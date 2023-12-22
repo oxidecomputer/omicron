@@ -7,6 +7,10 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 
 /// Describes how to find the list of sled agents to collect from
+///
+/// In a real system, this queries the database to list all sleds.  But for
+/// testing the `StaticSledAgentEnumerator` below can be used to avoid a
+/// database dependency.
 pub trait SledAgentEnumerator {
     /// Returns a list of URLs for Sled Agent HTTP endpoints
     fn list_sled_agents(

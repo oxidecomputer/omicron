@@ -615,7 +615,7 @@ impl InvSledAgent {
     ) -> Result<InvSledAgent, anyhow::Error> {
         // It's irritating to have to check this case at runtime.  The challenge
         // is that if this sled agent does have a baseboard id, we don't know
-        // what it's (SQL) id is.  The only way to get it is to query it from
+        // what its (SQL) id is.  The only way to get it is to query it from
         // the database.  As a result, the caller takes a wholly different code
         // path for that case that doesn't even involve constructing one of
         // these objects.  (In fact, we never see the id in Rust.)

@@ -9,11 +9,13 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+use omicron_common::api::external::ByteCount;
 pub use sled_agent_client::types::NetworkInterface;
 pub use sled_agent_client::types::NetworkInterfaceKind;
 pub use sled_agent_client::types::OmicronZoneConfig;
@@ -26,13 +28,10 @@ pub use sled_agent_client::types::Vni;
 pub use sled_agent_client::types::ZpoolName;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
 use uuid::Uuid;
-
-use crate::external_api::shared::Baseboard;
-use omicron_common::api::external::ByteCount;
-use std::net::SocketAddrV6;
 
 /// Results of collecting hardware/software inventory from various Omicron
 /// components

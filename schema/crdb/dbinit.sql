@@ -2930,7 +2930,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     inv_collection_id UUID NOT NULL,
     -- when this observation was made
     time_collected TIMESTAMPTZ NOT NULL,
-    -- which MGS instance reported this data
+    -- URL of the sled agent that reported this data
     source TEXT NOT NULL,
 
     -- unique id for this sled (should be foreign keys into `sled` table, though
@@ -2962,14 +2962,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     inv_collection_id UUID NOT NULL,
     -- when this observation was made
     time_collected TIMESTAMPTZ NOT NULL,
-    -- which MGS instance reported this data
+    -- URL of the sled agent that reported this data
     source TEXT NOT NULL,
 
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
 
-    -- OmicronZonesConfig generation that this was found in
+    -- OmicronZonesConfig generation reporting these zones
     generation INT8 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, sled_id)

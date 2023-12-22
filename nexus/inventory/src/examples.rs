@@ -348,9 +348,8 @@ pub fn representative() -> Representative {
 
     // Report a representative set of Omicron zones.
     //
-    // Use the data we already keep around for the test suite.  We've
-    // hand-selected a minimal set of files to cover each type of zone.  These
-    // files were constructed by:
+    // We've hand-selected a minimal set of files to cover each type of zone.
+    // These files were constructed by:
     //
     // (1) copying the "omicron zones" ledgers from the sleds in a working
     //     Omicron deployment
