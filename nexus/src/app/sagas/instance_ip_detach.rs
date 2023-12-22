@@ -55,8 +55,8 @@ declare_saga_actions! {
         - siid_update_opte_undo
     }
 
-    COMPLETE_ATTACH -> "output" {
-        + siid_complete_attach
+    COMPLETE_DETACH -> "output" {
+        + siid_complete_detach
     }
 }
 
@@ -203,33 +203,28 @@ async fn siid_update_opte_undo(
     Ok(())
 }
 
-async fn siid_complete_attach(
+async fn siid_complete_detach(
     sagactx: NexusActionContext,
 ) -> Result<views::ExternalIp, ActionError> {
+    let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    let initial_state =
-        sagactx.lookup::<InstanceStateForIp>("instance_state")?.state;
     let target_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
 
-    let update_occurred = instance_ip_move_state(
+    if !instance_ip_move_state(
         &sagactx,
         &params.serialized_authn,
         IpAttachState::Detaching,
         IpAttachState::Detached,
     )
-    .await?;
-
-    // TODO: explain why it is safe to not back out on state change.
-    match (update_occurred, initial_state) {
-        // Allow failure here on stopped because the instance_delete saga
-        // may have been concurrently fired off and removed the row.
-        (false, InstanceState::Stopped) | (true, _) => {
-            target_ip.try_into().map_err(ActionError::action_failed)
-        }
-        _ => Err(ActionError::action_failed(Error::internal_error(
-            "failed to complete IP detach",
-        ))),
+    .await?
+    {
+        warn!(
+            log,
+            "siia_complete_attach: external IP was deleted or call was idempotent"
+        )
     }
+
+    target_ip.try_into().map_err(ActionError::action_failed)
 }
 
 #[derive(Debug)]
@@ -250,7 +245,7 @@ impl NexusSaga for SagaInstanceIpDetach {
         builder.append(instance_state_action());
         builder.append(remove_nat_action());
         builder.append(remove_opte_port_action());
-        builder.append(complete_attach_action());
+        builder.append(complete_detach_action());
         Ok(builder.build()?)
     }
 }

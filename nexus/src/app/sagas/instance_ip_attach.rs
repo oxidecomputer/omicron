@@ -14,27 +14,26 @@ use crate::external_api::params;
 use nexus_db_model::{ExternalIp, IpAttachState};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{Error, InstanceState};
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
 use uuid::Uuid;
 
-// TODO: explain in-depth here how locking works in practice for
-// attach and detach wrt create/stop/start.
-
-// rough sequence of evts:
-// - take temp ownership of instance while interacting w/ sled agent
-//  -> mark instance migration id as Some(0) if None
-// - Attach+alloc EIP to instance
-// - Register routes
-//  -> ensure_dpd...
-//  -> must precede OPTE: host may change its sending
-//     behaviour prematurely
-// - Register addr in OPTE
-//  -> Put addr in sled-agent endpoint
-// - free up migration_id of instance.
-//  -> mark instance migration id as None
+// The IP attach/detach sagas do some resource locking -- because we
+// allow them to be called in [Running, Stopped], they must contend
+// with each other/themselves, instance start, instance delete, and
+// the instance stop action (noting the latter is not a saga.
+//
+// The main means of access control here is an external IP's `state`.
+// Entering either saga begins with an atomic swap from Attached/Detached
+// to Attaching/Detaching. This prevents concurrent attach/detach on the
+// same EIP, and prevents instance start from executing with an
+// Error::unavail.
+//
+// Overlap with stop is handled by treating comms failures with
+// sled-agent as temporary errors and unwinding. For the delete case, we
+// allow the attach/detach completion to have a missing record.
+// See `instance_common::instance_ip_get_instance_state` for more info.
 
 declare_saga_actions! {
     instance_ip_attach;
@@ -199,30 +198,25 @@ async fn siia_update_opte_undo(
 async fn siia_complete_attach(
     sagactx: NexusActionContext,
 ) -> Result<views::ExternalIp, ActionError> {
+    let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    let initial_state =
-        sagactx.lookup::<InstanceStateForIp>("instance_state")?.state;
     let target_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
 
-    let update_occurred = instance_ip_move_state(
+    if !instance_ip_move_state(
         &sagactx,
         &params.serialized_authn,
         IpAttachState::Attaching,
         IpAttachState::Attached,
     )
-    .await?;
-
-    // TODO: explain why it is safe to not back out on state change.
-    match (update_occurred, initial_state) {
-        // Allow failure here on stopped because the instance_delete saga
-        // may have been concurrently fired off and removed the row.
-        (false, InstanceState::Stopped) | (true, _) => {
-            target_ip.try_into().map_err(ActionError::action_failed)
-        }
-        _ => Err(ActionError::action_failed(Error::internal_error(
-            "failed to complete IP attach",
-        ))),
+    .await?
+    {
+        warn!(
+            log,
+            "siia_complete_attach: external IP was deleted or call was idempotent"
+        )
     }
+
+    target_ip.try_into().map_err(ActionError::action_failed)
 }
 
 // TODO: backout changes if run state changed illegally?
@@ -252,16 +246,102 @@ impl NexusSaga for SagaInstanceIpAttach {
 
 #[cfg(test)]
 pub(crate) mod test {
+    use crate::app::sagas::test_helpers;
 
+    use super::*;
+    use dropshot::test_util::ClientTestContext;
+    use nexus_db_model::Name;
+    use nexus_db_queries::context::OpContext;
+    use nexus_test_utils::resource_helpers::{populate_ip_pool, create_project, create_disk, create_floating_ip, object_create};
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::{SimpleIdentity, IdentityMetadataCreateParams};
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
+    const PROJECT_NAME: &str = "cafe";
+    const INSTANCE_NAME: &str = "menu";
+    const FIP_NAME: &str = "affogato";
+    const DISK_NAME: &str = "my-disk";
+
+    // Test matrix:
+    // - instance started/stopped
+    // - fip vs ephemeral
+
+    // async fn create_instance(
+    //     client: &ClientTestContext,
+    // ) -> omicron_common::api::external::Instance {
+    //     let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
+    //     object_create(
+    //         client,
+    //         &instances_url,
+    //         &params::InstanceCreate {
+    //             identity: IdentityMetadataCreateParams {
+    //                 name: INSTANCE_NAME.parse().unwrap(),
+    //                 description: format!("instance {:?}", INSTANCE_NAME),
+    //             },
+    //             ncpus: InstanceCpuCount(2),
+    //             memory: ByteCount::from_gibibytes_u32(2),
+    //             hostname: String::from(INSTANCE_NAME),
+    //             user_data: b"#cloud-config".to_vec(),
+    //             network_interfaces:
+    //                 params::InstanceNetworkInterfaceAttachment::None,
+    //             external_ips: vec![],
+    //             disks: vec![],
+    //             start: false,
+    //         },
+    //     )
+    //     .await
+    // }
+
+    pub async fn ip_manip_test_setup(client: &ClientTestContext) -> Uuid {
+        populate_ip_pool(&client, "default", None).await;
+        let project = create_project(client, PROJECT_NAME).await;
+        create_disk(&client, PROJECT_NAME, DISK_NAME).await;
+        create_floating_ip(
+            client,
+            FIP_NAME,
+            &project.identity.id.to_string(),
+            None,
+            None,
+        )
+        .await;
+
+
+        project.id()
+    }
+
+    async fn new_test_params(opctx: &OpContext, datastore: &db::DataStore, project_id: Uuid, use_floating: bool) -> Params {
+        let create_params = if use_floating {
+            params::ExternalIpCreate::Floating { floating_ip_name: FIP_NAME.parse().unwrap() }
+        } else {
+            params::ExternalIpCreate::Ephemeral { pool_name: None }
+        };
+
+        let (.., authz_instance) = LookupPath::new(opctx, datastore).project_id(project_id)
+        .instance_name(&Name(INSTANCE_NAME.parse().unwrap())).lookup_for(authz::Action::Modify).await.unwrap();
+        Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id,
+            create_params,
+            authz_instance,
+        }
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_saga_basic_usage_succeeds(
-        _cptestctx: &ControlPlaneTestContext,
+        cptestctx: &ControlPlaneTestContext,
     ) {
+        let client = &cptestctx.external_client;
+        let nexus = &cptestctx.server.apictx().nexus;
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let instance = create_instance(client).await;
+        let db_instance =
+            test_helpers::instance_fetch(cptestctx, instance.identity.id)
+                .await
+                .instance()
+                .clone();
+        let project_id = ip_manip_test_setup(&client);
         todo!()
     }
 
