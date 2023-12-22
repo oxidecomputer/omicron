@@ -11,7 +11,7 @@ use std::net::Ipv6Addr;
 /// Wraps commands for interacting with interfaces.
 pub struct Ipadm {}
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 impl Ipadm {
     // Remove current IP interface and create a new temporary one.
     pub fn set_temp_interface_for_datalink(

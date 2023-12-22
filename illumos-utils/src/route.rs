@@ -11,7 +11,7 @@ use std::net::Ipv6Addr;
 /// Wraps commands for interacting with routing tables.
 pub struct Route {}
 
-#[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
+#[cfg_attr(any(test, feature = "testing"), mockall::automock)]
 impl Route {
     pub fn ensure_default_route_with_gateway(
         gateway: &Ipv6Addr,

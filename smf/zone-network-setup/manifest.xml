@@ -17,18 +17,10 @@
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
-  <!-- TODO: Make svc:/milestone/network depend on this service? -->
-
-<!--TODO: Do the actual thing we want to do-->
   <exec_method type='method' name='start'
     exec='/opt/oxide/lib/svc/manifest/zone-network-setup.sh'
     timeout_seconds='0' />
   
-  <!-- 
-    TODO: Define whether it needs a stop method or not
-  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
-  -->
-
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='transient' />
   </property_group>
