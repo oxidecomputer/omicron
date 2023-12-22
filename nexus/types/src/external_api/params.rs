@@ -47,6 +47,23 @@ macro_rules! id_path_param {
     };
 }
 
+/// The unique hardware ID for a sled
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct UninitializedSledId {
+    pub serial: String,
+    pub part: String,
+}
+
 path_param!(ProjectPath, project, "project");
 path_param!(InstancePath, instance, "instance");
 path_param!(NetworkInterfacePath, interface, "network interface");
