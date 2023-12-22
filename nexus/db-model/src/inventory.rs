@@ -1149,10 +1149,10 @@ impl InvOmicronZoneNic {
         zone_id: Uuid,
     ) -> nexus_types::inventory::NetworkInterface {
         nexus_types::inventory::NetworkInterface {
-            id: zone_id,
+            id: self.id,
             ip: self.ip.ip(),
             kind: nexus_types::inventory::NetworkInterfaceKind::Service(
-                self.id,
+                zone_id,
             ),
             mac: (*self.mac).into(),
             name: (&(*self.name)).into(),
