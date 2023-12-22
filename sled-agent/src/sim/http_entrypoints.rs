@@ -398,8 +398,6 @@ async fn inventory(
 ) -> Result<HttpResponseOk<Inventory>, HttpError> {
     let sa = rqctx.context();
     Ok(HttpResponseOk(sa.inventory(rqctx.server.local_addr).map_err(|e| {
-        // XXX-dap sync up and use this instead
-        // HttpError::for_internal_error(InlineErrorChain::new(e).to_string())
         HttpError::for_internal_error(format!("{:#}", e))
     })?))
 }
