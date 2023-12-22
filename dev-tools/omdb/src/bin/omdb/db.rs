@@ -135,6 +135,11 @@ impl Display for MaybeSledId {
     }
 }
 
+/// Format a chrono::DateTime like "2018-01-26T18:30:09.453Z"
+fn chrono_to_rfc_3999(time: &chrono::DateTime<chrono::Utc>) -> String {
+    time.to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
 #[derive(Debug, Args)]
 pub struct DbArgs {
     /// URL of the database SQL interface
@@ -1957,7 +1962,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
 
         struct SagaRow {
             id: Uuid,
-            time_created: chrono::DateTime<chrono::Utc>,
+            time_created: String,
             name: String,
             state: String,
             start_params: String,
@@ -1967,7 +1972,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
             .into_iter()
             .map(|saga: Saga| SagaRow {
                 id: saga.id.0.into(),
-                time_created: saga.time_created,
+                time_created: chrono_to_rfc_3999(&saga.time_created),
                 name: saga.name,
                 state: format!("{:?}", saga.saga_state),
                 start_params: {
@@ -1994,7 +1999,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
             .map(|x| {
                 (
                     format!("{}", x.id).chars().count(),
-                    format!("{}", x.time_created).chars().count(),
+                    x.time_created.chars().count(),
                     x.name.chars().count(),
                     x.state.chars().count(),
                     x.start_params.chars().count(),
@@ -2049,7 +2054,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
         #[derive(Tabled)]
         struct SagaRow {
             id: Uuid,
-            time_created: chrono::DateTime<chrono::Utc>,
+            time_created: String,
             name: String,
             state: String,
         }
@@ -2058,7 +2063,7 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
             .into_iter()
             .map(|saga: Saga| SagaRow {
                 id: saga.id.0.into(),
-                time_created: saga.time_created,
+                time_created: chrono_to_rfc_3999(&saga.time_created),
                 name: saga.name,
                 state: format!("{:?}", saga.saga_state),
             })
@@ -2092,7 +2097,7 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
 
     struct SagaNodeRow {
         saga_id: Uuid,
-        event_time: chrono::DateTime<chrono::Utc>,
+        event_time: String,
         sub_saga_id: Option<u32>,
         node_id: String,
         event_type: String,
@@ -2213,7 +2218,7 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
 
         rows.push(SagaNodeRow {
             saga_id: saga_node.saga_id.0.into(),
-            event_time: saga_node.event_time,
+            event_time: chrono_to_rfc_3999(&saga_node.event_time),
             sub_saga_id,
             node_id,
             event_type: saga_node.event_type,
@@ -2235,7 +2240,7 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
         .map(|x| {
             (
                 format!("{}", x.saga_id).chars().count(),
-                format!("{}", x.event_time).chars().count(),
+                x.event_time.chars().count(),
                 if let Some(sub_saga_id) = x.sub_saga_id {
                     format!("{}", sub_saga_id).chars().count()
                 } else {
