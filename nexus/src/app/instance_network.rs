@@ -342,24 +342,33 @@ impl super::Nexus {
             .instance_lookup_external_ips(&opctx, instance_id)
             .await?;
 
-        let (ips_of_interest, must_all_be_attached) = if let Some(wanted_id) = ip_filter {
-            if let Some(ip) = ips.iter().find(|v| v.id == wanted_id) {
-                (std::slice::from_ref(ip), false)
-            } else {
-                return Err(Error::internal_error(&format!(
+        let (ips_of_interest, must_all_be_attached) =
+            if let Some(wanted_id) = ip_filter {
+                if let Some(ip) = ips.iter().find(|v| v.id == wanted_id) {
+                    (std::slice::from_ref(ip), false)
+                } else {
+                    return Err(Error::internal_error(&format!(
                     "failed to find external ip address with id: {wanted_id}",
                 )));
-            }
-        } else {
-            (&ips[..], true)
-        };
+                }
+            } else {
+                (&ips[..], true)
+            };
 
         // This is performed so that an IP attach/detach will block the
         // instance_start saga. Return service unavailable to indicate
         // the request is retryable.
-        if ips_of_interest.iter().find(|ip| must_all_be_attached && ip.state != IpAttachState::Attached).is_some() {
-            return Err(Error::ServiceUnavailable { 
-                internal_message: "cannot push all DPD state: IP attach/detach in progress".into(),
+        if ips_of_interest
+            .iter()
+            .find(|ip| {
+                must_all_be_attached && ip.state != IpAttachState::Attached
+            })
+            .is_some()
+        {
+            return Err(Error::ServiceUnavailable {
+                internal_message:
+                    "cannot push all DPD state: IP attach/detach in progress"
+                        .into(),
             });
         }
 

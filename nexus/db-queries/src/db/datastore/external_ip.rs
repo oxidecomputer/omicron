@@ -26,6 +26,9 @@ use crate::db::model::Name;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::external_ip::NextExternalIp;
+use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
+use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES_CREATING;
+use crate::db::queries::external_ip::SAFE_TRANSITORY_INSTANCE_STATES;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -51,27 +54,8 @@ use ref_cast::RefCast;
 use std::net::IpAddr;
 use uuid::Uuid;
 
-// Broadly, we want users to be able to attach/detach at will
-// once an instance is created and functional.
-// If we're in a state which will naturally resolve to either
-// stopped/running, we want users to know that the request can be
-// retried safely.
-const SAFE_TO_ATTACH_INSTANCE_STATES_CREATING: [DbInstanceState; 3] = [
-    DbInstanceState(ApiInstanceState::Stopped),
-    DbInstanceState(ApiInstanceState::Running),
-    DbInstanceState(ApiInstanceState::Creating),
-];
-const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] = [
-    DbInstanceState(ApiInstanceState::Stopped),
-    DbInstanceState(ApiInstanceState::Running),
-];
-const SAFE_TRANSITORY_INSTANCE_STATES: [DbInstanceState; 3] = [
-    DbInstanceState(ApiInstanceState::Starting),
-    DbInstanceState(ApiInstanceState::Stopping),
-    DbInstanceState(ApiInstanceState::Creating),
-];
 // FIXME: should be exported from a shared location, original lives in
-//        nexus app.
+//        nexus/app.
 const MAX_EXTERNAL_IPS_PER_INSTANCE: u32 = 32;
 
 impl DataStore {
@@ -456,7 +440,7 @@ impl DataStore {
         Ok(eip)
     }
 
-    /// Delete all external IP addresses associated with the provided instance
+    /// Delete all non-floating IP addresses associated with the provided instance
     /// ID.
     ///
     /// This method returns the number of records deleted, rather than the usual
@@ -474,16 +458,22 @@ impl DataStore {
             .filter(dsl::is_service.eq(false))
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::kind.ne(IpKind::Floating))
-            .set(dsl::time_deleted.eq(now))
+            .set((
+                dsl::time_deleted.eq(now),
+                dsl::state.eq(IpAttachState::Detached),
+            ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Detach an individual Floating IP address from its parent instance.
+    /// Detach all Floating IP address from their parent instance.
     ///
     /// As in `deallocate_external_ip_by_instance_id`, this method returns the
     /// number of records altered, rather than an `UpdateResult`.
+    ///
+    /// This method ignores ongoing state transitions, and is only safely
+    /// usable from within the instance_delete saga.
     pub async fn detach_floating_ips_by_instance_id(
         &self,
         opctx: &OpContext,
@@ -495,7 +485,10 @@ impl DataStore {
             .filter(dsl::is_service.eq(false))
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::kind.eq(IpKind::Floating))
-            .set(dsl::parent_id.eq(Option::<Uuid>::None))
+            .set((
+                dsl::parent_id.eq(Option::<Uuid>::None),
+                dsl::state.eq(IpAttachState::Detached),
+            ))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

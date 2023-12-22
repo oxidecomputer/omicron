@@ -65,3 +65,9 @@ impl From<InstanceState> for sled_agent_client::types::InstanceState {
         }
     }
 }
+
+impl From<external::InstanceState> for InstanceState {
+    fn from(state: external::InstanceState) -> Self {
+        Self::new(state)
+    }
+}
