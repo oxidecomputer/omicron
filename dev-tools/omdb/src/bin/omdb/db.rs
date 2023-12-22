@@ -1994,6 +1994,10 @@ fn print_sagas(sagas: Vec<Saga>, with_start_params: bool) {
             })
             .collect();
 
+        if rows.is_empty() {
+            return;
+        }
+
         let row_char_counts: Vec<_> = rows
             .iter()
             .map(|x| {
@@ -2230,6 +2234,10 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
                 })
                 .unwrap_or(String::from("")),
         })
+    }
+
+    if rows.is_empty() {
+        return;
     }
 
     // Using Tabled isn't recommended: the data column could be huge, and Tabled
