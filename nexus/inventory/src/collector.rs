@@ -606,7 +606,7 @@ mod test {
     async fn test_multi_mgs() {
         // This is the same as the basic test, but we set up two different MGS
         // instances and point the collector at both.  We should get the same
-        // result.  We don't bother with the sled agent stuff here.
+        // result.
         let gwtestctx1 = gateway_test_utils::setup::test_setup(
             "test_multi_mgs_1",
             SpPort::One,
@@ -618,6 +618,20 @@ mod test {
         )
         .await;
         let log = &gwtestctx1.logctx.log;
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+        )
+        .await;
+        let sled2 = sim_sled_agent(
+            log.clone(),
+            "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+        )
+        .await;
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_clients = [&gwtestctx1, &gwtestctx2]
             .into_iter()
             .map(|g| {
@@ -626,7 +640,7 @@ mod test {
                 Arc::new(client)
             })
             .collect::<Vec<_>>();
-        let sled_enum = StaticSledAgentEnumerator::empty();
+        let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
         let collector =
             Collector::new("test-suite", &mgs_clients, &sled_enum, log.clone());
         let collection = collector
@@ -639,6 +653,7 @@ mod test {
         let s = dump_collection(&collection);
         expectorate::assert_contents("tests/output/collector_basic.txt", &s);
 
+        sled1.http_server.close().await.unwrap();
         gwtestctx1.teardown().await;
         gwtestctx2.teardown().await;
     }
