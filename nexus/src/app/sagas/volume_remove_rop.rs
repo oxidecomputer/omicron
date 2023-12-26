@@ -5,8 +5,8 @@
 use super::{ActionRegistry, NexusActionContext, NexusSaga, SagaInitError};
 use crate::app::sagas;
 use crate::app::sagas::declare_saga_actions;
-use crate::authn;
-use crate::db;
+use nexus_db_queries::authn;
+use nexus_db_queries::db;
 use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
@@ -17,7 +17,7 @@ use uuid::Uuid;
 // Volume remove read only parent saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub volume_id: Uuid,
 }
@@ -57,7 +57,7 @@ declare_saga_actions! {
 // volume remove read only parent saga: definition
 
 #[derive(Debug)]
-pub struct SagaVolumeRemoveROP;
+pub(crate) struct SagaVolumeRemoveROP;
 impl NexusSaga for SagaVolumeRemoveROP {
     const NAME: &'static str = "volume-remove-read-only-parent";
     type Params = Params;
@@ -126,7 +126,7 @@ impl NexusSaga for SagaVolumeRemoveROP {
 
 async fn svr_create_temp_volume(
     sagactx: NexusActionContext,
-) -> Result<db::model::Volume, ActionError> {
+) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     let temp_volume_id = sagactx.lookup::<Uuid>("temp_volume_id")?;
@@ -148,13 +148,13 @@ async fn svr_create_temp_volume(
         })?;
 
     let volume = db::model::Volume::new(temp_volume_id, temp_volume_data);
-    let volume_created = osagactx
+    osagactx
         .datastore()
         .volume_create(volume)
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(volume_created)
+    Ok(())
 }
 
 async fn svr_create_temp_volume_undo(

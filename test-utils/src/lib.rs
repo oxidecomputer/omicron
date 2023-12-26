@@ -12,6 +12,7 @@ use anyhow::anyhow;
 use anyhow::Context;
 use headers::authorization::Credentials;
 
+pub mod certificates;
 pub mod dev;
 
 #[macro_use]

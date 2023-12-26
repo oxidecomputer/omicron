@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
+use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use omicron_common::api::external;
 use ref_cast::RefCast;
@@ -28,15 +29,9 @@ pub enum SubnetError {
 impl SubnetError {
     /// Construct a `SubnetError` from a Diesel error, catching the desired
     /// cases and building useful errors.
-    pub fn from_pool(
-        e: async_bb8_diesel::PoolError,
-        subnet: &VpcSubnet,
-    ) -> Self {
+    pub fn from_diesel(e: DieselError, subnet: &VpcSubnet) -> Self {
         use crate::db::error;
-        use async_bb8_diesel::ConnectionError;
-        use async_bb8_diesel::PoolError;
         use diesel::result::DatabaseErrorKind;
-        use diesel::result::Error;
         const IPV4_OVERLAP_ERROR_MESSAGE: &str =
             r#"null value in column "ipv4_block" violates not-null constraint"#;
         const IPV6_OVERLAP_ERROR_MESSAGE: &str =
@@ -44,33 +39,27 @@ impl SubnetError {
         const NAME_CONFLICT_CONSTRAINT: &str = "vpc_subnet_vpc_id_name_key";
         match e {
             // Attempt to insert overlapping IPv4 subnet
-            PoolError::Connection(ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::NotNullViolation,
-                    ref info,
-                ),
-            )) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
+            DieselError::DatabaseError(
+                DatabaseErrorKind::NotNullViolation,
+                ref info,
+            ) if info.message() == IPV4_OVERLAP_ERROR_MESSAGE => {
                 SubnetError::OverlappingIpRange(subnet.ipv4_block.0 .0.into())
             }
 
             // Attempt to insert overlapping IPv6 subnet
-            PoolError::Connection(ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::NotNullViolation,
-                    ref info,
-                ),
-            )) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
+            DieselError::DatabaseError(
+                DatabaseErrorKind::NotNullViolation,
+                ref info,
+            ) if info.message() == IPV6_OVERLAP_ERROR_MESSAGE => {
                 SubnetError::OverlappingIpRange(subnet.ipv6_block.0 .0.into())
             }
 
             // Conflicting name for the subnet within a VPC
-            PoolError::Connection(ConnectionError::Query(
-                Error::DatabaseError(
-                    DatabaseErrorKind::UniqueViolation,
-                    ref info,
-                ),
-            )) if info.constraint_name() == Some(NAME_CONFLICT_CONSTRAINT) => {
-                SubnetError::External(error::public_error_from_diesel_pool(
+            DieselError::DatabaseError(
+                DatabaseErrorKind::UniqueViolation,
+                ref info,
+            ) if info.constraint_name() == Some(NAME_CONFLICT_CONSTRAINT) => {
+                SubnetError::External(error::public_error_from_diesel(
                     e,
                     error::ErrorHandler::Conflict(
                         external::ResourceType::VpcSubnet,
@@ -80,7 +69,7 @@ impl SubnetError {
             }
 
             // Any other error at all is a bug
-            _ => SubnetError::External(error::public_error_from_diesel_pool(
+            _ => SubnetError::External(error::public_error_from_diesel(
                 e,
                 error::ErrorHandler::Server,
             )),
@@ -444,8 +433,11 @@ mod test {
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
-        let db_datastore =
-            Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
+        let db_datastore = Arc::new(
+            crate::db::DataStore::new(&log, Arc::clone(&pool), None)
+                .await
+                .unwrap(),
+        );
 
         // We should be able to insert anything into an empty table.
         assert!(

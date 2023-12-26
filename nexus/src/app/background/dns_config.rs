@@ -166,7 +166,6 @@ mod test {
     use crate::app::background::init::test::read_internal_dns_zone_id;
     use crate::app::background::init::test::write_test_dns_generation;
     use assert_matches::assert_matches;
-    use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::ExpressionMethods;
@@ -218,9 +217,11 @@ mod test {
         // Simulate the configuration going backwards.  This should not be
         // possible, but it's easy to check that we at least don't panic.
         {
-            use crate::db::schema::dns_version::dsl;
+            use nexus_db_queries::db::schema::dns_version::dsl;
             diesel::delete(dsl::dns_version.filter(dsl::version.eq(2)))
-                .execute_async(datastore.pool_for_tests().await.unwrap())
+                .execute_async(
+                    &*datastore.pool_connection_for_tests().await.unwrap(),
+                )
                 .await
                 .unwrap();
         }
@@ -235,31 +236,35 @@ mod test {
         );
 
         // Similarly, wipe all of the state and verify that we handle that okay.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
         datastore
-            .pool_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper("dns_config_test_basic")
+            .transaction(&conn, |conn| async move {
                 conn.batch_execute_async(
                     nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
                 )
                 .await
                 .unwrap();
                 diesel::delete(
-                    crate::db::schema::dns_version::dsl::dns_version,
+                    nexus_db_queries::db::schema::dns_version::dsl::dns_version,
                 )
                 .execute_async(&conn)
                 .await
                 .unwrap();
-                diesel::delete(crate::db::schema::dns_name::dsl::dns_name)
-                    .execute_async(&conn)
-                    .await
-                    .unwrap();
-                diesel::delete(crate::db::schema::dns_zone::dsl::dns_zone)
-                    .execute_async(&conn)
-                    .await
-                    .unwrap();
-                Ok::<_, crate::db::TransactionError<()>>(())
+                diesel::delete(
+                    nexus_db_queries::db::schema::dns_name::dsl::dns_name,
+                )
+                .execute_async(&conn)
+                .await
+                .unwrap();
+                diesel::delete(
+                    nexus_db_queries::db::schema::dns_zone::dsl::dns_zone,
+                )
+                .execute_async(&conn)
+                .await
+                .unwrap();
+                Ok(())
             })
             .await
             .unwrap();

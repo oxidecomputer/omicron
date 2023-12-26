@@ -21,7 +21,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct ArtifactManifest {
     pub system_version: SemverVersion,
-    pub artifacts: BTreeMap<KnownArtifactKind, ArtifactData>,
+    pub artifacts: BTreeMap<KnownArtifactKind, Vec<ArtifactData>>,
 }
 
 impl ArtifactManifest {
@@ -63,108 +63,149 @@ impl ArtifactManifest {
             artifacts: manifest
                 .artifacts
                 .into_iter()
-                .map(|(kind, data)| {
-                    let source = match data.source {
-                        DeserializedArtifactSource::File { path } => {
-                            ArtifactSource::File(base_dir.join(path))
-                        }
-                        DeserializedArtifactSource::Fake { size } => {
-                            let fake_data = make_filler_text(size.0 as usize);
-                            ArtifactSource::Memory(fake_data.into())
-                        }
-                        DeserializedArtifactSource::CompositeHost {
-                            phase_1,
-                            phase_2,
-                        } => {
-                            ensure!(
-                                matches!(
-                                    kind,
-                                    KnownArtifactKind::Host
-                                        | KnownArtifactKind::Trampoline
-                                ),
-                                "`composite_host` source cannot be used with \
-                                artifact kind {kind:?}"
-                            );
-
-                            let data = Vec::new();
-                            let mut builder =
-                                CompositeHostArchiveBuilder::new(data)?;
-                            phase_1.with_data(|data| {
-                                builder
-                                    .append_phase_1(data.len(), data.as_slice())
-                            })?;
-                            phase_2.with_data(|data| {
-                                builder
-                                    .append_phase_2(data.len(), data.as_slice())
-                            })?;
-                            ArtifactSource::Memory(builder.finish()?.into())
-                        }
-                        DeserializedArtifactSource::CompositeRot {
-                            archive_a,
-                            archive_b,
-                        } => {
-                            ensure!(
-                                matches!(
-                                    kind,
-                                    KnownArtifactKind::GimletRot
-                                        | KnownArtifactKind::SwitchRot
-                                        | KnownArtifactKind::PscRot
-                                ),
-                                "`composite_rot` source cannot be used with \
-                                artifact kind {kind:?}"
-                            );
-
-                            let data = Vec::new();
-                            let mut builder =
-                                CompositeRotArchiveBuilder::new(data)?;
-                            archive_a.with_data(|data| {
-                                builder.append_archive_a(
-                                    data.len(),
-                                    data.as_slice(),
-                                )
-                            })?;
-                            archive_b.with_data(|data| {
-                                builder.append_archive_b(
-                                    data.len(),
-                                    data.as_slice(),
-                                )
-                            })?;
-                            ArtifactSource::Memory(builder.finish()?.into())
-                        }
-                        DeserializedArtifactSource::CompositeControlPlane {
-                            zones,
-                        } => {
-                            ensure!(
-                                kind == KnownArtifactKind::ControlPlane,
-                                "`composite_control_plane` source cannot be \
-                                used with artifact kind {kind:?}"
-                            );
-
-                            let data = Vec::new();
-                            let mut builder =
-                                CompositeControlPlaneArchiveBuilder::new(data)?;
-
-                            for zone in zones {
-                                zone.with_name_and_data(|name, data| {
-                                    builder.append_zone(
-                                        name,
-                                        data.len(),
-                                        data.as_slice(),
-                                    )
-                                })?;
-                            }
-                            ArtifactSource::Memory(builder.finish()?.into())
-                        }
-                    };
-                    let data = ArtifactData {
-                        name: data.name,
-                        version: data.version,
-                        source,
-                    };
-                    Ok((kind, data))
+                .map(|(kind, entries)| {
+                    Self::parse_deserialized_entries(base_dir, kind, entries)
                 })
                 .collect::<Result<_, _>>()?,
         })
+    }
+
+    fn parse_deserialized_entries(
+        base_dir: &Utf8Path,
+        kind: KnownArtifactKind,
+        entries: Vec<DeserializedArtifactData>,
+    ) -> Result<(KnownArtifactKind, Vec<ArtifactData>)> {
+        let entries = entries
+            .into_iter()
+            .map(|data| {
+                let source = match data.source {
+                    DeserializedArtifactSource::File { path } => {
+                        ArtifactSource::File(base_dir.join(path))
+                    }
+                    DeserializedArtifactSource::Fake { size } => {
+                        let fake_data = FakeDataAttributes::new(
+                            &data.name,
+                            kind,
+                            &data.version,
+                        )
+                        .make_data(size.0 as usize);
+                        ArtifactSource::Memory(fake_data.into())
+                    }
+                    DeserializedArtifactSource::CompositeHost {
+                        phase_1,
+                        phase_2,
+                    } => {
+                        ensure!(
+                            matches!(
+                                kind,
+                                KnownArtifactKind::Host
+                                    | KnownArtifactKind::Trampoline
+                            ),
+                            "`composite_host` source cannot be used with \
+                             artifact kind {kind:?}"
+                        );
+
+                        let mut builder =
+                            CompositeHostArchiveBuilder::new(Vec::new())?;
+                        phase_1.with_data(
+                            FakeDataAttributes::new(
+                                "fake-phase-1",
+                                kind,
+                                &data.version,
+                            ),
+                            |buf| {
+                                builder
+                                    .append_phase_1(buf.len(), buf.as_slice())
+                            },
+                        )?;
+                        phase_2.with_data(
+                            FakeDataAttributes::new(
+                                "fake-phase-2",
+                                kind,
+                                &data.version,
+                            ),
+                            |buf| {
+                                builder
+                                    .append_phase_2(buf.len(), buf.as_slice())
+                            },
+                        )?;
+                        ArtifactSource::Memory(builder.finish()?.into())
+                    }
+                    DeserializedArtifactSource::CompositeRot {
+                        archive_a,
+                        archive_b,
+                    } => {
+                        ensure!(
+                            matches!(
+                                kind,
+                                KnownArtifactKind::GimletRot
+                                    | KnownArtifactKind::SwitchRot
+                                    | KnownArtifactKind::PscRot
+                            ),
+                            "`composite_rot` source cannot be used with \
+                             artifact kind {kind:?}"
+                        );
+
+                        let mut builder =
+                            CompositeRotArchiveBuilder::new(Vec::new())?;
+                        archive_a.with_data(
+                            FakeDataAttributes::new(
+                                "fake-rot-archive-a",
+                                kind,
+                                &data.version,
+                            ),
+                            |buf| {
+                                builder
+                                    .append_archive_a(buf.len(), buf.as_slice())
+                            },
+                        )?;
+                        archive_b.with_data(
+                            FakeDataAttributes::new(
+                                "fake-rot-archive-b",
+                                kind,
+                                &data.version,
+                            ),
+                            |buf| {
+                                builder
+                                    .append_archive_b(buf.len(), buf.as_slice())
+                            },
+                        )?;
+                        ArtifactSource::Memory(builder.finish()?.into())
+                    }
+                    DeserializedArtifactSource::CompositeControlPlane {
+                        zones,
+                    } => {
+                        ensure!(
+                            kind == KnownArtifactKind::ControlPlane,
+                            "`composite_control_plane` source cannot be \
+                             used with artifact kind {kind:?}"
+                        );
+
+                        let data = Vec::new();
+                        let mut builder =
+                            CompositeControlPlaneArchiveBuilder::new(data)?;
+
+                        for zone in zones {
+                            zone.with_name_and_data(|name, data| {
+                                builder.append_zone(
+                                    name,
+                                    data.len(),
+                                    data.as_slice(),
+                                )
+                            })?;
+                        }
+                        ArtifactSource::Memory(builder.finish()?.into())
+                    }
+                };
+                let data = ArtifactData {
+                    name: data.name,
+                    version: data.version,
+                    source,
+                };
+                Ok(data)
+            })
+            .collect::<Result<_, _>>()?;
+        Ok((kind, entries))
     }
 
     /// Returns a fake manifest. Useful for testing.
@@ -195,6 +236,54 @@ impl ArtifactManifest {
     }
 }
 
+#[derive(Debug)]
+struct FakeDataAttributes<'a> {
+    name: &'a str,
+    kind: KnownArtifactKind,
+    version: &'a SemverVersion,
+}
+
+impl<'a> FakeDataAttributes<'a> {
+    fn new(
+        name: &'a str,
+        kind: KnownArtifactKind,
+        version: &'a SemverVersion,
+    ) -> Self {
+        Self { name, kind, version }
+    }
+
+    fn make_data(&self, size: usize) -> Vec<u8> {
+        use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
+
+        let board = match self.kind {
+            // non-Hubris artifacts: just make fake data
+            KnownArtifactKind::Host
+            | KnownArtifactKind::Trampoline
+            | KnownArtifactKind::ControlPlane => return make_filler_text(size),
+
+            // hubris artifacts: build a fake archive (SimGimletSp and
+            // SimGimletRot are used by sp-sim)
+            KnownArtifactKind::GimletSp => "SimGimletSp",
+            KnownArtifactKind::GimletRot => "SimGimletRot",
+            KnownArtifactKind::PscSp => "fake-psc-sp",
+            KnownArtifactKind::PscRot => "fake-psc-rot",
+            KnownArtifactKind::SwitchSp => "fake-sidecar-sp",
+            KnownArtifactKind::SwitchRot => "fake-sidecar-rot",
+        };
+
+        let caboose = CabooseBuilder::default()
+            .git_commit("this-is-fake-data")
+            .board(board)
+            .version(self.version.to_string())
+            .name(self.name)
+            .build();
+
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(caboose.as_slice()).unwrap();
+        builder.build_to_vec().unwrap()
+    }
+}
+
 /// Information about an individual artifact.
 #[derive(Clone, Debug)]
 pub struct ArtifactData {
@@ -214,7 +303,7 @@ pub struct ArtifactData {
 struct DeserializedManifest {
     system_version: SemverVersion,
     #[serde(rename = "artifact")]
-    artifacts: BTreeMap<KnownArtifactKind, DeserializedArtifactData>,
+    artifacts: BTreeMap<KnownArtifactKind, Vec<DeserializedArtifactData>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -255,7 +344,7 @@ enum DeserializedFileArtifactSource {
 }
 
 impl DeserializedFileArtifactSource {
-    fn with_data<F, T>(&self, f: F) -> Result<T>
+    fn with_data<F, T>(&self, fake_attr: FakeDataAttributes, f: F) -> Result<T>
     where
         F: FnOnce(Vec<u8>) -> Result<T>,
     {
@@ -265,7 +354,7 @@ impl DeserializedFileArtifactSource {
                     .with_context(|| format!("failed to read {path}"))?
             }
             DeserializedFileArtifactSource::Fake { size } => {
-                make_filler_text(size.0 as usize)
+                fake_attr.make_data(size.0 as usize)
             }
         };
         f(data)

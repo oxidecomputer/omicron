@@ -14,8 +14,8 @@ use omicron_test_utils::dev::test_setup_log;
 use predicates::prelude::*;
 use tufaceous_lib::{Key, OmicronRepo};
 
-#[test]
-fn test_init_and_add() -> Result<()> {
+#[tokio::test]
+async fn test_init_and_add() -> Result<()> {
     let logctx = test_setup_log("test_init_and_add");
     let tempdir = tempfile::tempdir().unwrap();
     let key = Key::generate_ed25519();
@@ -54,9 +54,9 @@ fn test_init_and_add() -> Result<()> {
 
     // Now read the repository and ensure the list of expected artifacts.
     let repo_path: Utf8PathBuf = tempdir.path().join("repo").try_into()?;
-    let repo = OmicronRepo::load_untrusted(&logctx.log, &repo_path)?;
+    let repo = OmicronRepo::load_untrusted(&logctx.log, &repo_path).await?;
 
-    let artifacts = repo.read_artifacts()?;
+    let artifacts = repo.read_artifacts().await?;
     assert_eq!(
         artifacts.artifacts.len(),
         2,
@@ -73,7 +73,7 @@ fn test_init_and_add() -> Result<()> {
         "artifact kind"
     );
     assert_eq!(
-        artifact.target, "omicron-nexus-42.0.0.tar.gz",
+        artifact.target, "gimlet_sp-omicron-nexus-42.0.0.tar.gz",
         "artifact target"
     );
 
@@ -86,7 +86,7 @@ fn test_init_and_add() -> Result<()> {
         "artifact kind"
     );
     assert_eq!(
-        artifact.target, "my-unknown-kind-0.1.0.tar.gz",
+        artifact.target, "my_unknown_kind-my-unknown-kind-0.1.0.tar.gz",
         "artifact target"
     );
 

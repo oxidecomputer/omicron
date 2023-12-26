@@ -27,7 +27,6 @@
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
 use super::silo::silo_dns_name;
-use crate::db::model::ServiceKind;
 use crate::ServerContext;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -38,6 +37,7 @@ use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -482,7 +482,7 @@ impl TryFrom<Certificate> for TlsCertificate {
 // to _any_ of our external endpoints!  If data from the database is invalid or
 // inconsistent, that data is discarded and a warning is produced, but we'll
 // still return a usable object.
-pub async fn read_all_endpoints(
+pub(crate) async fn read_all_endpoints(
     datastore: &DataStore,
     opctx: &OpContext,
 ) -> Result<ExternalEndpoints, Error> {
@@ -827,6 +827,7 @@ mod test {
                 name: name.parse().unwrap(),
                 description: String::new(),
             },
+            quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode,
             admin_group_name: None,
@@ -933,6 +934,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             cert_create,
+            &["dummy.sys.oxide1.test".to_string()],
         )
         .unwrap();
         let ee2 = ExternalEndpoints::new(vec![], vec![cert], vec![]);
@@ -962,6 +964,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             cert_create,
+            &["dummy.sys.oxide1.test".to_string()],
         )
         .unwrap();
 
@@ -1095,6 +1098,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo1_cert1_params,
+            &["silo1.sys.oxide1.test".to_string()],
         )
         .unwrap();
         let silo1_cert2_params =
@@ -1120,6 +1124,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo2_cert2_params,
+            &["silo2.sys.oxide1.test".to_string()],
         )
         .unwrap();
         let silo3_cert_params =
@@ -1129,6 +1134,7 @@ mod test {
             Uuid::new_v4(),
             ServiceKind::Nexus,
             silo3_cert_params,
+            &["silo3.sys.oxide1.test".to_string()],
         )
         .unwrap();
         // Corrupt a byte of this last certificate.  (This has to be done after
@@ -1534,7 +1540,7 @@ mod test {
                     Err(Error::InvalidRequest { message }) => {
                         assert_eq!(rx_label, "empty");
                         assert_eq!(
-                            message,
+                            message.external_message(),
                             format!(
                                 "HTTP request for unknown server name {:?}",
                                 authority.host()

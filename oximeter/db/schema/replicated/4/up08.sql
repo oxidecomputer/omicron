@@ -1,0 +1,1 @@
+ALTER TABLE oximeter.measurements_i16 MODIFY COLUMN datum Nullable(Int16)

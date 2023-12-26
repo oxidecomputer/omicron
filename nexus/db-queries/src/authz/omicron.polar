@@ -365,6 +365,16 @@ resource DnsConfig {
 has_relation(fleet: Fleet, "parent_fleet", dns_config: DnsConfig)
 	if dns_config.fleet = fleet;
 
+# Describes the policy for reading and modifying low-level inventory
+resource Inventory {
+	permissions = [ "read", "modify" ];
+	relations = { parent_fleet: Fleet };
+	"read" if "viewer" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", inventory: Inventory)
+	if inventory.fleet = fleet;
+
 # Describes the policy for accessing "/v1/system/ip-pools" in the API
 resource IpPoolList {
 	permissions = [

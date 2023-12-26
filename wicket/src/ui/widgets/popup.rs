@@ -4,16 +4,14 @@
 
 //! A popup dialog box widget
 
-use serde::{Deserialize, Serialize};
-use tui::{
+use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
-    text::{Span, Spans, Text},
+    text::{Line, Span, Text},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Widget},
 };
 
-use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Fade};
 use crate::ui::{
     defaults::dimensions::RectExt, panes::ComputedScrollOffset, wrap::wrap_text,
 };
@@ -21,24 +19,28 @@ use crate::ui::{
     defaults::{colors::*, style},
     wrap::wrap_line,
 };
-use std::iter;
+use crate::ui::{
+    panes::PendingScroll,
+    widgets::{BoxConnector, BoxConnectorKind, Fade},
+};
+use std::{iter, marker::PhantomData};
 
 const BUTTON_HEIGHT: u16 = 3;
 
 #[derive(Clone, Debug)]
 pub struct ButtonText<'a> {
-    pub instruction: Spans<'a>,
-    pub key: Spans<'a>,
+    pub instruction: Line<'a>,
+    pub key: Line<'a>,
 }
 
 impl<'a> ButtonText<'a> {
     pub fn new(instruction: &'a str, key: &'a str) -> Self {
         Self {
-            instruction: Spans::from(Span::styled(
+            instruction: Line::from(Span::styled(
                 instruction,
                 Self::default_instruction_style(),
             )),
-            key: Spans::from(Span::styled(key, Self::default_key_style())),
+            key: Line::from(Span::styled(key, Self::default_key_style())),
         }
     }
 
@@ -53,56 +55,207 @@ impl<'a> ButtonText<'a> {
 
 #[derive(Default)]
 pub struct PopupBuilder<'a> {
-    pub header: Spans<'a>,
+    pub header: Line<'a>,
     pub body: Text<'a>,
     pub buttons: Vec<ButtonText<'a>>,
 }
 
 impl<'a> PopupBuilder<'a> {
-    pub fn build(
-        &self,
-        full_screen: Rect,
-        scroll_kind: PopupScrollKind,
-    ) -> Popup<'_> {
+    /// Builds a non-scrollable popup.
+    pub fn build(&self, full_screen: Rect) -> Popup<'_, NonScrollable> {
         Popup::new(
             full_screen,
             &self.header,
             &self.body,
             self.buttons.clone(),
-            scroll_kind,
+            NonScrollable {},
+        )
+    }
+
+    pub fn build_scrollable(
+        &self,
+        full_screen: Rect,
+        scroll_offset: PopupScrollOffset,
+    ) -> Popup<'_, Scrollable> {
+        Popup::new(
+            full_screen,
+            &self.header,
+            &self.body,
+            self.buttons.clone(),
+            Scrollable { scroll_offset },
         )
     }
 }
 
+/// Tracks state regarding scrollable and non-scrollable popups.
+///
+/// This is a trait to ensure a compile-time separation between scrollable and
+/// non-scrollable popups -- otherwise it was too easy to make a mistake
+/// handling scroll offsets.
+pub trait PopupScrollability {
+    /// Apply the state present in `self` to the data and body rectangle,
+    /// returning the actual scroll offset if any.
+    fn actualize(
+        self,
+        data: &mut PopupData<'_>,
+        body_rect: &mut Rect,
+    ) -> Option<u16>;
+}
+
+/// Type parameter for a non-scrollable popup.
+pub struct NonScrollable {}
+
+impl PopupScrollability for NonScrollable {
+    fn actualize(
+        self,
+        _data: &mut PopupData<'_>,
+        _body_rect: &mut Rect,
+    ) -> Option<u16> {
+        None
+    }
+}
+
+/// Type parameter for a scrollable popup.
+pub struct Scrollable {
+    scroll_offset: PopupScrollOffset,
+}
+
+impl PopupScrollability for Scrollable {
+    fn actualize(
+        self,
+        data: &mut PopupData<'_>,
+        body_rect: &mut Rect,
+    ) -> Option<u16> {
+        enum ScrollKind {
+            NotRequired,
+            Scrolling(PopupScrollOffset),
+        }
+
+        let height_exceeded =
+            data.wrapped_body.height() > body_rect.height as usize;
+        let scroll_kind = match (data.buttons.is_empty(), height_exceeded) {
+            (true, true) => {
+                // Need to add scroll buttons, which necessitates reducing
+                // the size.
+                body_rect.height =
+                    body_rect.height.saturating_sub(BUTTON_HEIGHT);
+                ScrollKind::Scrolling(self.scroll_offset)
+            }
+            (false, true) => ScrollKind::Scrolling(self.scroll_offset),
+            (_, false) => ScrollKind::NotRequired,
+        };
+
+        let offset = match scroll_kind {
+            ScrollKind::NotRequired => 0,
+            ScrollKind::Scrolling(offset) => {
+                // Add scroll buttons.
+                let offset = ComputedScrollOffset::new(
+                    offset.offset as usize,
+                    data.wrapped_body.height(),
+                    body_rect.height as usize,
+                    offset.pending_scroll,
+                );
+
+                let up_style = if offset.can_scroll_up() {
+                    style::selected()
+                } else {
+                    ButtonText::default_key_style()
+                };
+                let down_style = if offset.can_scroll_down() {
+                    style::selected()
+                } else {
+                    ButtonText::default_key_style()
+                };
+
+                data.buttons.insert(
+                    0,
+                    ButtonText {
+                        instruction: Span::styled(
+                            "Scroll",
+                            ButtonText::default_instruction_style(),
+                        )
+                        .into(),
+                        key: Line::from(vec![
+                            Span::styled("Up", up_style),
+                            Span::styled("/", ButtonText::default_key_style()),
+                            Span::styled("Down", down_style),
+                        ]),
+                    },
+                );
+
+                offset.into_offset()
+            }
+        };
+        Some(offset)
+    }
+}
+
+/// Returns the maximum width that this popup can have, including outer
+/// borders.
+///
+/// This is currently 80% of screen width.
+pub fn popup_max_width(full_screen_width: u16) -> u16 {
+    (full_screen_width as u32 * 4 / 5) as u16
+}
+
+/// Returns the maximum width that this popup can have, not including outer
+/// borders.
+pub fn popup_max_content_width(full_screen_width: u16) -> u16 {
+    // -2 for borders, -2 for padding
+    popup_max_width(full_screen_width).saturating_sub(4)
+}
+
+/// Returns the maximum height that this popup can have, including outer
+/// borders.
+///
+/// This is currently 80% of screen height.
+pub fn popup_max_height(full_screen_height: u16) -> u16 {
+    (full_screen_height as u32 * 4 / 5) as u16
+}
+
+/// Returns the wrap options that should be used in most cases for popups.
+fn default_wrap_options(
+    full_screen_width: u16,
+) -> crate::ui::wrap::Options<'static> {
+    crate::ui::wrap::Options {
+        width: popup_max_content_width(full_screen_width) as usize,
+        // The indent here is to add 1 character of padding.
+        initial_indent: Span::raw(" "),
+        subsequent_indent: Span::raw(" "),
+        break_words: true,
+    }
+}
+
 #[derive(Default)]
-pub struct Popup<'a> {
+pub struct Popup<'a, S: PopupScrollability> {
     data: PopupData<'a>,
     rect: Rect,
     chunks: Vec<Rect>,
     body_rect: Rect,
-    actual_scroll_kind: PopupScrollKind,
+    actual_scroll_offset: Option<u16>,
+    _marker: PhantomData<S>,
 }
 
-impl<'a> Popup<'a> {
+impl<'a, S: PopupScrollability> Popup<'a, S> {
     fn new(
         full_screen: Rect,
-        header: &'a Spans<'_>,
+        header: &'a Line<'_>,
         body: &'a Text<'_>,
         buttons: Vec<ButtonText<'a>>,
-        scroll_kind: PopupScrollKind,
+        scrollability: S,
     ) -> Self {
         let wrapped_header =
-            wrap_line(header, Self::default_wrap_options(full_screen.width));
+            wrap_line(header, default_wrap_options(full_screen.width));
         let wrapped_body =
-            wrap_text(body, Self::default_wrap_options(full_screen.width));
+            wrap_text(body, default_wrap_options(full_screen.width));
 
         let mut data = PopupData { wrapped_header, wrapped_body, buttons };
 
         // Compute the dimensions here so we can compute scroll positions more
         // effectively.
-        let width = u16::min(data.width(), Self::max_width(full_screen.width));
+        let width = u16::min(data.width(), popup_max_width(full_screen.width));
         let height =
-            u16::min(data.height(), Self::max_height(full_screen.height));
+            u16::min(data.height(), popup_max_height(full_screen.height));
 
         let rect =
             full_screen.center_horizontally(width).center_vertically(height);
@@ -131,123 +284,34 @@ impl<'a> Popup<'a> {
             body_rect.height = body_rect.height.saturating_sub(BUTTON_HEIGHT);
         }
 
-        enum ScrollKind {
-            Disabled,
-            NotRequired,
-            Scrolling(u16),
-        }
+        let actual_scroll = scrollability.actualize(&mut data, &mut body_rect);
 
-        let scroll_kind = match scroll_kind {
-            PopupScrollKind::Disabled => ScrollKind::Disabled,
-            PopupScrollKind::Enabled { offset } => {
-                let height_exceeded =
-                    data.wrapped_body.height() > body_rect.height as usize;
-                match (data.buttons.is_empty(), height_exceeded) {
-                    (true, true) => {
-                        // Need to add scroll buttons, which necessitates reducing
-                        // the size.
-                        body_rect.height =
-                            body_rect.height.saturating_sub(BUTTON_HEIGHT);
-                        ScrollKind::Scrolling(offset)
-                    }
-                    (false, true) => ScrollKind::Scrolling(offset),
-                    (_, false) => ScrollKind::NotRequired,
-                }
-            }
-        };
-
-        let actual_scroll_kind = match scroll_kind {
-            ScrollKind::Disabled => PopupScrollKind::Disabled,
-            ScrollKind::NotRequired => PopupScrollKind::Enabled { offset: 0 },
-            ScrollKind::Scrolling(offset) => {
-                // Add scroll buttons.
-                let offset = ComputedScrollOffset::new(
-                    offset as usize,
-                    data.wrapped_body.height(),
-                    body_rect.height as usize,
-                );
-
-                let up_style = if offset.can_scroll_up() {
-                    style::selected()
-                } else {
-                    ButtonText::default_key_style()
-                };
-                let down_style = if offset.can_scroll_down() {
-                    style::selected()
-                } else {
-                    ButtonText::default_key_style()
-                };
-
-                data.buttons.insert(
-                    0,
-                    ButtonText {
-                        instruction: Span::styled(
-                            "Scroll",
-                            ButtonText::default_instruction_style(),
-                        )
-                        .into(),
-                        key: Spans::from(vec![
-                            Span::styled("Up", up_style),
-                            Span::styled("/", ButtonText::default_key_style()),
-                            Span::styled("Down", down_style),
-                        ]),
-                    },
-                );
-
-                PopupScrollKind::Enabled { offset: offset.into_offset() }
-            }
-        };
-
-        Self { data, rect, chunks, body_rect, actual_scroll_kind }
-    }
-
-    /// Returns the effective, or actual, scroll kind after the text is laid
-    /// out.
-    ///
-    /// If this is a `PopupScrollKind::Enabled` popup, the offset is is capped
-    /// to the maximum degree to which text can be scrolled.
-    pub fn actual_scroll_kind(&self) -> PopupScrollKind {
-        self.actual_scroll_kind
-    }
-
-    /// Returns the maximum width that this popup can have, including outer
-    /// borders.
-    ///
-    /// This is currently 80% of screen width.
-    pub fn max_width(full_screen_width: u16) -> u16 {
-        (full_screen_width as u32 * 4 / 5) as u16
-    }
-
-    /// Returns the maximum width that this popup can have, not including outer
-    /// borders.
-    pub fn max_content_width(full_screen_width: u16) -> u16 {
-        // -2 for borders, -2 for padding
-        Self::max_width(full_screen_width).saturating_sub(4)
-    }
-
-    /// Returns the maximum height that this popup can have, including outer
-    /// borders.
-    ///
-    /// This is currently 80% of screen height.
-    pub fn max_height(full_screen_height: u16) -> u16 {
-        (full_screen_height as u32 * 4 / 5) as u16
-    }
-
-    /// Returns the wrap options that should be used in most cases for popups.
-    fn default_wrap_options(
-        full_screen_width: u16,
-    ) -> crate::ui::wrap::Options<'static> {
-        crate::ui::wrap::Options {
-            width: Popup::max_content_width(full_screen_width) as usize,
-            // The indent here is to add 1 character of padding.
-            initial_indent: Span::raw(" "),
-            subsequent_indent: Span::raw(" "),
-            break_words: true,
+        Self {
+            data,
+            rect,
+            chunks: chunks.to_vec(),
+            body_rect,
+            actual_scroll_offset: actual_scroll,
+            _marker: PhantomData,
         }
     }
 }
 
-impl Widget for Popup<'_> {
+impl<'a> Popup<'a, Scrollable> {
+    /// Returns the effective, or actual, scroll offset after the text is laid
+    /// out, in the form of a `PopupScrollOffset`.
+    ///
+    /// The offset is is capped to the maximum degree to which text can be
+    /// scrolled.
+    pub fn actual_scroll_offset(&self) -> PopupScrollOffset {
+        PopupScrollOffset::new(
+            self.actual_scroll_offset
+                .expect("scrollable popups always have actual_scroll_offset"),
+        )
+    }
+}
+
+impl<S: PopupScrollability> Widget for Popup<'_, S> {
     fn render(self, full_screen: Rect, buf: &mut Buffer) {
         let fade = Fade {};
         fade.render(full_screen, buf);
@@ -272,11 +336,8 @@ impl Widget for Popup<'_> {
             .render(self.chunks[1], buf);
 
         let mut body = Paragraph::new(self.data.wrapped_body);
-        match self.actual_scroll_kind {
-            PopupScrollKind::Disabled => {}
-            PopupScrollKind::Enabled { offset } => {
-                body = body.scroll((offset, 0));
-            }
+        if let Some(offset) = self.actual_scroll_offset {
+            body = body.scroll((offset, 0));
         }
 
         body.render(self.body_rect, buf);
@@ -289,63 +350,31 @@ impl Widget for Popup<'_> {
     }
 }
 
-/// Scroll kind for a popup.
-#[derive(
-    Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize,
-)]
-pub enum PopupScrollKind {
-    /// Scrolling is disabled.
-    #[default]
-    Disabled,
+/// Scroll offset for a popup.
+#[derive(Clone, Copy, Default, Debug, Eq, PartialEq)]
+#[must_use]
+pub struct PopupScrollOffset {
+    /// The offset.
+    offset: u16,
 
-    /// Scrolling is enabled.
-    Enabled {
-        /// The offset.
-        offset: u16,
-    },
+    /// A pending scroll event.
+    pending_scroll: Option<PendingScroll>,
 }
 
-impl PopupScrollKind {
-    /// Returns a new enabled scroll kind.
-    pub fn enabled() -> Self {
-        Self::Enabled { offset: 0 }
+impl PopupScrollOffset {
+    /// Returns a new `PopupScrollOffset` at the specified offset.
+    pub fn new(offset: u16) -> Self {
+        Self { offset, pending_scroll: None }
     }
 
-    /// Returns true if scrolling is enabled.
-    pub fn is_scrollable(&self) -> bool {
-        match self {
-            Self::Disabled => false,
-            Self::Enabled { .. } => true,
-        }
-    }
-
-    /// Scrolls up.
-    pub fn scroll_up(&mut self) {
-        match self {
-            Self::Disabled => {}
-            Self::Enabled { offset } => {
-                *offset = offset.saturating_sub(1);
-            }
-        }
-    }
-
-    /// Scrolls down.
-    ///
-    /// This method doesn't account for scrolling past the bottom of the text.
-    /// That will be considered and fixed up while creating the `Popup`, and the
-    /// fixed value returned in [`Popup::actual_offset`].
-    pub fn scroll_down(&mut self) {
-        match self {
-            PopupScrollKind::Disabled => {}
-            PopupScrollKind::Enabled { offset } => {
-                *offset = offset.saturating_add(1);
-            }
-        }
+    /// Sets a pending scroll event.
+    pub fn set_pending_scroll(&mut self, pending_scroll: PendingScroll) {
+        self.pending_scroll = Some(pending_scroll);
     }
 }
 
 #[derive(Default)]
-struct PopupData<'a> {
+pub struct PopupData<'a> {
     // Fields are private because we always want users to go through the
     // constructor.
 
@@ -435,7 +464,7 @@ pub fn draw_buttons(
     let button_rects = Layout::default()
         .direction(Direction::Horizontal)
         .horizontal_margin(2)
-        .constraints(constraints.as_ref())
+        .constraints(constraints)
         .split(rect);
 
     let block = Block::default()
@@ -445,12 +474,12 @@ pub fn draw_buttons(
 
     for (i, button) in buttons.into_iter().enumerate() {
         let mut spans = vec![Span::raw(" ")];
-        spans.extend(button.instruction.0);
+        spans.extend(button.instruction.spans);
         spans.push(Span::styled(" <", ButtonText::default_key_style()));
-        spans.extend(button.key.0);
+        spans.extend(button.key.spans);
         spans.push(Span::styled(">", ButtonText::default_key_style()));
 
-        let b = Paragraph::new(Spans(spans)).block(block.clone());
+        let b = Paragraph::new(Line::from(spans)).block(block.clone());
         b.render(button_rects[i + 1], buf);
     }
 }

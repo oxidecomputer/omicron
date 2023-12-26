@@ -24,6 +24,6 @@ EOF
 if [[ $? -ne 0 ]]; then
         echo "There was a problem installing the alpine image"
     echo "Please check Nexus logs for possible clues"
-    echo "pfexec zlogin oxz_nexus \"tail \\\$(svcs -L nexus)\""
+    echo "pfexec zlogin oxz_nexus_<UUID> \"tail \\\$(svcs -L nexus)\""
     exit 1
 fi

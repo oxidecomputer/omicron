@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::{
-    io::{self, BufReader, Read, Write},
+    io::{self, BufReader, Write},
     path::Path,
 };
 
@@ -127,14 +127,28 @@ pub struct HostPhaseImages {
 }
 
 impl HostPhaseImages {
-    pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
-        let uncompressed =
-            flate2::bufread::GzDecoder::new(BufReader::new(reader));
+    pub fn extract<R: io::BufRead>(reader: R) -> Result<Self> {
+        let mut phase_1 = Vec::new();
+        let mut phase_2 = Vec::new();
+        Self::extract_into(
+            reader,
+            io::Cursor::<&mut Vec<u8>>::new(&mut phase_1),
+            io::Cursor::<&mut Vec<u8>>::new(&mut phase_2),
+        )?;
+        Ok(Self { phase_1: phase_1.into(), phase_2: phase_2.into() })
+    }
+
+    pub fn extract_into<R: io::BufRead, W: io::Write>(
+        reader: R,
+        phase_1: W,
+        phase_2: W,
+    ) -> Result<()> {
+        let uncompressed = flate2::bufread::GzDecoder::new(reader);
         let mut archive = tar::Archive::new(uncompressed);
 
         let mut oxide_json_found = false;
-        let mut phase_1 = None;
-        let mut phase_2 = None;
+        let mut phase_1_writer = Some(phase_1);
+        let mut phase_2_writer = Some(phase_2);
         for entry in archive
             .entries()
             .context("error building list of entries from archive")?
@@ -160,12 +174,19 @@ impl HostPhaseImages {
                 }
                 oxide_json_found = true;
             } else if path == Path::new(HOST_PHASE_1_FILE_NAME) {
-                phase_1 = Some(read_entry(entry, HOST_PHASE_1_FILE_NAME)?);
+                if let Some(phase_1) = phase_1_writer.take() {
+                    read_entry_into(entry, HOST_PHASE_1_FILE_NAME, phase_1)?;
+                }
             } else if path == Path::new(HOST_PHASE_2_FILE_NAME) {
-                phase_2 = Some(read_entry(entry, HOST_PHASE_2_FILE_NAME)?);
+                if let Some(phase_2) = phase_2_writer.take() {
+                    read_entry_into(entry, HOST_PHASE_2_FILE_NAME, phase_2)?;
+                }
             }
 
-            if oxide_json_found && phase_1.is_some() && phase_2.is_some() {
+            if oxide_json_found
+                && phase_1_writer.is_none()
+                && phase_2_writer.is_none()
+            {
                 break;
             }
         }
@@ -174,34 +195,45 @@ impl HostPhaseImages {
         if !oxide_json_found {
             not_found.push(OXIDE_JSON_FILE_NAME);
         }
-        if phase_1.is_none() {
+
+        // If we didn't `.take()` the writer out of the options, we never saw
+        // the expected phase1/phase2 filenames.
+        if phase_1_writer.is_some() {
             not_found.push(HOST_PHASE_1_FILE_NAME);
         }
-        if phase_2.is_none() {
+        if phase_2_writer.is_some() {
             not_found.push(HOST_PHASE_2_FILE_NAME);
         }
+
         if !not_found.is_empty() {
             bail!("required files not found: {}", not_found.join(", "))
         }
 
-        Ok(Self { phase_1: phase_1.unwrap(), phase_2: phase_2.unwrap() })
+        Ok(())
     }
 }
 
 fn read_entry<R: io::Read>(
-    mut entry: tar::Entry<R>,
+    entry: tar::Entry<R>,
     file_name: &str,
 ) -> Result<Bytes> {
+    let mut buf = Vec::new();
+    read_entry_into(entry, file_name, io::Cursor::new(&mut buf))?;
+    Ok(buf.into())
+}
+
+fn read_entry_into<R: io::Read, W: io::Write>(
+    mut entry: tar::Entry<R>,
+    file_name: &str,
+    mut out: W,
+) -> Result<()> {
     let entry_type = entry.header().entry_type();
     if entry_type != tar::EntryType::Regular {
         bail!("for {file_name}, expected regular file, found {entry_type:?}");
     }
-    let size = entry.size();
-    let mut buf = Vec::with_capacity(size as usize);
-    entry
-        .read_to_end(&mut buf)
+    io::copy(&mut entry, &mut out)
         .with_context(|| format!("error reading {file_name} from archive"))?;
-    Ok(buf.into())
+    Ok(())
 }
 
 /// Represents RoT A/B hubris archives.
@@ -215,14 +247,28 @@ pub struct RotArchives {
 }
 
 impl RotArchives {
-    pub fn extract<R: io::Read>(reader: R) -> Result<Self> {
-        let uncompressed =
-            flate2::bufread::GzDecoder::new(BufReader::new(reader));
+    pub fn extract<R: io::BufRead>(reader: R) -> Result<Self> {
+        let mut archive_a = Vec::new();
+        let mut archive_b = Vec::new();
+        Self::extract_into(
+            reader,
+            io::Cursor::<&mut Vec<u8>>::new(&mut archive_a),
+            io::Cursor::<&mut Vec<u8>>::new(&mut archive_b),
+        )?;
+        Ok(Self { archive_a: archive_a.into(), archive_b: archive_b.into() })
+    }
+
+    pub fn extract_into<R: io::BufRead, W: io::Write>(
+        reader: R,
+        archive_a: W,
+        archive_b: W,
+    ) -> Result<()> {
+        let uncompressed = flate2::bufread::GzDecoder::new(reader);
         let mut archive = tar::Archive::new(uncompressed);
 
         let mut oxide_json_found = false;
-        let mut archive_a = None;
-        let mut archive_b = None;
+        let mut archive_a_writer = Some(archive_a);
+        let mut archive_b_writer = Some(archive_b);
         for entry in archive
             .entries()
             .context("error building list of entries from archive")?
@@ -248,12 +294,19 @@ impl RotArchives {
                 }
                 oxide_json_found = true;
             } else if path == Path::new(ROT_ARCHIVE_A_FILE_NAME) {
-                archive_a = Some(read_entry(entry, ROT_ARCHIVE_A_FILE_NAME)?);
+                if let Some(archive_a) = archive_a_writer.take() {
+                    read_entry_into(entry, ROT_ARCHIVE_A_FILE_NAME, archive_a)?;
+                }
             } else if path == Path::new(ROT_ARCHIVE_B_FILE_NAME) {
-                archive_b = Some(read_entry(entry, ROT_ARCHIVE_B_FILE_NAME)?);
+                if let Some(archive_b) = archive_b_writer.take() {
+                    read_entry_into(entry, ROT_ARCHIVE_B_FILE_NAME, archive_b)?;
+                }
             }
 
-            if oxide_json_found && archive_a.is_some() && archive_b.is_some() {
+            if oxide_json_found
+                && archive_a_writer.is_none()
+                && archive_b_writer.is_none()
+            {
                 break;
             }
         }
@@ -262,20 +315,21 @@ impl RotArchives {
         if !oxide_json_found {
             not_found.push(OXIDE_JSON_FILE_NAME);
         }
-        if archive_a.is_none() {
+
+        // If we didn't `.take()` the writer out of the options, we never saw
+        // the expected A/B filenames.
+        if archive_a_writer.is_some() {
             not_found.push(ROT_ARCHIVE_A_FILE_NAME);
         }
-        if archive_b.is_none() {
+        if archive_b_writer.is_some() {
             not_found.push(ROT_ARCHIVE_B_FILE_NAME);
         }
+
         if !not_found.is_empty() {
             bail!("required files not found: {}", not_found.join(", "))
         }
 
-        Ok(Self {
-            archive_a: archive_a.unwrap(),
-            archive_b: archive_b.unwrap(),
-        })
+        Ok(())
     }
 }
 

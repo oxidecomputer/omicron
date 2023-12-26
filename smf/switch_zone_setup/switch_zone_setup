@@ -6,7 +6,7 @@ set -ex -o pipefail
 
 # set up the users required for wicket and support.
 USERS=(
-    (user=wicket group=wicket gecos='Wicket User')
+    (user=wicket group=wicket gecos='Wicket User' nopasswd=1)
     (user=support group=support gecos='Oxide Support'
         profiles=('Primary Administrator')
     )
@@ -20,8 +20,15 @@ for i in "${!USERS[@]}"; do
     # Add the user.
     getent passwd "${u.user}" >/dev/null 2>&1 \
         || useradd -m -g "${u.group}" -c "${u.gecos}" "${u.user}"
-    # Remove the password from the user to enable passwordless login.
-    passwd -d "${u.user}"
+
+    # Either enable passwordless login (wicket) or disable password-based logins
+    # completely (support, which logs in via ssh key).
+    if ((u.nopasswd)); then
+        passwd -d "${u.user}"
+    else
+        passwd -N "${u.user}"
+    fi
+
     # Assign or remove profiles
     if [[ -n "${u.profiles}" ]]; then
         usermod -P"$(printf '%s,' "${u.profiles[@]}")" "${u.user}"
@@ -29,9 +36,5 @@ for i in "${!USERS[@]}"; do
         usermod -P '' "${u.user}"
     fi
 done
-
-# enable ipv6 forwarding and routing
-pfexec routeadm -e ipv6-forwarding -u
-pfexec routeadm -e ipv6-routing -u
 
 exit $SMF_EXIT_OK

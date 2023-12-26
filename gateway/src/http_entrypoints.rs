@@ -14,6 +14,7 @@ use self::conversions::component_from_str;
 use crate::error::SpCommsError;
 use crate::http_err_with_message;
 use crate::ServerContext;
+use base64::Engine;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::HttpError;
@@ -27,8 +28,7 @@ use dropshot::UntypedBody;
 use dropshot::WebsocketEndpointResult;
 use dropshot::WebsocketUpgrade;
 use futures::TryFutureExt;
-use gateway_messages::SpError;
-use gateway_sp_comms::error::CommunicationError;
+use gateway_messages::SpComponent;
 use gateway_sp_comms::HostPhase2Provider;
 use omicron_common::update::ArtifactHash;
 use schemars::JsonSchema;
@@ -118,6 +118,70 @@ pub enum RotSlot {
 pub struct RotImageDetails {
     pub digest: String,
     pub version: ImageVersion,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct RotCmpa {
+    pub base64_data: String,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(tag = "slot", rename_all = "snake_case")]
+pub enum RotCfpaSlot {
+    Active,
+    Inactive,
+    Scratch,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct GetCfpaParams {
+    pub slot: RotCfpaSlot,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
+pub struct RotCfpa {
+    pub base64_data: String,
+    pub slot: RotCfpaSlot,
 }
 
 #[derive(
@@ -422,7 +486,7 @@ pub struct SpComponentCaboose {
     pub git_commit: String,
     pub board: String,
     pub name: String,
-    pub version: Option<String>,
+    pub version: String,
 }
 
 /// Identity of a host phase2 recovery image.
@@ -502,10 +566,12 @@ async fn sp_get(
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpState>, HttpError> {
     let apictx = rqctx.context();
-    let sp_id = path.into_inner().sp;
-    let sp = apictx.mgmt_switch.sp(sp_id.into())?;
+    let sp_id = path.into_inner().sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-    let state = sp.state().await.map_err(SpCommsError::from)?;
+    let state = sp.state().await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseOk(state.into()))
 }
@@ -524,9 +590,12 @@ async fn sp_startup_options_get(
 ) -> Result<HttpResponseOk<HostStartupOptions>, HttpError> {
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
-    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+    let sp_id = path.into_inner().sp.into();
+    let sp = mgmt_switch.sp(sp_id)?;
 
-    let options = sp.get_startup_options().await.map_err(SpCommsError::from)?;
+    let options = sp.get_startup_options().await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseOk(options.into()))
 }
@@ -546,11 +615,12 @@ async fn sp_startup_options_set(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
-    let sp = mgmt_switch.sp(path.into_inner().sp.into())?;
+    let sp_id = path.into_inner().sp.into();
+    let sp = mgmt_switch.sp(sp_id)?;
 
-    sp.set_startup_options(body.into_inner().into())
-        .await
-        .map_err(SpCommsError::from)?;
+    sp.set_startup_options(body.into_inner().into()).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -568,8 +638,11 @@ async fn sp_component_list(
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<SpComponentList>, HttpError> {
     let apictx = rqctx.context();
-    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
-    let inventory = sp.inventory().await.map_err(SpCommsError::from)?;
+    let sp_id = path.into_inner().sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
+    let inventory = sp.inventory().await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseOk(inventory.into()))
 }
@@ -589,11 +662,13 @@ async fn sp_component_get(
 ) -> Result<HttpResponseOk<Vec<SpComponentDetails>>, HttpError> {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let component = component_from_str(&component)?;
 
-    let details =
-        sp.component_details(component).await.map_err(SpCommsError::from)?;
+    let details = sp.component_details(component).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseOk(details.entries.into_iter().map(Into::into).collect()))
 }
@@ -626,7 +701,8 @@ async fn sp_component_caboose_get(
 
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let ComponentCabooseSlot { firmware_slot } = query_params.into_inner();
     let component = component_from_str(&component)?;
 
@@ -650,27 +726,36 @@ async fn sp_component_caboose_get(
             CABOOSE_KEY_GIT_COMMIT,
         )
         .await
-        .map_err(SpCommsError::from)?;
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
     let board = sp
         .read_component_caboose(component, firmware_slot, CABOOSE_KEY_BOARD)
         .await
-        .map_err(SpCommsError::from)?;
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
     let name = sp
         .read_component_caboose(component, firmware_slot, CABOOSE_KEY_NAME)
         .await
-        .map_err(SpCommsError::from)?;
-    let version = match sp
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
+    let version = sp
         .read_component_caboose(component, firmware_slot, CABOOSE_KEY_VERSION)
         .await
-    {
-        Ok(value) => Some(from_utf8(&CABOOSE_KEY_VERSION, value)?),
-        Err(CommunicationError::SpError(SpError::NoSuchCabooseKey(_))) => None,
-        Err(err) => return Err(SpCommsError::from(err).into()),
-    };
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
 
     let git_commit = from_utf8(&CABOOSE_KEY_GIT_COMMIT, git_commit)?;
     let board = from_utf8(&CABOOSE_KEY_BOARD, board)?;
     let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
+    let version = from_utf8(&CABOOSE_KEY_VERSION, version)?;
 
     let caboose = SpComponentCaboose { git_commit, board, name, version };
 
@@ -691,10 +776,13 @@ async fn sp_component_clear_status(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let component = component_from_str(&component)?;
 
-    sp.component_clear_status(component).await.map_err(SpCommsError::from)?;
+    sp.component_clear_status(component).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -714,13 +802,13 @@ async fn sp_component_active_slot_get(
 ) -> Result<HttpResponseOk<SpComponentFirmwareSlot>, HttpError> {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let component = component_from_str(&component)?;
 
-    let slot = sp
-        .component_active_slot(component)
-        .await
-        .map_err(SpCommsError::from)?;
+    let slot = sp.component_active_slot(component).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseOk(SpComponentFirmwareSlot { slot }))
 }
@@ -748,14 +836,15 @@ async fn sp_component_active_slot_set(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let component = component_from_str(&component)?;
     let slot = body.into_inner().slot;
     let persist = query_params.into_inner().persist;
 
-    sp.set_component_active_slot(component, slot, persist)
-        .await
-        .map_err(SpCommsError::from)?;
+    sp.set_component_active_slot(component, slot, persist).await.map_err(
+        |err| SpCommsError::SpCommunicationFailed { sp: sp_id, err },
+    )?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -782,21 +871,27 @@ async fn sp_component_serial_console_attach(
 ) -> WebsocketEndpointResult {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
+    let sp_id = sp.into();
     let component = component_from_str(&component)?;
 
     // Ensure we can attach to this SP's serial console.
     let console = apictx
         .mgmt_switch
-        .sp(sp.into())?
+        .sp(sp_id)?
         .serial_console_attach(component)
         .await
-        .map_err(SpCommsError::from)?;
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
 
     let log = apictx.log.new(slog::o!("sp" => format!("{sp:?}")));
 
     // We've successfully attached to the SP's serial console: upgrade the
     // websocket and run our side of that connection.
-    websocket.handle(move |conn| crate::serial_console::run(console, conn, log))
+    websocket.handle(move |conn| {
+        crate::serial_console::run(sp_id, console, conn, log)
+    })
 }
 
 /// Detach the websocket connection attached to the given SP component's serial
@@ -814,9 +909,12 @@ async fn sp_component_serial_console_detach(
     // TODO-cleanup: "component" support for the serial console is half baked;
     // we don't use it at all to detach.
     let PathSpComponent { sp, component: _ } = path.into_inner();
+    let sp_id = sp.into();
 
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
-    sp.serial_console_detach().await.map_err(SpCommsError::from)?;
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
+    sp.serial_console_detach().await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -866,13 +964,17 @@ async fn sp_component_reset(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let component = component_from_str(&component)?;
 
     sp.reset_component_prepare(component)
         .and_then(|()| sp.reset_component_trigger(component))
         .await
-        .map_err(SpCommsError::from)?;
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -903,7 +1005,8 @@ async fn sp_component_update(
     let apictx = rqctx.context();
 
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let component = component_from_str(&component)?;
     let ComponentUpdateIdSlot { id, firmware_slot } = query_params.into_inner();
 
@@ -912,7 +1015,7 @@ async fn sp_component_update(
 
     sp.start_update(component, id, firmware_slot, image)
         .await
-        .map_err(SpCommsError::from)?;
+        .map_err(|err| SpCommsError::UpdateFailed { sp: sp_id, err })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -932,11 +1035,13 @@ async fn sp_component_update_status(
     let apictx = rqctx.context();
 
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let component = component_from_str(&component)?;
 
-    let status =
-        sp.update_status(component).await.map_err(SpCommsError::from)?;
+    let status = sp.update_status(component).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseOk(status.into()))
 }
@@ -959,13 +1064,89 @@ async fn sp_component_update_abort(
     let apictx = rqctx.context();
 
     let PathSpComponent { sp, component } = path.into_inner();
-    let sp = apictx.mgmt_switch.sp(sp.into())?;
+    let sp_id = sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let component = component_from_str(&component)?;
 
     let UpdateAbortBody { id } = body.into_inner();
-    sp.update_abort(component, id).await.map_err(SpCommsError::from)?;
+    sp.update_abort(component, id).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseUpdatedNoContent {})
+}
+
+/// Read the CMPA from a root of trust.
+///
+/// This endpoint is only valid for the `rot` component.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/cmpa",
+}]
+async fn sp_rot_cmpa_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+) -> Result<HttpResponseOk<RotCmpa>, HttpError> {
+    let apictx = rqctx.context();
+
+    let PathSpComponent { sp, component } = path.into_inner();
+    let sp_id = sp.into();
+
+    // Ensure the caller knows they're asking for the RoT
+    if component_from_str(&component)? != SpComponent::ROT {
+        return Err(HttpError::for_bad_request(
+            Some("RequestUnsupportedForComponent".to_string()),
+            "Only the RoT has a CFPA".into(),
+        ));
+    }
+
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
+    let data = sp.read_rot_cmpa().await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
+
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(data);
+
+    Ok(HttpResponseOk(RotCmpa { base64_data }))
+}
+
+/// Read the requested CFPA slot from a root of trust.
+///
+/// This endpoint is only valid for the `rot` component.
+#[endpoint {
+    method = GET,
+    path = "/sp/{type}/{slot}/component/{component}/cfpa",
+}]
+async fn sp_rot_cfpa_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path: Path<PathSpComponent>,
+    params: TypedBody<GetCfpaParams>,
+) -> Result<HttpResponseOk<RotCfpa>, HttpError> {
+    let apictx = rqctx.context();
+
+    let PathSpComponent { sp, component } = path.into_inner();
+    let GetCfpaParams { slot } = params.into_inner();
+    let sp_id = sp.into();
+
+    // Ensure the caller knows they're asking for the RoT
+    if component_from_str(&component)? != SpComponent::ROT {
+        return Err(HttpError::for_bad_request(
+            Some("RequestUnsupportedForComponent".to_string()),
+            "Only the RoT has a CFPA".into(),
+        ));
+    }
+
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
+    let data = match slot {
+        RotCfpaSlot::Active => sp.read_rot_active_cfpa().await,
+        RotCfpaSlot::Inactive => sp.read_rot_inactive_cfpa().await,
+        RotCfpaSlot::Scratch => sp.read_rot_scratch_cfpa().await,
+    }
+    .map_err(|err| SpCommsError::SpCommunicationFailed { sp: sp_id, err })?;
+
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(data);
+
+    Ok(HttpResponseOk(RotCfpa { base64_data, slot }))
 }
 
 /// List SPs via Ignition
@@ -1011,16 +1192,19 @@ async fn ignition_get(
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
 
-    let sp = path.into_inner().sp;
-    let ignition_target = mgmt_switch.ignition_target(sp.into())?;
+    let sp_id = path.into_inner().sp.into();
+    let ignition_target = mgmt_switch.ignition_target(sp_id)?;
 
     let state = mgmt_switch
         .ignition_controller()
         .ignition_state(ignition_target)
         .await
-        .map_err(SpCommsError::from)?;
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
 
-    let info = SpIgnitionInfo { id: sp, details: state.into() };
+    let info = SpIgnitionInfo { id: sp_id.into(), details: state.into() };
     Ok(HttpResponseOk(info))
 }
 
@@ -1043,13 +1227,17 @@ async fn ignition_command(
     let apictx = rqctx.context();
     let mgmt_switch = &apictx.mgmt_switch;
     let PathSpIgnitionCommand { sp, command } = path.into_inner();
-    let ignition_target = mgmt_switch.ignition_target(sp.into())?;
+    let sp_id = sp.into();
+    let ignition_target = mgmt_switch.ignition_target(sp_id)?;
 
     mgmt_switch
         .ignition_controller()
         .ignition_command(ignition_target, command.into())
         .await
-        .map_err(SpCommsError::from)?;
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -1067,9 +1255,12 @@ async fn sp_power_state_get(
     path: Path<PathSp>,
 ) -> Result<HttpResponseOk<PowerState>, HttpError> {
     let apictx = rqctx.context();
-    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+    let sp_id = path.into_inner().sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
 
-    let power_state = sp.power_state().await.map_err(SpCommsError::from)?;
+    let power_state = sp.power_state().await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseOk(power_state.into()))
 }
@@ -1088,10 +1279,13 @@ async fn sp_power_state_set(
     body: TypedBody<PowerState>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
-    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+    let sp_id = path.into_inner().sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
     let power_state = body.into_inner();
 
-    sp.set_power_state(power_state.into()).await.map_err(SpCommsError::from)?;
+    sp.set_power_state(power_state.into()).await.map_err(|err| {
+        SpCommsError::SpCommunicationFailed { sp: sp_id, err }
+    })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -1111,7 +1305,8 @@ async fn sp_installinator_image_id_set(
     use ipcc_key_value::Key;
 
     let apictx = rqctx.context();
-    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+    let sp_id = path.into_inner().sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
 
     let image_id =
         ipcc_key_value::InstallinatorImageId::from(body.into_inner());
@@ -1121,7 +1316,7 @@ async fn sp_installinator_image_id_set(
         image_id.serialize(),
     )
     .await
-    .map_err(SpCommsError::from)?;
+    .map_err(|err| SpCommsError::SpCommunicationFailed { sp: sp_id, err })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -1138,12 +1333,16 @@ async fn sp_installinator_image_id_delete(
     use ipcc_key_value::Key;
 
     let apictx = rqctx.context();
-    let sp = apictx.mgmt_switch.sp(path.into_inner().sp.into())?;
+    let sp_id = path.into_inner().sp.into();
+    let sp = apictx.mgmt_switch.sp(sp_id)?;
 
     // We clear the image ID by setting it to a 0-length vec.
     sp.set_ipcc_key_lookup_value(Key::InstallinatorImageId as u8, Vec::new())
         .await
-        .map_err(SpCommsError::from)?;
+        .map_err(|err| SpCommsError::SpCommunicationFailed {
+            sp: sp_id,
+            err,
+        })?;
 
     Ok(HttpResponseUpdatedNoContent {})
 }
@@ -1174,10 +1373,8 @@ async fn sp_host_phase2_progress_get(
     // this SP most recently requested. We'll treat that as "no progress
     // information", since it almost certainly means our progress info on this
     // SP is very stale.
-    let Ok(total_size) = apictx
-        .host_phase2_provider
-        .total_size(progress.hash)
-        .await
+    let Ok(total_size) =
+        apictx.host_phase2_provider.total_size(progress.hash).await
     else {
         return Ok(HttpResponseOk(HostPhase2Progress::None));
     };
@@ -1326,6 +1523,8 @@ pub fn api() -> GatewayApiDescription {
         api.register(sp_component_update)?;
         api.register(sp_component_update_status)?;
         api.register(sp_component_update_abort)?;
+        api.register(sp_rot_cmpa_get)?;
+        api.register(sp_rot_cfpa_get)?;
         api.register(sp_host_phase2_progress_get)?;
         api.register(sp_host_phase2_progress_delete)?;
         api.register(ignition_list)?;

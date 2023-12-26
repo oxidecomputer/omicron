@@ -9,10 +9,12 @@ use std::convert::From;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc::{self, Sender, UnboundedSender};
 use tokio::time::{interval, Duration, MissedTickBehavior};
+use wicket_common::rack_update::{SpIdentifier, SpType};
+use wicket_common::WICKETD_TIMEOUT;
 use wicketd_client::types::{
-    AbortUpdateOptions, ClearUpdateStateOptions, GetInventoryParams,
-    GetInventoryResponse, IgnitionCommand, SpIdentifier, SpType,
-    StartUpdateOptions,
+    AbortUpdateOptions, ClearUpdateStateOptions, ClearUpdateStateParams,
+    GetInventoryParams, GetInventoryResponse, GetLocationResponse,
+    IgnitionCommand, StartUpdateOptions, StartUpdateParams,
 };
 
 use crate::events::EventReportMap;
@@ -37,10 +39,6 @@ impl From<ComponentId> for SpIdentifier {
 }
 
 const WICKETD_POLL_INTERVAL: Duration = Duration::from_millis(500);
-// WICKETD_TIMEOUT used to be 1 second, but that might be too short (and in
-// particular might be responsible for
-// https://github.com/oxidecomputer/omicron/issues/3103).
-const WICKETD_TIMEOUT: Duration = Duration::from_secs(5);
 
 // Assume that these requests are periodic on the order of seconds or the
 // result of human interaction. In either case, this buffer should be plenty
@@ -114,6 +112,7 @@ impl WicketdManager {
         self.poll_artifacts_and_event_reports();
         self.poll_rack_setup_config();
         self.poll_rack_setup_status();
+        self.poll_location();
 
         loop {
             tokio::select! {
@@ -163,10 +162,11 @@ impl WicketdManager {
         tokio::spawn(async move {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let sp: SpIdentifier = component_id.into();
-            let response = match update_client
-                .post_start_update(sp.type_, sp.slot, &options)
-                .await
+            let params = StartUpdateParams {
+                targets: vec![component_id.into()],
+                options,
+            };
+            let response = match update_client.post_start_update(&params).await
             {
                 Ok(_) => Ok(()),
                 Err(error) => Err(error.to_string()),
@@ -197,7 +197,7 @@ impl WicketdManager {
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
             let response = match update_client
-                .post_abort_update(sp.type_, sp.slot, &options)
+                .post_abort_update(&sp.type_, sp.slot, &options)
                 .await
             {
                 Ok(_) => Ok(()),
@@ -227,14 +227,15 @@ impl WicketdManager {
         tokio::spawn(async move {
             let update_client =
                 create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
-            let sp: SpIdentifier = component_id.into();
-            let response = match update_client
-                .post_clear_update_state(sp.type_, sp.slot, &options)
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(error) => Err(error.to_string()),
+            let params = ClearUpdateStateParams {
+                targets: vec![component_id.into()],
+                options,
             };
+            let response =
+                match update_client.post_clear_update_state(&params).await {
+                    Ok(_) => Ok(()),
+                    Err(error) => Err(error.to_string()),
+                };
 
             slog::info!(
                 log,
@@ -263,7 +264,7 @@ impl WicketdManager {
             let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
             let sp: SpIdentifier = component_id.into();
             let res =
-                client.post_ignition_command(sp.type_, sp.slot, command).await;
+                client.post_ignition_command(&sp.type_, sp.slot, command).await;
             // We don't return errors or success values, as there's nobody to
             // return them to. How do we relay this result to the user?
             slog::info!(
@@ -342,6 +343,61 @@ impl WicketdManager {
         });
     }
 
+    fn poll_location(&self) {
+        let log = self.log.clone();
+        let tx = self.events_tx.clone();
+        let addr = self.wicketd_addr;
+        tokio::spawn(async move {
+            let client = create_wicketd_client(&log, addr, WICKETD_TIMEOUT);
+            let mut ticker = interval(WICKETD_POLL_INTERVAL * 2);
+            let mut prev = None;
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                // TODO: We should really be using ETAGs here
+                let location = match client.get_location().await {
+                    Ok(val) => val.into_inner(),
+                    Err(err) => {
+                        warn!(
+                            log,
+                            "Failed to fetch location of wicketd";
+                            "err" => #%err,
+                        );
+                        continue;
+                    }
+                };
+
+                // Only send a new event if the config has changed
+                if Some(&location) == prev.as_ref() {
+                    continue;
+                }
+                prev = Some(location.clone());
+
+                // If every field of `location` is filled in, we don't need to
+                // poll any more - wicketd can't move around while it's running.
+                // Check this prior to sending the event to avoid an extra
+                // clone.
+                let GetLocationResponse {
+                    sled_baseboard,
+                    sled_id,
+                    switch_baseboard,
+                    switch_id,
+                } = &location;
+
+                let location_fully_provided = sled_baseboard.is_some()
+                    && sled_id.is_some()
+                    && switch_baseboard.is_some()
+                    && switch_id.is_some();
+
+                let _ = tx.send(Event::WicketdLocation(location));
+
+                if location_fully_provided {
+                    break;
+                }
+            }
+        });
+    }
+
     fn poll_rack_setup_config(&self) {
         let log = self.log.clone();
         let tx = self.events_tx.clone();
@@ -390,7 +446,11 @@ impl WicketdManager {
                     Ok(val) => {
                         // TODO: Only send on changes
                         let rsp = val.into_inner();
-                        let artifacts = rsp.artifacts;
+                        let artifacts = rsp
+                            .artifacts
+                            .into_iter()
+                            .map(|artifact| artifact.artifact_id)
+                            .collect();
                         let system_version = rsp.system_version;
                         let event_reports: EventReportMap = rsp.event_reports;
                         let _ = tx.send(Event::ArtifactsAndEventReports {

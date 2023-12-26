@@ -13,16 +13,69 @@ use crate::db::pool::DbConnection;
 use crate::db::schema::virtual_provisioning_collection;
 use crate::db::schema::virtual_provisioning_resource;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
+use crate::db::true_or_cast_error::matches_sentinel;
+use crate::db::true_or_cast_error::TrueOrCastError;
 use db_macros::Subquery;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
+use diesel::result::Error as DieselError;
 use diesel::{
-    sql_types, CombineDsl, ExpressionMethods, IntoSql,
-    NullableExpressionMethods, QueryDsl, RunQueryDsl, SelectableHelper,
+    sql_types, BoolExpressionMethods, CombineDsl, ExpressionMethods, IntoSql,
+    JoinOnDsl, NullableExpressionMethods, QueryDsl, RunQueryDsl,
+    SelectableHelper,
 };
 use nexus_db_model::queries::virtual_provisioning_collection_update::{
-    all_collections, do_update, parent_silo,
+    all_collections, do_update, parent_silo, quotas, silo_provisioned,
 };
+use omicron_common::api::external;
+use omicron_common::api::external::MessagePair;
+
+const NOT_ENOUGH_CPUS_SENTINEL: &'static str = "Not enough cpus";
+const NOT_ENOUGH_MEMORY_SENTINEL: &'static str = "Not enough memory";
+const NOT_ENOUGH_STORAGE_SENTINEL: &'static str = "Not enough storage";
+
+/// Translates a generic pool error to an external error based
+/// on messages which may be emitted when provisioning virtual resources
+/// such as instances and disks.
+pub fn from_diesel(e: DieselError) -> external::Error {
+    use crate::db::error;
+
+    let sentinels = [
+        NOT_ENOUGH_CPUS_SENTINEL,
+        NOT_ENOUGH_MEMORY_SENTINEL,
+        NOT_ENOUGH_STORAGE_SENTINEL,
+    ];
+    if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
+        match sentinel {
+            NOT_ENOUGH_CPUS_SENTINEL => {
+                return external::Error::InsufficientCapacity {
+                    message: MessagePair::new_full(
+                         "vCPU Limit Exceeded: Not enough vCPUs to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "User tried to allocate an instance but the virtual provisioning resource table indicated that there were not enough CPUs available to satisfy the request.".to_string(),
+                    )
+                }
+            }
+            NOT_ENOUGH_MEMORY_SENTINEL => {
+                return external::Error::InsufficientCapacity {
+                    message: MessagePair::new_full(
+                         "Memory Limit Exceeded: Not enough memory to complete request. Either stop unused instances to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "User tried to allocate an instance but the virtual provisioning resource table indicated that there were not enough RAM available to satisfy the request.".to_string(),
+                    )
+                }
+            }
+            NOT_ENOUGH_STORAGE_SENTINEL => {
+                return external::Error::InsufficientCapacity {
+                    message: MessagePair::new_full(
+                         "Storage Limit Exceeded: Not enough storage to complete request. Either remove unneeded disks and snapshots to free up resources or contact the rack operator to request a capacity increase.".to_string(),
+                         "User tried to allocate a disk or snapshot but the virtual provisioning resource table indicated that there were not enough storage available to satisfy the request.".to_string(),
+                    )
+                }
+            }
+            _ => {}
+        }
+    }
+    error::public_error_from_diesel(e, error::ErrorHandler::Server)
+}
 
 #[derive(Subquery, QueryId)]
 #[subquery(name = parent_silo)]
@@ -82,20 +135,86 @@ struct DoUpdate {
 }
 
 impl DoUpdate {
-    fn new_for_insert(id: uuid::Uuid) -> Self {
+    fn new_for_insert(
+        silo_provisioned: &SiloProvisioned,
+        quotas: &Quotas,
+        resource: VirtualProvisioningResource,
+    ) -> Self {
         use virtual_provisioning_resource::dsl;
 
+        let cpus_provisioned_delta =
+            resource.cpus_provisioned.into_sql::<sql_types::BigInt>();
+        let memory_provisioned_delta =
+            i64::from(resource.ram_provisioned).into_sql::<sql_types::BigInt>();
+        let storage_provisioned_delta =
+            i64::from(resource.virtual_disk_bytes_provisioned)
+                .into_sql::<sql_types::BigInt>();
+
         let not_allocted = dsl::virtual_provisioning_resource
-            .find(id)
+            .find(resource.id)
             .count()
             .single_value()
             .assume_not_null()
             .eq(0);
 
+        let has_sufficient_cpus = quotas
+            .query_source()
+            .select(quotas::cpus)
+            .single_value()
+            .assume_not_null()
+            .ge(silo_provisioned
+                .query_source()
+                .select(silo_provisioned::cpus_provisioned)
+                .single_value()
+                .assume_not_null()
+                + cpus_provisioned_delta);
+
+        let has_sufficient_memory = quotas
+            .query_source()
+            .select(quotas::memory)
+            .single_value()
+            .assume_not_null()
+            .ge(silo_provisioned
+                .query_source()
+                .select(silo_provisioned::ram_provisioned)
+                .single_value()
+                .assume_not_null()
+                + memory_provisioned_delta);
+
+        let has_sufficient_storage = quotas
+            .query_source()
+            .select(quotas::storage)
+            .single_value()
+            .assume_not_null()
+            .ge(silo_provisioned
+                .query_source()
+                .select(silo_provisioned::virtual_disk_bytes_provisioned)
+                .single_value()
+                .assume_not_null()
+                + storage_provisioned_delta);
+
         Self {
             query: Box::new(diesel::select((ExpressionAlias::new::<
                 do_update::update,
-            >(not_allocted),))),
+            >(
+                not_allocted
+                    .and(TrueOrCastError::new(
+                        cpus_provisioned_delta.eq(0).or(has_sufficient_cpus),
+                        NOT_ENOUGH_CPUS_SENTINEL,
+                    ))
+                    .and(TrueOrCastError::new(
+                        memory_provisioned_delta
+                            .eq(0)
+                            .or(has_sufficient_memory),
+                        NOT_ENOUGH_MEMORY_SENTINEL,
+                    ))
+                    .and(TrueOrCastError::new(
+                        storage_provisioned_delta
+                            .eq(0)
+                            .or(has_sufficient_storage),
+                        NOT_ENOUGH_STORAGE_SENTINEL,
+                    )),
+            ),))),
         }
     }
 
@@ -161,6 +280,67 @@ impl UpdatedProvisions {
     }
 }
 
+#[derive(Subquery, QueryId)]
+#[subquery(name = quotas)]
+struct Quotas {
+    query: Box<dyn CteQuery<SqlType = quotas::SqlType>>,
+}
+
+impl Quotas {
+    // TODO: We could potentially skip this in cases where we know we're removing a resource instead of inserting
+    fn new(parent_silo: &ParentSilo) -> Self {
+        use crate::db::schema::silo_quotas::dsl;
+        Self {
+            query: Box::new(
+                dsl::silo_quotas
+                    .inner_join(
+                        parent_silo
+                            .query_source()
+                            .on(dsl::silo_id.eq(parent_silo::id)),
+                    )
+                    .select((
+                        dsl::silo_id,
+                        dsl::cpus,
+                        ExpressionAlias::new::<quotas::dsl::memory>(
+                            dsl::memory_bytes,
+                        ),
+                        ExpressionAlias::new::<quotas::dsl::storage>(
+                            dsl::storage_bytes,
+                        ),
+                    )),
+            ),
+        }
+    }
+}
+
+#[derive(Subquery, QueryId)]
+#[subquery(name = silo_provisioned)]
+struct SiloProvisioned {
+    query: Box<dyn CteQuery<SqlType = silo_provisioned::SqlType>>,
+}
+
+impl SiloProvisioned {
+    fn new(parent_silo: &ParentSilo) -> Self {
+        use virtual_provisioning_collection::dsl;
+        Self {
+            query: Box::new(
+                dsl::virtual_provisioning_collection
+                    .inner_join(
+                        parent_silo
+                            .query_source()
+                            .on(dsl::id.eq(parent_silo::id)),
+                    )
+                    .select((
+                        dsl::id,
+                        dsl::cpus_provisioned,
+                        dsl::ram_provisioned,
+                        dsl::virtual_disk_bytes_provisioned,
+                    )),
+            ),
+        }
+    }
+}
+
 // This structure wraps a query, such that it can be used within a CTE.
 //
 // It generates a name that can be used by the "CteBuilder", but does not
@@ -195,6 +375,15 @@ where
     }
 }
 
+/// The virtual resource collection is only updated when a resource is inserted
+/// or deleted from the resource provisioning table. By probing for the presence
+/// or absence of a resource, we can update collections at the same time as we
+/// create or destroy the resource, which helps make the operation idempotent.
+enum UpdateKind {
+    Insert(VirtualProvisioningResource),
+    Delete(uuid::Uuid),
+}
+
 /// Constructs a CTE for updating resource provisioning information in all
 /// collections for a particular object.
 #[derive(QueryId)]
@@ -220,7 +409,7 @@ impl VirtualProvisioningCollectionUpdate {
     // - values: The updated values to propagate through collections (iff
     // "do_update" evaluates to "true").
     fn apply_update<U, V>(
-        do_update: DoUpdate,
+        update_kind: UpdateKind,
         update: U,
         project_id: uuid::Uuid,
         values: V,
@@ -237,6 +426,17 @@ impl VirtualProvisioningCollectionUpdate {
             &parent_silo,
             *crate::db::fixed_data::FLEET_ID,
         );
+
+        let quotas = Quotas::new(&parent_silo);
+        let silo_provisioned = SiloProvisioned::new(&parent_silo);
+
+        let do_update = match update_kind {
+            UpdateKind::Insert(resource) => {
+                DoUpdate::new_for_insert(&silo_provisioned, &quotas, resource)
+            }
+            UpdateKind::Delete(id) => DoUpdate::new_for_delete(id),
+        };
+
         let updated_collections =
             UpdatedProvisions::new(&all_collections, &do_update, values);
 
@@ -251,6 +451,8 @@ impl VirtualProvisioningCollectionUpdate {
         let cte = CteBuilder::new()
             .add_subquery(parent_silo)
             .add_subquery(all_collections)
+            .add_subquery(quotas)
+            .add_subquery(silo_provisioned)
             .add_subquery(do_update)
             .add_subquery(update)
             .add_subquery(updated_collections)
@@ -273,8 +475,7 @@ impl VirtualProvisioningCollectionUpdate {
         provision.virtual_disk_bytes_provisioned = disk_byte_diff;
 
         Self::apply_update(
-            // We should insert the record if it does not already exist.
-            DoUpdate::new_for_insert(id),
+            UpdateKind::Insert(provision.clone()),
             // The query to actually insert the record.
             UnreferenceableSubquery(
                 diesel::insert_into(
@@ -305,8 +506,7 @@ impl VirtualProvisioningCollectionUpdate {
         use virtual_provisioning_resource::dsl as resource_dsl;
 
         Self::apply_update(
-            // We should delete the record if it exists.
-            DoUpdate::new_for_delete(id),
+            UpdateKind::Delete(id),
             // The query to actually delete the record.
             UnreferenceableSubquery(
                 diesel::delete(resource_dsl::virtual_provisioning_resource)
@@ -342,8 +542,7 @@ impl VirtualProvisioningCollectionUpdate {
         provision.ram_provisioned = ram_diff;
 
         Self::apply_update(
-            // We should insert the record if it does not already exist.
-            DoUpdate::new_for_insert(id),
+            UpdateKind::Insert(provision.clone()),
             // The query to actually insert the record.
             UnreferenceableSubquery(
                 diesel::insert_into(
@@ -368,20 +567,48 @@ impl VirtualProvisioningCollectionUpdate {
 
     pub fn new_delete_instance(
         id: uuid::Uuid,
+        max_instance_gen: i64,
         cpus_diff: i64,
         ram_diff: ByteCount,
         project_id: uuid::Uuid,
     ) -> Self {
+        use crate::db::schema::instance::dsl as instance_dsl;
         use virtual_provisioning_collection::dsl as collection_dsl;
         use virtual_provisioning_resource::dsl as resource_dsl;
 
         Self::apply_update(
-            // We should delete the record if it exists.
-            DoUpdate::new_for_delete(id),
+            UpdateKind::Delete(id),
             // The query to actually delete the record.
+            //
+            // The filter condition here ensures that the provisioning record is
+            // only deleted if the corresponding instance has a generation
+            // number less than the supplied `max_instance_gen`. This allows a
+            // caller that is about to apply an instance update that will stop
+            // the instance and that bears generation G to avoid deleting
+            // resources if the instance generation was already advanced to or
+            // past G.
+            //
+            // If the relevant instance ID is not in the database, then some
+            // other operation must have ensured the instance was previously
+            // stopped (because that's the only way it could have been deleted),
+            // and that operation should have cleaned up the resources already,
+            // in which case there's nothing to do here.
+            //
+            // There is an additional "direct" filter on the target resource ID
+            // to avoid a full scan of the resource table.
             UnreferenceableSubquery(
                 diesel::delete(resource_dsl::virtual_provisioning_resource)
                     .filter(resource_dsl::id.eq(id))
+                    .filter(
+                        resource_dsl::id.nullable().eq(instance_dsl::instance
+                            .filter(instance_dsl::id.eq(id))
+                            .filter(
+                                instance_dsl::state_generation
+                                    .lt(max_instance_gen),
+                            )
+                            .select(instance_dsl::id)
+                            .single_value()),
+                    )
                     .returning(virtual_provisioning_resource::all_columns),
             ),
             // Within this project, silo, fleet...

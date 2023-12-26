@@ -1,0 +1,34 @@
+# NOTE: The recommended version should be in sync with the version in
+# .github/buildomat/build-and-test.sh.
+#
+# The required version should be bumped up if we need new features, performance
+# improvements or bugfixes that are present in newer versions of nextest.
+nextest-version = { required = "0.9.59", recommended = "0.9.64" }
+
+experimental = ["setup-scripts"]
+
+[[profile.default.scripts]]
+# Exclude omicron-dev tests from crdb-seed as we explicitly want to simulate an
+# environment where the seed file doesn't exist.
+filter = 'rdeps(nexus-test-utils) - package(omicron-dev)'
+setup = 'crdb-seed'
+
+[profile.ci]
+fail-fast = false
+
+[script.crdb-seed]
+# Use the test profile for this executable since that's how almost all
+# invocations of nextest happen.
+command = 'cargo run -p crdb-seed --profile test'
+
+# The ClickHouse cluster tests currently rely on a hard-coded set of ports for
+# the nodes in the cluster. We would like to relax this in the future, at which
+# point this test-group configuration can be removed or at least loosened to
+# support testing in parallel. For now, enforce strict serialization for all
+# tests with `replicated` in the name.
+[test-groups]
+clickhouse-cluster = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'package(oximeter-db) and test(replicated)'
+test-group = 'clickhouse-cluster'

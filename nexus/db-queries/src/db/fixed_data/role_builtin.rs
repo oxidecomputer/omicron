@@ -3,8 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //! Built-in roles
 
-use lazy_static::lazy_static;
 use omicron_common::api;
+use once_cell::sync::Lazy;
 
 #[derive(Clone, Debug)]
 pub struct RoleBuiltinConfig {
@@ -13,28 +13,36 @@ pub struct RoleBuiltinConfig {
     pub description: &'static str,
 }
 
-lazy_static! {
-    pub static ref FLEET_ADMIN: RoleBuiltinConfig = RoleBuiltinConfig {
+pub static FLEET_ADMIN: Lazy<RoleBuiltinConfig> =
+    Lazy::new(|| RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Fleet,
         role_name: "admin",
         description: "Fleet Administrator",
-    };
-    pub static ref FLEET_AUTHENTICATOR: RoleBuiltinConfig = RoleBuiltinConfig {
+    });
+
+pub static FLEET_AUTHENTICATOR: Lazy<RoleBuiltinConfig> =
+    Lazy::new(|| RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Fleet,
         role_name: "external-authenticator",
         description: "Fleet External Authenticator",
-    };
-    pub static ref FLEET_VIEWER: RoleBuiltinConfig = RoleBuiltinConfig {
+    });
+
+pub static FLEET_VIEWER: Lazy<RoleBuiltinConfig> =
+    Lazy::new(|| RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Fleet,
         role_name: "viewer",
         description: "Fleet Viewer",
-    };
-    pub static ref SILO_ADMIN: RoleBuiltinConfig = RoleBuiltinConfig {
+    });
+
+pub static SILO_ADMIN: Lazy<RoleBuiltinConfig> =
+    Lazy::new(|| RoleBuiltinConfig {
         resource_type: api::external::ResourceType::Silo,
         role_name: "admin",
         description: "Silo Administrator",
-    };
-    pub static ref BUILTIN_ROLES: Vec<RoleBuiltinConfig> = vec![
+    });
+
+pub static BUILTIN_ROLES: Lazy<Vec<RoleBuiltinConfig>> = Lazy::new(|| {
+    vec![
         FLEET_ADMIN.clone(),
         FLEET_AUTHENTICATOR.clone(),
         FLEET_VIEWER.clone(),
@@ -69,8 +77,8 @@ lazy_static! {
             role_name: "viewer",
             description: "Project Viewer",
         },
-    ];
-}
+    ]
+});
 
 #[cfg(test)]
 mod test {

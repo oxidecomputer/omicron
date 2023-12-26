@@ -4,11 +4,13 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UserId;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use schemars::JsonSchema;
@@ -23,7 +25,7 @@ use uuid::Uuid;
 ///
 /// Note that this may change if the sled is physically moved
 /// within the rack.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, JsonSchema, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum SledRole {
     /// The sled is a general compute sled.
@@ -43,7 +45,7 @@ pub struct Baseboard {
 }
 
 /// Sent by a sled agent on startup to Nexus to request further instruction
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Serialize, Deserialize, Debug, JsonSchema)]
 pub struct SledAgentStartupInfo {
     /// The address of the sled agent's API endpoint
     pub sa_address: SocketAddrV6,
@@ -64,16 +66,6 @@ pub struct SledAgentStartupInfo {
     ///
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
-}
-
-/// Describes the type of physical disk.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case", tag = "type", content = "content")]
-pub enum PhysicalDiskKind {
-    M2,
-    U2,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -133,6 +125,7 @@ pub enum DatasetKind {
     Crucible,
     Cockroach,
     Clickhouse,
+    ClickhouseKeeper,
     ExternalDns,
     InternalDns,
 }
@@ -144,6 +137,7 @@ impl fmt::Display for DatasetKind {
             Crucible => "crucible",
             Cockroach => "cockroach",
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
         };
@@ -176,6 +170,7 @@ pub struct ServiceNic {
 #[serde(rename_all = "snake_case", tag = "type", content = "content")]
 pub enum ServiceKind {
     Clickhouse,
+    ClickhouseKeeper,
     Cockroach,
     Crucible,
     CruciblePantry,
@@ -187,6 +182,7 @@ pub enum ServiceKind {
     Tfport,
     BoundaryNtp { snat: SourceNatConfig, nic: ServiceNic },
     InternalNtp,
+    Mgd,
 }
 
 impl fmt::Display for ServiceKind {
@@ -194,6 +190,7 @@ impl fmt::Display for ServiceKind {
         use ServiceKind::*;
         let s = match self {
             Clickhouse => "clickhouse",
+            ClickhouseKeeper => "clickhouse_keeper",
             Cockroach => "cockroach",
             Crucible => "crucible",
             ExternalDns { .. } => "external_dns",
@@ -204,6 +201,7 @@ impl fmt::Display for ServiceKind {
             Tfport => "tfport",
             CruciblePantry => "crucible_pantry",
             BoundaryNtp { .. } | InternalNtp => "ntp",
+            Mgd => "mgd",
         };
         write!(f, "{}", s)
     }
@@ -262,8 +260,8 @@ pub struct RackInitializationRequest {
     pub external_dns_zone_name: String,
     /// configuration for the initial (recovery) Silo
     pub recovery_silo: RecoverySiloConfig,
-    /// The number of external qsfp ports per sidecar
-    pub external_port_count: u8,
+    /// The external qsfp ports per sidecar
+    pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
     pub rack_network_config: Option<RackNetworkConfig>,
 }

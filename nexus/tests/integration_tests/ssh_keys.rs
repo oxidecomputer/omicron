@@ -6,9 +6,9 @@ use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
 
+use nexus_types::external_api::params::SshKeyCreate;
+use nexus_types::external_api::views::SshKey;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_nexus::external_api::params::SshKeyCreate;
-use omicron_nexus::external_api::views::SshKey;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;

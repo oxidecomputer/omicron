@@ -19,7 +19,7 @@ function merge {
   local TARGET_BRANCH="$1"
   local INTEGRATION_BRANCH="$2"
   local BOT_ID="$3"
-  local -n CHECKOUT_PATHS=$4
+  local CHECKOUT_PATHS=$4
 
   set_reflector_bot "$BOT_ID"
 
@@ -96,9 +96,9 @@ function update_pr {
 
   # Compare the integration branch with the target branch
   local TARGET_TO_INTEGRATION
-  TARGET_TO_INTEGRATION="$(git rev-list --count $TARGET_BRANCH..$INTEGRATION_BRANCH)"
+  TARGET_TO_INTEGRATION="$(git rev-list --count "$TARGET_BRANCH".."$INTEGRATION_BRANCH")"
   local INTEGRATION_TO_TARGET
-  INTEGRATION_TO_TARGET="$(git rev-list --count $INTEGRATION_BRANCH..$TARGET_BRANCH)"
+  INTEGRATION_TO_TARGET="$(git rev-list --count "$INTEGRATION_BRANCH".."$TARGET_BRANCH")"
 
   # Check for an existing pull request from the integration branch to the target branch
   eval "$(gh pr view "$INTEGRATION_BRANCH" --repo "$GITHUB_REPOSITORY" --json url,number,state | jq -r 'to_entries[] | "\(.key | ascii_upcase)=\(.value)"')"

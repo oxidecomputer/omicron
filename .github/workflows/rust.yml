@@ -9,7 +9,9 @@ jobs:
   check-style:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@v3.5.0
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
     - name: Report cargo version
       run: cargo --version
     - name: Report rustfmt version
@@ -19,6 +21,8 @@ jobs:
 
   check-omicron-deployment:
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_INCREMENTAL: 0
     strategy:
       fail-fast: false
       matrix:
@@ -27,8 +31,10 @@ jobs:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@v3.5.0
-    - uses: Swatinem/rust-cache@v2.2.1
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@3cf7f8cc28d1b4e7d01e3783be10a97d55d483c8 # v2.7.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -41,18 +47,24 @@ jobs:
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Set default target
-      run: cargo run --bin omicron-package -- -t default target create
+      run: cargo run --bin omicron-package -- -t default target create -r single-sled
     - name: Check build of deployed Omicron packages
       run: cargo run --bin omicron-package -- -t default check
 
+  # Note that `cargo clippy` includes `cargo check, so this ends up checking all
+  # of our code.
   clippy-lint:
     runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@v3.5.0
-    - uses: Swatinem/rust-cache@v2.2.1
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@3cf7f8cc28d1b4e7d01e3783be10a97d55d483c8 # v2.7.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -67,23 +79,22 @@ jobs:
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Run Clippy Lints
-      #
-      # Clippy's style nits are useful, but not worth keeping in CI.  This
-      # override belongs in src/lib.rs, and it is there, but that doesn't
-      # reliably work due to rust-lang/rust-clippy#6610.
-      #
-      run: cargo clippy --all-targets -- --deny warnings --allow clippy::style
+      run: cargo xtask clippy
 
   # This is just a test build of docs.  Publicly available docs are built via
   # the separate "rustdocs" repo.
   build-docs:
     runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@v3.5.0
-    - uses: Swatinem/rust-cache@v2.2.1
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@3cf7f8cc28d1b4e7d01e3783be10a97d55d483c8 # v2.7.1
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version

@@ -86,6 +86,14 @@ pub struct GetVnicError {
     err: ExecutionError,
 }
 
+/// Errors returned from [`Dladm::get_simulated_tfports`].
+#[derive(thiserror::Error, Debug)]
+#[error("Failed to get simnets: {err}")]
+pub struct GetSimnetError {
+    #[source]
+    err: ExecutionError,
+}
+
 /// Errors returned from [`Dladm::delete_vnic`].
 #[derive(thiserror::Error, Debug)]
 #[error("Failed to delete vnic {name}: {err}")]
@@ -414,6 +422,25 @@ impl Dladm {
             })
             .collect();
         Ok(vnics)
+    }
+
+    /// Returns simnet links masquerading as tfport devices
+    pub fn get_simulated_tfports() -> Result<Vec<String>, GetSimnetError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[DLADM, "show-simnet", "-p", "-o", "LINK"]);
+        let output = execute(cmd).map_err(|err| GetSimnetError { err })?;
+
+        let tfports = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|name| {
+                if name.starts_with("tfport") {
+                    Some(name.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        Ok(tfports)
     }
 
     /// Remove a vnic from the sled.

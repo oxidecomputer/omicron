@@ -4,15 +4,15 @@
 
 //! VPC routers and routes
 
-use crate::authz;
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
-use crate::db::model::RouterRoute;
-use crate::db::model::VpcRouter;
-use crate::db::model::VpcRouterKind;
 use crate::external_api::params;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::RouterRoute;
+use nexus_db_queries::db::model::VpcRouter;
+use nexus_db_queries::db::model::VpcRouterKind;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -63,7 +63,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn vpc_create_router(
+    pub(crate) async fn vpc_create_router(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -86,7 +86,7 @@ impl super::Nexus {
         Ok(router)
     }
 
-    pub async fn vpc_router_list(
+    pub(crate) async fn vpc_router_list(
         &self,
         opctx: &OpContext,
         vpc_lookup: &lookup::Vpc<'_>,
@@ -101,7 +101,7 @@ impl super::Nexus {
         Ok(routers)
     }
 
-    pub async fn vpc_update_router(
+    pub(crate) async fn vpc_update_router(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -117,7 +117,7 @@ impl super::Nexus {
     // TODO: When a router is deleted all its routes should be deleted
     // TODO: When a router is deleted it should be unassociated w/ any subnets it may be associated with
     //       or trigger an error
-    pub async fn vpc_delete_router(
+    pub(crate) async fn vpc_delete_router(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -129,9 +129,7 @@ impl super::Nexus {
         // router kind cannot be changed, but it might be able to save us a
         // database round-trip.
         if db_router.kind == VpcRouterKind::System {
-            return Err(Error::MethodNotAllowed {
-                internal_message: "Cannot delete system router".to_string(),
-            });
+            return Err(Error::invalid_request("Cannot delete system router"));
         }
         self.db_datastore.vpc_delete_router(opctx, &authz_router).await
     }
@@ -180,7 +178,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn router_create_route(
+    pub(crate) async fn router_create_route(
         &self,
         opctx: &OpContext,
         router_lookup: &lookup::VpcRouter<'_>,
@@ -203,7 +201,7 @@ impl super::Nexus {
         Ok(route)
     }
 
-    pub async fn vpc_router_route_list(
+    pub(crate) async fn vpc_router_route_list(
         &self,
         opctx: &OpContext,
         vpc_router_lookup: &lookup::VpcRouter<'_>,
@@ -216,7 +214,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn router_update_route(
+    pub(crate) async fn router_update_route(
         &self,
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,
@@ -229,14 +227,12 @@ impl super::Nexus {
         match db_route.kind.0 {
             RouterRouteKind::Custom | RouterRouteKind::Default => (),
             _ => {
-                return Err(Error::MethodNotAllowed {
-                    internal_message: format!(
-                        "routes of type {} from the system table of VPC {:?} \
+                return Err(Error::invalid_request(format!(
+                    "routes of type {} from the system table of VPC {:?} \
                         are not modifiable",
-                        db_route.kind.0,
-                        vpc.id()
-                    ),
-                })
+                    db_route.kind.0,
+                    vpc.id()
+                )));
             }
         }
         self.db_datastore
@@ -244,7 +240,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn router_delete_route(
+    pub(crate) async fn router_delete_route(
         &self,
         opctx: &OpContext,
         route_lookup: &lookup::RouterRoute<'_>,
@@ -255,10 +251,9 @@ impl super::Nexus {
         // Only custom routes can be deleted
         // TODO Shouldn't this constraint be checked by the database query?
         if db_route.kind.0 != RouterRouteKind::Custom {
-            return Err(Error::MethodNotAllowed {
-                internal_message: "DELETE not allowed on system routes"
-                    .to_string(),
-            });
+            return Err(Error::invalid_request(
+                "DELETE not allowed on system routes",
+            ));
         }
         self.db_datastore.router_delete_route(opctx, &authz_route).await
     }

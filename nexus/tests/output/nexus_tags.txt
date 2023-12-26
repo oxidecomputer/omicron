@@ -6,10 +6,16 @@ disk_bulk_write_import_stop              POST     /v1/disks/{disk}/bulk-write-st
 disk_create                              POST     /v1/disks
 disk_delete                              DELETE   /v1/disks/{disk}
 disk_finalize_import                     POST     /v1/disks/{disk}/finalize
-disk_import_blocks_from_url              POST     /v1/disks/{disk}/import
 disk_list                                GET      /v1/disks
 disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
+
+API operations found with tag "floating-ips"
+OPERATION ID                             METHOD   URL PATH
+floating_ip_create                       POST     /v1/floating-ips
+floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
+floating_ip_list                         GET      /v1/floating-ips
+floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
 API operations found with tag "hidden"
 OPERATION ID                             METHOD   URL PATH
@@ -100,6 +106,7 @@ group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
+utilization_view                         GET      /v1/utilization
 
 API operations found with tag "snapshots"
 OPERATION ID                             METHOD   URL PATH
@@ -110,6 +117,7 @@ snapshot_view                            GET      /v1/snapshots/{snapshot}
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
+add_sled_to_initialized_rack             POST     /v1/system/hardware/sleds
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
@@ -120,7 +128,9 @@ rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
+sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
+sled_set_provision_state                 PUT      /v1/system/hardware/sleds/{sled_id}/provision-state
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
@@ -147,6 +157,14 @@ networking_address_lot_block_list        GET      /v1/system/networking/address-
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_bgp_announce_set_create       POST     /v1/system/networking/bgp-announce
+networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
+networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce
+networking_bgp_config_create             POST     /v1/system/networking/bgp
+networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
+networking_bgp_config_list               GET      /v1/system/networking/bgp
+networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
+networking_bgp_status                    GET      /v1/system/networking/bgp-status
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
 networking_loopback_address_list         GET      /v1/system/networking/loopback-address
@@ -168,11 +186,20 @@ silo_identity_provider_list              GET      /v1/system/identity-providers
 silo_list                                GET      /v1/system/silos
 silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
 silo_policy_view                         GET      /v1/system/silos/{silo}/policy
+silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
+silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
+silo_utilization_list                    GET      /v1/system/utilization/silos
+silo_utilization_view                    GET      /v1/system/utilization/silos/{silo}
 silo_view                                GET      /v1/system/silos/{silo}
+system_quotas_list                       GET      /v1/system/silo-quotas
 user_builtin_list                        GET      /v1/system/users-builtin
 user_builtin_view                        GET      /v1/system/users-builtin/{user}
+
+API operations found with tag "system/status"
+OPERATION ID                             METHOD   URL PATH
+ping                                     GET      /v1/ping
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH
@@ -181,16 +208,6 @@ vpc_delete                               DELETE   /v1/vpcs/{vpc}
 vpc_firewall_rules_update                PUT      /v1/vpc-firewall-rules
 vpc_firewall_rules_view                  GET      /v1/vpc-firewall-rules
 vpc_list                                 GET      /v1/vpcs
-vpc_router_create                        POST     /v1/vpc-routers
-vpc_router_delete                        DELETE   /v1/vpc-routers/{router}
-vpc_router_list                          GET      /v1/vpc-routers
-vpc_router_route_create                  POST     /v1/vpc-router-routes
-vpc_router_route_delete                  DELETE   /v1/vpc-router-routes/{route}
-vpc_router_route_list                    GET      /v1/vpc-router-routes
-vpc_router_route_update                  PUT      /v1/vpc-router-routes/{route}
-vpc_router_route_view                    GET      /v1/vpc-router-routes/{route}
-vpc_router_update                        PUT      /v1/vpc-routers/{router}
-vpc_router_view                          GET      /v1/vpc-routers/{router}
 vpc_subnet_create                        POST     /v1/vpc-subnets
 vpc_subnet_delete                        DELETE   /v1/vpc-subnets/{subnet}
 vpc_subnet_list                          GET      /v1/vpc-subnets

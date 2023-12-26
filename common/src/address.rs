@@ -9,6 +9,7 @@
 
 use crate::api::external::{self, Error, Ipv4Net, Ipv6Net};
 use ipnetwork::{Ipv4Network, Ipv6Network};
+use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -17,14 +18,14 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
-/// The amount of redundancy for DNS servers.
+/// The amount of redundancy for internal DNS servers.
 ///
-/// Must be less than MAX_DNS_REDUNDANCY.
-pub const DNS_REDUNDANCY: usize = 1;
+/// Must be less than or equal to MAX_DNS_REDUNDANCY.
+pub const DNS_REDUNDANCY: usize = 3;
+
 /// The maximum amount of redundancy for DNS servers.
 ///
-/// This determines the number of addresses which are
-/// reserved for DNS servers.
+/// This determines the number of addresses which are reserved for DNS servers.
 pub const MAX_DNS_REDUNDANCY: usize = 5;
 
 pub const DNS_PORT: u16 = 53;
@@ -36,14 +37,27 @@ pub const PROPOLIS_PORT: u16 = 12400;
 pub const COCKROACH_PORT: u16 = 32221;
 pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
+pub const CLICKHOUSE_KEEPER_PORT: u16 = 9181;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
+pub const MGD_PORT: u16 = 4676;
+pub const DDMD_PORT: u16 = 8000;
 pub const MGS_PORT: u16 = 12225;
 pub const WICKETD_PORT: u16 = 12226;
 pub const BOOTSTRAP_ARTIFACT_PORT: u16 = 12227;
 pub const CRUCIBLE_PANTRY_PORT: u16 = 17000;
 
 pub const NEXUS_INTERNAL_PORT: u16 = 12221;
+
+/// The port on which Nexus exposes its external API on the underlay network.
+///
+/// This is used by the `wicketd` Nexus proxy to allow external API access via
+/// the rack's tech port.
+pub const NEXUS_TECHPORT_EXTERNAL_PORT: u16 = 12228;
+
+/// The port on which `wicketd` runs a Nexus external API proxy on the tech port
+/// interface(s).
+pub const WICKETD_NEXUS_PROXY_PORT: u16 = 12229;
 
 pub const NTP_PORT: u16 = 123;
 
@@ -63,65 +77,78 @@ pub const NTP_PORT: u16 = 123;
 // that situation (which may be as soon as allocating ephemeral IPs).
 pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 
-lazy_static::lazy_static! {
-    // Services that require external connectivity are given an OPTE port
-    // with a "Service VNIC" record. Like a "Guest VNIC", a service is
-    // placed within a VPC (a built-in services VPC), along with a VPC subnet.
-    // But unlike guest instances which are created at runtime by Nexus, these
-    // services are created by RSS early on. So, we have some fixed values
-    // used to bootstrap service OPTE ports. Each service kind uses a distinct
-    // VPC subnet which RSS will allocate addresses from for those services.
-    // The specific values aren't deployment-specific as they are virtualized
-    // within OPTE.
+// Services that require external connectivity are given an OPTE port
+// with a "Service VNIC" record. Like a "Guest VNIC", a service is
+// placed within a VPC (a built-in services VPC), along with a VPC subnet.
+// But unlike guest instances which are created at runtime by Nexus, these
+// services are created by RSS early on. So, we have some fixed values
+// used to bootstrap service OPTE ports. Each service kind uses a distinct
+// VPC subnet which RSS will allocate addresses from for those services.
+// The specific values aren't deployment-specific as they are virtualized
+// within OPTE.
 
-    /// The IPv6 prefix assigned to the built-in services VPC.
-    // The specific prefix here was randomly chosen from the expected VPC
-    // prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
-    // Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
-    // /64's within this prefix.
-    pub static ref SERVICE_VPC_IPV6_PREFIX: Ipv6Net = Ipv6Net(
+/// The IPv6 prefix assigned to the built-in services VPC.
+// The specific prefix here was randomly chosen from the expected VPC
+// prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
+// Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
+// /64's within this prefix.
+pub static SERVICE_VPC_IPV6_PREFIX: Lazy<Ipv6Net> = Lazy::new(|| {
+    Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
             Ipv6Net::VPC_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
+        )
+        .unwrap(),
+    )
+});
 
-    /// The IPv4 subnet for External DNS OPTE ports.
-    pub static ref DNS_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
+/// The IPv4 subnet for External DNS OPTE ports.
+pub static DNS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
+    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap())
+});
 
-    /// The IPv6 subnet for External DNS OPTE ports.
-    pub static ref DNS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+/// The IPv6 subnet for External DNS OPTE ports.
+pub static DNS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+    Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
             Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
+        )
+        .unwrap(),
+    )
+});
 
-    /// The IPv4 subnet for Nexus OPTE ports.
-    pub static ref NEXUS_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
+/// The IPv4 subnet for Nexus OPTE ports.
+pub static NEXUS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
+    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap())
+});
 
-    /// The IPv6 subnet for Nexus OPTE ports.
-    pub static ref NEXUS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+/// The IPv6 subnet for Nexus OPTE ports.
+pub static NEXUS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+    Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
             Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
+        )
+        .unwrap(),
+    )
+});
 
-    /// The IPv4 subnet for Boundary NTP OPTE ports.
-    pub static ref NTP_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap());
+/// The IPv4 subnet for Boundary NTP OPTE ports.
+pub static NTP_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
+    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap())
+});
 
-    /// The IPv6 subnet for Boundary NTP OPTE ports.
-    pub static ref NTP_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+/// The IPv6 subnet for Boundary NTP OPTE ports.
+pub static NTP_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+    Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
             Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
-}
+        )
+        .unwrap(),
+    )
+});
 
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
@@ -139,9 +166,8 @@ const GZ_ADDRESS_INDEX: usize = 2;
 pub const RSS_RESERVED_ADDRESSES: u16 = 32;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
-#[derive(
-    Debug, Clone, Copy, JsonSchema, Serialize, Deserialize, Hash, PartialEq, Eq,
-)]
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
+#[schemars(rename = "Ipv6Subnet")]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
 }
@@ -158,6 +184,38 @@ impl<const N: u8> Ipv6Subnet<N> {
     /// Returns the underlying network.
     pub fn net(&self) -> Ipv6Network {
         self.net.0
+    }
+}
+
+impl<const N: u8> From<Ipv6Network> for Ipv6Subnet<N> {
+    fn from(net: Ipv6Network) -> Self {
+        // Ensure the address is set to within-prefix only components.
+        let net = Ipv6Network::new(net.network(), N).unwrap();
+        Self { net: Ipv6Net(net) }
+    }
+}
+
+// We need a custom Deserialize to ensure that the subnet is what we expect.
+impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct Inner {
+            net: Ipv6Net,
+        }
+
+        let Inner { net } = Inner::deserialize(deserializer)?;
+        if net.prefix() == N {
+            Ok(Self { net })
+        } else {
+            Err(<D::Error as serde::de::Error>::custom(format!(
+                "expected prefix {} but found {}",
+                N,
+                net.prefix(),
+            )))
+        }
     }
 }
 
@@ -205,10 +263,10 @@ impl ReservedRackSubnet {
 
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
-    /// These addresses will come from the first [`DNS_REDUNDANCY`] `/64s` of the
+    /// These addresses will come from the first [`MAX_DNS_REDUNDANCY`] `/64s` of the
     /// [`RACK_PREFIX`] subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
-        (0..DNS_REDUNDANCY)
+        (0..MAX_DNS_REDUNDANCY)
             .map(|idx| {
                 let subnet =
                     get_64_subnet(self.0, u8::try_from(idx + 1).unwrap());
@@ -298,6 +356,15 @@ impl JsonSchema for IpRange {
 }
 
 impl IpRange {
+    pub fn contains(&self, addr: IpAddr) -> bool {
+        match (self, addr) {
+            (IpRange::V4(r), IpAddr::V4(addr)) => r.contains(addr),
+            (IpRange::V6(r), IpAddr::V6(addr)) => r.contains(addr),
+            (IpRange::V6(_), IpAddr::V4(_))
+            | (IpRange::V4(_), IpAddr::V6(_)) => false,
+        }
+    }
+
     pub fn first_address(&self) -> IpAddr {
         match self {
             IpRange::V4(inner) => IpAddr::from(inner.first),
@@ -325,6 +392,20 @@ impl From<IpAddr> for IpRange {
         match addr {
             IpAddr::V4(addr) => IpRange::V4(Ipv4Range::from(addr)),
             IpAddr::V6(addr) => IpRange::V6(Ipv6Range::from(addr)),
+        }
+    }
+}
+
+impl TryFrom<(IpAddr, IpAddr)> for IpRange {
+    type Error = String;
+
+    fn try_from(pair: (IpAddr, IpAddr)) -> Result<Self, Self::Error> {
+        match (pair.0, pair.1) {
+            (IpAddr::V4(a), IpAddr::V4(b)) => Self::try_from((a, b)),
+            (IpAddr::V6(a), IpAddr::V6(b)) => Self::try_from((a, b)),
+            (IpAddr::V4(_), IpAddr::V6(_)) | (IpAddr::V6(_), IpAddr::V4(_)) => {
+                Err("IP address ranges cannot mix IPv4 and IPv6".to_string())
+            }
         }
     }
 }
@@ -362,6 +443,10 @@ impl Ipv4Range {
         } else {
             Err(String::from("IP address ranges must be non-decreasing"))
         }
+    }
+
+    pub fn contains(&self, addr: Ipv4Addr) -> bool {
+        self.first <= addr && addr <= self.last
     }
 
     pub fn first_address(&self) -> Ipv4Addr {
@@ -414,6 +499,10 @@ impl Ipv6Range {
         } else {
             Err(String::from("IP address ranges must be non-decreasing"))
         }
+    }
+
+    pub fn contains(&self, addr: Ipv6Addr) -> bool {
+        self.first <= addr && addr <= self.last
     }
 
     pub fn first_address(&self) -> Ipv6Addr {
@@ -505,6 +594,8 @@ impl Iterator for IpRangeIter {
 
 #[cfg(test)]
 mod test {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -523,7 +614,7 @@ mod test {
 
         // Observe the first DNS subnet within this reserved rack subnet.
         let dns_subnets = rack_subnet.get_dns_subnets();
-        assert_eq!(DNS_REDUNDANCY, dns_subnets.len());
+        assert_eq!(MAX_DNS_REDUNDANCY, dns_subnets.len());
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(
@@ -640,5 +731,15 @@ mod test {
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3),
             ]
         );
+    }
+
+    #[test]
+    fn test_ipv6_subnet_deserialize() {
+        let value = json!({
+            "net": "ff12::3456/64"
+        });
+
+        assert!(serde_json::from_value::<Ipv6Subnet<64>>(value.clone()).is_ok());
+        assert!(serde_json::from_value::<Ipv6Subnet<56>>(value).is_err());
     }
 }

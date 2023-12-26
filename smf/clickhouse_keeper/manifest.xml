@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='clickhouse_keeper'>
+
+  <service name='oxide/clickhouse_keeper' type='service' version='1'>
+  <create_default_instance enabled='true' />
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <exec_method type='method' name='start'
+    exec='/opt/oxide/lib/svc/manifest/clickhouse_keeper.sh'
+    timeout_seconds='0' />
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <property_group name='config' type='application'>
+    <propval name='datalink' type='astring' value='unknown' />
+    <propval name='gateway' type='astring' value='unknown' />
+    <propval name='listen_addr' type='astring' value='unknown' />
+    <propval name='listen_port' type='astring' value='unknown' />
+    <propval name='store' type='astring' value='unknown' />
+  </property_group>
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='contract' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>Clickhouse Keeper</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Oxide's Metrics Database Coordinator</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>

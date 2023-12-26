@@ -1,6 +1,13 @@
 :showtitle:
 :toc: left
 :icons: font
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
 
 = Running Omicron
 
@@ -104,22 +111,42 @@ As an example, in this doc:
 +
 * The network is 192.168.1.0/24.
 * The network's gateway is 192.168.1.199.
-* You can carve off 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system.
-* You can carve off 192.168.1.30 as the address used by SoftNPU on the external network.
-* You can carve off 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
-2. Alternatively, you'll set up an "external" network that only exists on your test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the same other details as in the case above, just for convenience.  In this mode, you'll need create your made-up network and give the global zone an IP address on it.  We'll use 192.168.1.199:
-+
+* You can carve off a range from 192.168.1.20 to 192.168.1.40 for use by the rack:
+** 192.168.1.20 - 192.168.1.29 for externally-facing services provided by the system,
+** 192.168.1.30 as the address used by SoftNPU on the external network, and
+** 192.168.1.31 - 192.168.1.40 as the addresses used for Instances that need some public IPs (even if just for NAT to the internet).
+
+2. Alternatively, you'll set up an "external" network that only exists on your
+   test machine.  If you go this route, we'll choose 192.168.1.0/24 and all the
+   same other details as in the case above, just for convenience, and it happens
+   to match what is in the non-gimlet.toml file.  In this mode, you'll need to
+   create your made-up network, give the global zone an IP address on it,
+   and set up IPv4 forwarding and address translation (NAT) so that the NTP
+   zone and any instances can get out to the outside world.
+   We'll use 192.168.1.199 for the GZ interface.
+
+NOTE: In the two `map` lines, replace `igb0` with the name of your machine's
+      physical interface that connects to the outside world.
+
 [source,text]
 ----
-# pfexec dladm create-etherstub -t fake_external_stub0
+$ pfexec dladm create-etherstub -t fake_external_stub0
 $ pfexec dladm create-vnic -t -l fake_external_stub0 fake_external0
 $ pfexec ipadm create-if -t fake_external0
 $ pfexec ipadm create-addr -t -T static --address 192.168.1.199 fake_external0/external
+$ echo "map igb0 192.168.1.0/24 -> 0/32 portmap tcp/udp auto" > /tmp/ipnat.conf
+$ echo "map igb0 192.168.1.0/24 -> 0/32" >> /tmp/ipnat.conf
+$ pfexec cp /tmp/ipnat.conf /etc/ipf/ipnat.conf
+$ pfexec routeadm -e ipv4-forwarding -u
+$ svcadm enable ipfilter
 ----
 
 Other network configurations are possible but beyond the scope of this doc.
 
-When making this choice, note that **in order to use the system once it's set up, you will need to be able to access it from a web browser.**  If you go with option 2 here, you may need to use an ssh tunnel or the like to do this.
+When making this choice, note that **in order to use the system once it's set
+up, you will need to be able to access it from a web browser.**  If you go with
+option 2 here, you may need to use an SSH tunnel (see:
+<<setting-up-an-ssh-tunnel-for-console-access>>) or the like to do this.
 
 === Picking a "machine" type
 
@@ -172,23 +199,39 @@ The rest of these instructions assume that you're building and running Omicron o
 The Sled Agent supports operation on both:
 
 * a Gimlet (i.e., real Oxide hardware), and
-* an ordinary PC that's been set up to look like a Gimlet using the `./tools_create_virtual_hardware.sh` script.
+* an ordinary PC that's been set up to look like a Gimlet using the `./tools/create_virtual_hardware.sh` script (described next).
 
 This script also sets up a "softnpu" zone to implement Boundary Services.  SoftNPU simulates the Tofino device that's used in real systems.  Just like Tofino, it can implement sled-to-sled networking, but that's beyond the scope of this doc.
 
-If you're running on a PC and using an existing network as your external network, you can usually just run:
+If you're running on a PC and using either of the networking configurations mentioned above, you can usually just run this script with a few environment vaiables set. These environment variables tell SoftNPU about your local network.  You will need the gateway for your network as well as the whole range of IPs that you've carved out for the Oxide system (see <<_external_networking>> above):
 
+[source,bash]
+----
+export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network (see above)
+export PXA_START=192.168.1.20       # The first IP address your Oxide cluster can use (see above)
+export PXA_END=192.168.1.40         # The last IP address your Oxide cluster can use (see above)
+----
+
+If you're using the fake sled-local external network mentioned above, then you'll need to set PHYSICAL_LINK:
+
+[source,bash]
+----
+export PHYSICAL_LINK=fake_external_stub0 	# The etherstub for the fake external network
+----
+
+If you're using an existing external network, you likely don't need to specify anything here because the script will choose one.  You can specify a particular one if you want, though:
+
+[source,bash]
+----
+export PHYSICAL_LINK=igb0           # The physical link for your external network.
+----
+
+Having set those variables, you're ready to run:
+
+[source,bash]
 ----
 $ pfexec ./tools/create_virtual_hardware.sh
 ----
-
-If above you made up a new "external" network only accessible within the Sled, then you'll want to override PHYSICAL_LINK:
-
-----
-$ PHYSICAL_LINK=fake_external_stub0 pfexec ./tools/create_virtual_hardware.sh
-----
-
-You can also use this override if you find that the script chose the wrong datalink to use for external connectivity for whatever reason.
 
 If you're running on a Gimlet, you don't need (or want) most of what `create_virtual_hardware.sh` does, but you do still need SoftNPU.  You'll have to look at the script and run that part by hand.
 
@@ -223,26 +266,52 @@ last = "192.168.1.29"
 
 This is a range of IP addresses on your external network that Omicron can assign to externally-facing services (like DNS and the API).  You'll need to change these if you've picked different addresses for your external network.  See <<_external_networking>> above for more on this.
 
+You will also need to update route information if your `$GATEWAY_IP` differs from the default.
+The below example demonstrates a single static gateway route; in-depth explanations for testing with BGP can be found https://docs.oxide.computer/guides/system/network-preparations#_rack_switch_configuration_with_bgp[in the Network Preparations guide] and https://docs.oxide.computer/guides/operator/configuring-bgp[the Configuring BGP guide]:
+
 [source,toml]
 ----
 # Configuration to bring up boundary services and make Nexus reachable from the
 # outside.  This block assumes that you're following option (2) above: putting
 # your Oxide system on an existing network that you control.
 [rack_network_config]
-# The gateway for the external network
-gateway_ip = "192.168.1.199"
+# An internal-only IPv6 address block which contains AZ-wide services.
+# This does not need to be changed.
+rack_subnet = "fd00:1122:3344:01::/56"
 # A range of IP addresses used by Boundary Services on the network.  In a real
 # system, these would be addresses of the uplink ports on the Sidecar.  With
 # softnpu, only one address is used.
 infra_ip_first = "192.168.1.30"
 infra_ip_last = "192.168.1.30"
-# Name of the port.  This should always be "qsfp0" when using softnpu.
-uplink_port = "qsfp0"
-uplink_port_speed = "40G"
-uplink_port_fec="none"
+
+# Configurations for BGP routers to run on the scrimlets.
+# This array can typically be safely left empty for home/local use,
+# otherwise this is a list of { asn: u32, originate: ["<v4 network>"] }
+# structs which will be be inserted when Nexus is started by sled-agent.
+# See the 'Network Preparations' guide linked above.
+bgp = []
+
+[[rack_network_config.ports]]
+# Routes associated with this port.
+# NOTE: The below `nexthop` should be set to $GATEWAY_IP for your configuration
+routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
+# Addresses associated with this port.
 # For softnpu, an address within the "infra" block above that will be used for
 # the softnpu uplink port.  You can just pick the first address in that pool.
-uplink_ip = "192.168.1.30"
+addresses = ["192.168.1.30/32"]
+# Name of the uplink port.  This should always be "qsfp0" when using softnpu.
+port = "qsfp0"
+# The speed of this port.
+uplink_port_speed = "40G"
+# The forward error correction mode for this port.
+uplink_port_fec="none"
+# Switch to use for the uplink. For single-rack deployments this can be
+# "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
+# and dendrite stub environments, use "switch0"
+switch = "switch0"
+# Neighbors we expect to peer with over BGP on this port.
+# see: common/src/api/internal/shared.rs – BgpPeerConfig
+bgp_peers = []
 ----
 
 In some configurations (not the one described here), it may be necessary to update `smf/sled-agent/$MACHINE/config.toml`:
@@ -281,20 +350,42 @@ Error: Creates a new build target, and sets it as "active"
 Usage: omicron-package target create [OPTIONS]
 
 Options:
-  -i, --image <IMAGE>      [default: standard] [possible values: standard, trampoline]
-  -m, --machine <MACHINE>  [possible values: gimlet, gimlet-standalone, non-gimlet]
-  -s, --switch <SWITCH>    [possible values: asic, stub, softnpu]
-  -h, --help               Print help (see more with '--help')
+  -i, --image <IMAGE>
+          [default: standard]
+
+          Possible values:
+          - standard:   A typical host OS image
+          - trampoline: A recovery host OS image, intended to bootstrap a Standard image
+
+  -m, --machine <MACHINE>
+          Possible values:
+          - gimlet:            Use sled agent configuration for a Gimlet
+          - gimlet-standalone: Use sled agent configuration for a Gimlet running in isolation
+          - non-gimlet:        Use sled agent configuration for a device emulating a Gimlet
+
+  -s, --switch <SWITCH>
+          Possible values:
+          - asic:    Use the "real" Dendrite, that attempts to interact with the Tofino
+          - stub:    Use a "stub" Dendrite that does not require any real hardware
+          - softnpu: Use a "softnpu" Dendrite that uses the SoftNPU asic emulator
+
+  -r, --rack-topology <RACK_TOPOLOGY>
+          Possible values:
+          - multi-sled:  Use configurations suitable for a multi-sled deployment, such as dogfood and production racks
+          - single-sled: Use configurations suitable for a single-sled deployment, such as CI and dev machines
+
+  -h, --help
+          Print help (see a summary with '-h')
 
 ----
 
-To setup a build target for a non-Gimlet machine with simulated (but fully functional) external networking, you would run:
+To set up a build target for a non-Gimlet machine with simulated (but fully functional) external networking, you would run:
 
 [source,console]
 ----
-$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu
+$ cargo run --release --bin omicron-package -- -t default target create -i standard -m non-gimlet -s softnpu -r single-sled
     Finished release [optimized] target(s) in 0.66s
-     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu`
+     Running `target/release/omicron-package -t default target create -i standard -m non-gimlet -s softnpu -r single-sled`
 Created new build target 'default' and set it as active
 ----
 
@@ -347,47 +438,7 @@ You can also list the zones that have been created so far:
 $ zoneadm list -cnv
 
 # View logs for a service:
-$ pfexec tail -f $(pfexec svcs -z oxz_nexus -L nexus)
-----
-
-=== SoftNPU Configuration
-
-After installing omicron with `omicron-package install`, you can run the `softnpu-init.sh` script to configure SoftNPU.  If your external network is the one that your global zone is already on (i.e., an existing network), then you can likely just run:
-
-[source,console]
-----
-$ ./tools/scrimlet/softnpu-init.sh
-----
-
-In this case, `softnpu-init.sh` determines a network gateway by looking at your system's default gateway.  Again, the assumption for this use case is that your rack gets external connectivity the same way your system does because it's part of the same network.
-
-If your external network is one you made up above that's local to your own system, this won't be right.  In that case, you'll want to override the gateway IP to be the address of the global zone on your made-up network.  In our example:
-
-[source,console]
-----
-$ GATEWAY_IP=192.168.1.199 ./tools/scrimlet/softnpu-init.sh
-----
-
-In other configurations, you might use a different GATEWAY_IP.  You can also override GATEWAY_MAC if needed, but that shouldn't be necessary for the configurations described here.
-
-=== SoftNPU Proxy ARP Setup
-
-Services that require external connectivity (e.g. Nexus, Boundary NTP, External DNS) do so via OPTE using addresses from the services IP pool.  When using SoftNPU, we'll need to configure Proxy ARP for those addresses.
-
-In this snippet, `$SERVICE_IP_POOL_START` and `$SERVICE_IP_POOL_END` are the addresses you put into `config-rss.toml` above for `internal_services_ip_pool_ranges`:
-
-[source,console]
-----
-# dladm won't return leading zeroes but `scadm` expects them
-$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
-  standalone \
-  add-proxy-arp \
-  $SERVICE_IP_POOL_START \
-  $SERVICE_IP_POOL_END \
-  $SOFTNPU_MAC
+$ pfexec tail -f $(pfexec svcs -z oxz_nexus_<UUID> -L nexus)
 ----
 
 == Using Omicron
@@ -407,9 +458,36 @@ $ dig recovery.sys.oxide.test @192.168.1.20 +short
 192.168.1.21
 ----
 
-Where did 192.168.1.20 come from?  That's the external address of the external DNS server.  We knew that only because it's the first address in the "internal services" IP pool in config-rss.toml.
+Where did 192.168.1.20 come from?  That's the external address of the external
+DNS server.  We knew that because it's listed in the `external_dns_ips` entry of
+the `config-rss.toml` file we're using.
 
-Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<_connecting_securely_with_tls_using_the_cli>>.
+Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<connecting-securely-with-tls-using-the-cli>>.
+
+=== Setting up an SSH tunnel for console access
+
+If you set up a fake external network (method 2 in <<external-networking>>), one
+way to be able to access the console of your deployment is by setting up an SSH
+tunnel. Console access is required to use the CLI for device authentication.
+The following is an example of how to access the console with an SSH tunnel.
+
+Nexus serves the console, so first get a nexus IP from the instructions above.
+
+In this example, Omicron is running on the lab machine `dunkin`. Usually, you'll
+want to set up the tunnel from the machine where you run a browser, to the
+machine running Omicron. In this example, one would run this on the machine
+running the browser:
+
+```
+$ ssh -L 1234:192.168.1.22:80 dunkin.eng.oxide.computer
+```
+
+The above command configures `ssh` to bind to the TCP port `1234` on the machine
+running the browser, forward packets through the ssh connection, and redirect
+them to 192.168.1.22 port 80 *as seen from the other side of the connection*.
+
+Now you should be able to access the console from the browser on this machine,
+via something like: `127.0.0.1:1234`, using the port from the `ssh` command.
 
 === Using the CLI
 
@@ -426,12 +504,19 @@ An IP pool is needed to provide external connectivity to Instances.  The address
 
 [source,console]
 ----
-$ oxide api /v1/system/ip-pools/default/ranges/add --method POST --input - <<EOF
-{
-  "first": "192.168.1.31",
-  "last": "192.168.1.40"
+$ oxide ip-pool range add --pool default --first 192.168.1.31 --last 192.168.1.40
+success
+IpPoolRange {
+    id: 4a61e65a-d96d-4c56-9cfd-dc1e44d9e99b,
+    ip_pool_id: 1b1289a7-cefe-4a7e-a8c9-d93330846301,
+    range: V4(
+        Ipv4Range {
+            first: 192.168.1.31,
+            last: 192.168.1.40,
+        },
+    ),
+    time_created: 2023-08-02T16:31:43.679785Z,
 }
-EOF
 ----
 
 With SoftNPU you will generally also need to configure Proxy ARP.  Below, `IP_POOL_START` and `IP_POOL_END` are the first and last addresses you used in the previous command:
@@ -440,9 +525,9 @@ With SoftNPU you will generally also need to configure Proxy ARP.  Below, `IP_PO
 ----
 # dladm won't return leading zeroes but `scadm` expects them
 $ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
+$ pfexec zlogin sidecar_softnpu /softnpu/scadm \
+  --server /softnpu/server \
+  --client /softnpu/client \
   standalone \
   add-proxy-arp \
   $IP_POOL_START \
@@ -469,11 +554,6 @@ $ oxide api /v1/images?project=myproj --method POST --input - <<EOF
 {
   "name": "alpine",
   "description": "boot from propolis zone blob!",
-  "block_size": 512,
-  "distribution": {
-    "name": "alpine",
-    "version": "propolis-blob"
-  },
   "os": "linux",
   "version": "1",
   "source": {
@@ -491,14 +571,12 @@ $ oxide api /v1/images --method POST --input - <<EOF
 {
   "name": "crucible-tester-sparse",
   "description": "boot from a url!",
-  "block_size": 512,
-  "distribution": {
-    "name": "debian",
-    "version": "9"
-  },
+  "os": "debian",
+  "version": "9",
   "source": {
     "type": "url",
-    "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img"
+    "url": "http://[fd00:1122:3344:101::15]/crucible-tester-sparse.img",
+    "block_size": 512
   }
 }
 EOF
@@ -506,7 +584,8 @@ EOF
 
 === Provision an instance using the CLI
 
-You'll need the id `$IMAGE_ID` of the image you just created.
+You'll need the id `$IMAGE_ID` of the image you just created. You can fetch that
+with `oxide image view --image $IMAGE_NAME`.
 
 Now, create a Disk from that Image.  The disk size must be a multiple of 1 GiB and at least as large as the image size.  The example below creates a disk using the image made from the alpine ISO that ships with propolis, and sets the size to the next 1GiB multiple of the original alpine source:
 
@@ -671,4 +750,38 @@ To build a recovery host image:
 [source,console]
 ----
 $ ./tools/build-host-image.sh -R $HELIOS_PATH /work/trampoline-global-zone-packages.tar.gz
+----
+
+
+== Running `oximeter` in standalone mode
+
+`oximeter` is the program used to collect metrics from producers in the control
+plane. Normally, the producers register themselves with `nexus`, which creates a
+durable assignment between the producer and an `oximeter` collector in the
+database. That allows components to survive restarts, while still producing
+metrics.
+
+To ease development, `oximeter` can be run in "standalone" mode. In this case, a
+mock `nexus` server is started, with only the minimal subset of the internal API
+needed to register producers and collectors. Neither CockroachDB nor ClickHouse
+is required, although ClickHouse _can_ be used, if one wants to see how data is
+inserted into the database.
+
+To run `oximeter` in standalone, use:
+
+[source,console]
+----
+$ cargo run --bin oximeter -- standalone
+----
+
+The producer should still register with `nexus` as normal, which is usually done
+with an explicit IP address and port. This defaults to `[::1]:12221`.
+
+When run this way, `oximeter` will print the samples it collects from the
+producers to its logs, like so:
+
+[source,console]
+----
+Sep 26 17:48:56.006 INFO sample: Sample { measurement: Measurement { timestamp: 2023-09-26T17:48:56.004565890Z, datum: CumulativeF64(Cumulative { start_time: 2023-09-26T17:48:45.997404777Z, value: 10.007154703 }) }, timeseries_name: "virtual_machine:cpu_busy", target: FieldSet { name: "virtual_machine", fields: {"instance_id": Field { name: "instance_id", value: Uuid(564ef6df-d5f6-4204-88f7-5c615859cfa7) }, "project_id": Field { name: "project_id", value: Uuid(2dc7e1c9-f8ac-49d7-8292-46e9e2b1a61d) }} }, metric: FieldSet { name: "cpu_busy", fields: {"cpu_id": Field { name: "cpu_id", value: I64(0) }} } }, component: results-sink, collector_id: 78c7c9a5-1569-460a-8899-aada9ad5db6c, component: oximeter-standalone, component: nexus-standalone, file: oximeter/collector/src/lib.rs:280
+Sep 26 17:48:56.006 INFO sample: Sample { measurement: Measurement { timestamp: 2023-09-26T17:48:56.004700841Z, datum: CumulativeF64(Cumulative { start_time: 2023-09-26T17:48:45.997405187Z, value: 10.007154703 }) }, timeseries_name: "virtual_machine:cpu_busy", target: FieldSet { name: "virtual_machine", fields: {"instance_id": Field { name: "instance_id", value: Uuid(564ef6df-d5f6-4204-88f7-5c615859cfa7) }, "project_id": Field { name: "project_id", value: Uuid(2dc7e1c9-f8ac-49d7-8292-46e9e2b1a61d) }} }, metric: FieldSet { name: "cpu_busy", fields: {"cpu_id": Field { name: "cpu_id", value: I64(1) }} } }, component: results-sink, collector_id: 78c7c9a5-1569-460a-8899-aada9ad5db6c, component: oximeter-standalone, component: nexus-standalone, file: oximeter/collector/src/lib.rs:280
 ----

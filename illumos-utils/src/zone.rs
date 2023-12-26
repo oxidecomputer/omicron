@@ -353,7 +353,10 @@ impl Zones {
         info!(log, "Installing Omicron zone: {}", zone_name);
 
         zone::Adm::new(zone_name)
-            .install(&[zone_image.as_ref()])
+            .install(&[
+                zone_image.as_ref(),
+                "/opt/oxide/overlay.tar.gz".as_ref(),
+            ])
             .await
             .map_err(|err| AdmError {
                 op: Operation::Install,

@@ -22,7 +22,6 @@ slog-term.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 tempfile.workspace = true
-tempdir.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
@@ -31,6 +30,7 @@ trust-dns-proto.workspace = true
 trust-dns-resolver.workspace = true
 trust-dns-server.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
@@ -39,4 +39,5 @@ openapiv3.workspace = true
 openapi-lint.workspace = true
 serde_json.workspace = true
 subprocess.workspace = true
+tempdir.workspace = true
 trust-dns-resolver.workspace = true

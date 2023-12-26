@@ -5,7 +5,15 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+display-error-chain.workspace = true
+foreign-types.workspace = true
 openssl.workspace = true
+openssl-sys.workspace = true
 thiserror.workspace = true
 
 omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+omicron-test-utils.workspace = true
+rcgen.workspace = true

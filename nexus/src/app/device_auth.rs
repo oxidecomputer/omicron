@@ -44,12 +44,12 @@
 //! In the current implementation, we use long-lived random tokens,
 //! but that may change in the future.
 
-use crate::authn::{Actor, Reason};
-use crate::authz;
-use crate::db::lookup::LookupPath;
-use crate::db::model::{DeviceAccessToken, DeviceAuthRequest};
 use crate::external_api::device_auth::DeviceAccessTokenResponse;
+use nexus_db_queries::authn::{Actor, Reason};
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::{DeviceAccessToken, DeviceAuthRequest};
 
 use omicron_common::api::external::{CreateResult, Error};
 
@@ -59,7 +59,7 @@ use uuid::Uuid;
 impl super::Nexus {
     /// Start a device authorization grant flow.
     /// Corresponds to steps 1 & 2 in the flow description above.
-    pub async fn device_auth_request_create(
+    pub(crate) async fn device_auth_request_create(
         &self,
         opctx: &OpContext,
         client_id: Uuid,
@@ -76,7 +76,7 @@ impl super::Nexus {
     /// request so that at most one token will be granted per request.
     /// Invoked in response to a request from the browser, not the client.
     /// Corresponds to step 5 in the flow description above.
-    pub async fn device_auth_request_verify(
+    pub(crate) async fn device_auth_request_verify(
         &self,
         opctx: &OpContext,
         user_code: String,
@@ -114,9 +114,7 @@ impl super::Nexus {
                     token,
                 )
                 .await?;
-            Err(Error::InvalidRequest {
-                message: "device authorization request expired".to_string(),
-            })
+            Err(Error::invalid_request("device authorization request expired"))
         } else {
             self.db_datastore
                 .device_access_token_create(
@@ -131,7 +129,7 @@ impl super::Nexus {
 
     /// Look up a possibly-not-yet-granted device access token.
     /// Corresponds to steps 3 & 6 in the flow description above.
-    pub async fn device_access_token_fetch(
+    pub(crate) async fn device_access_token_fetch(
         &self,
         opctx: &OpContext,
         client_id: Uuid,
@@ -151,7 +149,7 @@ impl super::Nexus {
 
     /// Look up the actor for which a token was granted.
     /// Corresponds to a request *after* completing the flow above.
-    pub async fn device_access_token_actor(
+    pub(crate) async fn device_access_token_actor(
         &self,
         opctx: &OpContext,
         token: String,

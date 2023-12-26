@@ -4,22 +4,27 @@
 
 //! A rendering of the Oxide rack
 
+use crate::state::Inventory;
 use crate::state::{ComponentId, KnightRiderMode, RackState};
+use ratatui::buffer::Buffer;
+use ratatui::layout::Alignment;
+use ratatui::layout::Rect;
+use ratatui::style::Color;
+use ratatui::style::Style;
+use ratatui::text::Text;
+use ratatui::widgets::Block;
+use ratatui::widgets::Borders;
+use ratatui::widgets::Paragraph;
+use ratatui::widgets::Widget;
 use std::collections::BTreeMap;
-use tui::buffer::Buffer;
-use tui::layout::Alignment;
-use tui::layout::Rect;
-use tui::style::Color;
-use tui::style::Style;
-use tui::text::Text;
-use tui::widgets::Block;
-use tui::widgets::Borders;
-use tui::widgets::Paragraph;
-use tui::widgets::Widget;
+use wicketd_client::types::SpIgnition;
 
 #[derive(Debug, Clone)]
 pub struct Rack<'a> {
+    pub inventory: &'a Inventory,
     pub state: &'a RackState,
+    pub suspicious_style: Style,
+    pub not_present_style: Style,
     pub sled_style: Style,
     pub sled_selected_style: Style,
     pub switch_style: Style,
@@ -33,6 +38,8 @@ pub struct Rack<'a> {
 impl<'a> Rack<'a> {
     fn draw_sled(&self, buf: &mut Buffer, sled: Rect, i: u8) {
         let component_id = ComponentId::Sled(i);
+        let presence =
+            ComponentPresence::for_component(self.inventory, &component_id);
         let mut block = Block::default()
             .title(format!("SLD{}", i))
             .borders(borders(sled.height));
@@ -41,38 +48,45 @@ impl<'a> Rack<'a> {
                 .style(self.sled_selected_style)
                 .border_style(self.border_selected_style);
         } else {
-            block =
-                block.style(self.sled_style).border_style(self.border_style);
+            let style = match presence {
+                ComponentPresence::Present => self.sled_style,
+                ComponentPresence::NotPresent => self.not_present_style,
+                ComponentPresence::Suspicious => self.suspicious_style,
+            };
+
+            block = block.style(style).border_style(self.border_style);
         }
 
         let inner = block.inner(sled);
         block.render(sled, buf);
 
-        // Draw some U.2 bays
-        // TODO: Draw 10 only? - That may not scale down as well
-        for x in inner.left()..inner.right() {
-            for y in inner.top()..inner.bottom() {
-                let cell = buf.get_mut(x, y).set_symbol("▕");
-                if self.state.selected == component_id {
-                    if let Some(KnightRiderMode { count }) =
-                        self.state.knight_rider_mode
-                    {
-                        let width = inner.width as usize;
-                        let go_right = (count / width) % 2 == 0;
-                        let offset = if go_right {
-                            count % width
-                        } else {
-                            width - (count % width)
-                        } as u16;
-                        if x == (inner.left() + offset) {
-                            cell.set_bg(Color::Red);
+        if presence == ComponentPresence::Present {
+            // Draw some U.2 bays
+            // TODO: Draw 10 only? - That may not scale down as well
+            for x in inner.left()..inner.right() {
+                for y in inner.top()..inner.bottom() {
+                    let cell = buf.get_mut(x, y).set_symbol("▕");
+                    if self.state.selected == component_id {
+                        if let Some(KnightRiderMode { count }) =
+                            self.state.knight_rider_mode
+                        {
+                            let width = inner.width as usize;
+                            let go_right = (count / width) % 2 == 0;
+                            let offset = if go_right {
+                                count % width
+                            } else {
+                                width - (count % width)
+                            } as u16;
+                            if x == (inner.left() + offset) {
+                                cell.set_bg(Color::Red);
+                            }
                         }
-                    }
-                    if let Some(color) = self.sled_selected_style.fg {
+                        if let Some(color) = self.sled_selected_style.fg {
+                            cell.set_fg(color);
+                        }
+                    } else if let Some(color) = self.sled_style.fg {
                         cell.set_fg(color);
                     }
-                } else if let Some(color) = self.sled_style.fg {
-                    cell.set_fg(color);
                 }
             }
         }
@@ -80,6 +94,8 @@ impl<'a> Rack<'a> {
 
     fn draw_switch(&self, buf: &mut Buffer, switch: Rect, i: u8) {
         let component_id = ComponentId::Switch(i);
+        let presence =
+            ComponentPresence::for_component(self.inventory, &component_id);
         let mut block = Block::default()
             .title(format!("SW{}", i))
             .borders(borders(switch.height));
@@ -88,22 +104,30 @@ impl<'a> Rack<'a> {
                 .style(self.switch_selected_style)
                 .border_style(self.border_selected_style);
         } else {
-            block =
-                block.style(self.switch_style).border_style(self.border_style);
+            let style = match presence {
+                ComponentPresence::Present => self.switch_style,
+                ComponentPresence::NotPresent => self.not_present_style,
+                ComponentPresence::Suspicious => self.suspicious_style,
+            };
+            block = block.style(style).border_style(self.border_style);
         }
 
         let inner = block.inner(switch);
         block.render(switch, buf);
 
-        for x in inner.left()..inner.right() {
-            for y in inner.top()..inner.bottom() {
-                buf.get_mut(x, y).set_symbol("❒");
+        if presence == ComponentPresence::Present {
+            for x in inner.left()..inner.right() {
+                for y in inner.top()..inner.bottom() {
+                    buf.get_mut(x, y).set_symbol("❒");
+                }
             }
         }
     }
 
     fn draw_power_shelf(&self, buf: &mut Buffer, power_shelf: Rect, i: u8) {
         let component_id = ComponentId::Psc(i);
+        let presence =
+            ComponentPresence::for_component(self.inventory, &component_id);
         let mut block = Block::default()
             .title(format!("PWR{}", i))
             .borders(borders(power_shelf.height));
@@ -112,15 +136,18 @@ impl<'a> Rack<'a> {
                 .style(self.power_shelf_selected_style)
                 .border_style(self.border_selected_style);
         } else {
-            block = block
-                .style(self.power_shelf_style)
-                .border_style(self.border_style);
+            let style = match presence {
+                ComponentPresence::Present => self.power_shelf_style,
+                ComponentPresence::NotPresent => self.not_present_style,
+                ComponentPresence::Suspicious => self.suspicious_style,
+            };
+            block = block.style(style).border_style(self.border_style);
         }
 
         let inner = block.inner(power_shelf);
         block.render(power_shelf, buf);
 
-        if i == 0 {
+        if i == 0 && presence == ComponentPresence::Present {
             // Shipping racks only have one power shelf -- only show that one.
             let width = inner.right() - inner.left();
             let step = width / 6;
@@ -133,6 +160,46 @@ impl<'a> Rack<'a> {
                     }
                 }
             }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComponentPresence {
+    // Ignition says the device is present, and we're able to talk to it.
+    Present,
+    // Ignition says the device is not present, and we're not able to talk to
+    // it.
+    NotPresent,
+    // Something is wrong: ignition says it is present but we can't talk to it,
+    // or (less likely) the opposite.
+    Suspicious,
+}
+
+impl ComponentPresence {
+    fn for_component(inventory: &Inventory, component: &ComponentId) -> Self {
+        let sp = match inventory.get_inventory(component) {
+            Some(component) => component.sp(),
+            None => return Self::NotPresent,
+        };
+
+        match (sp.ignition(), sp.state().is_some()) {
+            // No ignition and no state = no sled.
+            (None, false) => Self::NotPresent,
+            // No ignition but we have state - suspect!
+            (None, true) => Self::Suspicious,
+            (Some(ignition), false) => match ignition {
+                // No ignition and no state = no sled.
+                SpIgnition::No => Self::NotPresent,
+                // Ignition says it's present but we have no state - suspect!
+                SpIgnition::Yes { .. } => Self::Suspicious,
+            },
+            (Some(ignition), true) => match ignition {
+                // No ignition but we have state - suspect!
+                SpIgnition::No => Self::Suspicious,
+                // Ignition and state = sled present.
+                SpIgnition::Yes { .. } => Self::Present,
+            },
         }
     }
 }

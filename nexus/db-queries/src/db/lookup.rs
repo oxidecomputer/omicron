@@ -11,7 +11,7 @@ use crate::{
     authz,
     context::OpContext,
     db,
-    db::error::{public_error_from_diesel_pool, ErrorHandler},
+    db::error::{public_error_from_diesel, ErrorHandler},
 };
 use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
@@ -231,6 +231,11 @@ impl<'a> LookupPath<'a> {
         RouterRoute::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type FloatingIp, identified by its id
+    pub fn floating_ip_id(self, id: Uuid) -> FloatingIp<'a> {
+        FloatingIp::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     // Fleet-level resources
 
     /// Select a resource of type ConsoleSession, identified by its `token`
@@ -345,6 +350,11 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type Sled, identified by its id
     pub fn sled_id(self, id: Uuid) -> Sled<'a> {
         Sled::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type Zpool, identified by its id
+    pub fn zpool_id(self, id: Uuid) -> Zpool<'a> {
+        Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type Service, identified by its id
@@ -627,7 +637,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Project",
     ancestors = [ "Silo" ],
-    children = [ "Disk", "Instance", "Vpc", "Snapshot", "ProjectImage" ],
+    children = [ "Disk", "Instance", "Vpc", "Snapshot", "ProjectImage", "FloatingIp" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -723,6 +733,15 @@ lookup_resource! {
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
+lookup_resource! {
+    name = "FloatingIp",
+    ancestors = [ "Silo", "Project" ],
+    children = [],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
 // Miscellaneous resources nested directly below "Fleet"
 
 lookup_resource! {
@@ -781,6 +800,15 @@ lookup_resource! {
 
 lookup_resource! {
     name = "Sled",
+    ancestors = [],
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "Zpool",
     ancestors = [],
     children = [],
     lookup_by_name = false,

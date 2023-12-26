@@ -16,66 +16,20 @@ set -x
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 OMICRON_TOP="$SOURCE_DIR/.."
+SOFTNPU_MODE=${SOFTNPU_MODE:-zone};
 
-MARKER=/etc/opt/oxide/NO_INSTALL
-if [[ -f "$MARKER" ]]; then
-    echo "This system has the marker file $MARKER, aborting." >&2
-    exit 1
-fi
+. "$SOURCE_DIR/virtual_hardware.sh"
 
 # Select the physical link over which to simulate the Chelsio links
 PHYSICAL_LINK=${PHYSICAL_LINK:=$(dladm show-phys -p -o LINK | head -1)}
 echo "Using $PHYSICAL_LINK as physical link"
 
-function success {
-    set +x
-    echo -e "\e[1;36m$1\e[0m"
-    set -x
-}
-
-# Create the ZFS zpools required for the sled agent, backed by file-based vdevs.
-function ensure_zpools {
-    # Find the list of zpools the sled agent expects, from its configuration
-    # file.
-    ZPOOL_TYPES=('oxp_' 'oxi_')
-    for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
-        readarray -t ZPOOLS < <( \
-                grep "\"$ZPOOL_TYPE" "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
-                sed 's/[ ",]//g' \
-            )
-        for ZPOOL in "${ZPOOLS[@]}"; do
-            echo "Zpool: [$ZPOOL]"
-            VDEV_PATH="$OMICRON_TOP/$ZPOOL.vdev"
-            if ! [[ -f "$VDEV_PATH" ]]; then
-                dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=6G
-            fi
-            success "ZFS vdev $VDEV_PATH exists"
-            if [[ -z "$(zpool list -o name | grep $ZPOOL)" ]]; then
-                zpool create -f "$ZPOOL" "$VDEV_PATH"
-            fi
-            success "ZFS zpool $ZPOOL exists"
-        done
-    done
-}
-
-# Return the name of a VNIC link if it exists, or the empty string if not.
+# Create virtual links
 #
 # Arguments:
-#   $1: The name of the VNIC to look for
-function get_vnic_name_if_exists {
-    dladm show-vnic -p -o LINK "$1" 2> /dev/null || echo ""
-}
-
-function get_simnet_name_if_exists {
-    dladm show-simnet -p -o LINK "$1" 2> /dev/null || echo ""
-}
-
-# Create virtual links to represent the Chelsio physical links
-#
-# Arguments:
-#   $1: Optional name of the physical link to use. If not provided, use the
+#   $1: Optional name of the physical uplink to use. If not provided, use the
 #   first physical link available on the machine.
-function ensure_simulated_chelsios {
+function ensure_simulated_links {
     local PHYSICAL_LINK="$1"
     INDICES=("0" "1")
     for I in "${INDICES[@]}"; do
@@ -84,61 +38,56 @@ function ensure_simulated_chelsios {
             dladm create-simnet -t "net$I"
             dladm create-simnet -t "sc${I}_0"
             dladm modify-simnet -t -p "net$I" "sc${I}_0"
-            dladm set-linkprop -p mtu=1600 "sc${I}_0" # encap headroom
-
-            # corresponding scrimlet ports
-            dladm create-simnet -t "sr0_$I"
-            dladm create-simnet -t "scr0_$I"
-            dladm modify-simnet -t -p "sr0_$I" "scr0_$I"
+            dladm set-linkprop -p mtu=9000 "sc${I}_0" # match emulated devices
         fi
-        success "Simnet net$I/sc${I}_0/sr0_$I/scr0_$I exists"
+        success "Simnet net$I/sc${I}_0 exists"
     done
 
     if [[ -z "$(get_vnic_name_if_exists "sc0_1")" ]]; then
-        dladm create-vnic -t "sc0_1" -l $PHYSICAL_LINK -m a8:e1:de:01:70:1d
+        dladm create-vnic -t "sc0_1" -l "$PHYSICAL_LINK" -m a8:e1:de:01:70:1d
+        if [[ -v PROMISC_FILT_OFF ]]; then
+            dladm set-linkprop -p promisc-filtered=off sc0_1
+        fi
     fi
     success "Vnic sc0_1 exists"
 }
 
-function ensure_run_as_root {
-    if [[ "$(id -u)" -ne 0 ]]; then
-        echo "This script must be run as root"
-        exit 1
-    fi
-}
-
 function ensure_softnpu_zone {
-    zoneadm list | grep -q softnpu || {
-        mkdir -p /softnpu-zone
-        mkdir -p /opt/oxide/softnpu/stuff
-        cp tools/scrimlet/softnpu.toml /opt/oxide/softnpu/stuff/
-        cp tools/scrimlet/softnpu-init.sh /opt/oxide/softnpu/stuff/
-        cp out/softnpu/libsidecar_lite.so /opt/oxide/softnpu/stuff/
-        cp out/softnpu/softnpu /opt/oxide/softnpu/stuff/
-        cp out/softnpu/scadm /opt/oxide/softnpu/stuff/
-
-        zfs create -p -o mountpoint=/softnpu-zone rpool/softnpu-zone
-
-        zonecfg -z softnpu -f tools/scrimlet/softnpu-zone.txt
-        zoneadm -z softnpu install
-        zoneadm -z softnpu boot
-    }
+    zoneadm list | grep -q sidecar_softnpu || {
+        if ! [[ -f "out/npuzone/npuzone" ]]; then
+            echo "npuzone binary is not installed"
+            echo "please re-run ./tools/install_prerequisites.sh"
+            exit 1
+        fi
+        out/npuzone/npuzone create sidecar \
+            --omicron-zone \
+            --ports sc0_0,tfportrear0_0 \
+            --ports sc0_1,tfportqsfp0_0 \
+            --sidecar-lite-commit e3ea4b495ba0a71801ded0776ae4bbd31df57e26 \
+            --softnpu-commit dbab082dfa89da5db5ca2325c257089d2f130092
+     }
+    "$SOURCE_DIR"/scrimlet/softnpu-init.sh
     success "softnpu zone exists"
 }
 
-function enable_softnpu {
-    zlogin softnpu uname -a || {
-        echo "softnpu zone not ready"
-        exit 1
-    }
-    zlogin softnpu pgrep softnpu || {
-        zlogin softnpu 'RUST_LOG=debug /stuff/softnpu /stuff/softnpu.toml &> /softnpu.log &'
-    }
-    success "softnpu started"
+function warn_if_no_proxy_arp {
+    if ! [[ -v PXA_START ]] || ! [[ -v PXA_END ]]; then
+        warn \
+"You have not set up the proxy-ARP environment variables PXA_START and\n\
+PXA_END.  These variables are necessary to allow SoftNPU to respond to\n\
+ARP requests for the portion of the network you've dedicated to Omicron.\n\
+\n\
+You must either destroy / recreate the Omicron environment with\n\
+PXA_START and PXA_END set or run \`scadm standalone add-proxy-arp\`\n\
+in the SoftNPU zone later to add those entries."
+    fi
 }
 
 ensure_run_as_root
 ensure_zpools
-ensure_simulated_chelsios "$PHYSICAL_LINK"
-ensure_softnpu_zone
-enable_softnpu
+
+if [[ "$SOFTNPU_MODE" == "zone" ]]; then
+    ensure_simulated_links "$PHYSICAL_LINK"
+    warn_if_no_proxy_arp
+    ensure_softnpu_zone
+fi

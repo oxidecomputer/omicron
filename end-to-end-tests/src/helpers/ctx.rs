@@ -5,7 +5,8 @@ use omicron_sled_agent::rack_setup::config::SetupServiceConfig;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{Name, ProjectCreate};
 use oxide_client::CustomDnsResolver;
-use oxide_client::{Client, ClientProjectsExt, ClientVpcsExt};
+use oxide_client::{Client, ClientImagesExt, ClientProjectsExt, ClientVpcsExt};
+use reqwest::dns::Resolve;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
 use std::net::IpAddr;
@@ -13,11 +14,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use trust_dns_resolver::error::ResolveErrorKind;
+use uuid::Uuid;
 
-const RSS_CONFIG_PATH: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../smf/sled-agent/non-gimlet/config-rss.toml"
-);
 const RSS_CONFIG_STR: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../smf/sled-agent/non-gimlet/config-rss.toml"
@@ -34,7 +32,7 @@ pub struct Context {
 
 impl Context {
     pub async fn new() -> Result<Context> {
-        Context::from_client(build_client().await?).await
+        Context::from_client(ClientParams::new()?.build_client().await?).await
     }
 
     pub async fn from_client(client: Client) -> Result<Context> {
@@ -50,6 +48,10 @@ impl Context {
             .clone();
 
         Ok(Context { client, project_name })
+    }
+
+    pub async fn get_silo_image_id(&self, name: &str) -> Result<Uuid> {
+        Ok(self.client.image_view().image(name).send().await?.id)
     }
 
     pub async fn cleanup(self) -> Result<()> {
@@ -72,8 +74,11 @@ impl Context {
 }
 
 fn rss_config() -> Result<SetupServiceConfig> {
-    toml::from_str(RSS_CONFIG_STR)
-        .with_context(|| format!("parsing {:?} as TOML", RSS_CONFIG_PATH))
+    let path = "/opt/oxide/sled-agent/pkg/config-rss.toml";
+    let content =
+        std::fs::read_to_string(&path).unwrap_or(RSS_CONFIG_STR.to_string());
+    toml::from_str(&content)
+        .with_context(|| "parsing config-rss as TOML".to_string())
 }
 
 fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {
@@ -147,6 +152,7 @@ impl ClientParams {
         // server.
         let rss_config = rss_config()?;
         let dns_addr = external_dns_addr(&rss_config)?;
+        eprintln!("Using external DNS server at {:?}", dns_addr);
         let nexus_dns_name = nexus_external_dns_name(&rss_config);
         let resolver = Arc::new(CustomDnsResolver::new(dns_addr)?);
 
@@ -179,6 +185,27 @@ impl ClientParams {
         format!("{}://{}", self.proto, self.nexus_dns_name)
     }
 
+    pub async fn resolve_nexus(&self) -> Result<String> {
+        let address = self
+            .resolver
+            .resolve(self.nexus_dns_name.parse()?)
+            .await
+            .map_err(anyhow::Error::msg)?
+            .next()
+            .with_context(|| {
+                format!(
+                    "{} did not resolve to any addresses",
+                    self.nexus_dns_name
+                )
+            })?;
+        let port = match self.proto {
+            "http" => 80,
+            "https" => 443,
+            _ => unreachable!(),
+        };
+        Ok(format!("{}:{}:{}", self.nexus_dns_name, port, address.ip()))
+    }
+
     pub fn reqwest_builder(&self) -> reqwest::ClientBuilder {
         let mut builder =
             reqwest::ClientBuilder::new().dns_resolver(self.resolver.clone());
@@ -189,77 +216,77 @@ impl ClientParams {
 
         builder
     }
-}
 
-pub async fn build_client() -> Result<oxide_client::Client> {
-    // Prepare to make a login request.
-    let client_params = ClientParams::new()?;
-    let config = &client_params.rss_config;
-    let base_url = client_params.base_url();
-    let silo_name = config.recovery_silo.silo_name.as_str();
-    let login_url = format!("{}/v1/login/{}/local", base_url, silo_name);
-    let username: oxide_client::types::UserId =
-        config.recovery_silo.user_name.as_str().parse().map_err(|s| {
-            anyhow!("parsing configured recovery user name: {:?}", s)
-        })?;
-    // See the comment in the config file about this password.
-    let password: oxide_client::types::Password = "oxide".parse().unwrap();
+    pub async fn build_client(&self) -> Result<oxide_client::Client> {
+        // Prepare to make a login request.
+        let config = &self.rss_config;
+        let base_url = self.base_url();
+        let silo_name = config.recovery_silo.silo_name.as_str();
+        let login_url = format!("{}/v1/login/{}/local", base_url, silo_name);
+        let username: oxide_client::types::UserId =
+            config.recovery_silo.user_name.as_str().parse().map_err(|s| {
+                anyhow!("parsing configured recovery user name: {:?}", s)
+            })?;
+        // See the comment in the config file about this password.
+        let password: oxide_client::types::Password = "oxide".parse().unwrap();
 
-    // By the time we get here, Nexus might not be up yet.  It may not have
-    // published its names to external DNS, and even if it has, it may not have
-    // opened its external listening socket.  So we have to retry a bit until we
-    // succeed.
-    let session_token = wait_for_condition(
-        || async {
-            // Use a raw reqwest client because it's not clear that Progenitor
-            // is intended to support endpoints that return 300-level response
-            // codes.  See progenitor#451.
-            eprintln!("{}: attempting to log into API", Utc::now());
+        // By the time we get here, Nexus might not be up yet.  It may not have
+        // published its names to external DNS, and even if it has, it may not have
+        // opened its external listening socket.  So we have to retry a bit until we
+        // succeed.
+        let session_token = wait_for_condition(
+            || async {
+                // Use a raw reqwest client because it's not clear that Progenitor
+                // is intended to support endpoints that return 300-level response
+                // codes.  See progenitor#451.
+                eprintln!("{}: attempting to log into API", Utc::now());
 
-            let builder = client_params
-                .reqwest_builder()
-                .connect_timeout(Duration::from_secs(15))
-                .timeout(Duration::from_secs(60));
+                let builder = self
+                    .reqwest_builder()
+                    .connect_timeout(Duration::from_secs(15))
+                    .timeout(Duration::from_secs(60));
 
-            oxide_client::login(
-                builder,
-                &login_url,
-                username.clone(),
-                password.clone(),
-            )
-            .await
-            .map_err(|e| {
-                eprintln!("{}: login failed: {:#}", Utc::now(), e);
-                if let oxide_client::LoginError::RequestError(e) = &e {
-                    if e.is_connect() {
-                        return CondCheckError::NotYet;
+                oxide_client::login(
+                    builder,
+                    &login_url,
+                    username.clone(),
+                    password.clone(),
+                )
+                .await
+                .map_err(|e| {
+                    eprintln!("{}: login failed: {:#}", Utc::now(), e);
+                    if let oxide_client::LoginError::RequestError(e) = &e {
+                        if e.is_connect() {
+                            return CondCheckError::NotYet;
+                        }
                     }
-                }
 
-                CondCheckError::Failed(e)
-            })
-        },
-        &Duration::from_secs(1),
-        &Duration::from_secs(600),
-    )
-    .await
-    .context("logging in")?;
+                    CondCheckError::Failed(e)
+                })
+            },
+            &Duration::from_secs(1),
+            &Duration::from_secs(600),
+        )
+        .await
+        .context("logging in")?;
 
-    eprintln!("{}: login succeeded", Utc::now());
+        eprintln!("{}: login succeeded", Utc::now());
 
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        http::header::COOKIE,
-        HeaderValue::from_str(&format!("session={}", session_token)).unwrap(),
-    );
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            http::header::COOKIE,
+            HeaderValue::from_str(&format!("session={}", session_token))
+                .unwrap(),
+        );
 
-    let reqwest_client = client_params
-        .reqwest_builder()
-        .default_headers(headers)
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(60))
-        .build()?;
-    Ok(Client::new_with_client(&base_url, reqwest_client))
+        let reqwest_client = self
+            .reqwest_builder()
+            .default_headers(headers)
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(60))
+            .build()?;
+        Ok(Client::new_with_client(&base_url, reqwest_client))
+    }
 }
 
 async fn wait_for_records(

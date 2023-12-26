@@ -6,12 +6,12 @@ use hyper::client::connect::dns::Name;
 use omicron_common::address::{
     Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
 };
-use slog::{debug, info, trace};
+use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-use trust_dns_proto::rr::record_type::RecordType;
 use trust_dns_resolver::config::{
-    NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
+    LookupIpStrategy, NameServerConfig, Protocol, ResolverConfig, ResolverOpts,
 };
+use trust_dns_resolver::lookup::SrvLookup;
 use trust_dns_resolver::TokioAsyncResolver;
 
 pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
@@ -55,12 +55,13 @@ impl Resolver {
     /// Construct a new DNS resolver from specific DNS server addresses.
     pub fn new_from_addrs(
         log: slog::Logger,
-        dns_addrs: Vec<SocketAddr>,
+        dns_addrs: &[SocketAddr],
     ) -> Result<Self, ResolveError> {
         info!(log, "new DNS resolver"; "addresses" => ?dns_addrs);
 
         let mut rc = ResolverConfig::new();
-        for socket_addr in dns_addrs.into_iter() {
+        let dns_server_count = dns_addrs.len();
+        for &socket_addr in dns_addrs.into_iter() {
             rc.add_name_server(NameServerConfig {
                 socket_addr,
                 protocol: Protocol::Udp,
@@ -69,7 +70,14 @@ impl Resolver {
                 bind_addr: None,
             });
         }
-        let resolver = TokioAsyncResolver::tokio(rc, ResolverOpts::default())?;
+        let mut opts = ResolverOpts::default();
+        opts.use_hosts_file = false;
+        opts.num_concurrent_reqs = dns_server_count;
+        // The underlay is IPv6 only, so this helps avoid needless lookups of
+        // the IPv4 variant.
+        opts.ip_strategy = LookupIpStrategy::Ipv6Only;
+        opts.negative_max_ttl = Some(std::time::Duration::from_secs(15));
+        let resolver = TokioAsyncResolver::tokio(rc, opts)?;
 
         Ok(Self { log, resolver })
     }
@@ -129,7 +137,12 @@ impl Resolver {
         subnet: Ipv6Subnet<AZ_PREFIX>,
     ) -> Result<Self, ResolveError> {
         let dns_ips = Self::servers_from_subnet(subnet);
-        Resolver::new_from_addrs(log, dns_ips)
+        Resolver::new_from_addrs(log, &dns_ips)
+    }
+
+    /// Remove all entries from the resolver's cache.
+    pub fn clear_cache(&self) {
+        self.resolver.clear_cache();
     }
 
     /// Looks up a single [`Ipv6Addr`] based on the SRV name.
@@ -186,98 +199,72 @@ impl Resolver {
         let response = self.resolver.srv_lookup(&name).await?;
         debug!(
             self.log,
-            "lookup_ipv6 srv";
+            "lookup_all_ipv6 srv";
             "dns_name" => &name,
             "response" => ?response
         );
-
-        // SRV records have a target, which is itself another DNS name that
-        // needs to be looked up in order to get to the actual IP addresses.
-        // Many DNS servers return these IP addresses directly in the response
-        // to the SRV query as Additional records.  Ours does not.  See
-        // omicron#3434.  So we need to do another round of lookups separately.
-        //
-        // According to the docs` for
-        // `trust_dns_resolver::lookup::SrvLookup::ip_iter()`, it sounds like
-        // trust-dns would have done this for us.  It doesn't.  See
-        // bluejekyll/trust-dns#1980.
-        //
-        // So if we have gotten any IPs, then we assume that one of the above
-        // issues has been addressed and so we have all the IPs and we're done.
-        // Otherwise, explicitly do the extra lookups.
-        let addresses: Vec<Ipv6Addr> = response
-            .ip_iter()
-            .filter_map(|addr| match addr {
-                IpAddr::V4(_) => None,
-                IpAddr::V6(addr) => Some(addr),
-            })
-            .collect();
-        if !addresses.is_empty() {
-            return Ok(addresses);
-        }
-
-        // What do we do if some of these queries succeed while others fail?  We
-        // may have some addresses, but the list might be incomplete.  That
-        // might be okay for some use cases but not others.  For now, we do the
-        // simple thing.  In the future, we'll want a more cueball-like resolver
-        // interface that better deals with these cases.
-        let log = &self.log;
-        let futures = response.iter().map(|srv| async {
-            let target = srv.target();
-            trace!(
-                log,
-                "lookup_all_ipv6: looking up SRV target";
-                "name" => ?target,
-            );
-            self.resolver.ipv6_lookup(target.clone()).await
-        });
-        let results = futures::future::try_join_all(futures).await?;
-        let results = results
-            .into_iter()
-            .flat_map(|ipv6| ipv6.into_iter())
+        let addrs = self
+            .lookup_service_targets(response)
+            .await
+            .map(|addrv6| *addrv6.ip())
             .collect::<Vec<_>>();
-        if results.is_empty() {
-            Err(ResolveError::NotFound(srv))
+        if !addrs.is_empty() {
+            Ok(addrs)
         } else {
-            Ok(results)
+            Err(ResolveError::NotFound(srv))
         }
     }
 
     /// Looks up a single [`SocketAddrV6`] based on the SRV name
     /// Returns an error if the record does not exist.
+    // TODO-robustness: any callers of this should probably be using
+    // all the targets for a given SRV and not just the first one
+    // we get, see [`Resolver::lookup_all_socket_v6`].
     pub async fn lookup_socket_v6(
         &self,
         service: crate::ServiceName,
     ) -> Result<SocketAddrV6, ResolveError> {
         let name = service.srv_name();
-        debug!(self.log, "lookup_socket_v6 srv"; "dns_name" => &name);
-        let response = self.resolver.lookup(&name, RecordType::SRV).await?;
+        trace!(self.log, "lookup_socket_v6 srv"; "dns_name" => &name);
+        let response = self.resolver.srv_lookup(&name).await?;
+        debug!(
+            self.log,
+            "lookup_socket_v6 srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
 
-        let rdata = response
-            .iter()
+        self.lookup_service_targets(response)
+            .await
             .next()
-            .ok_or_else(|| ResolveError::NotFound(service.clone()))?;
+            .ok_or_else(|| ResolveError::NotFound(service))
+    }
 
-        Ok(match rdata {
-            trust_dns_proto::rr::record_data::RData::SRV(srv) => {
-                let name = srv.target();
-                let response =
-                    self.resolver.ipv6_lookup(&name.to_string()).await?;
+    /// Returns the targets of the SRV records for a DNS name.
+    ///
+    /// Unlike [`Resolver::lookup_srv`], this will further lookup the returned
+    /// targets and return a list of [`SocketAddrV6`].
+    pub async fn lookup_all_socket_v6(
+        &self,
+        service: crate::ServiceName,
+    ) -> Result<Vec<SocketAddrV6>, ResolveError> {
+        let name = service.srv_name();
+        trace!(self.log, "lookup_all_socket_v6 srv"; "dns_name" => &name);
+        let response = self.resolver.srv_lookup(&name).await?;
+        debug!(
+            self.log,
+            "lookup_all_socket_v6 srv";
+            "dns_name" => &name,
+            "response" => ?response
+        );
 
-                let address = response
-                    .iter()
-                    .next()
-                    .ok_or_else(|| ResolveError::NotFound(service))?;
-
-                SocketAddrV6::new(*address, srv.port(), 0, 0)
-            }
-
-            _ => {
-                return Err(ResolveError::Resolve(
-                    "SRV query did not return SRV RData!".into(),
-                ));
-            }
-        })
+        let results =
+            self.lookup_service_targets(response).await.collect::<Vec<_>>();
+        if !results.is_empty() {
+            Ok(results)
+        } else {
+            Err(ResolveError::NotFound(service))
+        }
     }
 
     // Returns an iterator of SocketAddrs for the specified SRV name.
@@ -289,34 +276,17 @@ impl Resolver {
         name: &str,
     ) -> Result<Box<dyn Iterator<Item = SocketAddr> + Send>, ResolveError> {
         debug!(self.log, "lookup_sockets_v6_raw srv"; "dns_name" => &name);
-        let response = self.resolver.lookup(name, RecordType::SRV).await?;
-
-        let rdata = response
-            .into_iter()
-            .next()
-            .ok_or_else(|| ResolveError::NotFoundByString(name.to_string()))?;
-
-        Ok(match rdata {
-            trust_dns_proto::rr::record_data::RData::SRV(srv) => {
-                let name = srv.target();
-                let port = srv.port();
-                Box::new(
-                    self.resolver
-                        .ipv6_lookup(&name.to_string())
-                        .await?
-                        .into_iter()
-                        .map(move |ip| {
-                            SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0))
-                        }),
-                )
-            }
-
-            _ => {
-                return Err(ResolveError::Resolve(
-                    "SRV query did not return SRV RData!".into(),
-                ));
-            }
-        })
+        let response = self.resolver.srv_lookup(name).await?;
+        let mut results = self
+            .lookup_service_targets(response)
+            .await
+            .map(|addrv6| SocketAddr::V6(addrv6))
+            .peekable();
+        if results.peek().is_some() {
+            Ok(Box::new(results))
+        } else {
+            Err(ResolveError::NotFoundByString(name.to_string()))
+        }
     }
 
     pub async fn lookup_ip(
@@ -332,12 +302,77 @@ impl Resolver {
             .ok_or_else(|| ResolveError::NotFound(srv))?;
         Ok(address)
     }
+
+    /// Returns an iterator of [`SocketAddrV6`]'s for the targets of the given
+    /// SRV lookup response.
+    // SRV records have a target, which is itself another DNS name that needs
+    // to be looked up in order to get to the actual IP addresses. Many DNS
+    // servers (including ours) return these IP addresses directly in the
+    // response to the SRV query as Additional records. In theory
+    // `SrvLookup::ip_iter()` would suffice but some issues:
+    //   (1) it returns `IpAddr`'s rather than `SocketAddr`'s
+    //   (2) it doesn't actually return all the addresses from the Additional
+    //       section of the DNS server's response.
+    //       See bluejekyll/trust-dns#1980
+    //
+    // (1) is not a huge deal as we can try to match up the targets ourselves
+    // to grab the port for creating a `SocketAddr` but (2) means we need to do
+    // the lookups explicitly.
+    async fn lookup_service_targets(
+        &self,
+        service_lookup: SrvLookup,
+    ) -> impl Iterator<Item = SocketAddrV6> + Send {
+        let futures =
+            std::iter::repeat((self.log.clone(), self.resolver.clone()))
+                .zip(service_lookup.into_iter())
+                .map(|((log, resolver), srv)| async move {
+                    let target = srv.target();
+                    let port = srv.port();
+                    trace!(
+                        log,
+                        "lookup_service_targets: looking up SRV target";
+                        "name" => ?target,
+                    );
+                    resolver
+                        .ipv6_lookup(target.clone())
+                        .await
+                        .map(|ips| (ips, port))
+                        .map_err(|err| (target.clone(), err))
+                });
+        // What do we do if some of these queries succeed while others fail?  We
+        // may have some addresses, but the list might be incomplete.  That
+        // might be okay for some use cases but not others.  For now, we do the
+        // simple thing and return as many as we got and log any errors.
+        // In the future, we'll want a more cueball-like resolver interface
+        // that better deals with these cases.
+        let log = self.log.clone();
+        futures::future::join_all(futures)
+            .await
+            .into_iter()
+            .flat_map(move |target| match target {
+                Ok((ips, port)) => Some(
+                    ips.into_iter()
+                        .map(move |ip| SocketAddrV6::new(ip, port, 0, 0)),
+                ),
+                Err((target, err)) => {
+                    error!(
+                        log,
+                        "lookup_service_targets: failed looking up target";
+                        "name" => ?target,
+                        "error" => ?err,
+                    );
+                    None
+                }
+            })
+            .flatten()
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::ResolveError;
     use super::Resolver;
+    use crate::DNS_ZONE;
     use crate::{DnsConfigBuilder, ServiceName};
     use anyhow::Context;
     use assert_matches::assert_matches;
@@ -420,7 +455,7 @@ mod test {
         }
 
         fn dns_server_address(&self) -> SocketAddr {
-            *self.dns_server.local_address()
+            self.dns_server.local_address()
         }
 
         fn cleanup_successful(mut self) {
@@ -430,7 +465,7 @@ mod test {
 
         fn resolver(&self) -> anyhow::Result<Resolver> {
             let log = self.log.new(o!("component" => "DnsResolver"));
-            Resolver::new_from_addrs(log, vec![self.dns_server_address()])
+            Resolver::new_from_addrs(log, &[self.dns_server_address()])
                 .context("creating resolver for test DNS server")
         }
 
@@ -556,7 +591,7 @@ mod test {
             let zone =
                 dns_builder.host_zone(Uuid::new_v4(), *db_ip.ip()).unwrap();
             dns_builder
-                .service_backend_zone(srv_crdb.clone(), &zone, db_ip.port())
+                .service_backend_zone(srv_crdb, &zone, db_ip.port())
                 .unwrap();
         }
 
@@ -564,21 +599,13 @@ mod test {
             .host_zone(Uuid::new_v4(), *clickhouse_addr.ip())
             .unwrap();
         dns_builder
-            .service_backend_zone(
-                srv_clickhouse.clone(),
-                &zone,
-                clickhouse_addr.port(),
-            )
+            .service_backend_zone(srv_clickhouse, &zone, clickhouse_addr.port())
             .unwrap();
 
         let zone =
             dns_builder.host_zone(Uuid::new_v4(), *crucible_addr.ip()).unwrap();
         dns_builder
-            .service_backend_zone(
-                srv_backend.clone(),
-                &zone,
-                crucible_addr.port(),
-            )
+            .service_backend_zone(srv_backend, &zone, crucible_addr.port())
             .unwrap();
 
         let mut dns_config = dns_builder.build();
@@ -659,9 +686,7 @@ mod test {
         let ip1 = Ipv6Addr::from_str("ff::01").unwrap();
         let zone = dns_builder.host_zone(Uuid::new_v4(), ip1).unwrap();
         let srv_crdb = ServiceName::Cockroach;
-        dns_builder
-            .service_backend_zone(srv_crdb.clone(), &zone, 12345)
-            .unwrap();
+        dns_builder.service_backend_zone(srv_crdb, &zone, 12345).unwrap();
         let dns_config = dns_builder.build();
         dns_server.update(&dns_config).await.unwrap();
         let found_ip = resolver
@@ -676,9 +701,7 @@ mod test {
         let ip2 = Ipv6Addr::from_str("ee::02").unwrap();
         let zone = dns_builder.host_zone(Uuid::new_v4(), ip2).unwrap();
         let srv_crdb = ServiceName::Cockroach;
-        dns_builder
-            .service_backend_zone(srv_crdb.clone(), &zone, 54321)
-            .unwrap();
+        dns_builder.service_backend_zone(srv_crdb, &zone, 54321).unwrap();
         let mut dns_config = dns_builder.build();
         dns_config.generation += 1;
         dns_server.update(&dns_config).await.unwrap();
@@ -767,7 +790,7 @@ mod test {
         let dns_server = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            vec![*dns_server.dns_server.local_address()],
+            &[dns_server.dns_server.local_address()],
         )
         .unwrap();
 
@@ -844,9 +867,9 @@ mod test {
         let dns_server2 = DnsServer::create(&logctx.log).await;
         let resolver = Resolver::new_from_addrs(
             logctx.log.clone(),
-            vec![
-                *dns_server1.dns_server.local_address(),
-                *dns_server2.dns_server.local_address(),
+            &[
+                dns_server1.dns_server.local_address(),
+                dns_server2.dns_server.local_address(),
             ],
         )
         .unwrap();
@@ -906,6 +929,129 @@ mod test {
 
         server.close().await.expect("Failed to stop test server");
         dns_server2.cleanup_successful();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn resolver_doesnt_bail_on_missing_targets() {
+        let logctx = test_setup_log("resolver_doesnt_bail_on_missing_targets");
+
+        // Confirm that we can create a progenitor client for this server.
+        expect_openapi_json_valid_for_test_server();
+
+        // Next, create a DNS server, and a corresponding resolver.
+        let dns_server = DnsServer::create(&logctx.log).await;
+        let resolver = Resolver::new_from_addrs(
+            logctx.log.clone(),
+            &[dns_server.dns_server.local_address()],
+        )
+        .unwrap();
+
+        // Create DNS config with a single service and multiple backends.
+        let mut dns_config = DnsConfigBuilder::new();
+
+        let id1 = Uuid::new_v4();
+        let ip1 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
+        let addr1 = SocketAddrV6::new(ip1, 15001, 0, 0);
+        let zone1 = dns_config.host_zone(id1, ip1).unwrap();
+        dns_config
+            .service_backend_zone(ServiceName::Cockroach, &zone1, addr1.port())
+            .unwrap();
+
+        let id2 = Uuid::new_v4();
+        let ip2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
+        let addr2 = SocketAddrV6::new(ip2, 15002, 0, 0);
+        let zone2 = dns_config.host_zone(id2, ip2).unwrap();
+        dns_config
+            .service_backend_zone(ServiceName::Cockroach, &zone2, addr2.port())
+            .unwrap();
+
+        // Plumb records onto DNS server
+        let mut dns_config = dns_config.build();
+        dns_server.update(&dns_config).await.unwrap();
+
+        // Using the resolver we should get back both addresses
+        let mut addrs =
+            resolver.lookup_all_socket_v6(ServiceName::Cockroach).await.expect(
+                "Should have been able to look up all CockroachDB addresses",
+            );
+        addrs.sort();
+        assert_eq!(addrs, [addr1, addr2]);
+
+        // Now let's remove one of the AAAA records for a zone/target.
+        // The lookup should still succeed and return the other address.
+        dns_config.generation += 1;
+        let root = dns_config
+            .zones
+            .iter_mut()
+            .find(|zone| zone.zone_name == DNS_ZONE)
+            .expect("root dns zone missing?");
+        let zone1_records = root
+            .records
+            .remove(&zone1.dns_name())
+            .expect("Cockroach Zone record missing?");
+        // There should've been just the one address in this record
+        assert_eq!(zone1_records, [ip1.into()]);
+
+        // Both SRV records should stil exist
+        let srv_records = root
+            .records
+            .get(&ServiceName::Cockroach.dns_name())
+            .expect("Cockroach SRV records missing?");
+        assert_eq!(srv_records.len(), 2);
+
+        // Update DNS server
+        dns_server.update(&dns_config).await.unwrap();
+
+        // This time the resolver should only return one address
+        let addrs = resolver
+            .lookup_all_socket_v6(ServiceName::Cockroach)
+            .await
+            .expect("CockroachDB addresses lookup take 2");
+        assert_eq!(addrs, [addr2]);
+
+        // But both targets should still be there
+        let mut targets =
+            resolver.lookup_srv(ServiceName::Cockroach).await.unwrap();
+        targets.sort();
+        let mut expected_targets = [
+            (format!("{}.{DNS_ZONE}.", zone1.dns_name()), addr1.port()),
+            (format!("{}.{DNS_ZONE}.", zone2.dns_name()), addr2.port()),
+        ];
+        expected_targets.sort();
+        assert_eq!(targets, expected_targets);
+
+        // Finally, let's remove the last AAAA record as well
+        dns_config.generation += 1;
+        let root = dns_config
+            .zones
+            .iter_mut()
+            .find(|zone| zone.zone_name == DNS_ZONE)
+            .expect("root dns zone missing?");
+        let zone2_records = root
+            .records
+            .remove(&zone2.dns_name())
+            .expect("Cockroach Zone record missing?");
+        // There should've been just the one address in this record
+        assert_eq!(zone2_records, [ip2.into()]);
+
+        // Update DNS server
+        dns_server.update(&dns_config).await.unwrap();
+
+        // This time the resolver should return an error
+        let err = resolver
+            .lookup_all_socket_v6(ServiceName::Cockroach)
+            .await
+            .expect_err("CockroachDB addresses lookup take 3 worked??");
+        assert!(matches!(err, ResolveError::NotFound(ServiceName::Cockroach)));
+
+        // But both targets should still be there
+        let mut targets =
+            resolver.lookup_srv(ServiceName::Cockroach).await.unwrap();
+        targets.sort();
+        assert_eq!(targets, expected_targets);
+
+        dns_server.cleanup_successful();
         logctx.cleanup_successful();
     }
 }

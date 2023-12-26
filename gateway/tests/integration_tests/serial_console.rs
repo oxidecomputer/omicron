@@ -100,11 +100,12 @@ async fn serial_console_detach() {
         }
         tungstenite::Error::ConnectionClosed
         | tungstenite::Error::AlreadyClosed
+        | tungstenite::Error::AttackAttempt
         | tungstenite::Error::Io(_)
         | tungstenite::Error::Tls(_)
         | tungstenite::Error::Capacity(_)
         | tungstenite::Error::Protocol(_)
-        | tungstenite::Error::SendQueueFull(_)
+        | tungstenite::Error::WriteBufferFull(_)
         | tungstenite::Error::Utf8
         | tungstenite::Error::Url(_)
         | tungstenite::Error::HttpFormat(_) => panic!("unexpected error"),

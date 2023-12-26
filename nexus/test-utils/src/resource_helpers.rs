@@ -14,12 +14,14 @@ use dropshot::Method;
 use http::StatusCode;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
+use nexus_types::external_api::params::PhysicalDiskKind;
 use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
 use nexus_types::external_api::views::Certificate;
+use nexus_types::external_api::views::FloatingIp;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
@@ -31,7 +33,9 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::NameOrId;
 use omicron_sled_agent::sim::SledAgent;
+use std::net::IpAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -130,6 +134,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
+    silo: Option<Uuid>,
 ) -> (IpPool, IpPoolRange) {
     let pool = object_create(
         client,
@@ -139,11 +144,35 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+            silo: silo.map(|id| NameOrId::Id(id)),
+            is_default: false,
         },
     )
     .await;
     let range = populate_ip_pool(client, pool_name, ip_range).await;
     (pool, range)
+}
+
+pub async fn create_floating_ip(
+    client: &ClientTestContext,
+    fip_name: &str,
+    project: &str,
+    address: Option<IpAddr>,
+    parent_pool_name: Option<&str>,
+) -> FloatingIp {
+    object_create(
+        client,
+        &format!("/v1/floating-ips?project={project}"),
+        &params::FloatingIpCreate {
+            identity: IdentityMetadataCreateParams {
+                name: fip_name.parse().unwrap(),
+                description: String::from("a floating ip"),
+            },
+            address,
+            pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
+        },
+    )
+    .await
 }
 
 pub async fn create_certificate(
@@ -201,7 +230,7 @@ pub async fn create_physical_disk(
     vendor: &str,
     serial: &str,
     model: &str,
-    variant: internal_params::PhysicalDiskKind,
+    variant: PhysicalDiskKind,
     sled_id: Uuid,
 ) -> internal_params::PhysicalDiskPutResponse {
     object_put(
@@ -259,6 +288,7 @@ pub async fn create_silo(
                 name: silo_name.parse().unwrap(),
                 description: "a silo".to_string(),
             },
+            quotas: params::SiloQuotasCreate::arbitrarily_high_default(),
             discoverable,
             identity_mode,
             admin_group_name: None,

@@ -11,7 +11,7 @@ set -o xtrace
 set -o errexit
 
 SOURCE_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-ARG0="$(basename ${BASH_SOURCE[0]})"
+ARG0="$(basename "${BASH_SOURCE[0]}")"
 
 TARGET_DIR="out"
 # Location where intermediate artifacts are downloaded / unpacked.
@@ -89,7 +89,7 @@ function main
 
 function fail
 {
-	echo "$ARG0: $@" >&2
+	echo "$ARG0: $*" >&2
 	exit 1
 }
 
@@ -97,6 +97,7 @@ function configure_os
 {
 	echo "current directory: $PWD"
 	echo "configuring based on OS: \"$1\""
+	CIDL_DASHREV=
 	case "$1" in
 		darwin*)
 			CIDL_PLATFORM="macos"
@@ -112,6 +113,7 @@ function configure_os
 			CIDL_PLATFORM="illumos"
 			CIDL_MD5="$CIDL_MD5_ILLUMOS"
 			CIDL_MD5FUNC="do_md5sum"
+			CIDL_DASHREV=-1
 			;;
 		*)
 			fail "unsupported OS: $1"
@@ -119,10 +121,9 @@ function configure_os
 	esac
 
 	TARBALL_DIRNAME="clickhouse-$CIDL_VERSION"
-	TARBALL_FILENAME="$TARBALL_DIRNAME.$CIDL_PLATFORM.tar.gz"
+	TARBALL_FILENAME="$TARBALL_DIRNAME$CIDL_DASHREV.$CIDL_PLATFORM.tar.gz"
 
 	TARBALL_FILE="$DOWNLOAD_DIR/$TARBALL_FILENAME"
-	TARBALL_DIR="$DOWNLOAD_DIR/$TARBALL_DIRNAME"
 }
 
 function do_download_curl

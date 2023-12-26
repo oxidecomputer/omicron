@@ -4,17 +4,17 @@
 
 use dropshot::test_util::ClientTestContext;
 use http::{method::Method, StatusCode};
+use nexus_db_queries::authn::USER_TEST_UNPRIVILEGED;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::fixed_data::silo::SILO_ID;
 use nexus_test_utils::assert_same_items;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest};
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
 use omicron_common::api::external::LookupType;
-use omicron_nexus::{
-    authn::USER_TEST_UNPRIVILEGED, authz, db::fixed_data::silo::SILO_ID,
-    external_api::views,
-};
 use uuid::Uuid;
 
 type ControlPlaneTestContext =

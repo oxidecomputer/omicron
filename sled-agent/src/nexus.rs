@@ -2,9 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#[cfg(test)]
-pub use crate::mocks::MockNexusClient as NexusClient;
-#[cfg(not(test))]
 pub use nexus_client::Client as NexusClient;
 
 use internal_dns::resolver::{ResolveError, Resolver};
@@ -31,20 +28,32 @@ impl NexusClientWithResolver {
         log: &Logger,
         resolver: Arc<Resolver>,
     ) -> Result<Self, ResolveError> {
+        Ok(Self::new_from_resolver_with_port(
+            log,
+            resolver,
+            NEXUS_INTERNAL_PORT,
+        ))
+    }
+
+    pub fn new_from_resolver_with_port(
+        log: &Logger,
+        resolver: Arc<Resolver>,
+        port: u16,
+    ) -> Self {
         let client = reqwest::ClientBuilder::new()
             .dns_resolver(resolver.clone())
             .build()
             .expect("Failed to build client");
 
         let dns_name = ServiceName::Nexus.srv_name();
-        Ok(Self {
+        Self {
             client: NexusClient::new_with_client(
-                &format!("http://{dns_name}:{NEXUS_INTERNAL_PORT}"),
+                &format!("http://{dns_name}:{port}"),
                 client,
                 log.new(o!("component" => "NexusClient")),
             ),
             resolver,
-        })
+        }
     }
 
     /// Access the progenitor-based Nexus Client.
@@ -142,6 +151,54 @@ fn d2n_record(
                 target: srv.target.clone(),
                 weight: srv.weight,
             })
+        }
+    }
+}
+
+// Although it is a bit awkward to define these conversions here, it frees us
+// from depending on sled_storage/sled_hardware in the nexus_client crate.
+
+pub(crate) trait ConvertInto<T>: Sized {
+    fn convert(self) -> T;
+}
+
+impl ConvertInto<nexus_client::types::PhysicalDiskKind>
+    for sled_hardware::DiskVariant
+{
+    fn convert(self) -> nexus_client::types::PhysicalDiskKind {
+        use nexus_client::types::PhysicalDiskKind;
+
+        match self {
+            sled_hardware::DiskVariant::U2 => PhysicalDiskKind::U2,
+            sled_hardware::DiskVariant::M2 => PhysicalDiskKind::M2,
+        }
+    }
+}
+
+impl ConvertInto<nexus_client::types::Baseboard> for sled_hardware::Baseboard {
+    fn convert(self) -> nexus_client::types::Baseboard {
+        nexus_client::types::Baseboard {
+            serial_number: self.identifier().to_string(),
+            part_number: self.model().to_string(),
+            revision: self.revision(),
+        }
+    }
+}
+
+impl ConvertInto<nexus_client::types::DatasetKind>
+    for sled_storage::dataset::DatasetKind
+{
+    fn convert(self) -> nexus_client::types::DatasetKind {
+        use nexus_client::types::DatasetKind;
+        use sled_storage::dataset::DatasetKind::*;
+
+        match self {
+            CockroachDb => DatasetKind::Cockroach,
+            Crucible => DatasetKind::Crucible,
+            Clickhouse => DatasetKind::Clickhouse,
+            ClickhouseKeeper => DatasetKind::ClickhouseKeeper,
+            ExternalDns => DatasetKind::ExternalDns,
+            InternalDns => DatasetKind::InternalDns,
         }
     }
 }

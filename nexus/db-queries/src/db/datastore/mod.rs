@@ -24,7 +24,7 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db::{
     self,
-    error::{public_error_from_diesel_pool, ErrorHandler},
+    error::{public_error_from_diesel, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
 use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
@@ -37,14 +37,23 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::SemverVersion;
+use omicron_common::backoff::{
+    retry_notify, retry_policy_internal_service, BackoffError,
+};
+use omicron_common::nexus_config::SchemaConfig;
+use slog::Logger;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
 use uuid::Uuid;
 
 mod address_lot;
+mod bgp;
+mod bootstore;
 mod certificate;
 mod console_session;
 mod dataset;
+mod db_metadata;
 mod device_auth;
 mod disk;
 mod dns;
@@ -52,11 +61,14 @@ mod external_ip;
 mod identity_provider;
 mod image;
 mod instance;
+mod inventory;
 mod ip_pool;
+mod ipv4_nat_entry;
 mod network_interface;
 mod oximeter;
 mod physical_disk;
 mod project;
+mod quota;
 mod rack;
 mod region;
 mod region_snapshot;
@@ -74,18 +86,28 @@ mod switch;
 mod switch_interface;
 mod switch_port;
 mod update;
+mod utilization;
 mod virtual_provisioning_collection;
+mod vmm;
 mod volume;
 mod vpc;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
+pub use db_metadata::{
+    all_sql_for_version_migration, SchemaUpgrade, SchemaUpgradeStep,
+    EARLIEST_SUPPORTED_VERSION,
+};
 pub use dns::DnsVersionUpdateBuilder;
+pub use instance::InstanceAndActiveVmm;
+pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
+pub use volume::read_only_resources_associated_with_volume;
 pub use volume::CrucibleResources;
+pub use volume::CrucibleTargets;
 
 // Number of unique datasets required to back a region.
 // TODO: This should likely turn into a configuration option.
@@ -122,21 +144,69 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
+pub type DataStoreConnection<'a> =
+    bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
+
 pub struct DataStore {
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
+    transaction_retry_producer: crate::transaction_retry::Producer,
 }
 
 // The majority of `DataStore`'s methods live in our submodules as a concession
 // to compilation times; changing a query only requires incremental
 // recompilation of that query's module instead of all queries on `DataStore`.
 impl DataStore {
-    pub fn new(pool: Arc<Pool>) -> Self {
-        DataStore {
+    /// Constructs a new Datastore object, without any version validation.
+    ///
+    /// Ignores the underlying DB version. Should be used with caution, as usage
+    /// of this method can construct a Datastore which does not understand
+    /// the underlying CockroachDB schema. Data corruption could result.
+    pub fn new_unchecked(pool: Arc<Pool>) -> Result<Self, String> {
+        let datastore = DataStore {
             pool,
             virtual_provisioning_collection_producer:
                 crate::provisioning::Producer::new(),
-        }
+            transaction_retry_producer: crate::transaction_retry::Producer::new(
+            ),
+        };
+        Ok(datastore)
+    }
+
+    /// Constructs a new Datastore object.
+    ///
+    /// Only returns if the database schema is compatible with Nexus's known
+    /// schema version.
+    pub async fn new(
+        log: &Logger,
+        pool: Arc<Pool>,
+        config: Option<&SchemaConfig>,
+    ) -> Result<Self, String> {
+        let datastore = Self::new_unchecked(pool)?;
+
+        // Keep looping until we find that the schema matches our expectation.
+        const EXPECTED_VERSION: SemverVersion =
+            nexus_db_model::schema::SCHEMA_VERSION;
+        retry_notify(
+            retry_policy_internal_service(),
+            || async {
+                match datastore
+                    .ensure_schema(&log, EXPECTED_VERSION, config)
+                    .await
+                {
+                    Ok(()) => return Ok(()),
+                    Err(e) => {
+                        warn!(log, "Failed to ensure schema version: {e}");
+                    }
+                };
+                return Err(BackoffError::transient(()));
+            },
+            |_, _| {},
+        )
+        .await
+        .map_err(|_| "Failed to read valid DB schema".to_string())?;
+
+        Ok(datastore)
     }
 
     pub fn register_producers(&self, registry: &ProducerRegistry) {
@@ -145,31 +215,64 @@ impl DataStore {
                 self.virtual_provisioning_collection_producer.clone(),
             )
             .unwrap();
+        registry
+            .register_producer(self.transaction_retry_producer.clone())
+            .unwrap();
     }
 
-    // TODO-security This should be deprecated in favor of pool_authorized(),
-    // which gives us the chance to do a minimal security check before hitting
-    // the database.  Eventually, this function should only be used for doing
-    // authentication in the first place (since we can't do an authz check in
-    // that case).
-    fn pool(&self) -> &bb8::Pool<ConnectionManager<DbConnection>> {
-        self.pool.pool()
+    /// Constructs a transaction retry helper
+    ///
+    /// Automatically wraps the underlying producer
+    pub fn transaction_retry_wrapper(
+        &self,
+        name: &'static str,
+    ) -> crate::transaction_retry::RetryHelper {
+        crate::transaction_retry::RetryHelper::new(
+            &self.transaction_retry_producer,
+            name,
+        )
     }
 
-    pub(super) async fn pool_authorized(
+    #[cfg(test)]
+    pub(crate) fn transaction_retry_producer(
+        &self,
+    ) -> &crate::transaction_retry::Producer {
+        &self.transaction_retry_producer
+    }
+
+    /// Returns a connection to a connection from the database connection pool.
+    pub(super) async fn pool_connection_authorized(
         &self,
         opctx: &OpContext,
-    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
+    ) -> Result<DataStoreConnection, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        Ok(self.pool.pool())
+        let pool = self.pool.pool();
+        let connection = pool.get().await.map_err(|err| {
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
+        })?;
+        Ok(connection)
+    }
+
+    /// Returns an unauthorized connection to a connection from the database
+    /// connection pool.
+    ///
+    /// TODO-security: This should be deprecated in favor of
+    /// "pool_connection_authorized".
+    pub(super) async fn pool_connection_unauthorized(
+        &self,
+    ) -> Result<DataStoreConnection, Error> {
+        let connection = self.pool.pool().get().await.map_err(|err| {
+            Error::unavail(&format!("Failed to access DB connection: {err}"))
+        })?;
+        Ok(connection)
     }
 
     /// For testing only. This isn't cfg(test) because nexus needs access to it.
     #[doc(hidden)]
-    pub async fn pool_for_tests(
+    pub async fn pool_connection_for_tests(
         &self,
-    ) -> Result<&bb8::Pool<ConnectionManager<DbConnection>>, Error> {
-        Ok(self.pool.pool())
+    ) -> Result<DataStoreConnection, Error> {
+        self.pool_connection_unauthorized().await
     }
 
     /// Return the next available IPv6 address for an Oxide service running on
@@ -185,10 +288,10 @@ impl DataStore {
         )
         .set(dsl::last_used_address.eq(dsl::last_used_address + 1))
         .returning(dsl::last_used_address)
-        .get_result_async(self.pool_authorized(opctx).await?)
+        .get_result_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| {
-            public_error_from_diesel_pool(
+            public_error_from_diesel(
                 e,
                 ErrorHandler::NotFoundByLookup(
                     ResourceType::Sled,
@@ -213,19 +316,17 @@ impl DataStore {
     #[cfg(test)]
     async fn test_try_table_scan(&self, opctx: &OpContext) -> Error {
         use db::schema::project::dsl;
-        let conn = self.pool_authorized(opctx).await;
+        let conn = self.pool_connection_authorized(opctx).await;
         if let Err(error) = conn {
             return error;
         }
         let result = dsl::project
             .select(diesel::dsl::count_star())
-            .first_async::<i64>(conn.unwrap())
+            .first_async::<i64>(&*conn.unwrap())
             .await;
         match result {
             Ok(_) => Error::internal_error("table scan unexpectedly succeeded"),
-            Err(error) => {
-                public_error_from_diesel_pool(error, ErrorHandler::Server)
-            }
+            Err(error) => public_error_from_diesel(error, ErrorHandler::Server),
         }
     }
 }
@@ -248,7 +349,8 @@ pub async fn datastore_test(
 
     let cfg = db::Config { url: db.pg_config().clone() };
     let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-    let datastore = Arc::new(DataStore::new(pool));
+    let datastore =
+        Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
 
     // Create an OpContext with the credentials of "db-init" just for the
     // purpose of loading the built-in users, roles, and assignments.
@@ -297,9 +399,9 @@ mod test {
     use crate::db::model::{
         BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
         Dataset, DatasetKind, ExternalIp, PhysicalDisk, PhysicalDiskKind,
-        Project, Rack, Region, Service, ServiceKind, SiloUser, Sled,
-        SledBaseboard, SledSystemHardware, SshKey, SystemUpdate,
-        UpdateableComponentType, VpcSubnet, Zpool,
+        Project, Rack, Region, Service, ServiceKind, SiloUser, SledBaseboard,
+        SledProvisionState, SledSystemHardware, SledUpdate, SshKey,
+        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use assert_matches::assert_matches;
@@ -310,7 +412,9 @@ mod test {
     use omicron_common::api::external::{
         self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
+    use omicron_common::nexus_config::RegionAllocationStrategy;
     use omicron_test_utils::dev;
+    use std::collections::HashMap;
     use std::collections::HashSet;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
@@ -521,15 +625,48 @@ mod test {
         let rack_id = Uuid::new_v4();
         let sled_id = Uuid::new_v4();
 
-        let sled = Sled::new(
+        let sled_update = SledUpdate::new(
             sled_id,
             bogus_addr,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled).await.unwrap();
+        datastore.sled_upsert(sled_update).await.unwrap();
         sled_id
+    }
+
+    // Marks a sled as non-provisionable.
+    async fn mark_sled_non_provisionable(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) {
+        let (authz_sled, sled) = LookupPath::new(opctx, datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
+        println!("sled: {:?}", sled);
+        let old_state = datastore
+            .sled_set_provision_state(
+                &opctx,
+                &authz_sled,
+                SledProvisionState::NonProvisionable,
+            )
+            .await
+            .unwrap_or_else(|error| {
+                panic!(
+                    "error marking sled {sled_id} as non-provisionable: {error}"
+                )
+            });
+        // The old state should always be provisionable since that's where we
+        // start.
+        assert_eq!(old_state, SledProvisionState::Provisionable);
+    }
+
+    fn test_zpool_size() -> ByteCount {
+        ByteCount::from_gibibytes_u32(100)
     }
 
     const TEST_VENDOR: &str = "test-vendor";
@@ -707,86 +844,266 @@ mod test {
         sleds: Vec<SledInfo>,
     }
 
+    struct TestDataset {
+        sled_id: Uuid,
+        dataset_id: Uuid,
+    }
+
+    async fn create_test_datasets_for_region_allocation(
+        opctx: &OpContext,
+        datastore: Arc<DataStore>,
+        number_of_sleds: usize,
+    ) -> Vec<TestDataset> {
+        RegionAllocationTestCtxBuilder::default()
+            .sleds(number_of_sleds)
+            // create 9 disks per sled
+            .disks_per_sled(9)
+            // 3 datasets per zpool, to test that pools are distinct
+            .datasets_per_zpool(3)
+            .build(&opctx, &datastore)
+            .await
+            .sleds
+            .into_iter()
+            .map(|sled_info| {
+                TestDataset {
+                    sled_id: sled_info.id,
+                    dataset_id: sled_info.disks[0].datasets[0],
+                }
+            })
+            .collect()
+    }
+
     #[tokio::test]
-    async fn test_region_allocation() {
-        let logctx = dev::test_setup_log("test_region_allocation");
+    /// Note that this test is currently non-deterministic. It can be made
+    /// deterministic by generating deterministic *dataset* Uuids. The sled and
+    /// pool IDs should not matter.
+    async fn test_region_allocation_strat_random() {
+        let logctx = dev::test_setup_log("test_region_allocation_strat_random");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let test_datasets = create_test_datasets_for_region_allocation(
+            &opctx,
+            datastore.clone(),
+            // Even though we're going to mark one sled as non-provisionable to
+            // test that logic, we aren't forcing the datasets to be on
+            // distinct sleds, so REGION_REDUNDANCY_THRESHOLD is enough.
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
+
+        let non_provisionable_dataset_id = test_datasets[0].dataset_id;
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
+        )
+        .await;
+
+        // Allocate regions from the datasets for this disk. Do it a few times
+        // for good measure.
+        for alloc_seed in 0..10 {
+            let params = create_test_disk_create_params(
+                &format!("disk{}", alloc_seed),
+                ByteCount::from_mebibytes_u32(1),
+            );
+            let volume_id = Uuid::new_v4();
+
+            let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
+            let dataset_and_regions = datastore
+                .region_allocate(
+                    &opctx,
+                    volume_id,
+                    &params.disk_source,
+                    params.size,
+                    &RegionAllocationStrategy::Random {
+                        seed: Some(alloc_seed),
+                    },
+                )
+                .await
+                .unwrap();
+
+            // Verify the allocation.
+            assert_eq!(expected_region_count, dataset_and_regions.len());
+            let mut disk_datasets = HashSet::new();
+            let mut disk_zpools = HashSet::new();
+
+            for (dataset, region) in dataset_and_regions {
+                // Must be 3 unique datasets
+                assert!(disk_datasets.insert(dataset.id()));
+
+                // Dataset must not be non-provisionable.
+                assert_ne!(dataset.id(), non_provisionable_dataset_id);
+
+                // Must be 3 unique zpools
+                assert!(disk_zpools.insert(dataset.pool_id));
+
+                assert_eq!(volume_id, region.volume_id());
+                assert_eq!(ByteCount::from(4096), region.block_size());
+                let (_, extent_count) = DataStore::get_crucible_allocation(
+                    &BlockSize::AdvancedFormat,
+                    params.size,
+                );
+                assert_eq!(extent_count, region.extent_count());
+            }
+        }
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    /// Test the [`RegionAllocationStrategy::RandomWithDistinctSleds`] strategy.
+    /// It should always pick datasets where no two datasets are on the same
+    /// zpool and no two zpools are on the same sled.
+    async fn test_region_allocation_strat_random_with_distinct_sleds() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_strat_random_with_distinct_sleds",
+        );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let _testctx = RegionAllocationTestCtxBuilder::default()
-            .sleds(1)
-            .disks_per_sled(REGION_REDUNDANCY_THRESHOLD * 2)
-            .zpool_size(ByteCount::from_gibibytes_u32(100))
-            .datasets_per_zpool(1)
-            .build(&opctx, &datastore)
-            .await;
+        // Create a rack with enough sleds for a successful allocation when we
+        // require 3 distinct provisionable sleds.
+        let test_datasets = create_test_datasets_for_region_allocation(
+            &opctx,
+            datastore.clone(),
+            // We're going to mark one sled as non-provisionable to test that
+            // logic, and we *are* forcing the datasets to be on distinct
+            // sleds: hence threshold + 1.
+            REGION_REDUNDANCY_THRESHOLD + 1,
+        )
+        .await;
 
-        // Allocate regions from the datasets for this disk.
-        let params = create_test_disk_create_params(
-            "disk1",
-            ByteCount::from_mebibytes_u32(500),
-        );
-        let volume1_id = Uuid::new_v4();
+        let non_provisionable_dataset_id = test_datasets[0].dataset_id;
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
+        )
+        .await;
 
-        // Currently, we only allocate one Region Set per volume.
-        let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
-        let dataset_and_regions = datastore
-            .region_allocate(
-                &opctx,
-                volume1_id,
-                &params.disk_source,
-                params.size,
-            )
-            .await
-            .unwrap();
+        // We need to check that our datasets end up on 3 distinct sleds, but the query doesn't return the sled ID, so we need to reverse map from dataset ID to sled ID
+        let sled_id_map: HashMap<Uuid, Uuid> = test_datasets
+            .into_iter()
+            .map(|test_dataset| (test_dataset.dataset_id, test_dataset.sled_id))
+            .collect();
 
-        // Verify the allocation.
-        assert_eq!(expected_region_count, dataset_and_regions.len());
-        let mut disk1_datasets = HashSet::new();
-        for (dataset, region) in dataset_and_regions {
-            assert!(disk1_datasets.insert(dataset.id()));
-            assert_eq!(volume1_id, region.volume_id());
-            assert_eq!(ByteCount::from(4096), region.block_size());
-            let (_, extent_count) = DataStore::get_crucible_allocation(
-                &BlockSize::AdvancedFormat,
-                params.size,
+        // Allocate regions from the datasets for this disk. Do it a few times
+        // for good measure.
+        for alloc_seed in 0..10 {
+            let params = create_test_disk_create_params(
+                &format!("disk{}", alloc_seed),
+                ByteCount::from_mebibytes_u32(1),
             );
-            assert_eq!(extent_count, region.extent_count());
+            let volume_id = Uuid::new_v4();
+
+            let expected_region_count = REGION_REDUNDANCY_THRESHOLD;
+            let dataset_and_regions = datastore
+                .region_allocate(
+                    &opctx,
+                    volume_id,
+                    &params.disk_source,
+                    params.size,
+                    &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                        seed: Some(alloc_seed),
+                    },
+                )
+                .await
+                .unwrap();
+
+            // Verify the allocation.
+            assert_eq!(expected_region_count, dataset_and_regions.len());
+            let mut disk_datasets = HashSet::new();
+            let mut disk_zpools = HashSet::new();
+            let mut disk_sleds = HashSet::new();
+            for (dataset, region) in dataset_and_regions {
+                // Must be 3 unique datasets
+                assert!(disk_datasets.insert(dataset.id()));
+
+                // Dataset must not be non-provisionable.
+                assert_ne!(dataset.id(), non_provisionable_dataset_id);
+
+                // Must be 3 unique zpools
+                assert!(disk_zpools.insert(dataset.pool_id));
+
+                // Must be 3 unique sleds
+                let sled_id = sled_id_map.get(&dataset.id()).unwrap();
+                assert!(disk_sleds.insert(*sled_id));
+
+                assert_eq!(volume_id, region.volume_id());
+                assert_eq!(ByteCount::from(4096), region.block_size());
+                let (_, extent_count) = DataStore::get_crucible_allocation(
+                    &BlockSize::AdvancedFormat,
+                    params.size,
+                );
+                assert_eq!(extent_count, region.extent_count());
+            }
         }
 
-        // Allocate regions for a second disk. Observe that we allocate from
-        // the three previously unused datasets.
-        let params = create_test_disk_create_params(
-            "disk2",
-            ByteCount::from_mebibytes_u32(500),
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    /// Ensure the [`RegionAllocationStrategy::RandomWithDistinctSleds`]
+    /// strategy fails when there aren't enough distinct sleds.
+    async fn test_region_allocation_strat_random_with_distinct_sleds_fails() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_strat_random_with_distinct_sleds_fails",
         );
-        let volume2_id = Uuid::new_v4();
-        let dataset_and_regions = datastore
-            .region_allocate(
-                &opctx,
-                volume2_id,
-                &params.disk_source,
-                params.size,
-            )
-            .await
-            .unwrap();
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        assert_eq!(expected_region_count, dataset_and_regions.len());
-        let mut disk2_datasets = HashSet::new();
-        for (dataset, region) in dataset_and_regions {
-            assert!(disk2_datasets.insert(dataset.id()));
-            assert_eq!(volume2_id, region.volume_id());
-            assert_eq!(ByteCount::from(4096), region.block_size());
-            let (_, extent_count) = DataStore::get_crucible_allocation(
-                &BlockSize::AdvancedFormat,
-                params.size,
+        // Create a rack without enough sleds for a successful allocation when
+        // we require 3 distinct provisionable sleds.
+        let test_datasets = create_test_datasets_for_region_allocation(
+            &opctx,
+            datastore.clone(),
+            // Here, we need to have REGION_REDUNDANCY_THRESHOLD - 1
+            // provisionable sleds to test this failure condition. We're going
+            // to mark one sled as non-provisionable to test that logic, so we
+            // need to add 1 to that number.
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
+
+        mark_sled_non_provisionable(
+            &datastore,
+            &opctx,
+            test_datasets[0].sled_id,
+        )
+        .await;
+
+        // Allocate regions from the datasets for this disk. Do it a few times
+        // for good measure.
+        for alloc_seed in 0..10 {
+            let params = create_test_disk_create_params(
+                &format!("disk{}", alloc_seed),
+                ByteCount::from_mebibytes_u32(1),
             );
-            assert_eq!(extent_count, region.extent_count());
-        }
+            let volume_id = Uuid::new_v4();
 
-        // Double-check that the datasets used for the first disk weren't
-        // used when allocating the second disk.
-        assert_eq!(0, disk1_datasets.intersection(&disk2_datasets).count());
+            let err = datastore
+                .region_allocate(
+                    &opctx,
+                    volume_id,
+                    &params.disk_source,
+                    params.size,
+                    &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                        seed: Some(alloc_seed),
+                    },
+                )
+                .await
+                .unwrap_err();
+
+            let expected = "Not enough zpool space to allocate disks";
+            assert!(
+                err.to_string().contains(expected),
+                "Saw error: \'{err}\', but expected \'{expected}\'"
+            );
+
+            assert!(matches!(err, Error::InsufficientCapacity { .. }));
+        }
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
@@ -798,15 +1115,12 @@ mod test {
             dev::test_setup_log("test_region_allocation_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
-        let disk_count = REGION_REDUNDANCY_THRESHOLD;
-        let _testctx = RegionAllocationTestCtxBuilder::default()
-            .sleds(1)
-            .disks_per_sled(disk_count)
-            .zpool_size(ByteCount::from_gibibytes_u32(100))
-            .datasets_per_zpool(1)
-            .build(&opctx, &datastore)
-            .await;
+        create_test_datasets_for_region_allocation(
+            &opctx,
+            datastore.clone(),
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
 
         // Allocate regions from the datasets for this volume.
         let params = create_test_disk_create_params(
@@ -820,15 +1134,20 @@ mod test {
                 volume_id,
                 &params.disk_source,
                 params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
             .unwrap();
+
+        // Use a different allocation ordering to ensure we're idempotent even
+        // if the shuffle changes.
         let mut dataset_and_regions2 = datastore
             .region_allocate(
                 &opctx,
                 volume_id,
                 &params.disk_source,
                 params.size,
+                &RegionAllocationStrategy::Random { seed: Some(1) },
             )
             .await
             .unwrap();
@@ -857,16 +1176,15 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_region_allocation_not_enough_datasets() {
+    async fn test_region_allocation_not_enough_zpools() {
         let logctx =
-            dev::test_setup_log("test_region_allocation_not_enough_datasets");
+            dev::test_setup_log("test_region_allocation_not_enough_zpools");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let _testctx = RegionAllocationTestCtxBuilder::default()
             .sleds(1)
             .disks_per_sled(REGION_REDUNDANCY_THRESHOLD - 1)
-            .zpool_size(ByteCount::from_gibibytes_u32(100))
             .datasets_per_zpool(1)
             .build(&opctx, &datastore)
             .await;
@@ -883,17 +1201,18 @@ mod test {
                 volume1_id,
                 &params.disk_source,
                 params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
             .unwrap_err();
 
-        let expected = "Not enough datasets to allocate disks";
+        let expected = "Not enough zpool space to allocate disks";
         assert!(
             err.to_string().contains(expected),
             "Saw error: \'{err}\', but expected \'{expected}\'"
         );
 
-        assert!(matches!(err, Error::ServiceUnavailable { .. }));
+        assert!(matches!(err, Error::InsufficientCapacity { .. }));
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
@@ -907,24 +1226,16 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let zpool_size = ByteCount::from_gibibytes_u32(100);
-        let _testctx = RegionAllocationTestCtxBuilder::default()
-            .sleds(1)
-            .disks_per_sled(1)
-            .zpool_size(zpool_size)
-            // The Zpool's space is shared by all these datasets.
-            //
-            // So even though we have enough datasets, we don't have enough
-            // space.
-            .datasets_per_zpool(REGION_REDUNDANCY_THRESHOLD)
-            .build(&opctx, &datastore)
-            .await;
+        create_test_datasets_for_region_allocation(
+            &opctx,
+            datastore.clone(),
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
 
-        // Allocate regions from the datasets for this disk.
-        //
-        // Note that we ask for a disk which is as large as the zpool,
-        // so we shouldn't have space for redundancy.
-        let params = create_test_disk_create_params("disk1", zpool_size);
+        let disk_size = test_zpool_size();
+        let alloc_size = ByteCount::try_from(disk_size.to_bytes() * 2).unwrap();
+        let params = create_test_disk_create_params("disk1", alloc_size);
         let volume1_id = Uuid::new_v4();
 
         datastore
@@ -933,6 +1244,7 @@ mod test {
                 volume1_id,
                 &params.disk_source,
                 params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
             .unwrap_err();
@@ -972,6 +1284,7 @@ mod test {
                 volume1_id,
                 &params.disk_source,
                 params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
             .unwrap_err();
@@ -1007,6 +1320,7 @@ mod test {
                 volume_id,
                 &params.disk_source,
                 params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
             .unwrap();
@@ -1050,6 +1364,7 @@ mod test {
                 volume_id,
                 &params.disk_source,
                 params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
             )
             .await
             .unwrap_err();
@@ -1068,10 +1383,11 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = db::Pool::new(&logctx.log, &cfg);
-        let datastore = DataStore::new(Arc::new(pool));
-
+        let datastore =
+            DataStore::new(&logctx.log, Arc::new(pool), None).await.unwrap();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
-            .explain_async(datastore.pool())
+            .explain_async(&conn)
             .await
             .unwrap();
         assert!(
@@ -1096,7 +1412,7 @@ mod test {
                 .values(values)
                 .returning(VpcSubnet::as_returning());
         println!("{}", diesel::debug_query(&query));
-        let explanation = query.explain_async(datastore.pool()).await.unwrap();
+        let explanation = query.explain_async(&conn).await.unwrap();
         assert!(
             !explanation.contains("FULL SCAN"),
             "Found an unexpected FULL SCAN: {}",
@@ -1117,14 +1433,15 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
         let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-        let datastore = Arc::new(DataStore::new(Arc::clone(&pool)));
+        let datastore =
+            Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), datastore.clone());
 
         let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
         let sled1_id = "0de4b299-e0b4-46f0-d528-85de81a7095f".parse().unwrap();
-        let sled1 = db::model::Sled::new(
+        let sled1 = db::model::SledUpdate::new(
             sled1_id,
             addr1,
             sled_baseboard_for_test(),
@@ -1135,7 +1452,7 @@ mod test {
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
-        let sled2 = db::model::Sled::new(
+        let sled2 = db::model::SledUpdate::new(
             sled2_id,
             addr2,
             sled_baseboard_for_test(),
@@ -1471,6 +1788,7 @@ mod test {
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // Create a few records.
         let now = Utc::now();
@@ -1485,6 +1803,7 @@ mod test {
                 time_deleted: None,
                 ip_pool_id: Uuid::new_v4(),
                 ip_pool_range_id: Uuid::new_v4(),
+                project_id: None,
                 is_service: false,
                 parent_id: Some(instance_id),
                 kind: IpKind::Ephemeral,
@@ -1497,7 +1816,7 @@ mod test {
             .collect::<Vec<_>>();
         diesel::insert_into(dsl::external_ip)
             .values(ips.clone())
-            .execute_async(datastore.pool())
+            .execute_async(&*conn)
             .await
             .unwrap();
 
@@ -1532,6 +1851,7 @@ mod test {
             dev::test_setup_log("test_deallocate_external_ip_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // Create a record.
         let now = Utc::now();
@@ -1544,6 +1864,7 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
+            project_id: None,
             is_service: false,
             parent_id: Some(Uuid::new_v4()),
             kind: IpKind::SNat,
@@ -1555,7 +1876,7 @@ mod test {
         };
         diesel::insert_into(dsl::external_ip)
             .values(ip.clone())
-            .execute_async(datastore.pool())
+            .execute_async(&*conn)
             .await
             .unwrap();
 
@@ -1589,14 +1910,14 @@ mod test {
     async fn test_external_ip_check_constraints() {
         use crate::db::model::IpKind;
         use crate::db::schema::external_ip::dsl;
-        use async_bb8_diesel::ConnectionError::Query;
-        use async_bb8_diesel::PoolError::Connection;
         use diesel::result::DatabaseErrorKind::CheckViolation;
+        use diesel::result::DatabaseErrorKind::UniqueViolation;
         use diesel::result::Error::DatabaseError;
 
         let logctx = dev::test_setup_log("test_external_ip_check_constraints");
         let mut db = test_setup_database(&logctx.log).await;
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
         let now = Utc::now();
 
         // Create a mostly-populated record, for a floating IP
@@ -1615,6 +1936,7 @@ mod test {
             time_deleted: None,
             ip_pool_id: Uuid::new_v4(),
             ip_pool_range_id: Uuid::new_v4(),
+            project_id: None,
             is_service: false,
             parent_id: Some(Uuid::new_v4()),
             kind: IpKind::Floating,
@@ -1627,151 +1949,190 @@ mod test {
         // - name
         // - description
         // - parent (instance / service) UUID
-        let names = [
-            None,
-            Some(db::model::Name(Name::try_from("foo".to_string()).unwrap())),
-        ];
+        // - project UUID
+        let names = [None, Some("foo")];
         let descriptions = [None, Some("foo".to_string())];
         let parent_ids = [None, Some(Uuid::new_v4())];
+        let project_ids = [None, Some(Uuid::new_v4())];
+
+        let mut seen_pairs = HashSet::new();
 
         // For Floating IPs, both name and description must be non-NULL
-        for name in names.iter() {
-            for description in descriptions.iter() {
-                for parent_id in parent_ids.iter() {
-                    for is_service in [false, true] {
-                        let new_ip = ExternalIp {
-                            id: Uuid::new_v4(),
-                            name: name.clone(),
-                            description: description.clone(),
-                            ip: addresses.next().unwrap().into(),
-                            is_service,
-                            parent_id: *parent_id,
-                            ..ip
-                        };
-                        let res = diesel::insert_into(dsl::external_ip)
-                            .values(new_ip)
-                            .execute_async(datastore.pool())
-                            .await;
-                        if name.is_some() && description.is_some() {
-                            // Name/description must be non-NULL, instance ID can be
-                            // either
-                            res.unwrap_or_else(|_| {
-                                panic!(
-                                    "Failed to insert Floating IP with valid \
-                                     name, description, and {} ID",
-                                    if is_service {
-                                        "Service"
-                                    } else {
-                                        "Instance"
-                                    }
-                                )
-                            });
-                        } else {
-                            // At least one is not valid, we expect a check violation
-                            let err = res.expect_err(
-                                "Expected a CHECK violation when inserting a \
-                                 Floating IP record with NULL name and/or description",
-                            );
-                            assert!(
-                                matches!(
-                                    err,
-                                    Connection(Query(DatabaseError(
-                                        CheckViolation,
-                                        _
-                                    )))
-                                ),
-                                "Expected a CHECK violation when inserting a \
-                                 Floating IP record with NULL name and/or description",
-                            );
-                        }
-                    }
-                }
+        // If they are instance FIPs, they *must* have a project id.
+        for (
+            name,
+            description,
+            parent_id,
+            is_service,
+            project_id,
+            modify_name,
+        ) in itertools::iproduct!(
+            &names,
+            &descriptions,
+            &parent_ids,
+            [false, true],
+            &project_ids,
+            [false, true]
+        ) {
+            // Both choices of parent_id are valid, so we need a unique name for each.
+            let name_local = name.map(|v| {
+                let name = if modify_name {
+                    v.to_string()
+                } else {
+                    format!("{v}-with-parent")
+                };
+                db::model::Name(Name::try_from(name).unwrap())
+            });
+
+            // We do name duplicate checking on the `Some` branch, don't steal the
+            // name intended for another floating IP.
+            if parent_id.is_none() && modify_name {
+                continue;
+            }
+
+            let new_ip = ExternalIp {
+                id: Uuid::new_v4(),
+                name: name_local.clone(),
+                description: description.clone(),
+                ip: addresses.next().unwrap().into(),
+                is_service,
+                parent_id: *parent_id,
+                project_id: *project_id,
+                ..ip
+            };
+
+            let key = (*project_id, name_local);
+
+            let res = diesel::insert_into(dsl::external_ip)
+                .values(new_ip)
+                .execute_async(&*conn)
+                .await;
+
+            let project_as_expected = (is_service && project_id.is_none())
+                || (!is_service && project_id.is_some());
+
+            let valid_expression =
+                name.is_some() && description.is_some() && project_as_expected;
+            let name_exists = seen_pairs.contains(&key);
+
+            if valid_expression && !name_exists {
+                // Name/description must be non-NULL, instance ID can be
+                // either
+                // Names must be unique at fleet level and at project level.
+                // Project must be NULL if service, non-NULL if instance.
+                res.unwrap_or_else(|e| {
+                    panic!(
+                        "Failed to insert Floating IP with valid \
+                         name, description, project ID, and {} ID:\
+                         {name:?} {description:?} {project_id:?} {:?}\n{e}",
+                        if is_service { "Service" } else { "Instance" },
+                        &ip.parent_id
+                    )
+                });
+
+                seen_pairs.insert(key);
+            } else if !valid_expression {
+                // Several permutations are invalid and we want to detect them all.
+                // NOTE: CHECK violation will supersede UNIQUE violation below.
+                let err = res.expect_err(
+                    "Expected a CHECK violation when inserting a \
+                     Floating IP record with NULL name and/or description, \
+                     and incorrect project parent relation",
+                );
+                assert!(
+                    matches!(err, DatabaseError(CheckViolation, _)),
+                    "Expected a CHECK violation when inserting a \
+                     Floating IP record with NULL name and/or description, \
+                     and incorrect project parent relation",
+                );
+            } else {
+                let err = res.expect_err(
+                    "Expected a UNIQUE violation when inserting a \
+                     Floating IP record with existing (name, project_id)",
+                );
+                assert!(
+                    matches!(err, DatabaseError(UniqueViolation, _)),
+                    "Expected a UNIQUE violation when inserting a \
+                     Floating IP record with existing (name, project_id)",
+                );
             }
         }
 
-        // For other IP types, both name and description must be NULL
-        for kind in [IpKind::SNat, IpKind::Ephemeral].into_iter() {
-            for name in names.iter() {
-                for description in descriptions.iter() {
-                    for parent_id in parent_ids.iter() {
-                        for is_service in [false, true] {
-                            let new_ip = ExternalIp {
-                                id: Uuid::new_v4(),
-                                name: name.clone(),
-                                description: description.clone(),
-                                kind,
-                                ip: addresses.next().unwrap().into(),
-                                is_service,
-                                parent_id: *parent_id,
-                                ..ip
-                            };
-                            let res = diesel::insert_into(dsl::external_ip)
-                                .values(new_ip.clone())
-                                .execute_async(datastore.pool())
-                                .await;
-                            let ip_type =
-                                if is_service { "Service" } else { "Instance" };
-                            if name.is_none()
-                                && description.is_none()
-                                && parent_id.is_some()
-                            {
-                                // Name/description must be NULL, instance ID cannot
-                                // be NULL.
+        // For other IP types: name, description and project must be NULL
+        for (kind, name, description, parent_id, is_service, project_id) in itertools::iproduct!(
+            [IpKind::SNat, IpKind::Ephemeral],
+            &names,
+            &descriptions,
+            &parent_ids,
+            [false, true],
+            &project_ids
+        ) {
+            let name_local = name.map(|v| {
+                db::model::Name(Name::try_from(v.to_string()).unwrap())
+            });
+            let new_ip = ExternalIp {
+                id: Uuid::new_v4(),
+                name: name_local,
+                description: description.clone(),
+                kind,
+                ip: addresses.next().unwrap().into(),
+                is_service,
+                parent_id: *parent_id,
+                project_id: *project_id,
+                ..ip
+            };
+            let res = diesel::insert_into(dsl::external_ip)
+                .values(new_ip.clone())
+                .execute_async(&*conn)
+                .await;
+            let ip_type = if is_service { "Service" } else { "Instance" };
+            if name.is_none()
+                && description.is_none()
+                && parent_id.is_some()
+                && project_id.is_none()
+            {
+                // Name/description must be NULL, instance ID cannot
+                // be NULL.
 
-                                if kind == IpKind::Ephemeral && is_service {
-                                    // Ephemeral Service IPs aren't supported.
-                                    let err = res.unwrap_err();
-                                    assert!(
-                                        matches!(
-                                            err,
-                                            Connection(Query(DatabaseError(
-                                                CheckViolation,
-                                                _
-                                            )))
-                                        ),
-                                        "Expected a CHECK violation when inserting an \
-                                         Ephemeral Service IP",
-                                    );
-                                } else {
-                                    assert!(
-                                        res.is_ok(),
-                                        "Failed to insert {:?} IP with valid \
-                                         name, description, and {} ID",
-                                        kind,
-                                        ip_type,
-                                    );
-                                }
-                            } else {
-                                // One is not valid, we expect a check violation
-                                assert!(
-                                    res.is_err(),
-                                    "Expected a CHECK violation when inserting a \
-                                     {:?} IP record with non-NULL name, description, \
-                                     and/or {} ID",
-                                    kind,
-                                    ip_type,
-                                );
-                                let err = res.unwrap_err();
-                                assert!(
-                                    matches!(
-                                        err,
-                                        Connection(Query(DatabaseError(
-                                            CheckViolation,
-                                            _
-                                        )))
-                                    ),
-                                    "Expected a CHECK violation when inserting a \
-                                     {:?} IP record with non-NULL name, description, \
-                                     and/or {} ID",
-                                    kind,
-                                    ip_type,
-                                );
-                            }
-                        }
-                    }
+                if kind == IpKind::Ephemeral && is_service {
+                    // Ephemeral Service IPs aren't supported.
+                    let err = res.unwrap_err();
+                    assert!(
+                        matches!(err, DatabaseError(CheckViolation, _)),
+                        "Expected a CHECK violation when inserting an \
+                         Ephemeral Service IP",
+                    );
+                } else {
+                    assert!(
+                        res.is_ok(),
+                        "Failed to insert {:?} IP with valid \
+                         name, description, and {} ID",
+                        kind,
+                        ip_type,
+                    );
                 }
+            } else {
+                // One is not valid, we expect a check violation
+                assert!(
+                    res.is_err(),
+                    "Expected a CHECK violation when inserting a \
+                     {:?} IP record with non-NULL name, description, \
+                     and/or {} ID",
+                    kind,
+                    ip_type,
+                );
+                let err = res.unwrap_err();
+                assert!(
+                    matches!(err, DatabaseError(CheckViolation, _)),
+                    "Expected a CHECK violation when inserting a \
+                     {:?} IP record with non-NULL name, description, \
+                     and/or {} ID",
+                    kind,
+                    ip_type,
+                );
             }
         }
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

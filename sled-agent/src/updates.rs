@@ -198,7 +198,8 @@ impl UpdateManager {
                 let serde_json::Value::String(pkg) = &json["pkg"] else {
                     return Err(version_malformed_err(path, "pkg"));
                 };
-                let serde_json::Value::String(version) = &json["version"] else {
+                let serde_json::Value::String(version) = &json["version"]
+                else {
                     return Err(version_malformed_err(path, "version"));
                 };
 
@@ -257,21 +258,22 @@ impl UpdateManager {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::mocks::MockNexusClient;
-    use bytes::Bytes;
+    use crate::fakes::nexus::FakeNexusServer;
     use flate2::write::GzEncoder;
-    use http::StatusCode;
-    use progenitor::progenitor_client::{ByteStream, ResponseValue};
-    use reqwest::{header::HeaderMap, Result};
+    use nexus_client::Client as NexusClient;
+    use omicron_common::api::external::Error;
+    use omicron_common::api::internal::nexus::UpdateArtifactId;
+    use omicron_test_utils::dev::test_setup_log;
     use std::io::Write;
     use tar::Builder;
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_write_artifact_to_filesystem() {
+        let logctx = test_setup_log("test_write_artifact_to_filesystem");
+        let log = &logctx.log;
         // The (completely fabricated) artifact we'd like to download.
         let expected_name = "test_artifact";
-        let expected_contents = "test_artifact contents";
+        const EXPECTED_CONTENTS: &'static str = "test_artifact contents";
         let artifact = UpdateArtifactId {
             name: expected_name.to_string(),
             version: "0.0.0".parse().unwrap(),
@@ -286,23 +288,27 @@ mod test {
         let _ = tokio::fs::remove_file(&expected_path).await;
 
         // Let's pretend this is an artifact Nexus can actually give us.
-        let mut nexus_client = MockNexusClient::default();
-        nexus_client.expect_cpapi_artifact_download().times(1).return_once(
-            move |kind, name, version| {
-                assert_eq!(name, "test_artifact");
-                assert_eq!(version.to_string(), "0.0.0");
-                assert_eq!(kind.to_string(), "control_plane");
-                let response = ByteStream::new(Box::pin(
-                    futures::stream::once(futures::future::ready(Result::Ok(
-                        Bytes::from(expected_contents),
-                    ))),
-                ));
-                Ok(ResponseValue::new(
-                    response,
-                    StatusCode::OK,
-                    HeaderMap::default(),
-                ))
-            },
+        struct NexusServer {}
+        impl FakeNexusServer for NexusServer {
+            fn cpapi_artifact_download(
+                &self,
+                artifact_id: UpdateArtifactId,
+            ) -> Result<Vec<u8>, Error> {
+                assert_eq!(artifact_id.name, "test_artifact");
+                assert_eq!(artifact_id.version.to_string(), "0.0.0");
+                assert_eq!(artifact_id.kind.to_string(), "control_plane");
+
+                Ok(EXPECTED_CONTENTS.as_bytes().to_vec())
+            }
+        }
+
+        let nexus_server = crate::fakes::nexus::start_test_server(
+            log.clone(),
+            Box::new(NexusServer {}),
+        );
+        let nexus_client = NexusClient::new(
+            &format!("http://{}", nexus_server.local_addr()),
+            log.clone(),
         );
 
         let config =
@@ -314,7 +320,9 @@ mod test {
         // Confirm the download succeeded.
         assert!(expected_path.exists());
         let contents = tokio::fs::read(&expected_path).await.unwrap();
-        assert_eq!(std::str::from_utf8(&contents).unwrap(), expected_contents);
+        assert_eq!(std::str::from_utf8(&contents).unwrap(), EXPECTED_CONTENTS);
+
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]

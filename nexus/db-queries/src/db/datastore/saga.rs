@@ -6,7 +6,7 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::Generation;
 use crate::db::pagination::paginated;
@@ -30,11 +30,9 @@ impl DataStore {
 
         diesel::insert_into(dsl::saga)
             .values(saga.clone())
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(())
     }
 
@@ -48,10 +46,10 @@ impl DataStore {
         // owning this saga.
         diesel::insert_into(dsl::saga_node_event)
             .values(event.clone())
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(ResourceType::SagaDbg, "Saga Event"),
                 )
@@ -75,10 +73,10 @@ impl DataStore {
             .filter(dsl::adopt_generation.eq(current_adopt_generation))
             .set(dsl::saga_state.eq(db::saga_types::SagaCachedState(new_state)))
             .check_if_exists::<db::saga_types::Saga>(saga_id)
-            .execute_and_check(self.pool())
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::SagaDbg,
@@ -89,8 +87,8 @@ impl DataStore {
 
         match result.status {
             UpdateStatus::Updated => Ok(()),
-            UpdateStatus::NotUpdatedButExists => Err(Error::InvalidRequest {
-                message: format!(
+            UpdateStatus::NotUpdatedButExists => Err(Error::invalid_request(
+                format!(
                     "failed to update saga {:?} with state {:?}: preconditions not met: \
                     expected current_sec = {:?}, adopt_generation = {:?}, \
                     but found current_sec = {:?}, adopt_generation = {:?}, state = {:?}",
@@ -102,7 +100,7 @@ impl DataStore {
                     result.found.adopt_generation,
                     result.found.saga_state,
                 )
-            }),
+            )),
         }
     }
 
@@ -117,10 +115,10 @@ impl DataStore {
                 steno::SagaCachedState::Done,
             )))
             .filter(dsl::current_sec.eq(*sec_id))
-            .load_async(self.pool())
+            .load_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::SagaDbg,
@@ -138,10 +136,12 @@ impl DataStore {
         use db::schema::saga_node_event::dsl;
         paginated(dsl::saga_node_event, dsl::saga_id, &pagparams)
             .filter(dsl::saga_id.eq(id))
-            .load_async::<db::saga_types::SagaNodeEvent>(self.pool())
+            .load_async::<db::saga_types::SagaNodeEvent>(
+                &*self.pool_connection_unauthorized().await?,
+            )
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::SagaDbg,

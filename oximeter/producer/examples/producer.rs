@@ -6,14 +6,18 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
+use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HandlerTaskMode;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter::types::Cumulative;
+use oximeter::types::ProducerRegistry;
 use oximeter::types::Sample;
 use oximeter::Metric;
 use oximeter::MetricsError;
@@ -22,8 +26,21 @@ use oximeter::Target;
 use oximeter_producer::Config;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server;
+use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
+
+/// Run an example oximeter metric producer.
+#[derive(Parser)]
+struct Args {
+    /// The address to use for the producer server.
+    #[arg(long, default_value = "[::1]:0")]
+    address: SocketAddr,
+
+    /// The address of nexus at which to register.
+    #[arg(long, default_value = "[::1]:12221")]
+    nexus: SocketAddr,
+}
 
 /// Example target describing a virtual machine.
 #[derive(Debug, Clone, Target)]
@@ -85,7 +102,7 @@ impl Producer for CpuBusyProducer {
                 .as_secs_f64();
             let datum = cpu.datum_mut();
             *datum += elapsed - datum.value();
-            data.push(Sample::new(&self.vm, cpu));
+            data.push(Sample::new(&self.vm, cpu)?);
         }
         // Yield the available samples.
         Ok(Box::new(data.into_iter()))
@@ -93,30 +110,30 @@ impl Producer for CpuBusyProducer {
 }
 
 #[tokio::main]
-async fn main() {
-    let address = "[::1]:0".parse().unwrap();
+async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
     let dropshot = ConfigDropshot {
-        bind_address: address,
+        bind_address: args.address,
         request_body_max_bytes: 2048,
         default_handler_task_mode: HandlerTaskMode::Detached,
     };
     let log = LogConfig::Config(ConfigLogging::StderrTerminal {
         level: ConfigLoggingLevel::Debug,
     });
+    let registry = ProducerRegistry::new();
+    let producer = CpuBusyProducer::new(4);
+    registry.register_producer(producer).unwrap();
     let server_info = ProducerEndpoint {
-        id: Uuid::new_v4(),
-        address,
+        id: registry.producer_id(),
+        kind: ProducerKind::Service,
+        address: args.address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
     };
-    let config = Config {
-        server_info,
-        registration_address: "[::1]:12221".parse().unwrap(),
-        dropshot,
-        log,
-    };
-    let server = Server::start(&config).await.unwrap();
-    let producer = CpuBusyProducer::new(4);
-    server.registry().register_producer(producer).unwrap();
-    server.serve_forever().await.unwrap();
+    let config =
+        Config { server_info, registration_address: args.nexus, dropshot, log };
+    let server = Server::with_registry(registry, &config)
+        .await
+        .context("failed to create producer")?;
+    server.serve_forever().await.context("server failed")
 }

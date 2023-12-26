@@ -17,13 +17,13 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views::Snapshot;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::Snapshot;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use sled_agent_client::TestInterfaces as _;
@@ -84,7 +84,11 @@ async fn set_instance_state(
 }
 
 async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus.instance_sled_by_id(id).await.unwrap();
+    let sa = nexus
+        .instance_sled_by_id(id)
+        .await
+        .unwrap()
+        .expect("instance must be on a sled to simulate a state change");
     sa.instance_finish_transition(*id).await;
 }
 
@@ -298,25 +302,6 @@ async fn bulk_write_stop(
     .unwrap();
 }
 
-async fn import_blocks_from_url(client: &ClientTestContext) {
-    // Import blocks from a URL
-    let import_blocks_from_url_url =
-        format!("/v1/disks/{}/import?project={}", DISK_NAME, PROJECT_NAME,);
-
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &import_blocks_from_url_url)
-            .body(Some(&params::ImportBlocksFromUrl {
-                url: "http://fake.endpoint/image.iso".to_string(),
-                expected_digest: None,
-            }))
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-}
-
 async fn finalize_import(
     client: &ClientTestContext,
     expected_status: StatusCode,
@@ -455,33 +440,6 @@ async fn test_cannot_mount_import_from_bulk_writes_disk(
     // We shouldn't be able to attach a disk in state ImportingFromBulkWrites
     create_instance_and_attach_disk(client, nexus, StatusCode::BAD_REQUEST)
         .await;
-}
-
-// Test the normal flow of importing from a URL
-#[nexus_test]
-async fn test_import_blocks_from_url(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
-
-    DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
-
-    create_disk_with_state_importing_blocks(client).await;
-
-    // Import blocks from a URL
-    import_blocks_from_url(client).await;
-
-    // Validate disk is in state ImportReady
-    validate_disk_state(client, DiskState::ImportReady).await;
-
-    // Finalize import
-    finalize_import(client, StatusCode::NO_CONTENT).await;
-
-    // Validate disk is in state Detached
-    validate_disk_state(client, DiskState::Detached).await;
-
-    // Create an instance to attach the disk.
-    create_instance_and_attach_disk(client, nexus, StatusCode::ACCEPTED).await;
 }
 
 // Test the normal flow of importing from bulk writes

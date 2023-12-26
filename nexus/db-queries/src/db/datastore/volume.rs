@@ -6,27 +6,27 @@
 
 use super::DataStore;
 use crate::db;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
 use crate::db::model::Volume;
-use async_bb8_diesel::AsyncConnection;
+use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
+use crate::transaction_retry::OptionalError;
+use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
 use diesel::prelude::*;
-use diesel::OptionalExtension as DieselOptionalExtension;
+use diesel::OptionalExtension;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
 use uuid::Uuid;
@@ -43,127 +43,142 @@ impl DataStore {
             #[error("Serde error during Volume creation: {0}")]
             SerdeError(#[from] serde_json::Error),
         }
-        type TxnError = TransactionError<VolumeCreationError>;
 
-        self.pool()
-            .transaction(move |conn| {
-                let maybe_volume: Option<Volume> = dsl::volume
-                    .filter(dsl::id.eq(volume.id()))
-                    .select(Volume::as_select())
-                    .first(conn)
-                    .optional()
-                    .map_err(|e| {
-                        TxnError::CustomError(VolumeCreationError::Public(
-                            public_error_from_diesel_pool(
-                                e.into(),
-                                ErrorHandler::Server,
-                            ),
-                        ))
-                    })?;
+        // Grab all the targets that the volume construction request references.
+        // Do this outside the transaction, as the data inside volume doesn't
+        // change and this would simply add to the transaction time.
+        let crucible_targets = {
+            let vcr: VolumeConstructionRequest =
+                serde_json::from_str(&volume.data()).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "serde_json::from_str error in volume_create: {}",
+                        e
+                    ))
+                })?;
 
-                // If the volume existed already, return it and do not increase
-                // usage counts.
-                if let Some(volume) = maybe_volume {
-                    return Ok(volume);
-                }
+            let mut crucible_targets = CrucibleTargets::default();
+            read_only_resources_associated_with_volume(
+                &vcr,
+                &mut crucible_targets,
+            );
+            crucible_targets
+        };
 
-                // TODO do we need on_conflict do_nothing here? if the transaction
-                // model is read-committed, the SELECT above could return nothing,
-                // and the INSERT here could still result in a conflict.
-                //
-                // See also https://github.com/oxidecomputer/omicron/issues/1168
-                let volume: Volume = diesel::insert_into(dsl::volume)
-                    .values(volume.clone())
-                    .on_conflict(dsl::id)
-                    .do_nothing()
-                    .returning(Volume::as_returning())
-                    .get_result(conn)
-                    .map_err(|e| {
-                        TxnError::CustomError(VolumeCreationError::Public(
-                            public_error_from_diesel_pool(
-                                e.into(),
-                                ErrorHandler::Conflict(
-                                    ResourceType::Volume,
-                                    volume.id().to_string().as_str(),
-                                ),
-                            ),
-                        ))
-                    })?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("volume_create")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let crucible_targets = crucible_targets.clone();
+                let volume = volume.clone();
+                async move {
+                    let maybe_volume: Option<Volume> = dsl::volume
+                        .filter(dsl::id.eq(volume.id()))
+                        .select(Volume::as_select())
+                        .first_async(&conn)
+                        .await
+                        .optional()?;
 
-                // Increase the usage count for Crucible resources according to the
-                // contents of the volume.
+                    // If the volume existed already, return it and do not increase
+                    // usage counts.
+                    if let Some(volume) = maybe_volume {
+                        return Ok(volume);
+                    }
 
-                // Grab all the targets that the volume construction request references.
-                let crucible_targets = {
-                    let vcr: VolumeConstructionRequest = serde_json::from_str(
-                        &volume.data(),
-                    )
-                    .map_err(|e: serde_json::Error| {
-                        TxnError::CustomError(VolumeCreationError::SerdeError(
-                            e,
-                        ))
-                    })?;
-
-                    let mut crucible_targets = CrucibleTargets::default();
-                    resources_associated_with_volume(
-                        &vcr,
-                        &mut crucible_targets,
-                    );
-                    crucible_targets
-                };
-
-                // Increase the number of uses for each referenced region snapshot.
-                use db::schema::region_snapshot::dsl as rs_dsl;
-                for read_only_target in &crucible_targets.read_only_targets {
-                    diesel::update(rs_dsl::region_snapshot)
-                        .filter(
-                            rs_dsl::snapshot_addr.eq(read_only_target.clone()),
-                        )
-                        .set(
-                            rs_dsl::volume_references
-                                .eq(rs_dsl::volume_references + 1),
-                        )
-                        .execute(conn)
+                    // TODO do we need on_conflict do_nothing here? if the transaction
+                    // model is read-committed, the SELECT above could return nothing,
+                    // and the INSERT here could still result in a conflict.
+                    //
+                    // See also https://github.com/oxidecomputer/omicron/issues/1168
+                    let volume: Volume = diesel::insert_into(dsl::volume)
+                        .values(volume.clone())
+                        .on_conflict(dsl::id)
+                        .do_nothing()
+                        .returning(Volume::as_returning())
+                        .get_result_async(&conn)
+                        .await
                         .map_err(|e| {
-                            TxnError::CustomError(VolumeCreationError::Public(
-                                public_error_from_diesel_pool(
-                                    e.into(),
-                                    ErrorHandler::Server,
-                                ),
-                            ))
+                            err.bail_retryable_or_else(e, |e| {
+                                VolumeCreationError::Public(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Conflict(
+                                            ResourceType::Volume,
+                                            volume.id().to_string().as_str(),
+                                        ),
+                                    ),
+                                )
+                            })
                         })?;
-                }
 
-                Ok(volume)
+                    // Increase the usage count for Crucible resources according to the
+                    // contents of the volume.
+
+                    // Increase the number of uses for each referenced region snapshot.
+                    use db::schema::region_snapshot::dsl as rs_dsl;
+                    for read_only_target in &crucible_targets.read_only_targets
+                    {
+                        diesel::update(rs_dsl::region_snapshot)
+                            .filter(
+                                rs_dsl::snapshot_addr
+                                    .eq(read_only_target.clone()),
+                            )
+                            .filter(rs_dsl::deleting.eq(false))
+                            .set(
+                                rs_dsl::volume_references
+                                    .eq(rs_dsl::volume_references + 1),
+                            )
+                            .execute_async(&conn)
+                            .await?;
+                    }
+
+                    Ok(volume)
+                }
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(VolumeCreationError::Public(e)) => e,
-
-                _ => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        VolumeCreationError::Public(err) => err,
+                        VolumeCreationError::SerdeError(err) => {
+                            Error::internal_error(&format!(
+                                "Transaction error: {}",
+                                err
+                            ))
+                        }
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
     }
 
+    /// Return a `Option<Volume>` based on id, even if it's soft deleted.
+    pub async fn volume_get(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<Option<Volume>> {
+        use db::schema::volume::dsl;
+        dsl::volume
+            .filter(dsl::id.eq(volume_id))
+            .select(Volume::as_select())
+            .first_async::<Volume>(&*self.pool_connection_unauthorized().await?)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Delete the volume if it exists. If it was already deleted, this is a
+    /// no-op.
     pub async fn volume_hard_delete(&self, volume_id: Uuid) -> DeleteResult {
         use db::schema::volume::dsl;
 
         diesel::delete(dsl::volume)
             .filter(dsl::id.eq(volume_id))
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel_pool(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Volume,
-                        LookupType::ById(volume_id),
-                    ),
-                )
-            })?;
-
-        Ok(())
+            .map(|_| ())
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Checkout a copy of the Volume from the database.
@@ -180,16 +195,12 @@ impl DataStore {
 
         #[derive(Debug, thiserror::Error)]
         enum VolumeGetError {
-            #[error("Error during volume_checkout: {0}")]
-            DieselError(#[from] diesel::result::Error),
-
             #[error("Serde error during volume_checkout: {0}")]
             SerdeError(#[from] serde_json::Error),
 
             #[error("Updated {0} database rows, expected {1}")]
             UnexpectedDatabaseUpdate(usize, usize),
         }
-        type TxnError = TransactionError<VolumeGetError>;
 
         // We perform a transaction here, to be sure that on completion
         // of this, the database contains an updated version of the
@@ -197,141 +208,141 @@ impl DataStore {
         // types that require it).  The generation number (along with the
         // rest of the volume data) that was in the database is what is
         // returned to the caller.
-        self.pool()
-            .transaction(move |conn| {
-                // Grab the volume in question.
-                let volume = dsl::volume
-                    .filter(dsl::id.eq(volume_id))
-                    .select(Volume::as_select())
-                    .get_result(conn)?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
 
-                // Turn the volume.data into the VolumeConstructionRequest
-                let vcr: VolumeConstructionRequest =
-                    serde_json::from_str(volume.data()).map_err(|e| {
-                        TxnError::CustomError(VolumeGetError::SerdeError(e))
-                    })?;
+        self.transaction_retry_wrapper("volume_checkout")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // Grab the volume in question.
+                    let volume = dsl::volume
+                        .filter(dsl::id.eq(volume_id))
+                        .select(Volume::as_select())
+                        .get_result_async(&conn)
+                        .await?;
 
-                // Look to see if the VCR is a Volume type, and if so, look at
-                // its sub_volumes. If they are of type Region, then we need
-                // to update their generation numbers and record that update
-                // back to the database. We return to the caller whatever the
-                // original volume data was we pulled from the database.
-                match vcr {
-                    VolumeConstructionRequest::Volume {
-                        id,
-                        block_size,
-                        sub_volumes,
-                        read_only_parent,
-                    } => {
-                        let mut update_needed = false;
-                        let mut new_sv = Vec::new();
-                        for sv in sub_volumes {
-                            match sv {
-                                VolumeConstructionRequest::Region {
+                    // Turn the volume.data into the VolumeConstructionRequest
+                    let vcr: VolumeConstructionRequest =
+                        serde_json::from_str(volume.data()).map_err(|e| {
+                            err.bail(VolumeGetError::SerdeError(e))
+                        })?;
+
+                    // Look to see if the VCR is a Volume type, and if so, look at
+                    // its sub_volumes. If they are of type Region, then we need
+                    // to update their generation numbers and record that update
+                    // back to the database. We return to the caller whatever the
+                    // original volume data was we pulled from the database.
+                    match vcr {
+                        VolumeConstructionRequest::Volume {
+                            id,
+                            block_size,
+                            sub_volumes,
+                            read_only_parent,
+                        } => {
+                            let mut update_needed = false;
+                            let mut new_sv = Vec::new();
+                            for sv in sub_volumes {
+                                match sv {
+                                    VolumeConstructionRequest::Region {
+                                        block_size,
+                                        blocks_per_extent,
+                                        extent_count,
+                                        opts,
+                                        gen,
+                                    } => {
+                                        update_needed = true;
+                                        new_sv.push(
+                                            VolumeConstructionRequest::Region {
+                                                block_size,
+                                                blocks_per_extent,
+                                                extent_count,
+                                                opts,
+                                                gen: gen + 1,
+                                            },
+                                        );
+                                    }
+                                    _ => {
+                                        new_sv.push(sv);
+                                    }
+                                }
+                            }
+
+                            // Only update the volume data if we found the type
+                            // of volume that needed it.
+                            if update_needed {
+                                // Create a new VCR and fill in the contents
+                                // from what the original volume had, but with our
+                                // updated sub_volume records.
+                                let new_vcr = VolumeConstructionRequest::Volume {
+                                    id,
                                     block_size,
-                                    blocks_per_extent,
-                                    extent_count,
-                                    opts,
-                                    gen,
-                                } => {
-                                    update_needed = true;
-                                    new_sv.push(
-                                        VolumeConstructionRequest::Region {
-                                            block_size,
-                                            blocks_per_extent,
-                                            extent_count,
-                                            opts,
-                                            gen: gen + 1,
-                                        },
-                                    );
-                                }
-                                _ => {
-                                    new_sv.push(sv);
-                                }
-                            }
-                        }
+                                    sub_volumes: new_sv,
+                                    read_only_parent,
+                                };
 
-                        // Only update the volume data if we found the type
-                        // of volume that needed it.
-                        if update_needed {
-                            // Create a new VCR and fill in the contents
-                            // from what the original volume had, but with our
-                            // updated sub_volume records.
-                            let new_vcr = VolumeConstructionRequest::Volume {
-                                id,
-                                block_size,
-                                sub_volumes: new_sv,
-                                read_only_parent,
-                            };
-
-                            let new_volume_data = serde_json::to_string(
-                                &new_vcr,
-                            )
-                            .map_err(|e| {
-                                TxnError::CustomError(
-                                    VolumeGetError::SerdeError(e),
+                                let new_volume_data = serde_json::to_string(
+                                    &new_vcr,
                                 )
-                            })?;
+                                .map_err(|e| {
+                                    err.bail(VolumeGetError::SerdeError(e))
+                                })?;
 
-                            // Update the original volume_id with the new
-                            // volume.data.
-                            use db::schema::volume::dsl as volume_dsl;
-                            let num_updated =
-                                diesel::update(volume_dsl::volume)
-                                    .filter(volume_dsl::id.eq(volume_id))
-                                    .set(volume_dsl::data.eq(new_volume_data))
-                                    .execute(conn)?;
+                                // Update the original volume_id with the new
+                                // volume.data.
+                                use db::schema::volume::dsl as volume_dsl;
+                                let num_updated =
+                                    diesel::update(volume_dsl::volume)
+                                        .filter(volume_dsl::id.eq(volume_id))
+                                        .set(volume_dsl::data.eq(new_volume_data))
+                                        .execute_async(&conn)
+                                        .await?;
 
-                            // This should update just one row.  If it does
-                            // not, then something is terribly wrong in the
-                            // database.
-                            if num_updated != 1 {
-                                return Err(TxnError::CustomError(
-                                    VolumeGetError::UnexpectedDatabaseUpdate(
-                                        num_updated,
-                                        1,
-                                    ),
-                                ));
+                                // This should update just one row.  If it does
+                                // not, then something is terribly wrong in the
+                                // database.
+                                if num_updated != 1 {
+                                    return Err(err.bail(
+                                        VolumeGetError::UnexpectedDatabaseUpdate(
+                                            num_updated,
+                                            1,
+                                        ),
+                                    ));
+                                }
                             }
                         }
+                        VolumeConstructionRequest::Region {
+                            block_size: _,
+                            blocks_per_extent: _,
+                            extent_count: _,
+                            opts: _,
+                            gen: _,
+                        } => {
+                            // We don't support a pure Region VCR at the volume
+                            // level in the database, so this choice should
+                            // never be encountered, but I want to know if it is.
+                            panic!("Region not supported as a top level volume");
+                        }
+                        VolumeConstructionRequest::File {
+                            id: _,
+                            block_size: _,
+                            path: _,
+                        }
+                        | VolumeConstructionRequest::Url {
+                            id: _,
+                            block_size: _,
+                            url: _,
+                        } => {}
                     }
-                    VolumeConstructionRequest::Region {
-                        block_size: _,
-                        blocks_per_extent: _,
-                        extent_count: _,
-                        opts: _,
-                        gen: _,
-                    } => {
-                        // We don't support a pure Region VCR at the volume
-                        // level in the database, so this choice should
-                        // never be encountered, but I want to know if it is.
-                        panic!("Region not supported as a top level volume");
-                    }
-                    VolumeConstructionRequest::File {
-                        id: _,
-                        block_size: _,
-                        path: _,
-                    }
-                    | VolumeConstructionRequest::Url {
-                        id: _,
-                        block_size: _,
-                        url: _,
-                    } => {}
+                    Ok(volume)
                 }
-                Ok(volume)
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(VolumeGetError::DieselError(e)) => {
-                    public_error_from_diesel_pool(
-                        e.into(),
-                        ErrorHandler::Server,
-                    )
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return Error::internal_error(&format!("Transaction error: {}", err));
                 }
-
-                _ => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
-                }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 
@@ -381,6 +392,16 @@ impl DataStore {
                 opts,
                 gen,
             } => {
+                if !opts.read_only {
+                    // Only one volume can "own" a Region, and that volume's
+                    // UUID is recorded in the region table accordingly. It is
+                    // an error to make a copy of a volume construction request
+                    // that references non-read-only Regions.
+                    bail!(
+                        "only one Volume can reference a Region non-read-only!"
+                    );
+                }
+
                 let mut opts = opts.clone();
                 opts.id = Uuid::new_v4();
 
@@ -406,7 +427,10 @@ impl DataStore {
     /// Checkout a copy of the Volume from the database using `volume_checkout`,
     /// then randomize the UUIDs in the construction request. Because this is a
     /// new volume, it is immediately passed to `volume_create` so that the
-    /// accounting for Crucible resources stays correct.
+    /// accounting for Crucible resources stays correct. This is only valid for
+    /// Volumes that reference regions read-only - it's important for accounting
+    /// purposes that each region in this volume construction request is
+    /// returned by `read_only_resources_associated_with_volume`.
     pub async fn volume_checkout_randomize_ids(
         &self,
         volume_id: Uuid,
@@ -432,7 +456,7 @@ impl DataStore {
     /// snapshots.
     pub async fn find_deleted_volume_regions(
         &self,
-    ) -> ListResultVec<(Dataset, Region, Volume)> {
+    ) -> ListResultVec<(Dataset, Region, Option<RegionSnapshot>, Volume)> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         use db::schema::region_snapshot::dsl;
@@ -457,6 +481,10 @@ impl DataStore {
             .filter(
                 dsl::volume_references
                     .eq(0)
+                    // Despite the SQL specifying that this column is NOT NULL,
+                    // this null check is required for this function to work!
+                    // It's possible that the left join of region_snapshot above
+                    // could join zero rows, making this null.
                     .or(dsl::volume_references.is_null()),
             )
             // where the volume has already been soft-deleted
@@ -465,11 +493,34 @@ impl DataStore {
             .select((
                 Dataset::as_select(),
                 Region::as_select(),
+                Option::<RegionSnapshot>::as_select(),
                 Volume::as_select(),
             ))
-            .load_async(self.pool())
+            .load_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn read_only_resources_associated_with_volume(
+        &self,
+        volume_id: Uuid,
+    ) -> LookupResult<CrucibleTargets> {
+        let volume = if let Some(volume) = self.volume_get(volume_id).await? {
+            volume
+        } else {
+            // Volume has already been hard deleted (volume_get returns
+            // soft deleted records), return that no cleanup is necessary.
+            return Ok(CrucibleTargets::default());
+        };
+
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(&volume.data())?;
+
+        let mut crucible_targets = CrucibleTargets::default();
+
+        read_only_resources_associated_with_volume(&vcr, &mut crucible_targets);
+
+        Ok(crucible_targets)
     }
 
     /// Decrease the usage count for Crucible resources according to the
@@ -483,22 +534,44 @@ impl DataStore {
         &self,
         volume_id: Uuid,
     ) -> Result<CrucibleResources, Error> {
-        #[derive(Debug, thiserror::Error)]
-        enum DecreaseCrucibleResourcesError {
-            #[error("Error during decrease Crucible resources: {0}")]
-            DieselError(#[from] diesel::result::Error),
+        // Grab all the targets that the volume construction request references.
+        // Do this outside the transaction, as the data inside volume doesn't
+        // change and this would simply add to the transaction time.
+        let crucible_targets = {
+            let volume =
+                if let Some(volume) = self.volume_get(volume_id).await? {
+                    volume
+                } else {
+                    // The volume was hard-deleted, return an empty
+                    // CrucibleResources
+                    return Ok(CrucibleResources::V1(
+                        CrucibleResourcesV1::default(),
+                    ));
+                };
 
-            #[error("Serde error during decrease Crucible resources: {0}")]
-            SerdeError(#[from] serde_json::Error),
-        }
-        type TxnError = TransactionError<DecreaseCrucibleResourcesError>;
+            let vcr: VolumeConstructionRequest =
+                serde_json::from_str(&volume.data()).map_err(|e| {
+                    Error::internal_error(&format!(
+                        "serde_json::from_str error in volume_create: {}",
+                        e
+                    ))
+                })?;
 
-        // In a transaction:
+            let mut crucible_targets = CrucibleTargets::default();
+            read_only_resources_associated_with_volume(
+                &vcr,
+                &mut crucible_targets,
+            );
+            crucible_targets
+        };
+
+        // Call a CTE that will:
         //
         // 1. decrease the number of references for each region snapshot that
         //    this Volume references
         // 2. soft-delete the volume
-        // 3. record the resources to clean up
+        // 3. record the resources to clean up as a serialized CrucibleResources
+        //    struct in volume's `resources_to_clean_up` column.
         //
         // Step 3 is important because this function is called from a saga node.
         // If saga execution crashes after steps 1 and 2, but before serializing
@@ -507,196 +580,48 @@ impl DataStore {
         //
         // We also have to guard against the case where this function is called
         // multiple times, and that is done by soft-deleting the volume during
-        // the transaction, and returning the previously serialized list of
-        // resources to clean up if a soft-delete has already occurred.
-        //
-        // TODO it would be nice to make this transaction_async, but I couldn't
-        // get the async optional extension to work.
-        self.pool()
-            .transaction(move |conn| {
-                // Grab the volume in question. If the volume record was already
-                // hard-deleted, assume clean-up has occurred and return an empty
-                // CrucibleResources. If the volume record was soft-deleted, then
-                // return the serialized CrucibleResources.
-                let volume = {
-                    use db::schema::volume::dsl;
+        // the CTE, and returning the previously serialized list of resources to
+        // clean up if a soft-delete has already occurred.
 
-                    let volume = dsl::volume
-                        .filter(dsl::id.eq(volume_id))
-                        .select(Volume::as_select())
-                        .get_result(conn)
-                        .optional()?;
-
-                    let volume = if let Some(v) = volume {
-                        v
-                    } else {
-                        // the volume was hard-deleted, return an empty
-                        // CrucibleResources
-                        return Ok(CrucibleResources::V1(
-                            CrucibleResourcesV1::default(),
-                        ));
-                    };
-
-                    if volume.time_deleted.is_none() {
-                        // a volume record exists, and was not deleted - this is the
-                        // first time through this transaction for a certain volume
-                        // id. Get the volume for use in the transaction.
-                        volume
-                    } else {
-                        // this volume was soft deleted - this is a repeat time
-                        // through this transaction.
-
-                        if let Some(resources_to_clean_up) =
-                            volume.resources_to_clean_up
-                        {
-                            // return the serialized CrucibleResources
-                            return serde_json::from_str(
-                                &resources_to_clean_up,
-                            )
-                            .map_err(|e| {
-                                TxnError::CustomError(
-                                    DecreaseCrucibleResourcesError::SerdeError(
-                                        e,
-                                    ),
-                                )
-                            });
-                        } else {
-                            // If no CrucibleResources struct was serialized, that's
-                            // definitely a bug of some sort - the soft-delete below
-                            // sets time_deleted at the same time as
-                            // resources_to_clean_up! But, instead of a panic here,
-                            // just return an empty CrucibleResources.
-                            return Ok(CrucibleResources::V1(
-                                CrucibleResourcesV1::default(),
-                            ));
-                        }
-                    }
-                };
-
-                // Grab all the targets that the volume construction request references.
-                let crucible_targets = {
-                    let vcr: VolumeConstructionRequest =
-                        serde_json::from_str(&volume.data()).map_err(|e| {
-                            TxnError::CustomError(
-                                DecreaseCrucibleResourcesError::SerdeError(e),
-                            )
-                        })?;
-
-                    let mut crucible_targets = CrucibleTargets::default();
-                    resources_associated_with_volume(
-                        &vcr,
-                        &mut crucible_targets,
-                    );
-                    crucible_targets
-                };
-
-                // Decrease the number of uses for each referenced region snapshot.
-                use db::schema::region_snapshot::dsl;
-
-                for read_only_target in &crucible_targets.read_only_targets {
-                    diesel::update(dsl::region_snapshot)
-                        .filter(dsl::snapshot_addr.eq(read_only_target.clone()))
-                        .set(
-                            dsl::volume_references
-                                .eq(dsl::volume_references - 1),
-                        )
-                        .execute(conn)?;
-                }
-
-                // Return what results can be cleaned up
-                let result = CrucibleResources::V1(CrucibleResourcesV1 {
-                    // The only use of a read-write region will be at the top level of a
-                    // Volume. These are not shared, but if any snapshots are taken this
-                    // will prevent deletion of the region. Filter out any regions that
-                    // have associated snapshots.
-                    datasets_and_regions: {
-                        use db::schema::dataset::dsl as dataset_dsl;
-                        use db::schema::region::dsl as region_dsl;
-
-                        // Return all regions for this volume_id, where there either are
-                        // no region_snapshots, or region_snapshots.volume_references =
-                        // 0.
-                        region_dsl::region
-                            .filter(region_dsl::volume_id.eq(volume_id))
-                            .inner_join(
-                                dataset_dsl::dataset
-                                    .on(region_dsl::dataset_id
-                                        .eq(dataset_dsl::id)),
-                            )
-                            .left_join(
-                                dsl::region_snapshot.on(dsl::region_id
-                                    .eq(region_dsl::id)
-                                    .and(dsl::dataset_id.eq(dataset_dsl::id))),
-                            )
-                            .filter(
-                                dsl::volume_references
-                                    .eq(0)
-                                    .or(dsl::volume_references.is_null()),
-                            )
-                            .select((Dataset::as_select(), Region::as_select()))
-                            .get_results::<(Dataset, Region)>(conn)?
-                    },
-
-                    // A volume (for a disk or snapshot) may reference another nested
-                    // volume as a read-only parent, and this may be arbitrarily deep.
-                    // After decrementing volume_references above, get all region
-                    // snapshot records where the volume_references has gone to 0.
-                    // Consumers of this struct will be responsible for deleting the
-                    // read-only downstairs running for the snapshot and the snapshot
-                    // itself.
-                    datasets_and_snapshots: {
-                        use db::schema::dataset::dsl as dataset_dsl;
-
-                        dsl::region_snapshot
-                            .filter(dsl::volume_references.eq(0))
-                            .inner_join(
-                                dataset_dsl::dataset
-                                    .on(dsl::dataset_id.eq(dataset_dsl::id)),
-                            )
-                            .select((
-                                Dataset::as_select(),
-                                RegionSnapshot::as_select(),
-                            ))
-                            .get_results::<(Dataset, RegionSnapshot)>(conn)?
-                    },
-                });
-
-                // Soft delete this volume, and serialize the resources that are to
-                // be cleaned up.
-                use db::schema::volume::dsl as volume_dsl;
-
-                let now = Utc::now();
-                diesel::update(volume_dsl::volume)
-                    .filter(volume_dsl::id.eq(volume_id))
-                    .set((
-                        volume_dsl::time_deleted.eq(now),
-                        volume_dsl::resources_to_clean_up.eq(
-                            serde_json::to_string(&result).map_err(|e| {
-                                TxnError::CustomError(
-                                    DecreaseCrucibleResourcesError::SerdeError(
-                                        e,
-                                    ),
-                                )
-                            })?,
-                        ),
-                    ))
-                    .execute(conn)?;
-
-                Ok(result)
-            })
+        let _old_volume: Vec<Volume> =
+            DecreaseCrucibleResourceCountAndSoftDeleteVolume::new(
+                volume_id,
+                crucible_targets.read_only_targets.clone(),
+            )
+            .get_results_async::<Volume>(
+                &*self.pool_connection_unauthorized().await?,
+            )
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(
-                    DecreaseCrucibleResourcesError::DieselError(e),
-                ) => public_error_from_diesel_pool(
-                    e.into(),
-                    ErrorHandler::Server,
-                ),
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-                _ => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
+        // Get the updated Volume to get the resources to clean up
+        let resources_to_clean_up: CrucibleResources = match self
+            .volume_get(volume_id)
+            .await?
+        {
+            Some(volume) => {
+                match volume.resources_to_clean_up.as_ref() {
+                    Some(v) => serde_json::from_str(v)?,
+
+                    None => {
+                        // Even volumes with nothing to clean up should have
+                        // a serialized CrucibleResources that contains
+                        // empty vectors instead of None. Instead of
+                        // panicing here though, just return the default
+                        // (nothing to clean up).
+                        CrucibleResources::V1(CrucibleResourcesV1::default())
+                    }
                 }
-            })
+            }
+
+            None => {
+                // If the volume was hard-deleted already, return the
+                // default (nothing to clean up).
+                CrucibleResources::V1(CrucibleResourcesV1::default())
+            }
+        };
+
+        Ok(resources_to_clean_up)
     }
 
     // Here we remove the read only parent from volume_id, and attach it
@@ -712,16 +637,12 @@ impl DataStore {
     ) -> Result<bool, Error> {
         #[derive(Debug, thiserror::Error)]
         enum RemoveReadOnlyParentError {
-            #[error("Error removing read only parent: {0}")]
-            DieselError(#[from] diesel::result::Error),
-
             #[error("Serde error removing read only parent: {0}")]
             SerdeError(#[from] serde_json::Error),
 
             #[error("Updated {0} database rows, expected {1}")]
             UnexpectedDatabaseUpdate(usize, usize),
         }
-        type TxnError = TransactionError<RemoveReadOnlyParentError>;
 
         // In this single transaction:
         // - Get the given volume from the volume_id from the database
@@ -737,168 +658,162 @@ impl DataStore {
         //   data from original volume_id.
         // - Put the new temp VCR into the temp volume.data, update the
         //   temp_volume in the database.
-        self.pool()
-            .transaction(move |conn| {
-                // Grab the volume in question. If the volume record was already
-                // deleted then we can just return.
-                let volume = {
-                    use db::schema::volume::dsl;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("volume_remove_rop")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // Grab the volume in question. If the volume record was already
+                    // deleted then we can just return.
+                    let volume = {
+                        use db::schema::volume::dsl;
 
-                    let volume = dsl::volume
-                        .filter(dsl::id.eq(volume_id))
-                        .select(Volume::as_select())
-                        .get_result(conn)
-                        .optional()?;
+                        let volume = dsl::volume
+                            .filter(dsl::id.eq(volume_id))
+                            .select(Volume::as_select())
+                            .get_result_async(&conn)
+                            .await
+                            .optional()?;
 
-                    let volume = if let Some(v) = volume {
-                        v
-                    } else {
-                        // the volume does not exist, nothing to do.
-                        return Ok(false);
+                        let volume = if let Some(v) = volume {
+                            v
+                        } else {
+                            // the volume does not exist, nothing to do.
+                            return Ok(false);
+                        };
+
+                        if volume.time_deleted.is_some() {
+                            // this volume is deleted, so let whatever is deleting
+                            // it clean it up.
+                            return Ok(false);
+                        } else {
+                            // A volume record exists, and was not deleted, we
+                            // can attempt to remove its read_only_parent.
+                            volume
+                        }
                     };
 
-                    if volume.time_deleted.is_some() {
-                        // this volume is deleted, so let whatever is deleting
-                        // it clean it up.
-                        return Ok(false);
-                    } else {
-                        // A volume record exists, and was not deleted, we
-                        // can attempt to remove its read_only_parent.
-                        volume
-                    }
-                };
-
-                // If a read_only_parent exists, remove it from volume_id, and
-                // attach it to temp_volume_id.
-                let vcr: VolumeConstructionRequest =
-                    serde_json::from_str(
-                        volume.data()
-                    )
-                    .map_err(|e| {
-                        TxnError::CustomError(
-                            RemoveReadOnlyParentError::SerdeError(
-                                e,
-                            ),
+                    // If a read_only_parent exists, remove it from volume_id, and
+                    // attach it to temp_volume_id.
+                    let vcr: VolumeConstructionRequest =
+                        serde_json::from_str(
+                            volume.data()
                         )
-                    })?;
-
-                match vcr {
-                    VolumeConstructionRequest::Volume {
-                        id,
-                        block_size,
-                        sub_volumes,
-                        read_only_parent,
-                    } => {
-                        if read_only_parent.is_none() {
-                            // This volume has no read_only_parent
-                            Ok(false)
-                        } else {
-                            // Create a new VCR and fill in the contents
-                            // from what the original volume had.
-                            let new_vcr = VolumeConstructionRequest::Volume {
-                                id,
-                                block_size,
-                                sub_volumes,
-                                read_only_parent: None,
-                            };
-
-                            let new_volume_data =
-                                serde_json::to_string(
-                                    &new_vcr
+                        .map_err(|e| {
+                            err.bail(
+                                RemoveReadOnlyParentError::SerdeError(
+                                    e,
                                 )
-                                .map_err(|e| {
-                                    TxnError::CustomError(
-                                        RemoveReadOnlyParentError::SerdeError(
-                                            e,
-                                        ),
+                            )
+                        })?;
+
+                    match vcr {
+                        VolumeConstructionRequest::Volume {
+                            id,
+                            block_size,
+                            sub_volumes,
+                            read_only_parent,
+                        } => {
+                            if read_only_parent.is_none() {
+                                // This volume has no read_only_parent
+                                Ok(false)
+                            } else {
+                                // Create a new VCR and fill in the contents
+                                // from what the original volume had.
+                                let new_vcr = VolumeConstructionRequest::Volume {
+                                    id,
+                                    block_size,
+                                    sub_volumes,
+                                    read_only_parent: None,
+                                };
+
+                                let new_volume_data =
+                                    serde_json::to_string(
+                                        &new_vcr
                                     )
-                                })?;
-
-                            // Update the original volume_id with the new
-                            // volume.data.
-                            use db::schema::volume::dsl as volume_dsl;
-                            let num_updated = diesel::update(volume_dsl::volume)
-                                .filter(volume_dsl::id.eq(volume_id))
-                                .set(volume_dsl::data.eq(new_volume_data))
-                                .execute(conn)?;
-
-                            // This should update just one row.  If it does
-                            // not, then something is terribly wrong in the
-                            // database.
-                            if num_updated != 1 {
-                                return Err(TxnError::CustomError(
-                                    RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1),
-                                ));
-                            }
-
-                            // Make a new VCR, with the information from
-                            // our temp_volume_id, but the read_only_parent
-                            // from the original volume.
-                            let rop_vcr = VolumeConstructionRequest::Volume {
-                                id: temp_volume_id,
-                                block_size,
-                                sub_volumes: vec![],
-                                read_only_parent,
-                            };
-                            let rop_volume_data =
-                                serde_json::to_string(
-                                    &rop_vcr
-                                )
-                                .map_err(|e| {
-                                    TxnError::CustomError(
-                                        RemoveReadOnlyParentError::SerdeError(
+                                    .map_err(|e| {
+                                        err.bail(RemoveReadOnlyParentError::SerdeError(
                                             e,
-                                        ),
+                                        ))
+                                    })?;
+
+                                // Update the original volume_id with the new
+                                // volume.data.
+                                use db::schema::volume::dsl as volume_dsl;
+                                let num_updated = diesel::update(volume_dsl::volume)
+                                    .filter(volume_dsl::id.eq(volume_id))
+                                    .set(volume_dsl::data.eq(new_volume_data))
+                                    .execute_async(&conn)
+                                    .await?;
+
+                                // This should update just one row.  If it does
+                                // not, then something is terribly wrong in the
+                                // database.
+                                if num_updated != 1 {
+                                    return Err(err.bail(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)));
+                                }
+
+                                // Make a new VCR, with the information from
+                                // our temp_volume_id, but the read_only_parent
+                                // from the original volume.
+                                let rop_vcr = VolumeConstructionRequest::Volume {
+                                    id: temp_volume_id,
+                                    block_size,
+                                    sub_volumes: vec![],
+                                    read_only_parent,
+                                };
+                                let rop_volume_data =
+                                    serde_json::to_string(
+                                        &rop_vcr
                                     )
-                                })?;
-                            // Update the temp_volume_id with the volume
-                            // data that contains the read_only_parent.
-                            let num_updated =
-                                diesel::update(volume_dsl::volume)
-                                    .filter(volume_dsl::id.eq(temp_volume_id))
-                                    .filter(volume_dsl::time_deleted.is_null())
-                                    .set(volume_dsl::data.eq(rop_volume_data))
-                                    .execute(conn)?;
-                            if num_updated != 1 {
-                                return Err(TxnError::CustomError(
-                                    RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1),
-                                ));
+                                    .map_err(|e| {
+                                        err.bail(RemoveReadOnlyParentError::SerdeError(
+                                            e,
+                                        ))
+                                    })?;
+                                // Update the temp_volume_id with the volume
+                                // data that contains the read_only_parent.
+                                let num_updated =
+                                    diesel::update(volume_dsl::volume)
+                                        .filter(volume_dsl::id.eq(temp_volume_id))
+                                        .filter(volume_dsl::time_deleted.is_null())
+                                        .set(volume_dsl::data.eq(rop_volume_data))
+                                        .execute_async(&conn)
+                                        .await?;
+                                if num_updated != 1 {
+                                    return Err(err.bail(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)));
+                                }
+                                Ok(true)
                             }
-                            Ok(true)
                         }
-                    }
-                    VolumeConstructionRequest::File { id: _, block_size: _, path: _ }
-                    | VolumeConstructionRequest::Region {
-                        block_size: _,
-                        blocks_per_extent: _,
-                        extent_count: _,
-                        opts: _,
-                        gen: _ }
-                    | VolumeConstructionRequest::Url { id: _, block_size: _, url: _ } => {
-                        // Volume has a format that does not contain ROPs
-                        Ok(false)
+                        VolumeConstructionRequest::File { id: _, block_size: _, path: _ }
+                        | VolumeConstructionRequest::Region {
+                            block_size: _,
+                            blocks_per_extent: _,
+                            extent_count: _,
+                            opts: _,
+                            gen: _ }
+                        | VolumeConstructionRequest::Url { id: _, block_size: _, url: _ } => {
+                            // Volume has a format that does not contain ROPs
+                            Ok(false)
+                        }
                     }
                 }
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(
-                    RemoveReadOnlyParentError::DieselError(e),
-                ) => public_error_from_diesel_pool(
-                    e.into(),
-                    ErrorHandler::Server,
-                ),
-
-                _ => {
-                    Error::internal_error(&format!("Transaction error: {}", e))
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return Error::internal_error(&format!("Transaction error: {}", err));
                 }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 }
 
-#[derive(Default)]
-struct CrucibleTargets {
-    read_only_targets: Vec<String>,
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+pub struct CrucibleTargets {
+    pub read_only_targets: Vec<String>,
 }
 
 // Serialize this enum into the `resources_to_clean_up` column to handle
@@ -906,6 +821,8 @@ struct CrucibleTargets {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CrucibleResources {
     V1(CrucibleResourcesV1),
+    V2(CrucibleResourcesV2),
+    V3(CrucibleResourcesV3),
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -914,10 +831,186 @@ pub struct CrucibleResourcesV1 {
     pub datasets_and_snapshots: Vec<(Dataset, RegionSnapshot)>,
 }
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct CrucibleResourcesV2 {
+    pub datasets_and_regions: Vec<(Dataset, Region)>,
+    pub snapshots_to_delete: Vec<RegionSnapshot>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct RegionSnapshotV3 {
+    dataset: Uuid,
+    region: Uuid,
+    snapshot: Uuid,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct CrucibleResourcesV3 {
+    #[serde(deserialize_with = "null_to_empty_list")]
+    pub regions: Vec<Uuid>,
+
+    #[serde(deserialize_with = "null_to_empty_list")]
+    pub region_snapshots: Vec<RegionSnapshotV3>,
+}
+
+// Cockroach's `json_agg` will emit a `null` instead of a `[]` if a SELECT
+// returns zero rows. Handle that with this function when deserializing.
+fn null_to_empty_list<'de, D, T>(de: D) -> Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(match Option::<Vec<T>>::deserialize(de)? {
+        Some(v) => v,
+        None => vec![],
+    })
+}
+
+impl DataStore {
+    /// For a CrucibleResources object, return the Regions to delete, as well as
+    /// the Dataset they belong to.
+    pub async fn regions_to_delete(
+        &self,
+        crucible_resources: &CrucibleResources,
+    ) -> LookupResult<Vec<(Dataset, Region)>> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        match crucible_resources {
+            CrucibleResources::V1(crucible_resources) => {
+                Ok(crucible_resources.datasets_and_regions.clone())
+            }
+
+            CrucibleResources::V2(crucible_resources) => {
+                Ok(crucible_resources.datasets_and_regions.clone())
+            }
+
+            CrucibleResources::V3(crucible_resources) => {
+                use db::schema::dataset::dsl as dataset_dsl;
+                use db::schema::region::dsl as region_dsl;
+
+                region_dsl::region
+                    .filter(
+                        region_dsl::id
+                            .eq_any(crucible_resources.regions.clone()),
+                    )
+                    .inner_join(
+                        dataset_dsl::dataset
+                            .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
+                    )
+                    .select((Dataset::as_select(), Region::as_select()))
+                    .get_results_async::<(Dataset, Region)>(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })
+            }
+        }
+    }
+
+    /// For a CrucibleResources object, return the RegionSnapshots to delete, as
+    /// well as the Dataset they belong to.
+    pub async fn snapshots_to_delete(
+        &self,
+        crucible_resources: &CrucibleResources,
+    ) -> LookupResult<Vec<(Dataset, RegionSnapshot)>> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        match crucible_resources {
+            CrucibleResources::V1(crucible_resources) => {
+                Ok(crucible_resources.datasets_and_snapshots.clone())
+            }
+
+            CrucibleResources::V2(crucible_resources) => {
+                use db::schema::dataset::dsl;
+
+                let mut result: Vec<_> = Vec::with_capacity(
+                    crucible_resources.snapshots_to_delete.len(),
+                );
+
+                for snapshots_to_delete in
+                    &crucible_resources.snapshots_to_delete
+                {
+                    let maybe_dataset = dsl::dataset
+                        .filter(dsl::id.eq(snapshots_to_delete.dataset_id))
+                        .select(Dataset::as_select())
+                        .first_async(&*conn)
+                        .await
+                        .optional()
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+
+                    match maybe_dataset {
+                        Some(dataset) => {
+                            result.push((dataset, snapshots_to_delete.clone()));
+                        }
+
+                        None => {
+                            return Err(Error::internal_error(&format!(
+                                "could not find dataset {}!",
+                                snapshots_to_delete.dataset_id,
+                            )));
+                        }
+                    }
+                }
+
+                Ok(result)
+            }
+
+            CrucibleResources::V3(crucible_resources) => {
+                use db::schema::dataset::dsl as dataset_dsl;
+                use db::schema::region_snapshot::dsl;
+
+                let mut datasets_and_snapshots = Vec::with_capacity(
+                    crucible_resources.region_snapshots.len(),
+                );
+
+                for region_snapshots in &crucible_resources.region_snapshots {
+                    let maybe_tuple = dsl::region_snapshot
+                        .filter(dsl::dataset_id.eq(region_snapshots.dataset))
+                        .filter(dsl::region_id.eq(region_snapshots.region))
+                        .filter(dsl::snapshot_id.eq(region_snapshots.snapshot))
+                        .inner_join(
+                            dataset_dsl::dataset
+                                .on(dsl::dataset_id.eq(dataset_dsl::id)),
+                        )
+                        .select((
+                            Dataset::as_select(),
+                            RegionSnapshot::as_select(),
+                        ))
+                        .first_async::<(Dataset, RegionSnapshot)>(&*conn)
+                        .await
+                        .optional()
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+
+                    match maybe_tuple {
+                        Some(tuple) => {
+                            datasets_and_snapshots.push(tuple);
+                        }
+
+                        None => {
+                            // If something else is deleting the exact same
+                            // CrucibleResources (for example from a duplicate
+                            // resource-delete saga) then these region_snapshot
+                            // entries could be gone (because they are hard
+                            // deleted). Skip missing entries, return only what
+                            // we can find.
+                        }
+                    }
+                }
+
+                Ok(datasets_and_snapshots)
+            }
+        }
+    }
+}
+
 /// Return the targets from a VolumeConstructionRequest.
 ///
 /// The targets of a volume construction request map to resources.
-fn resources_associated_with_volume(
+pub fn read_only_resources_associated_with_volume(
     vcr: &VolumeConstructionRequest,
     crucible_targets: &mut CrucibleTargets,
 ) {
@@ -929,11 +1022,14 @@ fn resources_associated_with_volume(
             read_only_parent,
         } => {
             for sub_volume in sub_volumes {
-                resources_associated_with_volume(sub_volume, crucible_targets);
+                read_only_resources_associated_with_volume(
+                    sub_volume,
+                    crucible_targets,
+                );
             }
 
             if let Some(read_only_parent) = read_only_parent {
-                resources_associated_with_volume(
+                read_only_resources_associated_with_volume(
                     read_only_parent,
                     crucible_targets,
                 );
@@ -961,5 +1057,120 @@ fn resources_associated_with_volume(
         VolumeConstructionRequest::File { id: _, block_size: _, path: _ } => {
             // no action required
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::db::datastore::datastore_test;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_test_utils::dev;
+
+    // Assert that Nexus will not fail to deserialize an old version of
+    // CrucibleResources that was serialized before schema update 6.0.0.
+    #[tokio::test]
+    async fn test_deserialize_old_crucible_resources() {
+        let logctx =
+            dev::test_setup_log("test_deserialize_old_crucible_resources");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+
+        // Start with a fake volume, doesn't matter if it's empty
+
+        let volume_id = Uuid::new_v4();
+        let _volume = db_datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        // Add old CrucibleResources json in the `resources_to_clean_up` column -
+        // this was before the `deleting` column / field was added to
+        // ResourceSnapshot.
+
+        {
+            use db::schema::volume::dsl;
+
+            let conn =
+                db_datastore.pool_connection_unauthorized().await.unwrap();
+
+            let resources_to_clean_up = r#"{
+  "V1": {
+    "datasets_and_regions": [],
+    "datasets_and_snapshots": [
+      [
+        {
+          "identity": {
+            "id": "844ee8d5-7641-4b04-bca8-7521e258028a",
+            "time_created": "2023-12-19T21:38:34.000000Z",
+            "time_modified": "2023-12-19T21:38:34.000000Z"
+          },
+          "time_deleted": null,
+          "rcgen": 1,
+          "pool_id": "81a98506-4a97-4d92-8de5-c21f6fc71649",
+          "ip": "fd00:1122:3344:101::1",
+          "port": 32345,
+          "kind": "Crucible",
+          "size_used": 10737418240
+        },
+        {
+          "dataset_id": "b69edd77-1b3e-4f11-978c-194a0a0137d0",
+          "region_id": "8d668bf9-68cc-4387-8bc0-b4de7ef9744f",
+          "snapshot_id": "f548332c-6026-4eff-8c1c-ba202cd5c834",
+          "snapshot_addr": "[fd00:1122:3344:101::2]:19001",
+          "volume_references": 0
+        }
+      ]
+    ]
+  }
+}
+"#;
+
+            diesel::update(dsl::volume)
+                .filter(dsl::id.eq(volume_id))
+                .set(dsl::resources_to_clean_up.eq(resources_to_clean_up))
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+        }
+
+        // Soft delete the volume, which runs the CTE
+
+        let cr = db_datastore
+            .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
+            .await
+            .unwrap();
+
+        // Assert the contents of the returned CrucibleResources
+
+        let datasets_and_regions =
+            db_datastore.regions_to_delete(&cr).await.unwrap();
+        let datasets_and_snapshots =
+            db_datastore.snapshots_to_delete(&cr).await.unwrap();
+
+        assert!(datasets_and_regions.is_empty());
+        assert_eq!(datasets_and_snapshots.len(), 1);
+
+        let region_snapshot = &datasets_and_snapshots[0].1;
+
+        assert_eq!(
+            region_snapshot.snapshot_id,
+            "f548332c-6026-4eff-8c1c-ba202cd5c834".parse().unwrap()
+        );
+        assert_eq!(region_snapshot.deleting, false);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

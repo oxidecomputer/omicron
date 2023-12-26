@@ -222,7 +222,7 @@ impl Saga {
 }
 
 /// Represents a row in the "SagaNodeEvent" table
-#[derive(Queryable, Insertable, Clone, Debug)]
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = saga_node_event)]
 pub struct SagaNodeEvent {
     pub saga_id: SagaId,

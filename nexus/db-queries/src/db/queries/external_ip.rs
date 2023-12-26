@@ -20,6 +20,7 @@ use diesel::query_builder::AstPass;
 use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
 use diesel::query_builder::QueryId;
+use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::Column;
 use diesel::Expression;
@@ -42,7 +43,7 @@ const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
     "Reallocation of IP with different value";
 
 /// Translates a generic pool error to an external error.
-pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
+pub fn from_diesel(e: DieselError) -> external::Error {
     use crate::db::error;
 
     let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];
@@ -58,7 +59,7 @@ pub fn from_pool(e: async_bb8_diesel::PoolError) -> external::Error {
         }
     }
 
-    error::public_error_from_diesel_pool(e, error::ErrorHandler::Server)
+    error::public_error_from_diesel(e, error::ErrorHandler::Server)
 }
 
 const MAX_PORT: u16 = u16::MAX;
@@ -74,7 +75,7 @@ const MAX_PORT: u16 = u16::MAX;
 ///
 /// In general, the query:
 ///
-/// - Selects the next available IP address and port range from _any_ IP Pool
+/// - Selects the next available IP address and port range from the specified IP pool
 /// - Inserts that record into the `external_ip` table
 /// - Updates the rcgen and time modified of the parent `ip_pool_range` table
 ///
@@ -97,7 +98,8 @@ const MAX_PORT: u16 = u16::MAX;
 ///         <kind> AS kind,
 ///         candidate_ip AS ip,
 ///         CAST(candidate_first_port AS INT4) AS first_port,
-///         CAST(candidate_last_port AS INT4) AS last_port
+///         CAST(candidate_last_port AS INT4) AS last_port,
+///         <project_id> AS project_id
 ///     FROM
 ///         SELECT * FROM (
 ///             -- Select all IP addresses by pool and range.
@@ -370,6 +372,13 @@ impl NextExternalIp {
         out.push_identifier(dsl::first_port::NAME)?;
         out.push_sql(", CAST(candidate_last_port AS INT4) AS ");
         out.push_identifier(dsl::last_port::NAME)?;
+        out.push_sql(", ");
+
+        // Project ID, possibly null
+        out.push_bind_param::<sql_types::Nullable<sql_types::Uuid>, Option<Uuid>>(self.ip.project_id())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::project_id::NAME)?;
+
         out.push_sql(" FROM (");
         self.push_address_sequence_subquery(out.reborrow())?;
         out.push_sql(") CROSS JOIN (");
@@ -851,32 +860,42 @@ mod tests {
             crate::db::datastore::datastore_test(&logctx, &db).await;
             let cfg = crate::db::Config { url: db.pg_config().clone() };
             let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
-            let db_datastore =
-                Arc::new(crate::db::DataStore::new(Arc::clone(&pool)));
+            let db_datastore = Arc::new(
+                crate::db::DataStore::new(&logctx.log, Arc::clone(&pool), None)
+                    .await
+                    .unwrap(),
+            );
             let opctx =
                 OpContext::for_tests(log.new(o!()), db_datastore.clone());
             Self { logctx, opctx, db, db_datastore }
         }
 
-        async fn create_ip_pool(&self, name: &str, range: IpRange) {
-            let internal = false;
+        async fn create_ip_pool(
+            &self,
+            name: &str,
+            range: IpRange,
+            is_default: bool,
+        ) {
+            let silo_id = self.opctx.authn.silo_required().unwrap().id();
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
                     name: String::from(name).parse().unwrap(),
                     description: format!("ip pool {}", name),
                 },
-                internal,
+                Some(silo_id),
+                is_default,
             );
+
+            let conn = self
+                .db_datastore
+                .pool_connection_authorized(&self.opctx)
+                .await
+                .unwrap();
 
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
             diesel::insert_into(ip_pool_dsl::ip_pool)
                 .values(pool.clone())
-                .execute_async(
-                    self.db_datastore
-                        .pool_authorized(&self.opctx)
-                        .await
-                        .unwrap(),
-                )
+                .execute_async(&*conn)
                 .await
                 .expect("Failed to create IP Pool");
 
@@ -886,16 +905,16 @@ mod tests {
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
             // Find the target IP pool
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
+            let conn = self
+                .db_datastore
+                .pool_connection_authorized(&self.opctx)
+                .await
+                .unwrap();
             let pool = ip_pool_dsl::ip_pool
                 .filter(ip_pool_dsl::name.eq(name.to_string()))
                 .filter(ip_pool_dsl::time_deleted.is_null())
                 .select(IpPool::as_select())
-                .get_result_async(
-                    self.db_datastore
-                        .pool_authorized(&self.opctx)
-                        .await
-                        .unwrap(),
-                )
+                .get_result_async(&*conn)
                 .await
                 .expect("Failed to 'SELECT' IP Pool");
 
@@ -906,19 +925,20 @@ mod tests {
             )
             .values(pool_range)
             .execute_async(
-                self.db_datastore.pool_authorized(&self.opctx).await.unwrap(),
+                &*self
+                    .db_datastore
+                    .pool_connection_authorized(&self.opctx)
+                    .await
+                    .unwrap(),
             )
             .await
             .expect("Failed to create IP Pool range");
         }
 
         async fn default_pool_id(&self) -> Uuid {
-            let (.., pool) = self
+            let pool = self
                 .db_datastore
-                .ip_pools_fetch_default_for(
-                    &self.opctx,
-                    crate::authz::Action::ListChildren,
-                )
+                .ip_pools_fetch_default(&self.opctx)
                 .await
                 .expect("Failed to lookup default ip pool");
             pool.identity.id
@@ -977,9 +997,10 @@ mod tests {
             );
         assert_eq!(
             err,
-            Error::InvalidRequest {
-                message: String::from("No external IP addresses available"),
-            }
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
         );
         context.success().await;
     }
@@ -1033,9 +1054,10 @@ mod tests {
         );
         assert_eq!(
             res.unwrap_err(),
-            Error::InvalidRequest {
-                message: String::from("No external IP addresses available"),
-            }
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
         );
 
         let res = context
@@ -1055,9 +1077,10 @@ mod tests {
         );
         assert_eq!(
             res.unwrap_err(),
-            Error::InvalidRequest {
-                message: String::from("No external IP addresses available"),
-            }
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
         );
         context.success().await;
     }
@@ -1286,9 +1309,10 @@ mod tests {
             .expect_err("Should have failed to allocate after pool exhausted");
         assert_eq!(
             err,
-            Error::InvalidRequest {
-                message: String::from("No external IP addresses available"),
-            }
+            Error::insufficient_capacity(
+                "No external IP addresses available",
+                "NextExternalIp::new returned NotFound",
+            ),
         );
 
         // But we should be able to allocate another SNat IP
@@ -1703,7 +1727,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        context.create_ip_pool("p1", second_range).await;
+        context.create_ip_pool("p1", second_range, /*default*/ false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
@@ -1746,7 +1770,7 @@ mod tests {
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range).await;
+        context.create_ip_pool("p1", second_range, /* default */ false).await;
 
         // Allocate all available addresses in the second pool.
         let instance_id = Uuid::new_v4();

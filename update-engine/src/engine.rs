@@ -9,13 +9,11 @@ use std::{
     fmt,
     ops::ControlFlow,
     pin::Pin,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Mutex,
-    },
-    task::{ready, Poll},
+    sync::{Arc, Mutex},
+    task::Poll,
 };
 
+use cancel_safe_futures::coop_cancel;
 use debug_ignore::DebugIgnore;
 use derive_where::derive_where;
 use futures::{future::BoxFuture, prelude::*};
@@ -35,7 +33,7 @@ use crate::{
         StepEvent, StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
         StepProgress,
     },
-    AsError, CompletionContext, MetadataContext, StepContext,
+    AsError, CompletionContext, MetadataContext, NestedSpec, StepContext,
     StepContextPayload, StepHandle, StepSpec,
 };
 
@@ -71,11 +69,11 @@ pub struct UpdateEngine<'a, S: StepSpec> {
     // be a graph in the future.
     log: slog::Logger,
     execution_id: ExecutionId,
-    sender: mpsc::Sender<Event<S>>,
+    sender: EngineSender<S>,
 
     // This is set to None in Self::execute.
-    abort_sender: Option<mpsc::UnboundedSender<AbortMessage>>,
-    abort_receiver: mpsc::UnboundedReceiver<AbortMessage>,
+    canceler: Option<coop_cancel::Canceler<String>>,
+    cancel_receiver: coop_cancel::Receiver<String>,
 
     // This is a mutex to allow borrows to steps to be held by both
     // ComponentRegistrar and NewStep at the same time. (This could also be a
@@ -89,8 +87,23 @@ pub struct UpdateEngine<'a, S: StepSpec> {
 impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
     pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
+        let sender = Arc::new(DefaultSender { sender });
+        Self::new_impl(log, EngineSender { sender })
+    }
+
+    // See the comment on `StepContext::with_nested_engine` for why this is
+    // necessary.``
+    pub(crate) fn new_nested<S2: StepSpec>(
+        log: &slog::Logger,
+        sender: mpsc::Sender<StepContextPayload<S2>>,
+    ) -> Self {
+        let sender = Arc::new(NestedSender { sender });
+        Self::new_impl(log, EngineSender { sender })
+    }
+
+    fn new_impl(log: &slog::Logger, sender: EngineSender<S>) -> Self {
         let execution_id = ExecutionId(Uuid::new_v4());
-        let (abort_sender, abort_receiver) = mpsc::unbounded_channel();
+        let (canceler, cancel_receiver) = coop_cancel::new_pair();
         Self {
             log: log.new(slog::o!(
                 "component" => "UpdateEngine",
@@ -98,8 +111,8 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
             )),
             execution_id: ExecutionId(Uuid::new_v4()),
             sender,
-            abort_sender: Some(abort_sender),
-            abort_receiver,
+            canceler: Some(canceler),
+            cancel_receiver,
             steps: Default::default(),
         }
     }
@@ -156,8 +169,8 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     /// An abort handle can be used to forcibly cancel update engine executions.
     pub fn abort_handle(&self) -> AbortHandle {
         AbortHandle {
-            abort_sender: self
-                .abort_sender
+            canceler: self
+                .canceler
                 .as_ref()
                 .expect("abort_sender should always be present")
                 .clone(),
@@ -169,11 +182,11 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     /// This returns an `ExecutionHandle`, which needs to be awaited on to drive
     /// the engine forward.
     pub fn execute(mut self) -> ExecutionHandle<'a, S> {
-        let abort_sender = self
-            .abort_sender
+        let canceler = self
+            .canceler
             .take()
             .expect("execute is the only function which does this");
-        let abort_handle = AbortHandle { abort_sender };
+        let abort_handle = AbortHandle { canceler };
 
         let engine_fut = self.execute_impl().boxed();
 
@@ -183,14 +196,12 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     async fn execute_impl(
         mut self,
     ) -> Result<CompletionContext<S>, ExecutionError<S>> {
-        // TODO: this absolutely does not need to be an atomic! However it is
-        // currently so because of a bug in rustc, fixed in Rust 1.70. Fix this
-        // once omicron is on Rust 1.70.
-        //
-        // https://github.com/rust-lang/rust/pull/107844
-        let event_index = AtomicUsize::new(0);
-        let next_event_index = || event_index.fetch_add(1, Ordering::SeqCst);
-        let exec_cx = ExecutionContext::new(
+        let mut event_index = 0;
+        let next_event_index = || {
+            event_index += 1;
+            event_index - 1
+        };
+        let mut exec_cx = ExecutionContext::new(
             self.execution_id,
             next_event_index,
             self.sender.clone(),
@@ -239,13 +250,15 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
 
         let Some((index, first_step)) = steps_iter.next() else {
             // There are no steps defined.
-            self.sender.send(Event::Step(StepEvent {
-                spec: S::schema_name(),
-                execution_id: self.execution_id,
-                event_index: next_event_index(),
-                total_elapsed: exec_cx.total_start.elapsed(),
-                kind: StepEventKind::NoStepsDefined,
-            })).await?;
+            self.sender
+                .send(Event::Step(StepEvent {
+                    spec: S::schema_name(),
+                    execution_id: self.execution_id,
+                    event_index: (exec_cx.next_event_index)(),
+                    total_elapsed: exec_cx.total_start.elapsed(),
+                    kind: StepEventKind::NoStepsDefined,
+                }))
+                .await?;
             return Ok(CompletionContext::new());
         };
 
@@ -263,7 +276,7 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
         let event = Event::Step(StepEvent {
             spec: S::schema_name(),
             execution_id: self.execution_id,
-            event_index: next_event_index(),
+            event_index: (exec_cx.next_event_index)(),
             total_elapsed: exec_cx.total_start.elapsed(),
             kind: StepEventKind::ExecutionStarted {
                 steps: step_infos,
@@ -278,7 +291,7 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
 
         let (mut step_res, mut reporter) = first_step
             .exec
-            .execute(&self.log, step_exec_cx, &mut self.abort_receiver)
+            .execute(&self.log, step_exec_cx, &mut self.cancel_receiver)
             .await?;
 
         // Now run all remaining steps.
@@ -299,7 +312,7 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
 
             (step_res, reporter) = step
                 .exec
-                .execute(&self.log, step_exec_cx, &mut self.abort_receiver)
+                .execute(&self.log, step_exec_cx, &mut self.cancel_receiver)
                 .await?;
         }
 
@@ -307,6 +320,91 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
         reporter.last_step(step_res).await?;
 
         Ok(CompletionContext::new())
+    }
+}
+
+/// Abstraction used to send events to whatever receiver is interested in them.
+///
+/// # Why is this type so weird?
+///
+/// `EngineSender` is a wrapper around a cloneable trait object. Why do we need
+/// that?
+///
+/// `SenderImpl` has two implementations:
+///
+/// 1. `DefaultSender`, which is a wrapper around an `mpsc::Sender<Event<S>>`.
+///    This is used when the receiver is user code.
+/// 2. `NestedSender`, which is a more complex wrapper around an
+///    `mpsc::Sender<StepContextPayload<S>>`.
+///
+/// You might imagine that we could just have `EngineSender` be an enum with
+/// these two variants. But we actually want `NestedSender<S>` to implement
+/// `SenderImpl<S>` for *any* StepSpec, not just `S`, to allow nested engines to
+/// be a different StepSpec than the outer engine.
+///
+/// In other words, `NestedSender` doesn't just represent a single
+/// `mpsc::Sender<StepContextPayload<S>>`, it represents the universe of all
+/// possible StepSpecs S. This is an infinite number of variants, and requires a
+/// trait object to represent.
+#[derive_where(Clone, Debug)]
+struct EngineSender<S: StepSpec> {
+    sender: Arc<dyn SenderImpl<S>>,
+}
+
+impl<S: StepSpec> EngineSender<S> {
+    async fn send(&self, event: Event<S>) -> Result<(), ExecutionError<S>> {
+        self.sender.send(event).await
+    }
+}
+
+trait SenderImpl<S: StepSpec>: Send + Sync + fmt::Debug {
+    fn send(
+        &self,
+        event: Event<S>,
+    ) -> BoxFuture<'_, Result<(), ExecutionError<S>>>;
+}
+
+#[derive_where(Debug)]
+struct DefaultSender<S: StepSpec> {
+    sender: mpsc::Sender<Event<S>>,
+}
+
+impl<S: StepSpec> SenderImpl<S> for DefaultSender<S> {
+    fn send(
+        &self,
+        event: Event<S>,
+    ) -> BoxFuture<'_, Result<(), ExecutionError<S>>> {
+        self.sender.send(event).map_err(|error| error.into()).boxed()
+    }
+}
+
+#[derive_where(Debug)]
+struct NestedSender<S: StepSpec> {
+    sender: mpsc::Sender<StepContextPayload<S>>,
+}
+
+// Note that NestedSender<S> implements SenderImpl<S2> for any S2: StepSpec.
+// That is to allow nested engines to implement arbitrary StepSpecs.
+impl<S: StepSpec, S2: StepSpec> SenderImpl<S2> for NestedSender<S> {
+    fn send(
+        &self,
+        event: Event<S2>,
+    ) -> BoxFuture<'_, Result<(), ExecutionError<S2>>> {
+        let now = Instant::now();
+        async move {
+            let (done, done_rx) = oneshot::channel();
+            self.sender
+                .send(StepContextPayload::NestedSingle {
+                    now,
+                    event: event.into_generic(),
+                    done,
+                })
+                .await
+                .expect("our code always keeps payload_receiver open");
+            _ = done_rx.await;
+            Ok(())
+        }
+        .boxed()
     }
 }
 
@@ -328,10 +426,15 @@ impl<'a, S: StepSpec> ExecutionHandle<'a, S> {
     /// This sends the message immediately, and returns a future that can be
     /// optionally waited against to block until the abort is processed.
     ///
-    /// If this engine is still running, it is immediately aborted. The engine
-    /// sends an `ExecutionAborted` message over the wire, and an
+    /// If this engine is still running, it is aborted at the next await point.
+    /// The engine sends an `ExecutionAborted` message over the wire, and an
     /// `ExecutionError::Aborted` is returned.
-    pub fn abort(&self, message: impl Into<String>) -> AbortWaiter {
+    ///
+    /// Returns `Err(message)` if the engine has already completed execution.
+    pub fn abort(
+        &self,
+        message: impl Into<String>,
+    ) -> Result<AbortWaiter, String> {
         self.abort_handle.abort(message.into())
     }
 
@@ -357,9 +460,7 @@ impl<'a, S: StepSpec> Future for ExecutionHandle<'a, S> {
 /// An abort handle, used to forcibly cancel update engine executions.
 #[derive(Clone, Debug)]
 pub struct AbortHandle {
-    // This is an unbounded sender to make Self::abort not async. In general we
-    // don't expect more than one message to ever be sent on this channel.
-    abort_sender: mpsc::UnboundedSender<AbortMessage>,
+    canceler: coop_cancel::Canceler<String>,
 }
 
 impl AbortHandle {
@@ -368,15 +469,17 @@ impl AbortHandle {
     /// This sends the message immediately, and returns a future that can be
     /// optionally waited against to block until the abort is processed.
     ///
-    /// If this engine is still running, it is immediately aborted. The engine
-    /// sends an `ExecutionAborted` message over the wire, and an
+    /// If this engine is still running, it is aborted at the next await point.
+    /// The engine sends an `ExecutionAborted` message over the wire, and an
     /// `ExecutionError::Aborted` is returned.
-    pub fn abort(&self, message: impl Into<String>) -> AbortWaiter {
-        // Ignore errors here because if the receiver is closed, the engine has
-        // completed (or failed) execution.
-        let (message, processed_receiver) = AbortMessage::new(message.into());
-        _ = self.abort_sender.send(message);
-        AbortWaiter { processed_receiver }
+    ///
+    /// Returns `Err(message)` if the engine has already completed execution.
+    pub fn abort(
+        &self,
+        message: impl Into<String>,
+    ) -> Result<AbortWaiter, String> {
+        let waiter = self.canceler.cancel(message.into())?;
+        Ok(AbortWaiter { waiter })
     }
 }
 
@@ -386,7 +489,7 @@ impl AbortHandle {
 /// Dropping this future does not cancel the abort.
 #[derive(Debug)]
 pub struct AbortWaiter {
-    processed_receiver: oneshot::Receiver<()>,
+    waiter: coop_cancel::Waiter<String>,
 }
 
 impl Future for AbortWaiter {
@@ -396,24 +499,7 @@ impl Future for AbortWaiter {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Self::Output> {
-        // The return value of the receiver doesn't matter. If it's an error, it
-        // means that the sender was dropped, which means that execution
-        // finished.
-        _ = ready!(self.as_mut().processed_receiver.poll_unpin(cx));
-        Poll::Ready(())
-    }
-}
-
-#[derive(Debug)]
-struct AbortMessage {
-    message: String,
-    processed_sender: oneshot::Sender<()>,
-}
-
-impl AbortMessage {
-    fn new(message: String) -> (Self, oneshot::Receiver<()>) {
-        let (processed_sender, processed_receiver) = oneshot::channel();
-        (Self { message, processed_sender }, processed_receiver)
+        self.waiter.poll_unpin(cx)
     }
 }
 
@@ -570,6 +656,17 @@ pub struct StepResult<T, S: StepSpec> {
     ///
     /// This outcome is serializable.
     pub outcome: StepOutcome<S>,
+}
+
+impl<T, S: StepSpec> StepResult<T, S> {
+    /// Maps a `StepResult<T, S>` to `StepResult<U, S>` by applying a function
+    /// to the contained `output` value, leaving the `outcome` untouched.
+    pub fn map<U, F>(self, op: F) -> StepResult<U, S>
+    where
+        F: FnOnce(T) -> U,
+    {
+        StepResult { output: op(self.output), outcome: self.outcome }
+    }
 }
 
 /// A success result produced by a step.
@@ -782,11 +879,11 @@ struct StepExec<'a, S: StepSpec> {
 }
 
 impl<'a, S: StepSpec> StepExec<'a, S> {
-    async fn execute<F: Fn() -> usize>(
+    async fn execute<F: FnMut() -> usize>(
         self,
         log: &slog::Logger,
         step_exec_cx: StepExecutionContext<S, F>,
-        abort_receiver: &mut mpsc::UnboundedReceiver<AbortMessage>,
+        cancel_receiver: &mut coop_cancel::Receiver<String>,
     ) -> Result<
         (Result<StepOutcome<S>, S::Error>, StepProgressReporter<S, F>),
         ExecutionError<S>,
@@ -827,6 +924,16 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
                         Ok(ControlFlow::Continue(()))
                     }
 
+                    // Note: payload_receiver is always kept open while step_fut
+                    // is being driven. It is only dropped before completion if
+                    // the step is aborted, in which case step_fut is also
+                    // cancelled without being driven further. A bunch of
+                    // expects with "our code always keeps payload_receiver
+                    // open" rely on this.
+                    //
+                    // If we ever move the payload receiver to another task so
+                    // it runs in parallel, this situation would have to be
+                    // handled with care.
                     payload = payload_receiver.recv(), if !payload_done => {
                         match payload {
                             Some(payload) => {
@@ -859,7 +966,7 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
                     }
                 }
 
-                Some(message) = abort_receiver.recv() => {
+                Some(message) = cancel_receiver.recv() => {
                     return Err(reporter.handle_abort(message).await);
                 }
             }
@@ -876,14 +983,14 @@ struct ExecutionContext<S: StepSpec, F> {
     execution_id: ExecutionId,
     next_event_index: DebugIgnore<F>,
     total_start: Instant,
-    sender: mpsc::Sender<Event<S>>,
+    sender: EngineSender<S>,
 }
 
 impl<S: StepSpec, F> ExecutionContext<S, F> {
     fn new(
         execution_id: ExecutionId,
         next_event_index: F,
-        sender: mpsc::Sender<Event<S>>,
+        sender: EngineSender<S>,
     ) -> Self {
         let total_start = Instant::now();
         Self {
@@ -895,12 +1002,12 @@ impl<S: StepSpec, F> ExecutionContext<S, F> {
     }
 
     fn create(
-        &self,
+        &mut self,
         step_info: StepInfoWithMetadata<S>,
-    ) -> StepExecutionContext<S, &F> {
+    ) -> StepExecutionContext<S, &mut F> {
         StepExecutionContext {
             execution_id: self.execution_id,
-            next_event_index: DebugIgnore(&self.next_event_index.0),
+            next_event_index: DebugIgnore(&mut self.next_event_index.0),
             total_start: self.total_start,
             step_info,
             sender: self.sender.clone(),
@@ -914,7 +1021,7 @@ struct StepExecutionContext<S: StepSpec, F> {
     next_event_index: DebugIgnore<F>,
     total_start: Instant,
     step_info: StepInfoWithMetadata<S>,
-    sender: mpsc::Sender<Event<S>>,
+    sender: EngineSender<S>,
 }
 
 type StepMetadataFn<'a, S> = Box<
@@ -949,10 +1056,10 @@ struct StepProgressReporter<S: StepSpec, F> {
     step_start: Instant,
     attempt: usize,
     attempt_start: Instant,
-    sender: mpsc::Sender<Event<S>>,
+    sender: EngineSender<S>,
 }
 
-impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
+impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
     fn new(step_exec_cx: StepExecutionContext<S, F>) -> Self {
         let step_start = Instant::now();
         Self {
@@ -971,51 +1078,32 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
     async fn handle_payload(
         &mut self,
         payload: StepContextPayload<S>,
-    ) -> Result<(), mpsc::error::SendError<Event<S>>> {
+    ) -> Result<(), ExecutionError<S>> {
         match payload {
-            StepContextPayload::Progress(progress) => {
-                self.handle_progress(progress).await
+            StepContextPayload::Progress { now, progress, done } => {
+                self.handle_progress(now, progress).await?;
+                std::mem::drop(done);
             }
-            StepContextPayload::Nested(Event::Step(event)) => {
-                self.sender
-                    .send(Event::Step(StepEvent {
-                        spec: S::schema_name(),
-                        execution_id: self.execution_id,
-                        event_index: (self.next_event_index)(),
-                        total_elapsed: self.total_start.elapsed(),
-                        kind: StepEventKind::Nested {
-                            step: self.step_info.clone(),
-                            attempt: self.attempt,
-                            event: Box::new(event),
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
-                        },
-                    }))
-                    .await
+            StepContextPayload::NestedSingle { now, event, done } => {
+                self.handle_nested(now, event).await?;
+                std::mem::drop(done);
             }
-            StepContextPayload::Nested(Event::Progress(event)) => {
-                self.sender
-                    .send(Event::Progress(ProgressEvent {
-                        spec: S::schema_name(),
-                        execution_id: self.execution_id,
-                        total_elapsed: self.total_start.elapsed(),
-                        kind: ProgressEventKind::Nested {
-                            step: self.step_info.clone(),
-                            attempt: self.attempt,
-                            event: Box::new(event),
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
-                        },
-                    }))
-                    .await
+            StepContextPayload::Nested { now, event } => {
+                self.handle_nested(now, event).await?;
+            }
+            StepContextPayload::Sync { done } => {
+                std::mem::drop(done);
             }
         }
+
+        Ok(())
     }
 
     async fn handle_progress(
         &mut self,
+        now: Instant,
         progress: StepProgress<S>,
-    ) -> Result<(), mpsc::error::SendError<Event<S>>> {
+    ) -> Result<(), ExecutionError<S>> {
         match progress {
             StepProgress::Progress { progress, metadata } => {
                 // Send the progress to the sender.
@@ -1023,14 +1111,14 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
                     .send(Event::Progress(ProgressEvent {
                         spec: S::schema_name(),
                         execution_id: self.execution_id,
-                        total_elapsed: self.total_start.elapsed(),
+                        total_elapsed: now - self.total_start,
                         kind: ProgressEventKind::Progress {
                             step: self.step_info.clone(),
                             attempt: self.attempt,
                             progress,
                             metadata,
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
                         },
                     }))
                     .await
@@ -1042,13 +1130,13 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
                         spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
-                        total_elapsed: self.total_start.elapsed(),
+                        total_elapsed: now - self.total_start,
                         kind: StepEventKind::ProgressReset {
                             step: self.step_info.clone(),
                             attempt: self.attempt,
                             metadata,
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
                             message,
                         },
                     }))
@@ -1057,7 +1145,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
             StepProgress::Retry { message } => {
                 // Retry this step.
                 self.attempt += 1;
-                let attempt_elapsed = self.attempt_start.elapsed();
+                let attempt_elapsed = now - self.attempt_start;
                 self.attempt_start = Instant::now();
 
                 // Send the retry message.
@@ -1066,11 +1154,11 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
                         spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
-                        total_elapsed: self.total_start.elapsed(),
+                        total_elapsed: now - self.total_start,
                         kind: StepEventKind::AttemptRetry {
                             step: self.step_info.clone(),
                             next_attempt: self.attempt,
-                            step_elapsed: self.step_start.elapsed(),
+                            step_elapsed: now - self.step_start,
                             attempt_elapsed,
                             message,
                         },
@@ -1080,7 +1168,49 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
         }
     }
 
-    async fn handle_abort(self, message: AbortMessage) -> ExecutionError<S> {
+    async fn handle_nested(
+        &mut self,
+        now: Instant,
+        event: Event<NestedSpec>,
+    ) -> Result<(), ExecutionError<S>> {
+        match event {
+            Event::Step(event) => {
+                self.sender
+                    .send(Event::Step(StepEvent {
+                        spec: S::schema_name(),
+                        execution_id: self.execution_id,
+                        event_index: (self.next_event_index)(),
+                        total_elapsed: now - self.total_start,
+                        kind: StepEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
+                        },
+                    }))
+                    .await
+            }
+            Event::Progress(event) => {
+                self.sender
+                    .send(Event::Progress(ProgressEvent {
+                        spec: S::schema_name(),
+                        execution_id: self.execution_id,
+                        total_elapsed: now - self.total_start,
+                        kind: ProgressEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
+                        },
+                    }))
+                    .await
+            }
+        }
+    }
+
+    async fn handle_abort(mut self, message: String) -> ExecutionError<S> {
         // Send the abort message over the channel.
         //
         // The only way this can fail is if the event receiver is closed or
@@ -1098,28 +1228,24 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
                     attempt: self.attempt,
                     step_elapsed: self.step_start.elapsed(),
                     attempt_elapsed: self.attempt_start.elapsed(),
-                    message: message.message.clone(),
+                    message: message.clone(),
                 },
             }))
             .await;
-
-        // An error here doesn't matter -- it just means that the abort handle
-        // was dropped.
-        _ = message.processed_sender.send(());
 
         match res {
             Ok(()) => ExecutionError::Aborted {
                 component: self.step_info.info.component.clone(),
                 id: self.step_info.info.id.clone(),
                 description: self.step_info.info.description.clone(),
-                message: message.message,
+                message: message,
             },
-            Err(error) => error.into(),
+            Err(error) => error,
         }
     }
 
     async fn next_step(
-        self,
+        mut self,
         step_res: Result<StepOutcome<S>, S::Error>,
         next_step_info: &StepInfoWithMetadata<S>,
     ) -> Result<(), ExecutionError<S>> {
@@ -1159,7 +1285,7 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
     }
 
     async fn last_step(
-        self,
+        mut self,
         step_res: Result<StepOutcome<S>, S::Error>,
     ) -> Result<(), ExecutionError<S>> {
         match step_res {
@@ -1197,9 +1323,9 @@ impl<S: StepSpec, F: Fn() -> usize> StepProgressReporter<S, F> {
     }
 
     async fn send_error(
-        self,
+        mut self,
         error: &S::Error,
-    ) -> Result<(), mpsc::error::SendError<Event<S>>> {
+    ) -> Result<(), ExecutionError<S>> {
         // Stringify `error` into a message + list causes; this is written the
         // way it is to avoid `error` potentially living across the `.await`
         // below (which can cause lifetime issues in callers).

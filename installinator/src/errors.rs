@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{net::SocketAddrV6, time::Duration};
+use std::{net::SocketAddr, time::Duration};
 
 use installinator_artifact_client::ClientError;
 use thiserror::Error;
@@ -11,13 +11,13 @@ use thiserror::Error;
 pub(crate) enum ArtifactFetchError {
     #[error("peer {peer} returned an HTTP error")]
     HttpError {
-        peer: SocketAddrV6,
+        peer: SocketAddr,
         #[source]
         error: HttpError,
     },
 
     #[error("peer {peer} timed out ({timeout:?}) after returning {bytes_fetched} bytes")]
-    Timeout { peer: SocketAddrV6, timeout: Duration, bytes_fetched: usize },
+    Timeout { peer: SocketAddr, timeout: Duration, bytes_fetched: usize },
 
     #[error("artifact size in Content-Length header ({artifact_size}) did not match downloaded size ({downloaded_bytes})")]
     SizeMismatch { artifact_size: u64, downloaded_bytes: u64 },

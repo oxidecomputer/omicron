@@ -4,15 +4,15 @@
 
 //! x.509 Certificates
 
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
-use crate::db::model::ServiceKind;
 use crate::external_api::params;
 use crate::external_api::shared;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::Name;
+use nexus_db_queries::db::model::ServiceKind;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -37,7 +37,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn certificate_create(
+    pub(crate) async fn certificate_create(
         &self,
         opctx: &OpContext,
         params: params::CertificateCreate,
@@ -46,12 +46,31 @@ impl super::Nexus {
             .authn
             .silo_required()
             .internal_context("creating a Certificate")?;
+
+        // The `opctx` we received is going to be checked for permission to
+        // create a cert below in `db_datastore.certificate_create`, but first
+        // we need to look up this silo's fully-qualified domain names in order
+        // to check that the cert we've been given is valid for this silo.
+        // Looking up DNS names requires reading the DNS configuration of the
+        // _rack_, which this user may not be able to do (even if they have
+        // permission to upload new certs, which almost certainly implies a
+        // silo-level admin). We'll use our `opctx_external_authn()` context,
+        // which is the same context used to create a silo. This is a higher
+        // privilege than the current user may have, but we believe it does not
+        // leak any information that a silo admin doesn't already know (the
+        // external DNS name(s) of the rack, which leads to their silo's DNS
+        // name(s)).
+        let silo_fq_dns_names = self
+            .silo_fq_dns_names(self.opctx_external_authn(), authz_silo.id())
+            .await?;
+
         let kind = params.service;
         let new_certificate = db::model::Certificate::new(
             authz_silo.id(),
             Uuid::new_v4(),
             kind.into(),
             params,
+            &silo_fq_dns_names,
         )?;
         let cert = self
             .db_datastore
@@ -71,7 +90,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn certificates_list(
+    pub(crate) async fn certificates_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -81,7 +100,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn certificate_delete(
+    pub(crate) async fn certificate_delete(
         &self,
         opctx: &OpContext,
         certificate_lookup: lookup::Certificate<'_>,

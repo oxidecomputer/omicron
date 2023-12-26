@@ -11,42 +11,18 @@ set -euo pipefail
 
 TOOLS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-OUT_DIR="out/softnpu"
+OUT_DIR="out/npuzone"
 
 # Pinned commit for softnpu ASIC simulator
 SOFTNPU_REPO="softnpu"
-SOFTNPU_COMMIT="88f5f1334364e5580fe778c44ac0746a35927351"
-
-# Pinned commit for softnpu tools
-SIDECAR_LITE_REPO="sidecar-lite"
-SIDECAR_LITE_SERIES="release"
-SIDECAR_LITE_COMMIT="56abef043a9e2ba0363fea82528d7a9e86d3c0b0"
+SOFTNPU_COMMIT="dbab082dfa89da5db5ca2325c257089d2f130092"
 
 # This is the softnpu ASIC simulator
-echo "fetching softnpu"
-mkdir -p out/softnpu
-$TOOLS_DIR/ensure_buildomat_artifact.sh \
+echo "fetching npuzone"
+mkdir -p $OUT_DIR
+"$TOOLS_DIR"/ensure_buildomat_artifact.sh \
     -O $OUT_DIR \
-    "softnpu" \
+    "npuzone" \
     "$SOFTNPU_REPO" \
     "$SOFTNPU_COMMIT"
-chmod +x $OUT_DIR/softnpu
-
-# This is an ASIC administration program.
-echo "fetching scadm"
-$TOOLS_DIR/ensure_buildomat_artifact.sh \
-    -O $OUT_DIR \
-    -s "$SIDECAR_LITE_SERIES" \
-    "scadm" \
-    "$SIDECAR_LITE_REPO" \
-    "$SIDECAR_LITE_COMMIT"
-chmod +x $OUT_DIR/scadm
-
-# Fetch the pre-compiled sidecar_lite p4 program
-echo "fetching libsidecar_lite.so"
-$TOOLS_DIR/ensure_buildomat_artifact.sh \
-    -O $OUT_DIR \
-    -s "$SIDECAR_LITE_SERIES" \
-    "libsidecar_lite.so" \
-    "$SIDECAR_LITE_REPO" \
-    "$SIDECAR_LITE_COMMIT"
+chmod +x $OUT_DIR/npuzone

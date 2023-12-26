@@ -12,9 +12,28 @@
   </dependency>
 
   <exec_method type='method' name='start'
-      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-address %{config/mgs-address} --baseboard-file %{config/baseboard-file} &amp;'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/wicketd/bin/wicketd run /var/svc/manifest/site/wicketd/config.toml --address %{config/address} --artifact-address %{config/artifact-address} --mgs-address %{config/mgs-address} --nexus-proxy-address %{config/nexus-proxy-address} --baseboard-file %{config/baseboard-file} --read-smf-config &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <!--
+    This refresh method only exists to support changing `config/rack-subnet`,
+    and makes a couple critical assumptions:
+
+      * `config/address` is not changing
+      * the dropshot server listening at `config/address` is not configured
+        for TLS
+
+    both of which are fine for our standard wicketd deployment, which only
+    listens on a `::1` (IPv6 localhost) address without TLS. If any of the
+    above assumptions are violated, the `reload-config` endpoint we hit
+    here will return an error (either directly, if we attempt to change
+    `config/address`, or indirectly because we tried to post via http but
+    it expected https).
+  -->
+  <exec_method type='method' name='refresh'
+      exec='/opt/oxide/wicketd/bin/wicketd refresh-config /var/svc/manifest/site/wicketd/config.toml --address %{config/address}'
+      timeout_seconds='0' />
 
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='contract' />
@@ -24,7 +43,16 @@
     <propval name='address' type='astring' value='unknown' />
     <propval name='artifact-address' type='astring' value='unknown' />
     <propval name='mgs-address' type='astring' value='unknown' />
+    <propval name='nexus-proxy-address' type='astring' value='unknown' />
     <propval name='baseboard-file' type='astring' value='unknown' />
+
+    <!--
+      In a standard deployment, this will remain `unknown` until rack setup
+      is complete, at which point it will be populated. Prior to this being
+      populated, the `nexus-proxy-address` server will reject incoming
+      connections.
+    -->
+    <propval name='rack-subnet' type='astring' value='unknown' />
   </property_group>
 
   <stability value='Unstable' />

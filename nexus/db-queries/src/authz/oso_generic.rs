@@ -106,6 +106,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Database::get_polar_class(),
         DnsConfig::get_polar_class(),
         Fleet::get_polar_class(),
+        Inventory::get_polar_class(),
         IpPoolList::get_polar_class(),
         ConsoleSessionList::get_polar_class(),
         DeviceAuthRequestList::get_polar_class(),
@@ -130,6 +131,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         VpcRouter::init(),
         RouterRoute::init(),
         VpcSubnet::init(),
+        FloatingIp::init(),
         // Silo-level resources
         Image::init(),
         SiloImage::init(),
@@ -150,6 +152,7 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         IdentityProvider::init(),
         SamlIdentityProvider::init(),
         Sled::init(),
+        Zpool::init(),
         Service::init(),
         UpdateArtifact::init(),
         UserBuiltin::init(),

@@ -38,7 +38,7 @@ this document should act as a jumping-off point.
 * If your application logic involes any multi-step operations which would be interrupted by Nexus stopping mid-execution (due to reboot, crash, failure, etc), it is recommended to use a https://github.com/oxidecomputer/omicron/tree/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/app/sagas[saga] to define the operations durably.
 
 === **Database**
-* `CREATE TABLE` for the resource in xref:../common/src/sql/dbinit.sql[dbinit.sql] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/common/src/sql/dbinit.sql#L1103-L1129[Example])
+* `CREATE TABLE` for the resource in xref:../schema/crdb/dbinit.sql[dbinit.sql] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/common/src/sql/dbinit.sql#L1103-L1129[Example])
 * Add an equivalent schema for the resource in xref:../nexus/db-model/src/schema.rs[schema.rs], which allows https://docs.diesel.rs/master/diesel/index.html[Diesel] to translate raw SQL to rust queries (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/db-model/src/schema.rs#L144-L155[Example])
 * Add a Rust representation of the database object to xref:../nexus/db-model/src[the DB model] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/db-model/src/ip_pool.rs#L24-L40[Example])
 ** Remember to make the object visible; this is usually defined in xref:../nexus/db-model/src/lib.rs[lib.rs] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/db-model/src/lib.rs#L102[Example]).

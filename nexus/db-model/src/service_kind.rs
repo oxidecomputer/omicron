@@ -6,18 +6,20 @@ use super::impl_enum_type;
 use external_api::shared::ServiceUsingCertificate;
 use nexus_types::{external_api, internal_api};
 use serde::{Deserialize, Serialize};
+use strum::EnumIter;
 
 impl_enum_type!(
     #[derive(Clone, SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "service_kind"))]
     pub struct ServiceKindEnum;
 
-    #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, EnumIter)]
     #[diesel(sql_type = ServiceKindEnum)]
     pub enum ServiceKind;
 
     // Enum values
     Clickhouse => b"clickhouse"
+    ClickhouseKeeper => b"clickhouse_keeper"
     Cockroach => b"cockroach"
     Crucible => b"crucible"
     CruciblePantry => b"crucible_pantry"
@@ -28,6 +30,7 @@ impl_enum_type!(
     Oximeter => b"oximeter"
     Tfport => b"tfport"
     Ntp => b"ntp"
+    Mgd => b"mgd"
 );
 
 impl TryFrom<ServiceKind> for ServiceUsingCertificate {
@@ -53,6 +56,9 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
         match k {
             internal_api::params::ServiceKind::Clickhouse => {
                 ServiceKind::Clickhouse
+            }
+            internal_api::params::ServiceKind::ClickhouseKeeper => {
+                ServiceKind::ClickhouseKeeper
             }
             internal_api::params::ServiceKind::Cockroach => {
                 ServiceKind::Cockroach
@@ -83,6 +89,7 @@ impl From<internal_api::params::ServiceKind> for ServiceKind {
             | internal_api::params::ServiceKind::InternalNtp => {
                 ServiceKind::Ntp
             }
+            internal_api::params::ServiceKind::Mgd => ServiceKind::Mgd,
         }
     }
 }

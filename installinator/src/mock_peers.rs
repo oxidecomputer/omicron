@@ -2,10 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// TODO: Remove when https://github.com/frozenlib/test-strategy/commit/c0ca38711757d2b51f74b28e80ef4c78275c284f
+// is pulled into a new published version of "test_strategy" that we can use.
+#![allow(clippy::arc_with_non_send_sync)]
+
 use std::{
     collections::BTreeMap,
     fmt,
-    net::{Ipv6Addr, SocketAddrV6},
+    net::{IpAddr, Ipv6Addr, SocketAddr},
     time::Duration,
 };
 
@@ -28,7 +32,7 @@ use crate::{
 
 struct MockPeersUniverse {
     artifact: Bytes,
-    peers: BTreeMap<SocketAddrV6, MockPeer>,
+    peers: BTreeMap<SocketAddr, MockPeer>,
     attempt_bitmaps: Vec<AttemptBitmap>,
 }
 
@@ -45,7 +49,7 @@ impl fmt::Debug for MockPeersUniverse {
 impl MockPeersUniverse {
     fn new(
         artifact: Bytes,
-        peers: BTreeMap<SocketAddrV6, MockPeer>,
+        peers: BTreeMap<SocketAddr, MockPeer>,
         attempt_bitmaps: Vec<AttemptBitmap>,
     ) -> Self {
         assert!(peers.len() <= 32, "this test only supports up to 32 peers");
@@ -66,7 +70,7 @@ impl MockPeersUniverse {
         // being unique identifiers. This means that this code can use a BTreeMap rather than a
         // fancier structure like an IndexMap.
         let peers_strategy = prop::collection::btree_map(
-            any::<SocketAddrV6>(),
+            any::<SocketAddr>(),
             any::<MockResponse_>(),
             0..max_peer_count,
         );
@@ -78,7 +82,7 @@ impl MockPeersUniverse {
         (artifact_strategy, peers_strategy, attempt_bitmaps_strategy).prop_map(
             |(artifact, peers, attempt_bitmaps): (
                 Vec<u8>,
-                BTreeMap<SocketAddrV6, MockResponse_>,
+                BTreeMap<SocketAddr, MockResponse_>,
                 Vec<AttemptBitmap>,
             )| {
                 let artifact = Bytes::from(artifact);
@@ -103,7 +107,7 @@ impl MockPeersUniverse {
     fn expected_result(
         &self,
         timeout: Duration,
-    ) -> Result<(usize, SocketAddrV6), usize> {
+    ) -> Result<(usize, SocketAddr), usize> {
         self.attempts()
             .enumerate()
             .filter_map(|(attempt, peers)| {
@@ -170,20 +174,20 @@ enum AttemptBitmap {
 struct MockPeers {
     artifact: Bytes,
     // Peers within the universe that have been selected
-    selected_peers: BTreeMap<SocketAddrV6, MockPeer>,
+    selected_peers: BTreeMap<SocketAddr, MockPeer>,
 }
 
 impl MockPeers {
-    fn get(&self, addr: SocketAddrV6) -> Option<&MockPeer> {
+    fn get(&self, addr: SocketAddr) -> Option<&MockPeer> {
         self.selected_peers.get(&addr)
     }
 
-    fn peers(&self) -> impl Iterator<Item = (&SocketAddrV6, &MockPeer)> + '_ {
+    fn peers(&self) -> impl Iterator<Item = (&SocketAddr, &MockPeer)> + '_ {
         self.selected_peers.iter()
     }
 
     /// Returns the peer that can return the entire dataset within the timeout.
-    fn successful_peer(&self, timeout: Duration) -> Option<SocketAddrV6> {
+    fn successful_peer(&self, timeout: Duration) -> Option<SocketAddr> {
         self.peers()
             .filter_map(|(addr, peer)| {
                 if peer.artifact != self.artifact {
@@ -229,7 +233,7 @@ impl MockPeers {
 
 #[async_trait]
 impl PeersImpl for MockPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_> {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddr> + Send + '_> {
         Box::new(self.selected_peers.keys().copied())
     }
 
@@ -239,7 +243,7 @@ impl PeersImpl for MockPeers {
 
     async fn fetch_from_peer_impl(
         &self,
-        peer: SocketAddrV6,
+        peer: SocketAddr,
         // We don't (yet) use the artifact ID in MockPeers
         _artifact_hash_id: ArtifactHashId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
@@ -257,7 +261,7 @@ impl PeersImpl for MockPeers {
 
     async fn report_progress_impl(
         &self,
-        _peer: SocketAddrV6,
+        _peer: SocketAddr,
         _update_id: Uuid,
         _report: EventReport,
     ) -> Result<(), ClientError> {
@@ -464,17 +468,17 @@ struct MockReportPeers {
 }
 
 impl MockReportPeers {
-    // SocketAddrV6::new is not a const fn in stable Rust as of this writing
-    fn valid_peer() -> SocketAddrV6 {
-        SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1), 2000, 0, 0)
+    // SocketAddr::new is not a const fn in stable Rust as of this writing
+    fn valid_peer() -> SocketAddr {
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)), 2000)
     }
 
-    fn invalid_peer() -> SocketAddrV6 {
-        SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2), 2000, 0, 0)
+    fn invalid_peer() -> SocketAddr {
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 2)), 2000)
     }
 
-    fn unresponsive_peer() -> SocketAddrV6 {
-        SocketAddrV6::new(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3), 2000, 0, 0)
+    fn unresponsive_peer() -> SocketAddr {
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 3)), 2000)
     }
 
     fn new(update_id: Uuid, report_sender: mpsc::Sender<EventReport>) -> Self {
@@ -484,7 +488,7 @@ impl MockReportPeers {
 
 #[async_trait]
 impl PeersImpl for MockReportPeers {
-    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddrV6> + Send + '_> {
+    fn peers(&self) -> Box<dyn Iterator<Item = SocketAddr> + Send + '_> {
         Box::new(
             [
                 Self::valid_peer(),
@@ -501,7 +505,7 @@ impl PeersImpl for MockReportPeers {
 
     async fn fetch_from_peer_impl(
         &self,
-        _peer: SocketAddrV6,
+        _peer: SocketAddr,
         _artifact_hash_id: ArtifactHashId,
     ) -> Result<(u64, FetchReceiver), HttpError> {
         unimplemented!(
@@ -512,7 +516,7 @@ impl PeersImpl for MockReportPeers {
 
     async fn report_progress_impl(
         &self,
-        peer: SocketAddrV6,
+        peer: SocketAddr,
         update_id: Uuid,
         report: EventReport,
     ) -> Result<(), ClientError> {
@@ -708,7 +712,7 @@ mod tests {
 
     fn assert_reports(
         reports: &[EventReport],
-        expected_result: Result<(usize, SocketAddrV6), usize>,
+        expected_result: Result<(usize, SocketAddr), usize>,
     ) {
         let all_step_events: Vec<_> =
             reports.iter().flat_map(|report| &report.step_events).collect();
@@ -732,7 +736,7 @@ mod tests {
     fn assert_success_events(
         all_step_events: Vec<&StepEvent>,
         expected_attempt: usize,
-        expected_addr: SocketAddrV6,
+        expected_addr: SocketAddr,
     ) {
         let mut saw_success = false;
 

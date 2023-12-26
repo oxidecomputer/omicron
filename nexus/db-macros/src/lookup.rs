@@ -15,7 +15,7 @@ use std::ops::Deref;
 // INPUT (arguments to the macro)
 //
 
-/// Arguments for [`lookup_resource!`]
+/// Arguments for [`super::lookup_resource!`]
 // NOTE: this is only "pub" for the `cargo doc` link on [`lookup_resource!`].
 #[derive(serde::Deserialize)]
 pub struct Input {
@@ -167,7 +167,7 @@ impl Resource {
 // MACRO IMPLEMENTATION
 //
 
-/// Implementation of [`lookup_resource!`]
+/// Implementation of [`super::lookup_resource!`]
 pub fn lookup_resource(
     raw_input: TokenStream,
 ) -> Result<TokenStream, syn::Error> {
@@ -406,7 +406,7 @@ fn generate_misc_helpers(config: &Config) -> TokenStream {
             db_row: &nexus_db_model::#resource_name,
             lookup_type: LookupType,
         ) -> authz::#resource_name {
-            authz::#resource_name::new(
+            authz::#resource_name::with_primary_key(
                 authz_parent.clone(),
                 db_row.id(),
                 lookup_type
@@ -806,11 +806,11 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                     #lookup_filter
                     .select(nexus_db_model::#resource_name::as_select())
                     .get_result_async(
-                        datastore.pool_authorized(opctx).await?
+                        &*datastore.pool_connection_authorized(opctx).await?
                     )
                     .await
                     .map_err(|e| {
-                        public_error_from_diesel_pool(
+                        public_error_from_diesel(
                             e,
                             ErrorHandler::NotFoundByLookup(
                                 ResourceType::#resource_name,
@@ -891,10 +891,10 @@ fn generate_database_functions(config: &Config) -> TokenStream {
                 #soft_delete_filter
                 #(.filter(dsl::#pkey_column_names.eq(#pkey_names.clone())))*
                 .select(nexus_db_model::#resource_name::as_select())
-                .get_result_async(datastore.pool_authorized(opctx).await?)
+                .get_result_async(&*datastore.pool_connection_authorized(opctx).await?)
                 .await
                 .map_err(|e| {
-                    public_error_from_diesel_pool(
+                    public_error_from_diesel(
                         e,
                         ErrorHandler::NotFoundByLookup(
                             ResourceType::#resource_name,
@@ -923,8 +923,8 @@ fn generate_database_functions(config: &Config) -> TokenStream {
 #[cfg(test)]
 mod test {
     use super::lookup_resource;
+    use proc_macro2::TokenStream;
     use quote::quote;
-    use rustfmt_wrapper::rustfmt;
 
     #[test]
     #[ignore]
@@ -938,7 +938,7 @@ mod test {
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
         })
         .unwrap();
-        println!("{}", rustfmt(output).unwrap());
+        println!("{}", pretty_format(output));
 
         let output = lookup_resource(quote! {
             name = "SiloUser",
@@ -949,7 +949,7 @@ mod test {
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
         })
         .unwrap();
-        println!("{}", rustfmt(output).unwrap());
+        println!("{}", pretty_format(output));
 
         let output = lookup_resource(quote! {
             name = "UpdateArtifact",
@@ -964,6 +964,11 @@ mod test {
             ]
         })
         .unwrap();
-        println!("{}", rustfmt(output).unwrap());
+        println!("{}", pretty_format(output));
+    }
+
+    fn pretty_format(input: TokenStream) -> String {
+        let parsed = syn::parse2(input).unwrap();
+        prettyplease::unparse(&parsed)
     }
 }

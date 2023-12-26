@@ -100,6 +100,17 @@
 // arguments here that specify exactly which ones are expected to be found.
 pub fn configure_default_omicron_rpaths() {
     internal::configure_default_omicron_rpaths();
+    // If no 'rerun-if-*' directives are emitted, cargo conservatively [1]
+    // assumes the build-script should be rerun if any file within the
+    // package changes. Unfortunately this can result in overzealous,
+    // rebuilds, e.g., a change to an integration test triggering a
+    // rebuild for its containing package.
+    //
+    // To get around this we output this dummy directive to ensure a
+    // build.rs using just the rpath logic isn't rerun constantly.
+    //
+    // [1]: https://doc.rust-lang.org/cargo/reference/build-scripts.html#change-detection
+    println!("cargo:rerun-if-changed=build.rs");
 }
 
 // None of this behavior is needed on MacOS.

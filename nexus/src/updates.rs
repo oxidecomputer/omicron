@@ -2,38 +2,38 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::db;
+use buf_list::BufList;
+use futures::TryStreamExt;
+use nexus_db_queries::db;
 use omicron_common::update::ArtifactsDocument;
 use std::convert::TryInto;
 
-// TODO(iliana): make async/.await. awslabs/tough#213
-pub fn read_artifacts(
+pub(crate) async fn read_artifacts(
     trusted_root: &[u8],
     mut base_url: String,
 ) -> Result<
     Vec<db::model::UpdateArtifact>,
     Box<dyn std::error::Error + Send + Sync>,
 > {
-    use std::io::Read;
-
     if !base_url.ends_with('/') {
         base_url.push('/');
     }
 
     let repository = tough::RepositoryLoader::new(
-        trusted_root,
+        &trusted_root,
         format!("{}metadata/", base_url).parse()?,
         format!("{}targets/", base_url).parse()?,
     )
-    .load()?;
+    .load()
+    .await?;
 
-    let mut artifact_document = Vec::new();
-    match repository.read_target(&"artifacts.json".parse()?)? {
-        Some(mut target) => target.read_to_end(&mut artifact_document)?,
-        None => return Err("artifacts.json missing".into()),
-    };
+    let artifact_document =
+        match repository.read_target(&"artifacts.json".parse()?).await? {
+            Some(target) => target.try_collect::<BufList>().await?,
+            None => return Err("artifacts.json missing".into()),
+        };
     let artifacts: ArtifactsDocument =
-        serde_json::from_slice(&artifact_document)?;
+        serde_json::from_reader(buf_list::Cursor::new(&artifact_document))?;
 
     let valid_until = repository
         .root()

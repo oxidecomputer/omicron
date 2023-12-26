@@ -20,15 +20,18 @@ use sled_hardware::underlay::BootstrapInterface;
 use slog::info;
 use slog::Logger;
 
-const MG_DDM_SERVICE_FMRI: &str = "svc:/system/illumos/mg-ddm";
+const MG_DDM_SERVICE_FMRI: &str = "svc:/oxide/mg-ddm";
 const MG_DDM_MANIFEST_PATH: &str = "/opt/oxide/mg-ddm/pkg/ddm/manifest.xml";
 
 // TODO-cleanup The implementation of this function is heavily derived from
 // `sled_agent::bootstrap::server::Server::start()`; consider whether we could
 // find a way for them to share it.
-pub(crate) async fn bootstrap_sled(log: Logger) -> Result<()> {
+pub(crate) async fn bootstrap_sled(
+    data_links: &[String; 2],
+    log: Logger,
+) -> Result<()> {
     // Find address objects to pass to maghemite.
-    let links = underlay::find_chelsio_links()
+    let links = underlay::find_chelsio_links(data_links)
         .context("failed to find chelsio links")?;
     ensure!(
         !links.is_empty(),

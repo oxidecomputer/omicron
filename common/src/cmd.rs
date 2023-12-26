@@ -13,7 +13,7 @@ pub enum CmdError {
     /// incorrect command-line arguments
     Usage(String),
     /// all other errors
-    Failure(String),
+    Failure(anyhow::Error),
 }
 
 /// Exits the current process on a fatal error.
@@ -26,7 +26,7 @@ pub fn fatal(cmd_error: CmdError) -> ! {
         .unwrap_or("command");
     let (exit_code, message) = match cmd_error {
         CmdError::Usage(m) => (2, m),
-        CmdError::Failure(m) => (1, m),
+        CmdError::Failure(e) => (1, format!("{e:?}")),
     };
     eprintln!("{}: {}", arg0, message);
     exit(exit_code);

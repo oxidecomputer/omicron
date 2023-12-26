@@ -1,5 +1,5 @@
-use crate::db::{identity::Resource, model::Instance};
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
+use nexus_db_queries::db::{identity::Resource, model::Instance};
 use num_integer::Integer;
 use omicron_common::api::external::Error;
 use serde::Serialize;
@@ -21,7 +21,7 @@ impl InstanceCiData for Instance {
         // cloud-init meta-data is YAML, but YAML is a strict superset of JSON.
         let meta_data = serde_json::to_vec(&MetaData {
             instance_id: self.id(),
-            local_hostname: &self.runtime().hostname,
+            local_hostname: &self.hostname,
             public_keys,
         })
         .map_err(|_| Error::internal_error("failed to serialize meta-data"))?;

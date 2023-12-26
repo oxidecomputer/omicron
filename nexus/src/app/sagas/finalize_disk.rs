@@ -12,10 +12,10 @@ use super::NexusSaga;
 use super::SagaInitError;
 use crate::app::sagas::common_storage::call_pantry_detach_for_disk;
 use crate::app::sagas::snapshot_create;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
-use crate::{authn, authz};
 use nexus_db_model::Generation;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::{authn, authz};
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Name;
@@ -27,7 +27,7 @@ use steno::Node;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub silo_id: Uuid,
     pub project_id: Uuid,
@@ -56,7 +56,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaFinalizeDisk;
+pub(crate) struct SagaFinalizeDisk;
 impl NexusSaga for SagaFinalizeDisk {
     const NAME: &'static str = "finalize-disk";
     type Params = Params;
@@ -79,7 +79,7 @@ impl NexusSaga for SagaFinalizeDisk {
                 silo_id: params.silo_id,
                 project_id: params.project_id,
                 disk_id: params.disk_id,
-                use_the_pantry: true,
+                attached_instance_and_sled: None,
                 create_params: params::SnapshotCreate {
                     identity: external::IdentityMetadataCreateParams {
                         name: snapshot_name.clone(),

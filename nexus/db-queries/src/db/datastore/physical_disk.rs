@@ -10,7 +10,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::PhysicalDisk;
 use crate::db::model::PhysicalDiskKind;
@@ -47,14 +47,18 @@ impl DataStore {
     ) -> Result<(String, String, String), Error> {
         use db::schema::physical_disk::dsl;
 
+        let conn = self
+            .pool_connection_unauthorized()
+            .await?;
+
         dsl::physical_disk
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(id))
             .select((dsl::vendor, dsl::serial, dsl::model))
-            .get_result_async(self.pool())
+            .get_result_async(&*conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::PhysicalDisk,
@@ -95,7 +99,9 @@ impl DataStore {
                     dsl::time_modified.eq(now),
                 )),
         )
-        .insert_and_get_result_async(self.pool())
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(&opctx).await?,
+        )
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -103,7 +109,7 @@ impl DataStore {
                 lookup_type: LookupType::ById(sled_id),
             },
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(e, ErrorHandler::Server)
+                public_error_from_diesel(e, ErrorHandler::Server)
             }
         })?;
 
@@ -120,9 +126,9 @@ impl DataStore {
         paginated(dsl::physical_disk, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .select(PhysicalDisk::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn sled_list_physical_disks(
@@ -137,9 +143,9 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::sled_id.eq(sled_id))
             .select(PhysicalDisk::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn physical_disk_deactivate(
@@ -152,6 +158,10 @@ impl DataStore {
 
         let (vendor, serial, model) = authz_physical_disk.id();
 
+        let conn = self
+            .pool_connection_authorized(opctx)
+            .await?;
+
         diesel::update(dsl::physical_disk)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::vendor.eq(vendor))
@@ -161,10 +171,10 @@ impl DataStore {
             .filter(dsl::state.eq(PhysicalDiskState::Active))
             .set(dsl::state.eq(PhysicalDiskState::Draining))
             .returning(PhysicalDisk::as_returning())
-            .get_result_async(self.pool())
+            .get_result_async(&*conn)
             .await
             .map_err(|e| {
-                public_error_from_diesel_pool(
+                public_error_from_diesel(
                     e,
                     ErrorHandler::NotFoundByResource(authz_physical_disk),
                 )
@@ -189,10 +199,10 @@ impl DataStore {
             .filter(dsl::model.eq(model))
             .filter(dsl::sled_id.eq(sled_id))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(self.pool())
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|_rows_modified| ())
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 
@@ -203,7 +213,7 @@ mod test {
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
-    use crate::db::model::{PhysicalDiskKind, Sled};
+    use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
     use dropshot::PaginationOrder;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
@@ -215,14 +225,14 @@ mod test {
         let sled_id = Uuid::new_v4();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
         let rack_id = Uuid::new_v4();
-        let sled = Sled::new(
+        let sled_update = SledUpdate::new(
             sled_id,
             addr,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
         );
-        db.sled_upsert(sled)
+        db.sled_upsert(sled_update)
             .await
             .expect("Could not upsert sled during test prep")
     }

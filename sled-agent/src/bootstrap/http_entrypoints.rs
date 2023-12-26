@@ -7,21 +7,57 @@
 //! Note that the bootstrap agent also communicates over Sprockets,
 //! and has a separate interface for establishing the trust quorum.
 
-use super::agent::{RackInitId, RackResetId};
-use crate::bootstrap::agent::Agent;
+use super::rack_ops::RssAccess;
+use super::BootstrapError;
+use super::RssAccessError;
 use crate::bootstrap::params::RackInitializeRequest;
-use crate::updates::Component;
+use crate::bootstrap::rack_ops::{RackInitId, RackResetId};
+use crate::updates::ConfigUpdates;
+use crate::updates::{Component, UpdateManager};
+use bootstore::schemes::v0 as bootstore;
 use dropshot::{
     endpoint, ApiDescription, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, RequestContext, TypedBody,
 };
+use http::StatusCode;
 use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
-use std::sync::Arc;
+use sled_storage::manager::StorageHandle;
+use slog::Logger;
+use std::net::Ipv6Addr;
+use tokio::sync::mpsc::error::TrySendError;
+use tokio::sync::{mpsc, oneshot};
 
-type BootstrapApiDescription = ApiDescription<Arc<Agent>>;
+pub(crate) struct BootstrapServerContext {
+    pub(crate) base_log: Logger,
+    pub(crate) global_zone_bootstrap_ip: Ipv6Addr,
+    pub(crate) storage_manager: StorageHandle,
+    pub(crate) bootstore_node_handle: bootstore::NodeHandle,
+    pub(crate) baseboard: Baseboard,
+    pub(crate) rss_access: RssAccess,
+    pub(crate) updates: ConfigUpdates,
+    pub(crate) sled_reset_tx:
+        mpsc::Sender<oneshot::Sender<Result<(), BootstrapError>>>,
+}
+
+impl BootstrapServerContext {
+    pub(super) fn start_rack_initialize(
+        &self,
+        request: RackInitializeRequest,
+    ) -> Result<RackInitId, RssAccessError> {
+        self.rss_access.start_initializing(
+            &self.base_log,
+            self.global_zone_bootstrap_ip,
+            &self.storage_manager,
+            &self.bootstore_node_handle,
+            request,
+        )
+    }
+}
+
+type BootstrapApiDescription = ApiDescription<BootstrapServerContext>;
 
 /// Returns a description of the bootstrap agent API
 pub(crate) fn api() -> BootstrapApiDescription {
@@ -89,10 +125,10 @@ pub enum RackOperationStatus {
     path = "/baseboard",
 }]
 async fn baseboard_get(
-    rqctx: RequestContext<Arc<Agent>>,
+    rqctx: RequestContext<BootstrapServerContext>,
 ) -> Result<HttpResponseOk<Baseboard>, HttpError> {
-    let ba = rqctx.context();
-    Ok(HttpResponseOk(ba.baseboard().clone()))
+    let ctx = rqctx.context();
+    Ok(HttpResponseOk(ctx.baseboard.clone()))
 }
 
 /// Provides a list of components known to the bootstrap agent.
@@ -104,10 +140,14 @@ async fn baseboard_get(
     path = "/components",
 }]
 async fn components_get(
-    rqctx: RequestContext<Arc<Agent>>,
+    rqctx: RequestContext<BootstrapServerContext>,
 ) -> Result<HttpResponseOk<Vec<Component>>, HttpError> {
-    let ba = rqctx.context();
-    let components = ba.components_get().await.map_err(|e| Error::from(e))?;
+    let ctx = rqctx.context();
+    let updates = UpdateManager::new(ctx.updates.clone());
+    let components = updates
+        .components_get()
+        .await
+        .map_err(|err| HttpError::for_internal_error(err.to_string()))?;
     Ok(HttpResponseOk(components))
 }
 
@@ -117,10 +157,10 @@ async fn components_get(
     path = "/rack-initialize",
 }]
 async fn rack_initialization_status(
-    rqctx: RequestContext<Arc<Agent>>,
+    rqctx: RequestContext<BootstrapServerContext>,
 ) -> Result<HttpResponseOk<RackOperationStatus>, HttpError> {
-    let ba = rqctx.context();
-    let status = ba.initialization_reset_op_status();
+    let ctx = rqctx.context();
+    let status = ctx.rss_access.operation_status();
     Ok(HttpResponseOk(status))
 }
 
@@ -130,12 +170,12 @@ async fn rack_initialization_status(
     path = "/rack-initialize",
 }]
 async fn rack_initialize(
-    rqctx: RequestContext<Arc<Agent>>,
+    rqctx: RequestContext<BootstrapServerContext>,
     body: TypedBody<RackInitializeRequest>,
 ) -> Result<HttpResponseOk<RackInitId>, HttpError> {
-    let ba = rqctx.context();
+    let ctx = rqctx.context();
     let request = body.into_inner();
-    let id = ba
+    let id = ctx
         .start_rack_initialize(request)
         .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
     Ok(HttpResponseOk(id))
@@ -147,11 +187,12 @@ async fn rack_initialize(
     path = "/rack-initialize",
 }]
 async fn rack_reset(
-    rqctx: RequestContext<Arc<Agent>>,
+    rqctx: RequestContext<BootstrapServerContext>,
 ) -> Result<HttpResponseOk<RackResetId>, HttpError> {
-    let ba = rqctx.context();
-    let id = ba
-        .start_rack_reset()
+    let ctx = rqctx.context();
+    let id = ctx
+        .rss_access
+        .start_reset(&ctx.base_log, ctx.global_zone_bootstrap_ip)
         .map_err(|err| HttpError::for_bad_request(None, err.to_string()))?;
     Ok(HttpResponseOk(id))
 }
@@ -162,9 +203,35 @@ async fn rack_reset(
     path = "/sled-initialize",
 }]
 async fn sled_reset(
-    rqctx: RequestContext<Arc<Agent>>,
+    rqctx: RequestContext<BootstrapServerContext>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let ba = rqctx.context();
-    ba.sled_reset().await.map_err(|e| Error::from(e))?;
-    Ok(HttpResponseUpdatedNoContent())
+    let ctx = rqctx.context();
+    let (response_tx, response_rx) = oneshot::channel();
+
+    let make_channel_closed_err = || {
+        Err(HttpError::for_internal_error(
+            "sled_reset channel closed: task panic?".to_string(),
+        ))
+    };
+
+    match ctx.sled_reset_tx.try_send(response_tx) {
+        Ok(()) => (),
+        Err(TrySendError::Full(_)) => {
+            return Err(HttpError::for_status(
+                Some("ResetPending".to_string()),
+                StatusCode::TOO_MANY_REQUESTS,
+            ));
+        }
+        Err(TrySendError::Closed(_)) => {
+            return make_channel_closed_err();
+        }
+    }
+
+    match response_rx.await {
+        Ok(result) => {
+            () = result.map_err(Error::from)?;
+            Ok(HttpResponseUpdatedNoContent())
+        }
+        Err(_) => make_channel_closed_err(),
+    }
 }

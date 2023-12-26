@@ -22,10 +22,12 @@ use uuid::Uuid;
 pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
-pub mod import_blocks_from_url;
+pub mod image_delete;
+mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
 pub mod instance_migrate;
+pub mod instance_start;
 pub mod loopback_address_create;
 pub mod loopback_address_delete;
 pub mod project_create;
@@ -33,7 +35,7 @@ pub mod snapshot_create;
 pub mod snapshot_delete;
 pub mod switch_port_settings_apply;
 pub mod switch_port_settings_clear;
-pub mod switch_port_settings_update;
+pub mod switch_port_settings_common;
 pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;
@@ -41,17 +43,20 @@ pub mod vpc_create;
 
 pub mod common_storage;
 
+#[cfg(test)]
+mod test_helpers;
+
 #[derive(Debug)]
-pub struct NexusSagaType;
+pub(crate) struct NexusSagaType;
 impl steno::SagaType for NexusSagaType {
     type ExecContextType = Arc<SagaContext>;
 }
 
-pub type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
-pub type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
-pub type NexusActionContext = steno::ActionContext<NexusSagaType>;
+pub(crate) type ActionRegistry = steno::ActionRegistry<NexusSagaType>;
+pub(crate) type NexusAction = Arc<dyn steno::Action<NexusSagaType>>;
+pub(crate) type NexusActionContext = steno::ActionContext<NexusSagaType>;
 
-pub trait NexusSaga {
+pub(crate) trait NexusSaga {
     const NAME: &'static str;
 
     type Params: serde::Serialize
@@ -107,7 +112,7 @@ impl From<SagaInitError> for omicron_common::api::external::Error {
 pub(super) static ACTION_GENERATE_ID: Lazy<NexusAction> = Lazy::new(|| {
     new_action_noop_undo("common.uuid_generate", saga_generate_uuid)
 });
-pub static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
+pub(crate) static ACTION_REGISTRY: Lazy<Arc<ActionRegistry>> =
     Lazy::new(|| Arc::new(make_action_registry()));
 
 fn make_action_registry() -> ActionRegistry {
@@ -119,7 +124,6 @@ fn make_action_registry() -> ActionRegistry {
     <finalize_disk::SagaFinalizeDisk as NexusSaga>::register_actions(
         &mut registry,
     );
-    <import_blocks_from_url::SagaImportBlocksFromUrl as NexusSaga>::register_actions(&mut registry);
     <instance_create::SagaInstanceCreate as NexusSaga>::register_actions(
         &mut registry,
     );
@@ -127,6 +131,9 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_start::SagaInstanceStart as NexusSaga>::register_actions(
         &mut registry,
     );
     <loopback_address_create::SagaLoopbackAddressCreate
@@ -159,6 +166,9 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <vpc_create::SagaVpcCreate as NexusSaga>::register_actions(&mut registry);
+    <image_delete::SagaImageDelete as NexusSaga>::register_actions(
+        &mut registry,
+    );
 
     #[cfg(test)]
     <test_saga::SagaTest as NexusSaga>::register_actions(&mut registry);
@@ -302,7 +312,7 @@ macro_rules! declare_saga_actions {
     };
 }
 
-pub(crate) const NEXUS_DPD_TAG: &str = "nexus";
+use omicron_common::OMICRON_DPD_TAG as NEXUS_DPD_TAG;
 
 pub(crate) use __action_name;
 pub(crate) use __emit_action;
@@ -362,7 +372,7 @@ where
                                 ))
                             }
 
-                            // Anything elses is a permanent error
+                            // Anything else is a permanent error
                             _ => Err(backoff::BackoffError::Permanent(
                                 progenitor_client::Error::ErrorResponse(
                                     response_value,

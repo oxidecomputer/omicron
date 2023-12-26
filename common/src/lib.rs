@@ -25,10 +25,13 @@ pub mod api;
 pub mod backoff;
 pub mod cmd;
 pub mod disk;
+pub mod ledger;
 pub mod nexus_config;
 pub mod postgres_config;
 pub mod update;
 pub mod vlan;
+
+pub use update::hex_schema;
 
 #[macro_export]
 macro_rules! generate_logging_api {
@@ -49,3 +52,30 @@ macro_rules! generate_logging_api {
         );
     };
 }
+
+/// A type that allows adding file and line numbers to log messages
+/// automatically. It should be instantiated at the root logger of each
+/// executable that desires this functionality, as in the following example.
+/// ```ignore
+///     slog::Logger::root(drain, o!(FileKv))
+/// ```
+pub struct FileKv;
+
+impl slog::KV for FileKv {
+    fn serialize(
+        &self,
+        record: &slog::Record,
+        serializer: &mut dyn slog::Serializer,
+    ) -> slog::Result {
+        // Only log file information when severity is at least info level
+        if record.level() > slog::Level::Info {
+            return Ok(());
+        }
+        serializer.emit_arguments(
+            "file".into(),
+            &format_args!("{}:{}", record.file(), record.line()),
+        )
+    }
+}
+
+pub const OMICRON_DPD_TAG: &str = "omicron";

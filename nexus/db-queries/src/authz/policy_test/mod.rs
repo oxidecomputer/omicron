@@ -160,6 +160,7 @@ async fn test_iam_roles_behavior() {
             &logctx.log,
             &user_contexts,
             &test_resources,
+            true,
         )
         .await
         .unwrap();
@@ -185,6 +186,7 @@ async fn authorize_everything<W: Write>(
     log: &slog::Logger,
     user_contexts: &[Arc<(String, OpContext)>],
     test_resources: &ResourceSet,
+    print_actions: bool,
 ) -> std::io::Result<()> {
     // Run the per-resource tests in parallel.  Since the caller will be
     // checking the overall output against some expected output, it's important
@@ -204,11 +206,18 @@ async fn authorize_everything<W: Write>(
         write!(out, "{}", o)?;
     }
 
-    write!(out, "ACTIONS:\n\n")?;
-    for action in authz::Action::iter() {
-        write!(out, "  {:>2} = {:?}\n", action_abbreviation(action), action)?;
+    if print_actions {
+        write!(out, "ACTIONS:\n\n")?;
+        for action in authz::Action::iter() {
+            write!(
+                out,
+                "  {:>2} = {:?}\n",
+                action_abbreviation(action),
+                action
+            )?;
+        }
+        write!(out, "\n")?;
     }
-    write!(out, "\n")?;
 
     Ok(())
 }
@@ -343,18 +352,26 @@ async fn test_conferred_roles() {
         .await
         .unwrap();
 
-    // Assemble the list of resources that we'll use for testing.  This is much
-    // more limited than the main policy test because we only care about the
-    // behavior on the Fleet itself.  We also create a Silo because the
-    // ResourceBuilder will create for us users that we can use to test the
-    // behavior of each role.
     let exemptions = resources::exempted_authz_classes();
     let mut coverage = Coverage::new(&logctx.log, exemptions);
+
+    // Assemble the list of resources that we'll use for testing.  This is much
+    // more limited than the main policy test because we only care about the
+    // behavior on the Fleet itself, as well as some top-level resources that
+    // exist outside of a silo.
     let mut builder =
         ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
     builder.new_resource(authz::FLEET);
-    builder.new_resource_with_users(main_silo).await;
+    builder.new_resource(authz::IP_POOL_LIST);
     let test_resources = builder.build();
+
+    // We also create a Silo because the ResourceBuilder will create for us
+    // users that we can use to test the behavior of each role.
+    let mut silo_builder =
+        ResourceBuilder::new(&opctx, &datastore, &mut coverage, main_silo_id);
+    silo_builder.new_resource(authz::FLEET);
+    silo_builder.new_resource_with_users(main_silo).await;
+    let silo_resources = silo_builder.build();
 
     // Up to this point, this looks similar to the main policy test.  Here's
     // where things get different.
@@ -404,7 +421,7 @@ async fn test_conferred_roles() {
             write!(out, "policy: {:?}\n", policy).unwrap();
             let policy = SiloAuthnPolicy::new(policy);
 
-            let user_contexts: Vec<Arc<(String, OpContext)>> = test_resources
+            let user_contexts: Vec<Arc<(String, OpContext)>> = silo_resources
                 .users()
                 .map(|(username, user_id)| {
                     let user_id = *user_id;
@@ -426,13 +443,15 @@ async fn test_conferred_roles() {
                 })
                 .collect();
 
-            let o = authorize_one_resource(
-                logctx.log.clone(),
-                user_contexts,
-                Arc::new(authz::FLEET),
+            authorize_everything(
+                &mut out,
+                &logctx.log,
+                &user_contexts,
+                &test_resources,
+                false,
             )
-            .await;
-            write!(out, "{}", o).unwrap();
+            .await
+            .unwrap();
         }
     }
 

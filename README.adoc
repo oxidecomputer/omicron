@@ -43,21 +43,38 @@ This mode of operation will be used in production.
 
 To build and run the non-simulated version of Omicron, see: xref:docs/how-to-run.adoc[].
 
+=== Run tests with nextest
+
+The supported way to run tests is via https://nexte.st/[cargo-nextest].
+
+NOTE: `cargo test` may work, but that can't be guaranteed as `cargo test` isn't run in CI.
+
+If you don't already have nextest installed, get started by https://nexte.st/book/pre-built-binaries[downloading a pre-built binary] or installing nextest via your package manager. Nextest has pre-built binaries for Linux, macOS and illumos.
+
+Then, run tests with:
+
+[source,text]
+----
+$ cargo nextest run
+----
+
+Nextest https://github.com/nextest-rs/nextest/issues/16[does not support doctests]. Run doctests separately with `cargo test --doc`.
+
 === rustfmt and clippy
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
 
-You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo clippy --all-targets \-- --deny warnings --allow clippy::style`.  Make sure to run this before pushing changes.  The CI checks that the code is clippy-clean.
+You can **run the https://github.com/rust-lang/rust-clippy[Clippy linter]** using `cargo xtask clippy`.  CI checks that code is clippy-clean.
 
 == Working in Omicron
 
-Omicron is a pretty large repo containing a bunch of related components.  (Why?  See xref:docs/repo.adoc[].)  If you just build the whole thing with `cargo build` or `cargo test`, it can take a while, even for incremental builds.  Since most people are only working on a few of these components at a time, it's helpful to be know about Cargo's tools for working with individual packages in a workspace.
+Omicron is a pretty large repo containing a bunch of related components.  (Why?  See xref:docs/repo.adoc[].)  If you just build the whole thing with `cargo build` or `cargo nextest run`, it can take a while, even for incremental builds.  Since most people are only working on a few of these components at a time, it's helpful to be know about Cargo's tools for working with individual packages in a workspace.
 
 NOTE: This section assumes you're already familiar with the prerequisites and environment setup needed to do _any_ work on Omicron.  See xref:docs/how-to-run-simulated.adoc[] or xref:docs/how-to-run.adoc[] for more on that.
 
 === Key tips
 
-* Use `cargo check` when you just want to know if your code compiles.  It's _much_ faster than `cargo build` or `cargo test`.
+* Use `cargo check` when you just want to know if your code compiles.  It's _much_ faster than `cargo build` or `cargo nextest run`.
 * When using Cargo's check/build/test/clippy commands, you can use the `-p PACKAGE` flag to only operate on a specific package.  This often saves a lot of time for incremental builds.
 * When using Cargo's check/build/clippy commands, use `--all-targets` to make sure you're checking or building the test code, too.
 
@@ -74,19 +91,19 @@ _without_ any `-p` flag.  Running this incrementally is pretty fast even on the 
 When you're ready to test the changes you've made, start with building and running tests for the most specific package you've changed:
 
 ```
-cargo test -p nexus-db-model
+cargo nextest run -p nexus-db-model
 ```
 
 Once that works, check the tests for the next package up:
 
 ```
-cargo test -p omicron-nexus
+cargo nextest run -p omicron-nexus
 ```
 
 When you're happy with things and want to make sure you haven't missed something, test everything:
 
 ```
-cargo test
+cargo nextest run
 ```
 
 === Rust packages in Omicron
@@ -135,34 +152,21 @@ Many of these components themselves are made up of other packages (e.g., `nexus-
 
 Use Cargo's `-p PACKAGE` to check/build/test only the package you're working on.  Since people are usually only working on one or two components at a time, you can usually iterate faster this way.
 
-=== Why is Cargo rebuilding stuff all the time?
+=== Workspace management
 
-People are often surprised to find Cargo rebuilding stuff that it seems like it's just built, even when the relevant source files haven't changed.
+Omicron uses `cargo-hakari` to ensure that all workspace dependencies enable the same set of features. This dramatically improves compilation time when switching between different subsets of packages (e.g. `-p wicket` or `-p nexus-db-model`), because the sets of enabled features remain consistent.
 
-* Say you're iterating on code, running `cargo build -p nexus-db-model` to build just that package.  Great, it works.  Let's run tests: `cargo test -p nexus-db-model`.  Now it's rebuilding some _dependency_ of `nexus-db-model` again?!
-* Say you've just run `cargo test -p nexus-db-model`.  Now you go run `cargo test -p omicron-nexus`, which uses `nexus-db-model`.  You see Cargo building `nexus-db-model` again?!
+`cargo hakari` status is checked in CI; if the CI check fails, then update the configuration locally with
 
-This usually has to do with the way Cargo selects package https://doc.rust-lang.org/cargo/reference/features.html[features].  These are essentially tags that are used at build time to include specific code or dependencies.  For example, the https://docs.rs/serde/latest/serde/[serde] crate defines a feature called https://docs.rs/crate/serde/latest/features["derive"] that controls whether the `Serialize`/`Deserialize` derive macros will be included.  Let's look at how this affects builds.
-
-TIP: You can use `cargo tree` to inspect a package's dependencies, including features.  This is useful for debugging feature-related build issues.
-
-==== Feature selection differs when building tests
-
-When you run `cargo build -p nexus-db-model`, Cargo looks at all the packages in the depencency tree of `nexus-db-model` and figures out what features it needs for each one.  Let's take the `uuid` package as an example.  Cargo takes https://doc.rust-lang.org/cargo/reference/features.html#feature-unification[union of the features required by any of the packages that depend on `uuid` in the whole dependency tree of `nexus-db-model`].  Let's say that's just the "v4" feature.  Simple enough.
-
-When you then run `cargo test -p nexus-db-model`, it does the same thing.  Only this time, it's looking at the `dev-dependencies` tree.  `nexus-db-model` 's dev-dependencies might include some other package that depends on `uuid` and requires the "v5" feature.  Now, Cargo has to rebuild `uuid` -- and anything else that depends on it.
-
-This is why when using Cargo's check/build/clippy commands, we suggest using `--all-targets`.  When you use `cargo build --all-targets`, it builds the tests as well.  It's usually not much more time and avoids extra rebuilds when switching back and forth between the default targets and the targets with tests included.
-
-==== Feature selection differs when building different packages
-
-People run into a similar problem when switching packages within Omicron.  Once you've got `cargo test -p nexus-db-model` working, you may run `cargo test -p omicron-nexus`, which uses `nexus-db-model`.  And you may be surprised to see Cargo rebuilding some common dependency like `uuid`.  It's the same as above: we're building a different package now.  It has a different (larger) dependency tree.  That may result in some crate deep in the dependency tree needing some new feature, causing it and all of its dependents to be rebuilt.
-
-NOTE: https://github.com/rust-lang/cargo/issues/4463[There is interest in changing the way feature selection works in workspaces like Omicron for exactly this reason.]  It's been suggested to have an option for Cargo to always look at the features required for all packages in the workspace, rather than just the one you've selected.  This could eliminate this particular problem.  In the meantime, we mitigate this with heavy use of https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table[workspace dependencies], which helps make sure that different packages _within_ Omicron depend on the same set of features for a given dependency.
+```
+cargo install cargo-hakari --locked # only needed on the first run
+cargo hakari generate
+cargo hakari manage-deps
+```
 
 === Why am I getting compile errors after I thought I'd already built everything?
 
-Say you're iterating on code, running `cargo build -p nexus-db-model` to build just that package.  You work through lots of compiler errors until finally it works.  Now you run tests: `cargo test -p nexus-db-model`.  Now you see a bunch of compiler errors again!  What gives?
+Say you're iterating on code, running `cargo build -p nexus-db-model` to build just that package.  You work through lots of compiler errors until finally it works.  Now you run tests: `cargo nextest run -p nexus-db-model`.  Now you see a bunch of compiler errors again!  What gives?
 
 By default, Cargo does not operate on the tests.  Cargo's check/build/clippy commands ignore them.  This is another reason we suggest using `--all-targets` most of the time.
 
@@ -195,7 +199,7 @@ In general, changes any service API **require the following set of build steps**
 
 . Make changes to the service API.
 . Update the OpenAPI document by running the relevant test with overwrite set:
-  `EXPECTORATE=overwrite cargo test -p <package> -- test_nexus_openapi_internal`
+  `EXPECTORATE=overwrite cargo nextest run -p <package> -- test_nexus_openapi_internal`
   (changing the package name and test name as necessary).  It's important to do
   this _before_ the next step.
 . This will cause the generated client to be updated which may break the build

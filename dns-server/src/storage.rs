@@ -590,10 +590,20 @@ impl Store {
     ) -> Result<Vec<DnsRecord>, QueryError> {
         let name = mr.query().name();
         let orig_name = mr.query().original().name();
-        self.query_name(name, orig_name)
+        self.query_raw(name, orig_name)
     }
 
-    fn query_name(
+    /// Returns a non-empty list of DNS records associated with the given name.
+    ///
+    /// If the returned set would have been empty, returns `QueryError::NoName`.
+    pub(crate) fn query_name(
+        &self,
+        name: &Name,
+    ) -> Result<Vec<DnsRecord>, QueryError> {
+        self.query_raw(&LowerName::new(name), name)
+    }
+
+    fn query_raw(
         &self,
         name: &LowerName,
         orig_name: &Name,
@@ -843,7 +853,7 @@ mod test {
     fn expect(store: &Store, name: &str, expect: Expect<'_>) {
         let dns_name_orig = Name::from_str(name).expect("bad DNS name");
         let dns_name_lower = LowerName::from(dns_name_orig.clone());
-        let result = store.query_name(&dns_name_lower, &dns_name_orig);
+        let result = store.query_raw(&dns_name_lower, &dns_name_orig);
         println!(
             "expecting {:?} for query of {:?}: {:?}",
             expect, name, result

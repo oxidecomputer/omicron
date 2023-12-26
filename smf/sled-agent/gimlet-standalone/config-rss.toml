@@ -15,11 +15,6 @@ rack_subnet = "fd00:1122:3344:0100::"
 # Only include "our own sled" in the bootstrap network
 bootstrap_discovery.type = "only_ours"
 
-# The number of sleds required to unlock the rack secret.
-#
-# For values less than 2, no rack secret will be generated.
-rack_secret_threshold = 1
-
 ntp_servers = [ "ntp.eng.oxide.computer" ]
 dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 
@@ -41,6 +36,12 @@ dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 # can do this with the `--resolve` option.  In practice, people often skip DNS
 # altogether (which also means skipping TLS).
 external_dns_zone_name = "oxide.test"
+
+# IP addresses for authoritative external DNS servers operated by the rack for
+# the DNS domain delegated to the rack by the customer. Each of these addresses
+# must be contained in one of the "internal services" IP Pool ranges listed
+# below.
+external_dns_ips = [ "192.168.1.20", "192.168.1.21" ]
 
 # Initial TLS certificates for the external API
 #
@@ -87,20 +88,36 @@ last = "192.168.1.29"
 # Configuration to bring up Boundary Services and make Nexus reachable from the
 # outside.  See docs/how-to-run.adoc for more on what to put here.
 [rack_network_config]
-# The gateway IP for the rack's external network
-gateway_ip = "192.168.1.199"
+rack_subnet = "fd00:1122:3344:01::/56"
 # A range of IP addresses used by Boundary Services on the external network.  In
 # a real system, these would be addresses of the uplink ports on the Sidecar.
 # With softnpu, only one address is used.
 infra_ip_first = "192.168.1.30"
 infra_ip_last = "192.168.1.30"
+
+# Configurations for BGP routers to run on the scrimlets.
+bgp = []
+
+# You can configure multiple uplinks by repeating the following stanza
+[[rack_network_config.ports]]
+# Routes associated with this port.
+routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
+# Addresses associated with this port.
+addresses = ["192.168.1.30/32"]
 # Name of the uplink port.  This should always be "qsfp0" when using softnpu.
-uplink_port = "qsfp0"
+port = "qsfp0"
+# The speed of this port.
 uplink_port_speed = "40G"
+# The forward error correction mode for this port.
 uplink_port_fec="none"
-# For softnpu, an address within the "infra" block above that will be used for
-# the softnpu uplink port.  You can just pick the first address in that pool.
-uplink_ip = "192.168.1.30"
+# Do not use autonegotiation
+autoneg = false
+# Switch to use for the uplink. For single-rack deployments this can be
+# "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
+# and dendrite stub environments, use "switch0"
+switch = "switch0"
+# Neighbors we expect to peer with over BGP on this port.
+bgp_peers = []
 
 # Configuration for the initial Silo, user, and password.
 #

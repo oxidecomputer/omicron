@@ -12,6 +12,7 @@ pub mod http_pagination;
 use dropshot::HttpError;
 pub use error::*;
 
+pub use crate::api::internal::shared::SwitchLocation;
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -70,6 +71,23 @@ pub trait ObjectIdentity {
     fn identity(&self) -> &IdentityMetadata;
 }
 
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by name or id.
+pub trait SimpleIdentity {
+    fn id(&self) -> Uuid;
+    fn name(&self) -> &Name;
+}
+
+impl<T: ObjectIdentity> SimpleIdentity for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+
+    fn name(&self) -> &Name {
+        &self.identity().name
+    }
+}
+
 /// Parameters used to request a specific page of results when listing a
 /// collection of objects
 ///
@@ -98,6 +116,13 @@ pub struct DataPageParams<'a, NameType> {
 }
 
 impl<'a, NameType> DataPageParams<'a, NameType> {
+    pub fn max_page() -> Self {
+        Self {
+            marker: None,
+            direction: dropshot::PaginationOrder::Ascending,
+            limit: NonZeroU32::new(u32::MAX).unwrap(),
+        }
+    }
     /// Maps the marker type to a new type.
     ///
     /// Equivalent to [std::option::Option::map], because that's what it calls.
@@ -291,7 +316,7 @@ impl JsonSchema for Name {
                         r#"^"#,
                         // Cannot match a UUID
                         r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
-                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]*"#,
+                        r#"^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?"#,
                         r#"$"#,
                     )
                     .to_string(),
@@ -308,10 +333,7 @@ impl Name {
     /// `Name::try_from(String)` that marshals any error into an appropriate
     /// `Error`.
     pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
-        value.parse().map_err(|e| Error::InvalidValue {
-            label: String::from(label),
-            message: e,
-        })
+        value.parse().map_err(|e| Error::invalid_value(label, e))
     }
 
     /// Return the `&str` representing the actual name.
@@ -400,8 +422,8 @@ impl SemverVersion {
 
     /// This is the official ECMAScript-compatible validation regex for
     /// semver:
-    /// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
-    const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
+    /// <https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string>
+    const VALIDATION_REGEX: &'static str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
 impl JsonSchema for SemverVersion {
@@ -614,6 +636,7 @@ impl From<ByteCount> for i64 {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     JsonSchema,
     Ord,
     PartialEq,
@@ -652,6 +675,12 @@ impl From<&Generation> for i64 {
     }
 }
 
+impl From<u32> for Generation {
+    fn from(value: u32) -> Self {
+        Generation(u64::from(value))
+    }
+}
+
 impl TryFrom<i64> for Generation {
     type Error = anyhow::Error;
 
@@ -683,10 +712,14 @@ impl TryFrom<i64> for Generation {
 pub enum ResourceType {
     AddressLot,
     AddressLotBlock,
+    BackgroundTask,
+    BgpConfig,
+    BgpAnnounceSet,
     Fleet,
     Silo,
     SiloUser,
     SiloGroup,
+    SiloQuotas,
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,
@@ -732,6 +765,9 @@ pub enum ResourceType {
     UpdateableComponent,
     UserBuiltin,
     Zpool,
+    Vmm,
+    Ipv4NatEntry,
+    FloatingIp,
 }
 
 // IDENTITY METADATA
@@ -859,25 +895,6 @@ impl InstanceState {
             InstanceState::Destroyed => "destroyed",
         }
     }
-
-    /// Returns true if the given state represents a fully stopped Instance.
-    /// This means that a transition from an !is_stopped() state must go
-    /// through Stopping.
-    pub fn is_stopped(&self) -> bool {
-        match self {
-            InstanceState::Starting => false,
-            InstanceState::Running => false,
-            InstanceState::Stopping => false,
-            InstanceState::Rebooting => false,
-            InstanceState::Migrating => false,
-
-            InstanceState::Creating => true,
-            InstanceState::Stopped => true,
-            InstanceState::Repairing => true,
-            InstanceState::Failed => true,
-            InstanceState::Destroyed => true,
-        }
-    }
 }
 
 /// The number of CPUs in an Instance
@@ -903,17 +920,6 @@ impl From<&InstanceCpuCount> for i64 {
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
-}
-
-impl From<crate::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeState
-{
-    fn from(state: crate::api::internal::nexus::InstanceRuntimeState) -> Self {
-        InstanceRuntimeState {
-            run_state: state.run_state,
-            time_run_state_updated: state.time_updated,
-        }
-    }
 }
 
 /// View of an Instance
@@ -945,7 +951,9 @@ pub struct Disk {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
     pub project_id: Uuid,
+    /// ID of snapshot from which disk was created, if any
     pub snapshot_id: Option<Uuid>,
+    /// ID of image from which disk was created, if any
     pub image_id: Option<Uuid>,
     pub size: ByteCount,
     pub block_size: ByteCount,
@@ -1905,6 +1913,14 @@ impl MacAddr {
         Self::from_i64(value)
     }
 
+    /// Iterate the MAC addresses in the system address range
+    /// (used as an allocator in contexts where collisions are not expected and
+    /// determinism is useful, like in the test suite)
+    pub fn iter_system() -> impl Iterator<Item = MacAddr> {
+        ((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR)
+            .map(Self::from_i64)
+    }
+
     /// Is this a MAC in the Guest Addresses range
     pub fn is_guest(&self) -> bool {
         let value = self.to_i64();
@@ -2471,9 +2487,6 @@ pub struct SwitchPortBgpPeerConfig {
     /// The port settings object this BGP configuration belongs to.
     pub port_settings_id: Uuid,
 
-    /// The id for the set of prefixes announced in this peer configuration.
-    pub bgp_announce_set_id: Uuid,
-
     /// The id of the global BGP configuration referenced by this peer
     /// configuration.
     pub bgp_config_id: Uuid,
@@ -2488,7 +2501,9 @@ pub struct SwitchPortBgpPeerConfig {
 }
 
 /// A base BGP configuration.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,
+)]
 pub struct BgpConfig {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
@@ -2538,6 +2553,72 @@ pub struct SwitchPortAddressConfig {
     // TODO: https://github.com/oxidecomputer/omicron/issues/3050
     // Use `Name` instead of `String` for `interface_name` type
     pub interface_name: String,
+}
+
+/// The current state of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BgpPeerState {
+    /// Initial state. Refuse all incomming BGP connections. No resources
+    /// allocated to peer.
+    Idle,
+
+    /// Waiting for the TCP connection to be completed.
+    Connect,
+
+    /// Trying to acquire peer by listening for and accepting a TCP connection.
+    Active,
+
+    /// Waiting for open message from peer.
+    OpenSent,
+
+    /// Waiting for keepaliave or notification from peer.
+    OpenConfirm,
+
+    /// Synchronizing with peer.
+    SessionSetup,
+
+    /// Session established. Able to exchange update, notification and keepliave
+    /// messages with peers.
+    Established,
+}
+
+/// The current status of a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpPeerStatus {
+    /// IP address of the peer.
+    pub addr: IpAddr,
+
+    /// Local autonomous system number.
+    pub local_asn: u32,
+
+    /// Remote autonomous system number.
+    pub remote_asn: u32,
+
+    /// State of the peer.
+    pub state: BgpPeerState,
+
+    /// Time of last state change.
+    pub state_duration_millis: u64,
+
+    /// Switch with the peer session.
+    pub switch: SwitchLocation,
+}
+
+/// A route imported from a BGP peer.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpImportedRouteIpv4 {
+    /// The destination network prefix.
+    pub prefix: Ipv4Net,
+
+    /// The nexthop the prefix is reachable through.
+    pub nexthop: Ipv4Addr,
+
+    /// BGP identifier of the originating router.
+    pub id: u32,
+
+    /// Switch the route is imported into.
+    pub switch: SwitchLocation,
 }
 
 #[cfg(test)]
@@ -2762,10 +2843,10 @@ mod test {
         assert!(result.is_err());
         assert_eq!(
             result,
-            Err(Error::InvalidValue {
-                label: "the_name".to_string(),
-                message: "name requires at least one character".to_string()
-            })
+            Err(Error::invalid_value(
+                "the_name",
+                "name requires at least one character"
+            ))
         );
     }
 
@@ -3258,6 +3339,19 @@ mod test {
         let _ = MacAddr::from_str("g:g:g:g:g:g").unwrap_err();
         // Too many characters
         let _ = MacAddr::from_str("fff:ff:ff:ff:ff:ff").unwrap_err();
+    }
+
+    #[test]
+    fn test_mac_system_iterator() {
+        use super::MacAddr;
+
+        let mut count = 0;
+        for m in MacAddr::iter_system() {
+            assert!(m.is_system());
+            assert!(m.to_i64() > MacAddr::MAX_SYSTEM_RESV);
+            count += 1;
+        }
+        assert_eq!(count, MacAddr::MAX_SYSTEM_ADDR - MacAddr::MAX_SYSTEM_RESV);
     }
 
     #[test]

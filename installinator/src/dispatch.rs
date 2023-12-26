@@ -13,6 +13,7 @@ use installinator_common::{
     InstallinatorStepId, StepContext, StepHandle, StepProgress, StepSuccess,
     StepWarning, UpdateEngine,
 };
+use omicron_common::FileKv;
 use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHash, ArtifactHashId, ArtifactKind},
@@ -66,7 +67,7 @@ impl InstallinatorApp {
 
         let drain = slog::Duplicate::new(file_drain, stderr_drain).fuse();
         let drain = slog_async::Async::new(drain).build().fuse();
-        Ok(slog::Logger::root(drain, slog::o!()))
+        Ok(slog::Logger::root(drain, slog::o!(FileKv)))
     }
 }
 
@@ -103,7 +104,7 @@ impl DebugDiscoverOpts {
 /// Options shared by both [`DebugDiscoverOpts`] and [`InstallOpts`].
 #[derive(Debug, Args)]
 struct DiscoverOpts {
-    /// The mechanism by which to discover peers: bootstrap or list:[::1]:8000
+    /// The mechanism by which to discover peers: bootstrap or `list:[::1]:8000`
     #[clap(long, default_value_t = DiscoveryMechanism::Bootstrap)]
     mechanism: DiscoveryMechanism,
 }
@@ -150,6 +151,18 @@ struct InstallOpts {
     #[clap(long)]
     install_on_gimlet: bool,
 
+    //TODO(ry) this probably needs to get plumbed somewhere instead of relying
+    //on a default.
+    /// The first gimlet data link to use.
+    #[clap(long, default_value = "cxgbe0")]
+    data_link0: String,
+
+    //TODO(ry) this probably needs to get plumbed somewhere instead of relying
+    //on a default.
+    /// The second gimlet data link to use.
+    #[clap(long, default_value = "cxgbe1")]
+    data_link1: String,
+
     // TODO: checksum?
 
     // The destination to write to.
@@ -163,7 +176,8 @@ struct InstallOpts {
 impl InstallOpts {
     async fn exec(self, log: &slog::Logger) -> Result<()> {
         if self.bootstrap_sled {
-            crate::bootstrap::bootstrap_sled(log.clone()).await?;
+            let data_links = [self.data_link0.clone(), self.data_link1.clone()];
+            crate::bootstrap::bootstrap_sled(&data_links, log.clone()).await?;
         }
 
         let image_id = self.artifact_ids.resolve()?;
@@ -367,15 +381,16 @@ impl InstallOpts {
 
         // Wait for both the engine to complete and all progress reports to be
         // sent, then possibly return an error to our caller if either failed.
-        // We intentionally do not use `try_join!` here: we want both futures to
-        // complete, _then_ we will check for failures from either, so any
-        // errors from the engine that need to be reported to wicketd are
-        // reported before we return.
-        let (engine_result, progress_result) =
-            tokio::join!(engine.execute(), progress_handle);
-
-        engine_result.context("failed to execute installinator")?;
-        progress_result.context("progress reporter failed")?;
+        // Use `join_then_try!` to ensure this.
+        cancel_safe_futures::join_then_try!(
+            async {
+                engine
+                    .execute()
+                    .await
+                    .context("failed to execute installinator")
+            },
+            async { progress_handle.await.context("progress reporter failed") },
+        )?;
 
         if self.stay_alive {
             loop {

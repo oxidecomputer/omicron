@@ -12,12 +12,6 @@
 
 mod error;
 mod rack_secret;
-mod share_pkg;
 
 pub use error::TrustQuorumError;
-pub(crate) use rack_secret::RackSecret;
-
-#[allow(unused)]
-pub(crate) use share_pkg::{
-    create_pkgs, LearnedSharePkgV0, SharePkgHeader, SharePkgV0,
-};
+pub use rack_secret::RackSecret;

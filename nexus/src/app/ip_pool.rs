@@ -4,15 +4,17 @@
 
 //! IP Pools, collections of external IP addresses for guest instances
 
-use crate::authz;
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
-use crate::db::model::Name;
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
+use nexus_db_model::IpPool;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::model::Name;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -24,6 +26,10 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+
+fn is_internal(pool: &IpPool) -> bool {
+    pool.silo_id == Some(*INTERNAL_SILO_ID)
+}
 
 impl super::Nexus {
     pub fn ip_pool_lookup<'a>(
@@ -45,27 +51,30 @@ impl super::Nexus {
         }
     }
 
-    pub async fn ip_pool_create(
+    pub(crate) async fn ip_pool_create(
         &self,
         opctx: &OpContext,
-        new_pool: &params::IpPoolCreate,
+        pool_params: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        self.db_datastore
-            .ip_pool_create(opctx, new_pool, /* internal= */ false)
-            .await
+        let silo_id = match pool_params.clone().silo {
+            Some(silo) => {
+                let (.., authz_silo) = self
+                    .silo_lookup(&opctx, silo)?
+                    .lookup_for(authz::Action::Read)
+                    .await?;
+                Some(authz_silo.id())
+            }
+            _ => None,
+        };
+        let pool = db::model::IpPool::new(
+            &pool_params.identity,
+            silo_id,
+            pool_params.is_default,
+        );
+        self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
-    pub async fn ip_pool_services_create(
-        &self,
-        opctx: &OpContext,
-        new_pool: &params::IpPoolCreate,
-    ) -> CreateResult<db::model::IpPool> {
-        self.db_datastore
-            .ip_pool_create(opctx, new_pool, /* internal= */ true)
-            .await
-    }
-
-    pub async fn ip_pools_list(
+    pub(crate) async fn ip_pools_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -73,7 +82,7 @@ impl super::Nexus {
         self.db_datastore.ip_pools_list(opctx, pagparams).await
     }
 
-    pub async fn ip_pool_delete(
+    pub(crate) async fn ip_pool_delete(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -83,7 +92,7 @@ impl super::Nexus {
         self.db_datastore.ip_pool_delete(opctx, &authz_pool, &db_pool).await
     }
 
-    pub async fn ip_pool_update(
+    pub(crate) async fn ip_pool_update(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -96,7 +105,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn ip_pool_list_ranges(
+    pub(crate) async fn ip_pool_list_ranges(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -104,7 +113,7 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::IpPoolRange> {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::ListChildren).await?;
-        if db_pool.internal {
+        if is_internal(&db_pool) {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 &db_pool.identity.name,
@@ -116,7 +125,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn ip_pool_add_range(
+    pub(crate) async fn ip_pool_add_range(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -124,7 +133,7 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::IpPoolRange> {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
-        if db_pool.internal {
+        if is_internal(&db_pool) {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 &db_pool.identity.name,
@@ -133,7 +142,7 @@ impl super::Nexus {
         self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
-    pub async fn ip_pool_delete_range(
+    pub(crate) async fn ip_pool_delete_range(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
@@ -141,7 +150,7 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
-        if db_pool.internal {
+        if is_internal(&db_pool) {
             return Err(Error::not_found_by_name(
                 ResourceType::IpPool,
                 &db_pool.identity.name,
@@ -156,7 +165,7 @@ impl super::Nexus {
     // TODO(https://github.com/oxidecomputer/omicron/issues/1276): Should be
     // accessed via AZ UUID, probably.
 
-    pub async fn ip_pool_service_fetch(
+    pub(crate) async fn ip_pool_service_fetch(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<db::model::IpPool> {
@@ -166,7 +175,7 @@ impl super::Nexus {
         Ok(db_pool)
     }
 
-    pub async fn ip_pool_service_list_ranges(
+    pub(crate) async fn ip_pool_service_list_ranges(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, IpNetwork>,
@@ -179,7 +188,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn ip_pool_service_add_range(
+    pub(crate) async fn ip_pool_service_add_range(
         &self,
         opctx: &OpContext,
         range: &IpRange,
@@ -190,7 +199,7 @@ impl super::Nexus {
         self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
-    pub async fn ip_pool_service_delete_range(
+    pub(crate) async fn ip_pool_service_delete_range(
         &self,
         opctx: &OpContext,
         range: &IpRange,

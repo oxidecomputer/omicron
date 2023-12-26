@@ -7,9 +7,9 @@ use super::NexusActionContext;
 use super::NexusSaga;
 use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
-use crate::db::queries::vpc_subnet::SubnetError;
 use crate::external_api::params;
-use crate::{authn, authz, db};
+use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
+use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;
 use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -26,7 +26,7 @@ use uuid::Uuid;
 // vpc create saga: input parameters
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub vpc_create: params::VpcCreate,
     pub authz_project: authz::Project,
@@ -99,7 +99,7 @@ pub fn create_dag(
 }
 
 #[derive(Debug)]
-pub struct SagaVpcCreate;
+pub(crate) struct SagaVpcCreate;
 impl NexusSaga for SagaVpcCreate {
     const NAME: &'static str = "vpc-create";
     type Params = Params;
@@ -432,7 +432,7 @@ async fn svc_notify_sleds(
 
     osagactx
         .nexus()
-        .send_sled_agents_firewall_rules(&opctx, &db_vpc, &rules)
+        .send_sled_agents_firewall_rules(&opctx, &db_vpc, &rules, &[])
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -443,14 +443,18 @@ async fn svc_notify_sleds(
 pub(crate) mod test {
     use crate::{
         app::saga::create_saga_dag, app::sagas::vpc_create::Params,
-        app::sagas::vpc_create::SagaVpcCreate, authn::saga::Serialized, authz,
-        db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
-        db::lookup::LookupPath, external_api::params,
+        app::sagas::vpc_create::SagaVpcCreate, external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
-    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::{
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    };
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::{
+        authn::saga::Serialized, authz, context::OpContext,
+        db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
+        db::lookup::LookupPath,
+    };
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils_macros::nexus_test;
@@ -589,15 +593,17 @@ pub(crate) mod test {
     }
 
     async fn no_vpcs_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::Vpc;
-        use crate::db::schema::vpc::dsl;
+        use nexus_db_queries::db::model::Vpc;
+        use nexus_db_queries::db::schema::vpc::dsl;
 
         dsl::vpc
             .filter(dsl::time_deleted.is_null())
             // ignore built-in services VPC
             .filter(dsl::id.ne(*SERVICES_VPC_ID))
             .select(Vpc::as_select())
-            .first_async::<Vpc>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<Vpc>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -608,15 +614,17 @@ pub(crate) mod test {
     }
 
     async fn no_routers_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::VpcRouter;
-        use crate::db::schema::vpc_router::dsl;
+        use nexus_db_queries::db::model::VpcRouter;
+        use nexus_db_queries::db::schema::vpc_router::dsl;
 
         dsl::vpc_router
             .filter(dsl::time_deleted.is_null())
             // ignore built-in services VPC
             .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcRouter::as_select())
-            .first_async::<VpcRouter>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<VpcRouter>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -627,9 +635,9 @@ pub(crate) mod test {
     }
 
     async fn no_routes_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::RouterRoute;
-        use crate::db::schema::router_route::dsl;
-        use crate::db::schema::vpc_router::dsl as vpc_router_dsl;
+        use nexus_db_queries::db::model::RouterRoute;
+        use nexus_db_queries::db::schema::router_route::dsl;
+        use nexus_db_queries::db::schema::vpc_router::dsl as vpc_router_dsl;
 
         dsl::router_route
             .filter(dsl::time_deleted.is_null())
@@ -644,7 +652,7 @@ pub(crate) mod test {
             )
             .select(RouterRoute::as_select())
             .first_async::<RouterRoute>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -656,15 +664,17 @@ pub(crate) mod test {
     }
 
     async fn no_subnets_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::VpcSubnet;
-        use crate::db::schema::vpc_subnet::dsl;
+        use nexus_db_queries::db::model::VpcSubnet;
+        use nexus_db_queries::db::schema::vpc_subnet::dsl;
 
         dsl::vpc_subnet
             .filter(dsl::time_deleted.is_null())
             // ignore built-in services VPC
             .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcSubnet::as_select())
-            .first_async::<VpcSubnet>(datastore.pool_for_tests().await.unwrap())
+            .first_async::<VpcSubnet>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
             .await
             .optional()
             .unwrap()
@@ -675,8 +685,8 @@ pub(crate) mod test {
     }
 
     async fn no_firewall_rules_exist(datastore: &DataStore) -> bool {
-        use crate::db::model::VpcFirewallRule;
-        use crate::db::schema::vpc_firewall_rule::dsl;
+        use nexus_db_queries::db::model::VpcFirewallRule;
+        use nexus_db_queries::db::schema::vpc_firewall_rule::dsl;
 
         dsl::vpc_firewall_rule
             .filter(dsl::time_deleted.is_null())
@@ -684,7 +694,7 @@ pub(crate) mod test {
             .filter(dsl::vpc_id.ne(*SERVICES_VPC_ID))
             .select(VpcFirewallRule::as_select())
             .first_async::<VpcFirewallRule>(
-                datastore.pool_for_tests().await.unwrap(),
+                &*datastore.pool_connection_for_tests().await.unwrap(),
             )
             .await
             .optional()
@@ -734,43 +744,33 @@ pub(crate) mod test {
         let project_id = create_org_and_project(&client).await;
         delete_project_vpc_defaults(&cptestctx, project_id).await;
 
-        // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
-        let authz_project = get_authz_project(
-            &cptestctx,
-            project_id,
-            authz::Action::CreateChild,
+        crate::app::sagas::test_helpers::action_failure_can_unwind::<
+            SagaVpcCreate,
+            _,
+            _,
+        >(
+            nexus,
+            || {
+                Box::pin(async {
+                    new_test_params(
+                        &opctx,
+                        get_authz_project(
+                            &cptestctx,
+                            project_id,
+                            authz::Action::CreateChild,
+                        )
+                        .await,
+                    )
+                })
+            },
+            || {
+                Box::pin(async {
+                    verify_clean_slate(nexus.datastore()).await;
+                })
+            },
+            log,
         )
         .await;
-        let params = new_test_params(&opctx, authz_project);
-        let dag = create_saga_dag::<SagaVpcCreate>(params).unwrap();
-
-        for node in dag.get_nodes() {
-            // Create a new saga for this node.
-            info!(
-                log,
-                "Creating new saga which will fail at index {:?}", node.index();
-                "node_name" => node.name().as_ref(),
-                "label" => node.label(),
-            );
-
-            let runnable_saga =
-                nexus.create_runnable_saga(dag.clone()).await.unwrap();
-
-            // Inject an error instead of running the node.
-            //
-            // This should cause the saga to unwind.
-            nexus
-                .sec()
-                .saga_inject_error(runnable_saga.id(), node.index())
-                .await
-                .unwrap();
-            nexus
-                .run_saga(runnable_saga)
-                .await
-                .expect_err("Saga should have failed");
-
-            verify_clean_slate(nexus.datastore()).await;
-        }
     }
 }

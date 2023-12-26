@@ -5,16 +5,16 @@
 //! Project APIs
 
 use crate::app::sagas;
-use crate::authn;
-use crate::authz;
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
 use crate::external_api::shared;
 use anyhow::Context;
 use nexus_db_model::Name;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -44,7 +44,7 @@ impl super::Nexus {
         })
     }
 
-    pub async fn project_create(
+    pub(crate) async fn project_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         new_project: &params::ProjectCreate,
@@ -74,7 +74,7 @@ impl super::Nexus {
         Ok(db_project)
     }
 
-    pub async fn project_list(
+    pub(crate) async fn project_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -82,7 +82,7 @@ impl super::Nexus {
         self.db_datastore.projects_list(opctx, pagparams).await
     }
 
-    pub async fn project_update(
+    pub(crate) async fn project_update(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -95,7 +95,7 @@ impl super::Nexus {
             .await
     }
 
-    pub async fn project_delete(
+    pub(crate) async fn project_delete(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -109,7 +109,7 @@ impl super::Nexus {
 
     // Role assignments
 
-    pub async fn project_fetch_policy(
+    pub(crate) async fn project_fetch_policy(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -127,7 +127,7 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn project_update_policy(
+    pub(crate) async fn project_update_policy(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -150,7 +150,7 @@ impl super::Nexus {
         Ok(shared::Policy { role_assignments })
     }
 
-    pub async fn project_ip_pools_list(
+    pub(crate) async fn project_ip_pools_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,

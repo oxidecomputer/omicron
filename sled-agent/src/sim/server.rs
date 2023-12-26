@@ -22,7 +22,9 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use omicron_common::FileKv;
 use slog::{info, Drain, Logger};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
@@ -92,11 +94,11 @@ impl Server {
                     &config.id,
                     &NexusTypes::SledAgentStartupInfo {
                         sa_address: sa_address.to_string(),
-                        role: NexusTypes::SledRole::Gimlet,
+                        role: NexusTypes::SledRole::Scrimlet,
                         baseboard: NexusTypes::Baseboard {
                             serial_number: format!(
-                                "Simulated sled {}",
-                                config.id
+                                "sim-{}",
+                                &config.id.to_string()[0..8]
                             ),
                             part_number: String::from("Unknown"),
                             revision: 0,
@@ -268,7 +270,7 @@ pub async fn run_standalone_server(
             .to_logger("sled-agent")
             .map_err(|message| anyhow!("initializing logger: {}", message))?,
     );
-    let log = slog::Logger::root(drain.fuse(), slog::o!());
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
     if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
         let msg = format!("failed to register DTrace probes: {}", e);
         error!(log, "{}", msg);
@@ -330,6 +332,7 @@ pub async fn run_standalone_server(
     }];
 
     let mut internal_services_ip_pool_ranges = vec![];
+    let mut macs = MacAddr::iter_system();
     if let Some(nexus_external_addr) = rss_args.nexus_external_addr {
         let ip = nexus_external_addr.ip();
 
@@ -344,7 +347,7 @@ pub async fn run_standalone_server(
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac: macs.next().unwrap(),
                 },
             },
             service_id: Uuid::new_v4(),
@@ -377,7 +380,7 @@ pub async fn run_standalone_server(
                         .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
                         .unwrap()
                         .into(),
-                    mac: MacAddr::random_system(),
+                    mac: macs.next().unwrap(),
                 },
             },
             service_id: Uuid::new_v4(),
@@ -436,7 +439,9 @@ pub async fn run_standalone_server(
         external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING
             .to_owned(),
         recovery_silo,
-        external_port_count: 1,
+        external_port_count: NexusTypes::ExternalPortDiscovery::Static(
+            HashMap::new(),
+        ),
         rack_network_config: None,
     };
 

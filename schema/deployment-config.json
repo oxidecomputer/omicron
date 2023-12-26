@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeploymentConfig",
+  "type": "object",
+  "required": [
+    "database",
+    "external_dns_servers",
+    "id",
+    "internal_dns",
+    "rack_id"
+  ],
+  "properties": {
+    "database": {
+      "description": "DB configuration.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Database"
+        }
+      ]
+    },
+    "external_dns_servers": {
+      "description": "External DNS servers Nexus can use to resolve external hosts.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "format": "ip"
+      }
+    },
+    "id": {
+      "description": "Uuid of the Nexus instance",
+      "type": "string",
+      "format": "uuid"
+    },
+    "internal_dns": {
+      "description": "Describes how Nexus should find internal DNS servers for bootstrapping.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/InternalDns"
+        }
+      ]
+    },
+    "rack_id": {
+      "description": "Uuid of the Rack where Nexus is executing.",
+      "type": "string",
+      "format": "uuid"
+    }
+  },
+  "definitions": {
+    "Database": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "from_dns"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "url"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "from_url"
+              ]
+            },
+            "url": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "InternalDns": {
+      "description": "The mechanism Nexus should use to contact the internal DNS servers.",
+      "oneOf": [
+        {
+          "description": "Nexus should infer the DNS server addresses from this subnet.\n\nThis is a more common usage for production.",
+          "type": "object",
+          "required": [
+            "subnet",
+            "type"
+          ],
+          "properties": {
+            "subnet": {
+              "$ref": "#/definitions/Ipv6Subnet"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "from_subnet"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Nexus should use precisely the following address.\n\nThis is less desirable in production, but can give value in test scenarios.",
+          "type": "object",
+          "required": [
+            "address",
+            "type"
+          ],
+          "properties": {
+            "address": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "from_address"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "Ipv6Net": {
+      "title": "An IPv6 subnet",
+      "description": "An IPv6 subnet, including prefix and subnet mask",
+      "examples": [
+        "fd12:3456::/64"
+      ],
+      "type": "string",
+      "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+    },
+    "Ipv6Subnet": {
+      "description": "Wraps an [`Ipv6Network`] with a compile-time prefix length.",
+      "type": "object",
+      "required": [
+        "net"
+      ],
+      "properties": {
+        "net": {
+          "$ref": "#/definitions/Ipv6Net"
+        }
+      }
+    }
+  }
+}

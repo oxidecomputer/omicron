@@ -5,9 +5,9 @@
 //! Default consistent styling for various widgets
 
 use super::colors::*;
-use tui::style::Color;
-use tui::style::Modifier;
-use tui::style::Style;
+use ratatui::style::Color;
+use ratatui::style::Modifier;
+use ratatui::style::Style;
 
 pub fn selected() -> Style {
     Style::default().fg(TUI_GREEN)
@@ -119,4 +119,20 @@ pub fn bold() -> Style {
 
 pub fn faded_background() -> Style {
     Style::default().bg(TUI_BLACK).fg(TUI_GREY)
+}
+
+pub fn text_label() -> Style {
+    Style::default().fg(OX_OFF_WHITE)
+}
+
+pub fn text_success() -> Style {
+    Style::default().fg(OX_GREEN_LIGHT)
+}
+
+pub fn text_failure() -> Style {
+    Style::default().fg(OX_RED)
+}
+
+pub fn text_warning() -> Style {
+    Style::default().fg(OX_YELLOW)
 }

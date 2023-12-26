@@ -47,7 +47,7 @@ pub enum Cmd {
     /// Raw(KeyEvent),
 
     /// Display details for the given selection
-    /// This can be used to do things like open a scollable popup for a given
+    /// This can be used to do things like open a scrollable popup for a given
     /// `Control`.
     Details,
 
@@ -82,6 +82,12 @@ pub enum Cmd {
 
     /// Begin rack setup.
     StartRackSetup,
+
+    /// Page up.
+    PageUp,
+
+    /// Page down.
+    PageDown,
 
     /// Goto top of list/screen/etc...
     GotoTop,
@@ -154,6 +160,7 @@ pub enum ShowPopupCmd {
 #[allow(non_camel_case_types)]
 enum MultiKeySeqStart {
     g,
+    CtrlR,
 }
 
 /// A Key Handler maintains any state that is needed across key presses,
@@ -185,6 +192,33 @@ impl KeyHandler {
                     }
                     _ => (),
                 },
+                MultiKeySeqStart::CtrlR => match event.code {
+                    KeyCode::Char('a')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::AbortUpdate);
+                    }
+                    KeyCode::Char('r')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::ResetState);
+                    }
+                    KeyCode::Char('s')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::DumpSnapshot);
+                    }
+                    KeyCode::Char('t')
+                        if event.modifiers == KeyModifiers::CONTROL =>
+                    {
+                        self.seq = None;
+                        return Some(Cmd::KnightRiderMode);
+                    }
+                    _ => (),
+                },
             }
         }
 
@@ -204,37 +238,24 @@ impl KeyHandler {
             KeyCode::Down => Cmd::Down,
             KeyCode::Right => Cmd::Right,
             KeyCode::Left => Cmd::Left,
+            KeyCode::PageUp => Cmd::PageUp,
+            KeyCode::PageDown => Cmd::PageDown,
+            KeyCode::Home => Cmd::GotoTop,
+            KeyCode::End => Cmd::GotoBottom,
             KeyCode::Char('y') => Cmd::Yes,
             KeyCode::Char('u') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::StartUpdate
             }
-            KeyCode::Char('a')
-                if event.modifiers
-                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
-            {
-                Cmd::AbortUpdate
+            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
+                self.seq = Some(MultiKeySeqStart::CtrlR);
+                return None;
             }
-            KeyCode::Char('r')
-                if event.modifiers
-                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
-            {
-                Cmd::ResetState
-            }
-            KeyCode::Char('s')
-                if event.modifiers
-                    == KeyModifiers::CONTROL | KeyModifiers::ALT =>
-            {
+            KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
                 Cmd::StartRackSetup
             }
             KeyCode::Char('n') => Cmd::No,
-            KeyCode::Char('k') if event.modifiers == KeyModifiers::CONTROL => {
-                Cmd::KnightRiderMode
-            }
             KeyCode::Tab => Cmd::NextPane,
             KeyCode::BackTab => Cmd::PrevPane,
-            KeyCode::Char('r') if event.modifiers == KeyModifiers::CONTROL => {
-                Cmd::DumpSnapshot
-            }
 
             // Vim navigation
             KeyCode::Char('k') => Cmd::Up,

@@ -24,6 +24,7 @@
 
 use crate::schema::dataset;
 use crate::schema::physical_disk;
+use crate::schema::sled;
 use crate::schema::zpool;
 
 table! {
@@ -49,9 +50,9 @@ table! {
 }
 
 table! {
-    candidate_zpools {
+    shuffled_candidate_datasets {
         id -> Uuid,
-        total_size -> Int8,
+        pool_id -> Uuid,
     }
 }
 
@@ -71,13 +72,6 @@ table! {
 }
 
 table! {
-    zpool_size_delta (pool_id) {
-        pool_id -> Uuid,
-        size_used_delta -> Numeric,
-    }
-}
-
-table! {
     proposed_dataset_changes {
         id -> Uuid,
         pool_id -> Uuid,
@@ -93,14 +87,27 @@ table! {
 }
 
 table! {
-    proposed_datasets_fit (fits) {
-        fits -> Bool,
+    candidate_zpools (pool_id) {
+        pool_id -> Uuid
     }
 }
 
 table! {
     do_insert (insert) {
         insert -> Bool,
+    }
+}
+
+table! {
+    one_zpool_per_sled (pool_id) {
+        pool_id -> Uuid
+    }
+}
+
+table! {
+    one_dataset_per_zpool {
+        id -> Uuid,
+        pool_id -> Uuid
     }
 }
 
@@ -137,8 +144,6 @@ table! {
     }
 }
 
-diesel::allow_tables_to_appear_in_same_query!(candidate_datasets, zpool,);
-
 diesel::allow_tables_to_appear_in_same_query!(
     proposed_dataset_changes,
     dataset,
@@ -147,23 +152,45 @@ diesel::allow_tables_to_appear_in_same_query!(
 diesel::allow_tables_to_appear_in_same_query!(
     do_insert,
     candidate_regions,
+    candidate_zpools,
     dataset,
     physical_disk,
     zpool,
 );
 
-diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, dataset);
-
 diesel::allow_tables_to_appear_in_same_query!(
     old_zpool_usage,
     zpool,
-    zpool_size_delta,
+    sled,
     proposed_dataset_changes,
 );
 
 diesel::allow_tables_to_appear_in_same_query!(old_regions, dataset,);
+diesel::allow_tables_to_appear_in_same_query!(old_regions, zpool,);
 
 diesel::allow_tables_to_appear_in_same_query!(
     inserted_regions,
     updated_datasets,
 );
+
+diesel::allow_tables_to_appear_in_same_query!(candidate_datasets, dataset);
+
+// == Needed for random region allocation ==
+
+pub mod cockroach_md5 {
+    pub mod functions {
+        use diesel::sql_types::*;
+        diesel::sql_function!(fn md5(x: Bytea) -> Bytea);
+    }
+
+    pub mod helper_types {
+        pub type Md5<Expr> = super::functions::md5::HelperType<Expr>;
+    }
+
+    pub mod dsl {
+        pub use super::functions::*;
+        pub use super::helper_types::*;
+    }
+}
+
+// == End random region allocation dependencies ==

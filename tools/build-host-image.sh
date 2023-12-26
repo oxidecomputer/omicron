@@ -60,7 +60,7 @@ function main
     HELIOS_PATH=$1
     GLOBAL_ZONE_TARBALL_PATH=$2
 
-    TOOLS_DIR="$(pwd)/$(dirname $0)"
+    TOOLS_DIR="$(pwd)/$(dirname "$0")"
 
     # Grab the opte version
     OPTE_VER=$(cat "$TOOLS_DIR/opte_version")
@@ -71,9 +71,9 @@ function main
     fi
     trap 'cd /; rm -rf "$tmp_gz"' EXIT
 
-    # Extract the trampoline global zone tarball into a tmp_gz directory
+    # Extract the global zone tarball into a tmp_gz directory
     echo "Extracting gz packages into $tmp_gz"
-    ptime -m tar xvzf $GLOBAL_ZONE_TARBALL_PATH -C $tmp_gz
+    ptime -m tar xvzf "$GLOBAL_ZONE_TARBALL_PATH" -C "$tmp_gz"
 
     # If the user specified a switch zone (which is probably named
     # `switch-SOME_VARIANT.tar.gz`), stage it in the right place and rename it
@@ -83,26 +83,16 @@ function main
         cp "$SWITCH_ZONE" "$tmp_gz/root/opt/oxide/switch.tar.gz"
     fi
 
+    if [ "x$BUILD_STANDARD" != "x" ]; then
+        mkdir -p "$tmp_gz/root/root"
+        echo "# Add opteadm, ddmadm to PATH" >> "$tmp_gz/root/root/.profile"
+        echo 'export PATH=$PATH:/opt/oxide/opte/bin:/opt/oxide/mg-ddm' >> "$tmp_gz/root/root/.profile"
+    fi
+
     # Move to the helios checkout
-    cd $HELIOS_PATH
+    cd "$HELIOS_PATH"
 
-    # Create the "./helios-build" command, which lets us build images
-    gmake setup
-
-    # Commands that "./helios-build" would ask us to run (either explicitly
-    # or implicitly, to avoid an error).
-    rc=0
-    pfexec pkg install -q /system/zones/brand/omicron1/tools || rc=$?
-    case $rc in
-        # `man pkg` notes that exit code 4 means no changes were made because
-        # there is nothing to do; that's fine. Any other exit code is an error.
-        0 | 4) ;;
-        *) exit $rc ;;
-    esac
-
-    pfexec zfs create -p rpool/images/$USER
-
-    HELIOS_REPO=https://pkg.oxide.computer/helios-netdev
+    HELIOS_REPO=https://pkg.oxide.computer/helios/2/dev/
 
     # Build an image name that includes the omicron and host OS hashes
     IMAGE_NAME="$IMAGE_PREFIX ${GITHUB_SHA:0:7}"
@@ -111,7 +101,7 @@ function main
     IMAGE_NAME+=" $(date +'%Y-%m-%d %H:%M')"
 
     ./helios-build experiment-image \
-        -p helios-netdev="$HELIOS_REPO" \
+        -p helios-dev="$HELIOS_REPO" \
         -F optever="$OPTE_VER" \
         -P "$tmp_gz/root" \
         -N "$IMAGE_NAME" \

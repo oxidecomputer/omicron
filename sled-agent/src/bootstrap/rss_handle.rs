@@ -9,13 +9,14 @@ use super::params::StartSledAgentRequest;
 use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
-use crate::storage_manager::StorageResources;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
+use bootstore::schemes::v0 as bootstore;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use omicron_common::backoff::BackoffError;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
@@ -45,17 +46,17 @@ impl RssHandle {
         log: &Logger,
         config: SetupServiceConfig,
         our_bootstrap_address: Ipv6Addr,
-        storage_resources: StorageResources,
-        external_port_count: u8,
+        storage_manager: StorageHandle,
+        bootstore: bootstore::NodeHandle,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
-            storage_resources,
+            storage_manager,
             tx,
-            external_port_count,
+            bootstore,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_rss_request(&log).await;

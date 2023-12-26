@@ -12,10 +12,10 @@ use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
-use omicron_nexus::external_api::views::{
+use nexus_types::external_api::views::{
     PhysicalDisk, PhysicalDiskType, Sled,
 };
-use omicron_nexus::internal_api::params as internal_params;
+use nexus_types::internal_api::params as internal_params;
 use omicron_sled_agent::sim;
 use std::str::FromStr;
 use uuid::Uuid;

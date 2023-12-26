@@ -10,16 +10,16 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::error::public_error_from_diesel_pool;
+use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
+use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
 use crate::db::model::Service;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::PoolError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -39,20 +39,21 @@ impl DataStore {
         opctx: &OpContext,
         service: Service,
     ) -> CreateResult<Service> {
-        let conn = self.pool_authorized(opctx).await?;
-        self.service_upsert_conn(conn, service).await
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.service_upsert_conn(&conn, service).await.map_err(|e| match e {
+            TransactionError::CustomError(err) => err,
+            TransactionError::Database(err) => {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            }
+        })
     }
 
     /// Stores a new service in the database (using an existing db connection).
-    pub(crate) async fn service_upsert_conn<ConnError>(
+    pub(crate) async fn service_upsert_conn(
         &self,
-        conn: &(impl AsyncConnection<DbConnection, ConnError> + Sync),
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         service: Service,
-    ) -> CreateResult<Service>
-    where
-        ConnError: From<diesel::result::Error> + Send + 'static,
-        PoolError: From<ConnError>,
-    {
+    ) -> Result<Service, TransactionError<Error>> {
         use db::schema::service::dsl;
 
         let service_id = service.id();
@@ -74,18 +75,23 @@ impl DataStore {
         .insert_and_get_result_async(conn)
         .await
         .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Sled,
-                lookup_type: LookupType::ById(sled_id),
-            },
+            AsyncInsertError::CollectionNotFound => {
+                TransactionError::CustomError(Error::ObjectNotFound {
+                    type_name: ResourceType::Sled,
+                    lookup_type: LookupType::ById(sled_id),
+                })
+            }
             AsyncInsertError::DatabaseError(e) => {
-                public_error_from_diesel_pool(
+                if retryable(&e) {
+                    return TransactionError::Database(e);
+                }
+                TransactionError::CustomError(public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::Service,
                         &service_id.to_string(),
                     ),
-                )
+                ))
             }
         })
     }
@@ -102,8 +108,8 @@ impl DataStore {
         paginated(dsl::service, dsl::id, pagparams)
             .filter(dsl::kind.eq(kind))
             .select(Service::as_select())
-            .load_async(self.pool_authorized(opctx).await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel_pool(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

@@ -23,7 +23,24 @@ data_link = "cxgbe0"
 
 # Percentage of usable physical DRAM to use for the VMM reservoir, which
 # guest memory is pulled from.
-vmm_reservoir_percentage = 0
+vmm_reservoir_percentage = 80
+
+# Swap device size for the system. The device is a sparsely allocated zvol on
+# the internal zpool of the M.2 that we booted from.
+#
+# If use of the VMM reservoir is configured, it is likely the system will not
+# work without a swap device configured.
+#
+# We pick 256 GiB somewhat arbitrarily, since the device is sparsely
+# allocated.
+swap_device_size_gb = 256
+
+data_links = ["cxgbe0", "cxgbe1"]
+
+[dropshot]
+# Host OS images are just over 800 MiB currently; set this to 2 GiB to give some
+# breathing room.
+request_body_max_bytes = 2_147_483_648
 
 [log]
 level = "info"

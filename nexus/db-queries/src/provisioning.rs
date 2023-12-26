@@ -54,15 +54,15 @@ impl Producer {
     pub fn append_all_metrics(
         &self,
         provisions: &Vec<VirtualProvisioningCollection>,
-    ) {
-        self.append_cpu_metrics(&provisions);
-        self.append_disk_metrics(&provisions);
+    ) -> Result<(), MetricsError> {
+        self.append_cpu_metrics(&provisions)?;
+        self.append_disk_metrics(&provisions)
     }
 
     pub fn append_disk_metrics(
         &self,
         provisions: &Vec<VirtualProvisioningCollection>,
-    ) {
+    ) -> Result<(), MetricsError> {
         let new_samples = provisions
             .iter()
             .map(|provision| {
@@ -78,15 +78,16 @@ impl Producer {
                     },
                 )
             })
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         self.append(new_samples);
+        Ok(())
     }
 
     pub fn append_cpu_metrics(
         &self,
         provisions: &Vec<VirtualProvisioningCollection>,
-    ) {
+    ) -> Result<(), MetricsError> {
         let new_samples = provisions
             .iter()
             .map(|provision| {
@@ -107,9 +108,10 @@ impl Producer {
                     &RamProvisioned { bytes: provision.ram_provisioned.into() },
                 )
             }))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         self.append(new_samples);
+        Ok(())
     }
 
     fn append(&self, mut new_samples: Vec<Sample>) {

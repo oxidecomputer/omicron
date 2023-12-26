@@ -9,7 +9,7 @@ use chrono::Utc;
 use omicron_common::api::external::DiskState;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use propolis_client::api::DiskAttachmentState as PropolisDiskState;
+use propolis_client::types::DiskAttachmentState as PropolisDiskState;
 use uuid::Uuid;
 
 /// Action to be taken on behalf of state transition.
@@ -118,12 +118,10 @@ impl DiskStates {
             | DiskState::ImportingFromBulkWrites
             | DiskState::Destroyed
             | DiskState::Faulted => {
-                return Err(Error::InvalidRequest {
-                    message: format!(
-                        "cannot detach from {}",
-                        self.current.disk_state
-                    ),
-                });
+                return Err(Error::invalid_request(format!(
+                    "cannot detach from {}",
+                    self.current.disk_state
+                )));
             }
         };
     }
@@ -134,9 +132,9 @@ impl DiskStates {
             // (which is a no-op anyway).
             DiskState::Attaching(id) | DiskState::Attached(id) => {
                 if uuid != id {
-                    return Err(Error::InvalidRequest {
-                        message: "disk is already attached".to_string(),
-                    });
+                    return Err(Error::invalid_request(
+                        "disk is already attached",
+                    ));
                 }
                 return Ok(None);
             }
@@ -157,12 +155,10 @@ impl DiskStates {
             | DiskState::Detaching(_)
             | DiskState::Destroyed
             | DiskState::Faulted => {
-                return Err(Error::InvalidRequest {
-                    message: format!(
-                        "cannot attach from {}",
-                        self.current.disk_state
-                    ),
-                });
+                return Err(Error::invalid_request(format!(
+                    "cannot attach from {}",
+                    self.current.disk_state
+                )));
             }
         }
     }

@@ -7,17 +7,18 @@ use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
-use crate::authn;
-use crate::authz;
-use crate::db::model::LoopbackAddress;
 use crate::external_api::params;
 use anyhow::Error;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
+use nexus_db_queries::db::model::LoopbackAddress;
+use omicron_common::api::internal::shared::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use steno::ActionError;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Params {
+pub(crate) struct Params {
     pub serialized_authn: authn::saga::Serialized,
     pub loopback_address: params::LoopbackAddressCreate,
 }
@@ -34,7 +35,7 @@ declare_saga_actions! {
 }
 
 #[derive(Debug)]
-pub struct SagaLoopbackAddressCreate;
+pub(crate) struct SagaLoopbackAddressCreate;
 impl NexusSaga for SagaLoopbackAddressCreate {
     const NAME: &'static str = "loopback-address-create";
     type Params = Params;
@@ -132,21 +133,11 @@ async fn slc_loopback_address_delete_record(
 async fn slc_loopback_address_create(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
 
-    // TODO: https://github.com/oxidecomputer/omicron/issues/2629
-    if let Ok(_) = std::env::var("SKIP_ASIC_CONFIG") {
-        debug!(log, "SKIP_ASIC_CONFIG is set, disabling calls to dendrite");
-        return Ok(());
-    };
-
-    // TODO https://github.com/oxidecomputer/omicron/issues/2760
-    // how do we know this is the right dpd client? There will be at least
-    // two and in multirack 2*N where N is the number of racks.
     let dpd_client: Arc<dpd_client::Client> =
-        Arc::clone(&osagactx.nexus().dpd_client);
+        select_dendrite_client(&sagactx).await?;
 
     retry_until_known_result(log, || async {
         dpd_client
@@ -159,4 +150,29 @@ async fn slc_loopback_address_create(
     })
     .await
     .map_err(|e| ActionError::action_failed(e.to_string()))
+}
+
+pub(crate) async fn select_dendrite_client(
+    sagactx: &NexusActionContext,
+) -> Result<Arc<dpd_client::Client>, ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    let switch_location: SwitchLocation = params
+        .loopback_address
+        .switch_location
+        .as_str()
+        .parse()
+        .map_err(ActionError::action_failed)?;
+    let dpd_client: Arc<dpd_client::Client> = osagactx
+        .nexus()
+        .dpd_clients
+        .get(&switch_location)
+        .ok_or_else(|| {
+            ActionError::action_failed(format!(
+                "requested switch not available: {switch_location}"
+            ))
+        })?
+        .clone();
+    Ok(dpd_client)
 }

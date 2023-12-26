@@ -33,6 +33,9 @@ pub struct Region {
     volume_id: Uuid,
 
     block_size: ByteCount,
+
+    // These are i64 only so that we can derive a diesel table from them. We
+    // never expect them to be negative.
     blocks_per_extent: i64,
     extent_count: i64,
 }
@@ -42,16 +45,16 @@ impl Region {
         dataset_id: Uuid,
         volume_id: Uuid,
         block_size: ByteCount,
-        blocks_per_extent: i64,
-        extent_count: i64,
+        blocks_per_extent: u64,
+        extent_count: u64,
     ) -> Self {
         Self {
             identity: RegionIdentity::new(Uuid::new_v4()),
             dataset_id,
             volume_id,
             block_size,
-            blocks_per_extent,
-            extent_count,
+            blocks_per_extent: blocks_per_extent as i64,
+            extent_count: extent_count as i64,
         }
     }
 
@@ -64,11 +67,11 @@ impl Region {
     pub fn block_size(&self) -> external::ByteCount {
         self.block_size.0
     }
-    pub fn blocks_per_extent(&self) -> i64 {
-        self.blocks_per_extent
+    pub fn blocks_per_extent(&self) -> u64 {
+        self.blocks_per_extent as u64
     }
-    pub fn extent_count(&self) -> i64 {
-        self.extent_count
+    pub fn extent_count(&self) -> u64 {
+        self.extent_count as u64
     }
     pub fn encrypted(&self) -> bool {
         // Per RFD 29, data is always encrypted at rest, and support for

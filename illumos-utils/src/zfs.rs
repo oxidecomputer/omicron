@@ -9,10 +9,27 @@ use camino::Utf8PathBuf;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
+// These locations in the ramdisk must only be used by the switch zone.
+//
+// We need the switch zone online before we can create the U.2 drives and
+// encrypt the zpools during rack initialization. Without the switch zone we
+// cannot get the rack initialization request from wicketd in RSS which allows
+// us to  initialize the trust quorum and derive the encryption keys needed for
+// the U.2 disks.
 pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
-const ZFS: &str = "/usr/sbin/zfs";
+
+pub const ZFS: &str = "/usr/sbin/zfs";
+
+/// This path is intentionally on a `tmpfs` to prevent copy-on-write behavior
+/// and to ensure it goes away on power off.
+///
+/// We want minimize the time the key files are in memory, and so we rederive
+/// the keys and recreate the files on demand when creating and mounting
+/// encrypted filesystems. We then zero them and unlink them.
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
+// Use /tmp so we don't have to worry about running tests with pfexec
+pub const TEST_KEYPATH_ROOT: &str = "/tmp";
 
 /// Error returned by [`Zfs::list_datasets`].
 #[derive(thiserror::Error, Debug)]
@@ -23,13 +40,21 @@ pub struct ListDatasetsError {
     err: crate::ExecutionError,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum DestroyDatasetErrorVariant {
+    #[error("Dataset not found")]
+    NotFound,
+    #[error(transparent)]
+    Other(crate::ExecutionError),
+}
+
 /// Error returned by [`Zfs::destroy_dataset`].
 #[derive(thiserror::Error, Debug)]
 #[error("Could not destroy dataset {name}: {err}")]
 pub struct DestroyDatasetError {
     name: String,
     #[source]
-    err: crate::ExecutionError,
+    pub err: DestroyDatasetErrorVariant,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -45,6 +70,9 @@ enum EnsureFilesystemErrorRaw {
 
     #[error("Failed to mount encrypted filesystem: {0}")]
     MountEncryptedFsFailed(crate::ExecutionError),
+
+    #[error("Failed to mount overlay filesystem: {0}")]
+    MountOverlayFsFailed(crate::ExecutionError),
 }
 
 /// Error returned by [`Zfs::ensure_filesystem`].
@@ -89,6 +117,26 @@ pub struct GetValueError {
     err: GetValueErrorRaw,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to list snapshots: {0}")]
+pub struct ListSnapshotsError(#[from] crate::ExecutionError);
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to create snapshot '{snap_name}' from filesystem '{filesystem}': {err}")]
+pub struct CreateSnapshotError {
+    filesystem: String,
+    snap_name: String,
+    err: crate::ExecutionError,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("Failed to delete snapshot '{filesystem}@{snap_name}': {err}")]
+pub struct DestroySnapshotError {
+    filesystem: String,
+    snap_name: String,
+    err: crate::ExecutionError,
+}
+
 /// Wraps commands for interacting with ZFS.
 pub struct Zfs {}
 
@@ -119,23 +167,37 @@ impl fmt::Display for Keypath {
     }
 }
 
+#[cfg(not(feature = "tmp_keypath"))]
 impl From<&DiskIdentity> for Keypath {
     fn from(id: &DiskIdentity) -> Self {
-        let filename = format!(
-            "{}-{}-{}-zfs-aes-256-gcm.key",
-            id.vendor, id.serial, id.model
-        );
-        let mut path = Utf8PathBuf::new();
-        path.push(KEYPATH_ROOT);
-        path.push(filename);
-        Keypath(path)
+        build_keypath(id, KEYPATH_ROOT)
     }
+}
+
+#[cfg(feature = "tmp_keypath")]
+impl From<&DiskIdentity> for Keypath {
+    fn from(id: &DiskIdentity) -> Self {
+        build_keypath(id, TEST_KEYPATH_ROOT)
+    }
+}
+
+fn build_keypath(id: &DiskIdentity, root: &str) -> Keypath {
+    let filename =
+        format!("{}-{}-{}-zfs-aes-256-gcm.key", id.vendor, id.serial, id.model);
+    let path: Utf8PathBuf = [root, &filename].iter().collect();
+    Keypath(path)
 }
 
 #[derive(Debug)]
 pub struct EncryptionDetails {
     pub keypath: Keypath,
     pub epoch: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct SizeDetails {
+    pub quota: Option<usize>,
+    pub compression: Option<&'static str>,
 }
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
@@ -159,13 +221,34 @@ impl Zfs {
         Ok(filesystems)
     }
 
+    /// Return the name of a dataset for a ZFS object.
+    ///
+    /// The object can either be a dataset name, or a path, in which case it
+    /// will be resolved to the _mounted_ ZFS dataset containing that path.
+    pub fn get_dataset_name(object: &str) -> Result<String, ListDatasetsError> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&["get", "-Hpo", "value", "name", object]);
+        execute(cmd)
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout).trim().to_string()
+            })
+            .map_err(|err| ListDatasetsError { name: object.to_string(), err })
+    }
+
     /// Destroys a dataset.
     pub fn destroy_dataset(name: &str) -> Result<(), DestroyDatasetError> {
         let mut command = std::process::Command::new(PFEXEC);
         let cmd = command.args(&[ZFS, "destroy", "-r", name]);
-        execute(cmd).map_err(|err| DestroyDatasetError {
-            name: name.to_string(),
-            err,
+        execute(cmd).map_err(|err| {
+            let variant = match err {
+                crate::ExecutionError::CommandFailure(info)
+                    if info.stderr.contains("does not exist") =>
+                {
+                    DestroyDatasetErrorVariant::NotFound
+                }
+                _ => DestroyDatasetErrorVariant::Other(err),
+            };
+            DestroyDatasetError { name: name.to_string(), err: variant }
         })?;
         Ok(())
     }
@@ -173,16 +256,24 @@ impl Zfs {
     /// Creates a new ZFS filesystem named `name`, unless one already exists.
     ///
     /// Applies an optional quota, provided _in bytes_.
+    #[allow(clippy::too_many_arguments)]
     pub fn ensure_filesystem(
         name: &str,
         mountpoint: Mountpoint,
         zoned: bool,
         do_format: bool,
         encryption_details: Option<EncryptionDetails>,
-        quota: Option<usize>,
+        size_details: Option<SizeDetails>,
+        additional_options: Option<Vec<String>>,
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
+            if let Some(SizeDetails { quota, compression }) = size_details {
+                // apply quota and compression mode (in case they've changed across
+                // sled-agent versions since creation)
+                Self::apply_properties(name, &mountpoint, quota, compression)?;
+            }
+
             if encryption_details.is_none() {
                 // If the dataset exists, we're done. Unencrypted datasets are
                 // automatically mounted.
@@ -225,21 +316,53 @@ impl Zfs {
                 &epoch,
             ]);
         }
+
+        if let Some(opts) = additional_options {
+            for o in &opts {
+                cmd.args(&["-o", &o]);
+            }
+        }
+
         cmd.args(&["-o", &format!("mountpoint={}", mountpoint), name]);
+
         execute(cmd).map_err(|err| EnsureFilesystemError {
             name: name.to_string(),
             mountpoint: mountpoint.clone(),
             err: err.into(),
         })?;
 
-        // Apply any quota.
+        if let Some(SizeDetails { quota, compression }) = size_details {
+            // Apply any quota and compression mode.
+            Self::apply_properties(name, &mountpoint, quota, compression)?;
+        }
+
+        Ok(())
+    }
+
+    fn apply_properties(
+        name: &str,
+        mountpoint: &Mountpoint,
+        quota: Option<usize>,
+        compression: Option<&'static str>,
+    ) -> Result<(), EnsureFilesystemError> {
         if let Some(quota) = quota {
             if let Err(err) =
                 Self::set_value(name, "quota", &format!("{quota}"))
             {
                 return Err(EnsureFilesystemError {
                     name: name.to_string(),
-                    mountpoint,
+                    mountpoint: mountpoint.clone(),
+                    // Take the execution error from the SetValueError
+                    err: err.err.into(),
+                });
+            }
+        }
+        if let Some(compression) = compression {
+            if let Err(err) = Self::set_value(name, "compression", compression)
+            {
+                return Err(EnsureFilesystemError {
+                    name: name.to_string(),
+                    mountpoint: mountpoint.clone(),
                     // Take the execution error from the SetValueError
                     err: err.err.into(),
                 });
@@ -258,6 +381,20 @@ impl Zfs {
             name: name.to_string(),
             mountpoint: mountpoint.clone(),
             err: EnsureFilesystemErrorRaw::MountEncryptedFsFailed(err),
+        })?;
+        Ok(())
+    }
+
+    pub fn mount_overlay_dataset(
+        name: &str,
+        mountpoint: &Mountpoint,
+    ) -> Result<(), EnsureFilesystemError> {
+        let mut command = std::process::Command::new(PFEXEC);
+        let cmd = command.args(&[ZFS, "mount", "-O", name]);
+        execute(cmd).map_err(|err| EnsureFilesystemError {
+            name: name.to_string(),
+            mountpoint: mountpoint.clone(),
+            err: EnsureFilesystemErrorRaw::MountOverlayFsFailed(err),
         })?;
         Ok(())
     }
@@ -293,6 +430,7 @@ impl Zfs {
         }
     }
 
+    /// Set the value of an Oxide-managed ZFS property.
     pub fn set_oxide_value(
         filesystem_name: &str,
         name: &str,
@@ -318,6 +456,7 @@ impl Zfs {
         Ok(())
     }
 
+    /// Get the value of an Oxide-managed ZFS property.
     pub fn get_oxide_value(
         filesystem_name: &str,
         name: &str,
@@ -325,7 +464,7 @@ impl Zfs {
         Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
     }
 
-    fn get_value(
+    pub fn get_value(
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
@@ -348,6 +487,88 @@ impl Zfs {
         }
         Ok(value.to_string())
     }
+
+    /// List all extant snapshots.
+    pub fn list_snapshots() -> Result<Vec<Snapshot>, ListSnapshotsError> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&["list", "-H", "-o", "name", "-t", "snapshot"]);
+        execute(cmd)
+            .map(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                stdout
+                    .trim()
+                    .lines()
+                    .map(|line| {
+                        let (filesystem, snap_name) =
+                            line.split_once('@').unwrap();
+                        Snapshot {
+                            filesystem: filesystem.to_string(),
+                            snap_name: snap_name.to_string(),
+                        }
+                    })
+                    .collect()
+            })
+            .map_err(ListSnapshotsError::from)
+    }
+
+    /// Create a snapshot of a filesystem.
+    ///
+    /// A list of properties, as name-value tuples, may be passed to this
+    /// method, for creating properties directly on the snapshots.
+    pub fn create_snapshot<'a>(
+        filesystem: &'a str,
+        snap_name: &'a str,
+        properties: &'a [(&'a str, &'a str)],
+    ) -> Result<(), CreateSnapshotError> {
+        let mut command = std::process::Command::new(ZFS);
+        let mut cmd = command.arg("snapshot");
+        for (name, value) in properties.iter() {
+            cmd = cmd.arg("-o").arg(&format!("{name}={value}"));
+        }
+        cmd.arg(&format!("{filesystem}@{snap_name}"));
+        execute(cmd).map(|_| ()).map_err(|err| CreateSnapshotError {
+            filesystem: filesystem.to_string(),
+            snap_name: snap_name.to_string(),
+            err,
+        })
+    }
+
+    /// Destroy a named snapshot of a filesystem.
+    pub fn destroy_snapshot(
+        filesystem: &str,
+        snap_name: &str,
+    ) -> Result<(), DestroySnapshotError> {
+        let mut command = std::process::Command::new(ZFS);
+        let path = format!("{filesystem}@{snap_name}");
+        let cmd = command.args(&["destroy", &path]);
+        execute(cmd).map(|_| ()).map_err(|err| DestroySnapshotError {
+            filesystem: filesystem.to_string(),
+            snap_name: snap_name.to_string(),
+            err,
+        })
+    }
+}
+
+/// A read-only snapshot of a ZFS filesystem.
+#[derive(Clone, Debug)]
+pub struct Snapshot {
+    pub filesystem: String,
+    pub snap_name: String,
+}
+
+impl Snapshot {
+    /// Return the full path to the snapshot directory within the filesystem.
+    pub fn full_path(&self) -> Result<Utf8PathBuf, GetValueError> {
+        let mountpoint = Zfs::get_value(&self.filesystem, "mountpoint")?;
+        Ok(Utf8PathBuf::from(mountpoint)
+            .join(format!(".zfs/snapshot/{}", self.snap_name)))
+    }
+}
+
+impl fmt::Display for Snapshot {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}@{}", self.filesystem, self.snap_name)
+    }
 }
 
 /// Returns all datasets managed by Omicron
@@ -362,8 +583,12 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
         let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
-            // Avoid erasing crashdump datasets on internal pools
-            if dataset == "crash" && internal {
+            // Avoid erasing crashdump, backing data and swap datasets on
+            // internal pools. The swap device may be in use.
+            if internal
+                && (["crash", "backing", "swap"].contains(&dataset.as_str())
+                    || dataset.starts_with("backing/"))
+            {
                 continue;
             }
 
@@ -371,13 +596,13 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
         }
     }
 
-    // Collect all datasets for ramdisk-based Oxide zones,
-    // if any exist.
+    // Collect all datasets for ramdisk-based Oxide zones, if any exist.
     if let Ok(ramdisk_datasets) = Zfs::list_datasets(&ZONE_ZFS_RAMDISK_DATASET)
     {
         for dataset in &ramdisk_datasets {
             datasets.push(format!("{}/{dataset}", ZONE_ZFS_RAMDISK_DATASET));
         }
     };
+
     Ok(datasets)
 }

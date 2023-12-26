@@ -77,6 +77,7 @@ impl From<PhysicalDisk> for views::PhysicalDisk {
             serial: disk.serial,
             model: disk.model,
             state: disk.state.into(),
+            form_factor: disk.variant.into(),
         }
     }
 }

@@ -15,3 +15,7 @@ rustdocflags = "--document-private-items"
 rustflags = [
     "-C", "link-arg=-Wl,-znocompstrtab"
 ]
+
+# Set up `cargo xtask`.
+[alias]
+xtask = "run --package xtask -- "

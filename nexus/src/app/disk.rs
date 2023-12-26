@@ -5,13 +5,13 @@
 //! Disks and snapshots
 
 use crate::app::sagas;
-use crate::authn;
-use crate::authz;
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
 use crate::external_api::params;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -27,6 +27,9 @@ use omicron_common::api::internal::nexus::DiskRuntimeState;
 use sled_agent_client::Client as SledAgentClient;
 use std::sync::Arc;
 use uuid::Uuid;
+
+use super::MAX_DISK_SIZE_BYTES;
+use super::MIN_DISK_SIZE_BYTES;
 
 impl super::Nexus {
     // Disks
@@ -137,43 +140,54 @@ impl super::Nexus {
         // Reject disks where the block size doesn't evenly divide the
         // total size
         if (params.size.to_bytes() % block_size) != 0 {
-            return Err(Error::InvalidValue {
-                label: String::from("size and block_size"),
-                message: format!(
+            return Err(Error::invalid_value(
+                "size and block_size",
+                format!(
                     "total size must be a multiple of block size {}",
                     block_size,
                 ),
-            });
+            ));
         }
 
         // Reject disks where the size isn't at least
         // MIN_DISK_SIZE_BYTES
-        if params.size.to_bytes() < params::MIN_DISK_SIZE_BYTES as u64 {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+        if params.size.to_bytes() < MIN_DISK_SIZE_BYTES as u64 {
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "total size must be at least {}",
-                    ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+                    ByteCount::from(MIN_DISK_SIZE_BYTES)
                 ),
-            });
+            ));
         }
 
         // Reject disks where the MIN_DISK_SIZE_BYTES doesn't evenly
         // divide the size
-        if (params.size.to_bytes() % params::MIN_DISK_SIZE_BYTES as u64) != 0 {
-            return Err(Error::InvalidValue {
-                label: String::from("size"),
-                message: format!(
+        if (params.size.to_bytes() % MIN_DISK_SIZE_BYTES as u64) != 0 {
+            return Err(Error::invalid_value(
+                "size",
+                format!(
                     "total size must be a multiple of {}",
-                    ByteCount::from(params::MIN_DISK_SIZE_BYTES)
+                    ByteCount::from(MIN_DISK_SIZE_BYTES)
                 ),
-            });
+            ));
+        }
+
+        // Reject disks where the size is greated than MAX_DISK_SIZE_BYTES
+        if params.size.to_bytes() > MAX_DISK_SIZE_BYTES {
+            return Err(Error::invalid_value(
+                "size",
+                format!(
+                    "total size must be less than {}",
+                    ByteCount::try_from(MAX_DISK_SIZE_BYTES).unwrap()
+                ),
+            ));
         }
 
         Ok(())
     }
 
-    pub async fn project_create_disk(
+    pub(crate) async fn project_create_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -198,7 +212,7 @@ impl super::Nexus {
         Ok(disk_created)
     }
 
-    pub async fn disk_list(
+    pub(crate) async fn disk_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -252,7 +266,7 @@ impl super::Nexus {
             .map(|_| ())
     }
 
-    pub async fn notify_disk_updated(
+    pub(crate) async fn notify_disk_updated(
         &self,
         opctx: &OpContext,
         id: Uuid,
@@ -309,7 +323,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn project_delete_disk(
+    pub(crate) async fn project_delete_disk(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -337,7 +351,7 @@ impl super::Nexus {
     /// This is just a wrapper around the volume operation of the same
     /// name, but we provide this interface when all the caller has is
     /// the disk UUID as the internal volume_id is not exposed.
-    pub async fn disk_remove_read_only_parent(
+    pub(crate) async fn disk_remove_read_only_parent(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_id: Uuid,
@@ -355,35 +369,9 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// Import blocks from a URL into a disk
-    pub async fn import_blocks_from_url_for_disk(
-        self: &Arc<Self>,
-        opctx: &OpContext,
-        disk_lookup: &lookup::Disk<'_>,
-        params: params::ImportBlocksFromUrl,
-    ) -> UpdateResult<()> {
-        let authz_disk: authz::Disk;
-
-        (.., authz_disk) =
-            disk_lookup.lookup_for(authz::Action::Modify).await?;
-
-        let saga_params = sagas::import_blocks_from_url::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            disk_id: authz_disk.id(),
-
-            import_params: params.clone(),
-        };
-
-        self
-            .execute_saga::<sagas::import_blocks_from_url::SagaImportBlocksFromUrl>(saga_params)
-            .await?;
-
-        Ok(())
-    }
-
     /// Move a disk from the "ImportReady" state to the "Importing" state,
     /// blocking any import from URL jobs.
-    pub async fn disk_manual_import_start(
+    pub(crate) async fn disk_manual_import_start(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -420,7 +408,7 @@ impl super::Nexus {
     }
 
     /// Bulk write some bytes into a disk that's in state ImportingFromBulkWrites
-    pub async fn disk_manual_import(
+    pub(crate) async fn disk_manual_import(
         self: &Arc<Self>,
         disk_lookup: &lookup::Disk<'_>,
         param: params::ImportBlocksBulkWrite,
@@ -542,7 +530,7 @@ impl super::Nexus {
     /// Move a disk from the "ImportingFromBulkWrites" state to the
     /// "ImportReady" state, usually signalling the end of manually importing
     /// blocks.
-    pub async fn disk_manual_import_stop(
+    pub(crate) async fn disk_manual_import_stop(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,
@@ -580,7 +568,7 @@ impl super::Nexus {
 
     /// Move a disk from the "ImportReady" state to the "Detach" state, making
     /// it ready for general use.
-    pub async fn disk_finalize_import(
+    pub(crate) async fn disk_finalize_import(
         self: &Arc<Self>,
         opctx: &OpContext,
         disk_lookup: &lookup::Disk<'_>,

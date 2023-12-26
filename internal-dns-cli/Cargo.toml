@@ -13,3 +13,4 @@ omicron-common.workspace = true
 slog.workspace = true
 tokio.workspace = true
 trust-dns-resolver.workspace = true
+omicron-workspace-hack.workspace = true

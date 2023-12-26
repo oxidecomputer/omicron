@@ -4,11 +4,18 @@
 
 //! Integration tests for oximeter collectors and producers.
 
+use dropshot::Method;
+use http::StatusCode;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
+use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
+use std::collections::BTreeSet;
 use std::net;
+use std::net::Ipv6Addr;
+use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -110,7 +117,10 @@ async fn test_oximeter_reregistration() {
     );
     let client =
         oximeter_db::Client::new(ch_address.into(), &context.logctx.log);
-    client.init_db().await.expect("Failed to initialize timeseries database");
+    client
+        .init_single_node_db()
+        .await
+        .expect("Failed to initialize timeseries database");
 
     // Helper to retrieve the timeseries from ClickHouse
     let timeseries_name = "integration_target:integration_metric";
@@ -326,6 +336,91 @@ async fn test_oximeter_reregistration() {
     assert_eq!(
         timeseries.measurements,
         new_timeseries.measurements[..timeseries.measurements.len()]
+    );
+    context.teardown().await;
+}
+
+// A regression test for https://github.com/oxidecomputer/omicron/issues/4498
+#[tokio::test]
+async fn test_oximeter_collector_reregistration_gets_all_assignments() {
+    let mut context = nexus_test_utils::test_setup::<omicron_nexus::Server>(
+        "test_oximeter_collector_reregistration_gets_all_assignments",
+    )
+    .await;
+    let oximeter_id = nexus_test_utils::OXIMETER_UUID.parse().unwrap();
+
+    // Create a bunch of producer records.
+    //
+    // Note that the actual count is arbitrary, but it should be larger than the
+    // internal pagination limit used in `Nexus::upsert_oximeter_collector()`,
+    // which is currently 100.
+    const N_PRODUCERS: usize = 150;
+    let mut ids = BTreeSet::new();
+    for _ in 0..N_PRODUCERS {
+        let id = Uuid::new_v4();
+        ids.insert(id);
+        let info = ProducerEndpoint {
+            id,
+            kind: ProducerKind::Service,
+            address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 12345),
+            base_route: String::from("/collect"),
+            interval: Duration::from_secs(1),
+        };
+        context
+            .internal_client
+            .make_request(
+                Method::POST,
+                "/metrics/producers",
+                Some(&info),
+                StatusCode::NO_CONTENT,
+            )
+            .await
+            .expect("failed to register test producer");
+    }
+
+    // Check that `oximeter` has these registered.
+    let producers =
+        context.oximeter.list_producers(None, N_PRODUCERS * 2).await;
+    let actual_ids: BTreeSet<_> =
+        producers.iter().map(|info| info.id).collect();
+
+    // There is an additional producer that's created as part of the normal test
+    // setup, so we'll check that all of the new producers exist, and that
+    // there's exactly 1 additional one.
+    assert!(
+        ids.is_subset(&actual_ids),
+        "oximeter did not get the right set of producers"
+    );
+    assert_eq!(
+        ids.len(),
+        actual_ids.len() - 1,
+        "oximeter did not get the right set of producers"
+    );
+
+    // Drop and restart oximeter, which should result in the exact same set of
+    // producers again.
+    drop(context.oximeter);
+    context.oximeter = nexus_test_utils::start_oximeter(
+        context.logctx.log.new(o!("component" => "oximeter")),
+        context.server.get_http_server_internal_address().await,
+        context.clickhouse.port(),
+        oximeter_id,
+    )
+    .await
+    .expect("failed to restart oximeter");
+
+    let producers =
+        context.oximeter.list_producers(None, N_PRODUCERS * 2).await;
+    let actual_ids: BTreeSet<_> =
+        producers.iter().map(|info| info.id).collect();
+    assert!(
+        ids.is_subset(&actual_ids),
+        "oximeter did not get the right set of producers after re-registering"
+    );
+    assert_eq!(
+        ids.len(),
+        actual_ids.len() - 1,
+        "oximeter did not get the right set of producers after re-registering"
     );
     context.teardown().await;
 }

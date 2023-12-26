@@ -4,25 +4,45 @@
 
 //! Tools for interacting with the control plane telemetry database.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 use crate::query::StringFieldSelector;
-use chrono::{DateTime, Utc};
-use dropshot::{EmptyScanParams, PaginationParams};
-pub use oximeter::{DatumType, Field, FieldType, Measurement, Sample};
+use chrono::DateTime;
+use chrono::Utc;
+use dropshot::EmptyScanParams;
+use dropshot::PaginationParams;
+pub use oximeter::schema::FieldSchema;
+pub use oximeter::schema::FieldSource;
+pub use oximeter::schema::TimeseriesName;
+pub use oximeter::schema::TimeseriesSchema;
+pub use oximeter::DatumType;
+pub use oximeter::Field;
+pub use oximeter::FieldType;
+pub use oximeter::Measurement;
+pub use oximeter::Sample;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::io;
 use std::num::NonZeroU32;
+use std::path::PathBuf;
 use thiserror::Error;
 
 mod client;
 pub mod model;
 pub mod query;
-pub use client::{Client, DbWrite};
+pub mod sql;
 
-#[derive(Clone, Debug, Error)]
+pub use client::Client;
+pub use client::DbWrite;
+pub use client::QueryMetadata;
+pub use client::QueryResult;
+pub use client::Table;
+pub use model::OXIMETER_VERSION;
+
+#[derive(Debug, Error)]
 pub enum Error {
     #[error("Oximeter core error: {0}")]
     Oximeter(#[from] oximeter::MetricsError),
@@ -31,17 +51,19 @@ pub enum Error {
     #[error("Telemetry database unavailable: {0}")]
     DatabaseUnavailable(String),
 
+    #[error("Missing expected metadata header key '{key}'")]
+    MissingHeaderKey { key: String },
+
+    #[error("Invalid or malformed query metadata for key '{key}': {msg}")]
+    BadMetadata { key: String, msg: String },
+
     /// An error interacting with the telemetry database
-    #[error("Error interacting with telemetry database: {0}")]
+    #[error("Error interacting with telemetry database")]
     Database(String),
 
     /// A schema provided when collecting samples did not match the expected schema
-    #[error("Schema mismatch for timeseries '{name}', expected fields {expected:?} found fields {actual:?}")]
-    SchemaMismatch {
-        name: String,
-        expected: BTreeMap<String, FieldType>,
-        actual: BTreeMap<String, FieldType>,
-    },
+    #[error("Schema mismatch for timeseries '{0}'", expected.timeseries_name)]
+    SchemaMismatch { expected: TimeseriesSchema, actual: TimeseriesSchema },
 
     #[error("Timeseries not found for: {0}")]
     TimeseriesNotFound(String),
@@ -77,134 +99,43 @@ pub enum Error {
     #[error("The field comparison {op} is not valid for the type {ty}")]
     InvalidFieldCmp { op: String, ty: FieldType },
 
-    #[error("Invalid timeseries name")]
-    InvalidTimeseriesName,
-
     #[error("Query must resolve to a single timeseries if limit is specified")]
     InvalidLimitQuery,
-}
 
-/// A timeseries name.
-///
-/// Timeseries are named by concatenating the names of their target and metric, joined with a
-/// colon.
-#[derive(
-    Debug, Clone, PartialEq, PartialOrd, Ord, Eq, Hash, Serialize, Deserialize,
-)]
-#[serde(try_from = "&str")]
-pub struct TimeseriesName(String);
+    #[error("Database is not at expected version")]
+    DatabaseVersionMismatch { expected: u64, found: u64 },
 
-impl JsonSchema for TimeseriesName {
-    fn schema_name() -> String {
-        "TimeseriesName".to_string()
-    }
+    #[error("Could not read schema directory")]
+    ReadSchemaDir {
+        context: String,
+        #[source]
+        err: io::Error,
+    },
 
-    fn json_schema(
-        _: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        schemars::schema::SchemaObject {
-            metadata: Some(Box::new(schemars::schema::Metadata {
-                title: Some("The name of a timeseries".to_string()),
-                description: Some(
-                    "Names are constructed by concatenating the target \
-                     and metric names with ':'. Target and metric \
-                     names must be lowercase alphanumeric characters \
-                     with '_' separating words."
-                        .to_string(),
-                ),
-                ..Default::default()
-            })),
-            instance_type: Some(schemars::schema::InstanceType::String.into()),
-            string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(TIMESERIES_NAME_REGEX.to_string()),
-                ..Default::default()
-            })),
-            ..Default::default()
-        }
-        .into()
-    }
-}
+    #[error("Could not read SQL file from path")]
+    ReadSqlFile {
+        context: String,
+        #[source]
+        err: io::Error,
+    },
 
-impl std::ops::Deref for TimeseriesName {
-    type Target = String;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+    #[error("Non-UTF8 schema directory entry")]
+    NonUtf8SchemaDirEntry(std::ffi::OsString),
 
-impl std::fmt::Display for TimeseriesName {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+    #[error("Missing desired schema version: {0}")]
+    MissingSchemaVersion(u64),
 
-impl std::convert::TryFrom<&str> for TimeseriesName {
-    type Error = Error;
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        validate_timeseries_name(s).map(|s| TimeseriesName(s.to_string()))
-    }
-}
+    #[error("Data-modifying operations are not supported in schema updates")]
+    SchemaUpdateModifiesData { path: PathBuf, statement: String },
 
-impl std::convert::TryFrom<String> for TimeseriesName {
-    type Error = Error;
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        validate_timeseries_name(&s)?;
-        Ok(TimeseriesName(s))
-    }
-}
+    #[error("Schema update SQL files should contain at most 1 statement")]
+    MultipleSqlStatementsInSchemaUpdate { path: PathBuf },
 
-impl<T> PartialEq<T> for TimeseriesName
-where
-    T: AsRef<str>,
-{
-    fn eq(&self, other: &T) -> bool {
-        self.0.eq(other.as_ref())
-    }
-}
+    #[error("Schema update versions must be sequential without gaps")]
+    NonSequentialSchemaVersions,
 
-fn validate_timeseries_name(s: &str) -> Result<&str, Error> {
-    if regex::Regex::new(TIMESERIES_NAME_REGEX).unwrap().is_match(s) {
-        Ok(s)
-    } else {
-        Err(Error::InvalidTimeseriesName)
-    }
-}
-
-/// The schema for a timeseries.
-///
-/// This includes the name of the timeseries, as well as the datum type of its metric and the
-/// schema for each field.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct TimeseriesSchema {
-    pub timeseries_name: TimeseriesName,
-    pub field_schema: Vec<FieldSchema>,
-    pub datum_type: DatumType,
-    pub created: DateTime<Utc>,
-}
-
-impl TimeseriesSchema {
-    /// Return the schema for the given field.
-    pub fn field_schema<S>(&self, name: S) -> Option<&FieldSchema>
-    where
-        S: AsRef<str>,
-    {
-        self.field_schema.iter().find(|field| field.name == name.as_ref())
-    }
-
-    /// Return the target and metric component names for this timeseries
-    pub fn component_names(&self) -> (&str, &str) {
-        self.timeseries_name
-            .split_once(':')
-            .expect("Incorrectly formatted timseries name")
-    }
-}
-
-impl PartialEq for TimeseriesSchema {
-    fn eq(&self, other: &TimeseriesSchema) -> bool {
-        self.timeseries_name == other.timeseries_name
-            && self.datum_type == other.datum_type
-            && self.field_schema == other.field_schema
-    }
+    #[error("SQL error")]
+    Sql(#[from] sql::Error),
 }
 
 impl From<model::DbTimeseriesSchema> for TimeseriesSchema {
@@ -245,25 +176,6 @@ pub struct Timeseries {
     pub measurements: Vec<Measurement>,
 }
 
-/// The source from which a field is derived, the target or metric.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum FieldSource {
-    Target,
-    Metric,
-}
-
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize,
 )]
@@ -289,24 +201,6 @@ impl From<FieldSource> for DbFieldSource {
     }
 }
 
-/// The name and type information for a field of a timeseries schema.
-#[derive(
-    Clone,
-    Debug,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-)]
-pub struct FieldSchema {
-    pub name: String,
-    pub ty: FieldType,
-    pub source: FieldSource,
-}
-
 /// Type used to paginate request to list timeseries schema.
 pub type TimeseriesSchemaPaginationParams =
     PaginationParams<EmptyScanParams, TimeseriesName>;
@@ -328,19 +222,46 @@ pub struct TimeseriesPageSelector {
 pub(crate) type TimeseriesKey = u64;
 
 pub(crate) fn timeseries_key(sample: &Sample) -> TimeseriesKey {
-    timeseries_key_for(&sample.target_fields(), &sample.metric_fields())
+    timeseries_key_for(
+        &sample.timeseries_name,
+        sample.sorted_target_fields(),
+        sample.sorted_metric_fields(),
+        sample.measurement.datum_type(),
+    )
 }
 
-pub(crate) fn timeseries_key_for(
-    target_fields: &[Field],
-    metric_fields: &[Field],
+// It's critical that values used for derivation of the timeseries_key are stable.
+// We use "bcs" to ensure stability of the derivation across hardware and rust toolchain revisions.
+fn canonicalize<T: Serialize + ?Sized>(what: &str, value: &T) -> Vec<u8> {
+    bcs::to_bytes(value)
+        .unwrap_or_else(|_| panic!("Failed to serialize {what}"))
+}
+
+fn timeseries_key_for(
+    timeseries_name: &str,
+    target_fields: &BTreeMap<String, Field>,
+    metric_fields: &BTreeMap<String, Field>,
+    datum_type: DatumType,
 ) -> TimeseriesKey {
-    use std::collections::hash_map::DefaultHasher;
+    // We use HighwayHasher primarily for stability - it should provide a stable
+    // hash for the values used to derive the timeseries_key.
+    use highway::HighwayHasher;
     use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    for field in target_fields.iter().chain(metric_fields.iter()) {
-        field.hash(&mut hasher);
+
+    // NOTE: The order of these ".hash" calls matters, changing them will change
+    // the derivation of the "timeseries_key". We have change-detector tests for
+    // modifications like this, but be cautious, making such a change will
+    // impact all currently-provisioned databases.
+    let mut hasher = HighwayHasher::default();
+    canonicalize("timeseries name", timeseries_name).hash(&mut hasher);
+    for field in target_fields.values() {
+        canonicalize("target field", &field).hash(&mut hasher);
     }
+    for field in metric_fields.values() {
+        canonicalize("metric field", &field).hash(&mut hasher);
+    }
+    canonicalize("datum type", &datum_type).hash(&mut hasher);
+
     hasher.finish()
 }
 
@@ -355,42 +276,141 @@ const DATABASE_NAME: &str = "oximeter";
 // See https://clickhouse.com/docs/en/interfaces/formats/#jsoneachrow for details.
 const DATABASE_SELECT_FORMAT: &str = "JSONEachRow";
 
-// Regular expression describing valid timeseries names.
-//
-// Names are derived from the names of the Rust structs for the target and metric, converted to
-// snake case. So the names must be valid identifiers, and generally:
-//
-//  - Start with lowercase a-z
-//  - Any number of alphanumerics
-//  - Zero or more of the above, delimited by '-'.
-//
-// That describes the target/metric name, and the timeseries is two of those, joined with ':'.
-const TIMESERIES_NAME_REGEX: &str =
-    "(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*):(([a-z]+[a-z0-9]*)(_([a-z0-9]+))*)";
-
 #[cfg(test)]
 mod tests {
-    use super::TimeseriesName;
-    use std::convert::TryFrom;
+    use super::*;
+    use crate::model::DbFieldList;
+    use crate::model::DbTimeseriesSchema;
+    use uuid::Uuid;
 
+    // Validates that the timeseries_key stability for a sample is stable.
     #[test]
-    fn test_timeseries_name() {
-        let name = TimeseriesName::try_from("foo:bar").unwrap();
-        assert_eq!(format!("{}", name), "foo:bar");
+    fn test_timeseries_key_sample_stability() {
+        #[derive(oximeter::Target)]
+        pub struct TestTarget {
+            pub name: String,
+            pub num: i64,
+        }
+
+        #[derive(oximeter::Metric)]
+        pub struct TestMetric {
+            pub id: Uuid,
+            pub datum: i64,
+        }
+
+        let target = TestTarget { name: String::from("Hello"), num: 1337 };
+        let metric = TestMetric { id: Uuid::nil(), datum: 0x1de };
+        let sample = Sample::new(&target, &metric).unwrap();
+        let key = super::timeseries_key(&sample);
+
+        expectorate::assert_contents(
+            "test-output/sample-timeseries-key.txt",
+            &format!("{key}"),
+        );
+    }
+
+    // Validates that the timeseries_key stability for specific fields is
+    // stable.
+    #[test]
+    fn test_timeseries_key_field_stability() {
+        use oximeter::{Field, FieldValue};
+        use strum::EnumCount;
+
+        let values = [
+            ("string", FieldValue::String(String::default())),
+            ("i8", FieldValue::I8(-0x0A)),
+            ("u8", FieldValue::U8(0x0A)),
+            ("i16", FieldValue::I16(-0x0ABC)),
+            ("u16", FieldValue::U16(0x0ABC)),
+            ("i32", FieldValue::I32(-0x0ABC_0000)),
+            ("u32", FieldValue::U32(0x0ABC_0000)),
+            ("i64", FieldValue::I64(-0x0ABC_0000_0000_0000)),
+            ("u64", FieldValue::U64(0x0ABC_0000_0000_0000)),
+            (
+                "ipaddr",
+                FieldValue::IpAddr(std::net::IpAddr::V4(
+                    std::net::Ipv4Addr::LOCALHOST,
+                )),
+            ),
+            ("uuid", FieldValue::Uuid(uuid::Uuid::nil())),
+            ("bool", FieldValue::Bool(true)),
+        ];
+
+        // Exhaustively testing enums is a bit tricky. Although it's easy to
+        // check "all variants of an enum are matched", it harder to test "all
+        // variants of an enum have been supplied".
+        //
+        // We use this as a proxy, confirming that each variant is represented
+        // here for the purposes of tracking stability.
+        assert_eq!(values.len(), FieldValue::COUNT);
+
+        let mut output = vec![];
+        for (name, value) in values {
+            let target_fields = BTreeMap::from([(
+                "field".to_string(),
+                Field { name: name.to_string(), value },
+            )]);
+            let metric_fields = BTreeMap::new();
+            let key = timeseries_key_for(
+                "timeseries name",
+                &target_fields,
+                &metric_fields,
+                // ... Not actually, but we are only trying to compare fields here.
+                DatumType::Bool,
+            );
+            output.push(format!("{name} -> {key}"));
+        }
+
+        expectorate::assert_contents(
+            "test-output/field-timeseries-keys.txt",
+            &output.join("\n"),
+        );
     }
 
     #[test]
-    fn test_timeseries_name_from_str() {
-        assert!(TimeseriesName::try_from("a:b").is_ok());
-        assert!(TimeseriesName::try_from("a_a:b_b").is_ok());
-        assert!(TimeseriesName::try_from("a0:b0").is_ok());
-        assert!(TimeseriesName::try_from("a_0:b_0").is_ok());
+    fn test_unsorted_db_fields_are_sorted_on_read() {
+        let target_field = FieldSchema {
+            name: String::from("later"),
+            field_type: FieldType::U64,
+            source: FieldSource::Target,
+        };
+        let metric_field = FieldSchema {
+            name: String::from("earlier"),
+            field_type: FieldType::U64,
+            source: FieldSource::Metric,
+        };
+        let timeseries_name: TimeseriesName = "foo:bar".parse().unwrap();
+        let datum_type = DatumType::U64;
+        let field_schema =
+            [target_field.clone(), metric_field.clone()].into_iter().collect();
+        let expected_schema = TimeseriesSchema {
+            timeseries_name: timeseries_name.clone(),
+            field_schema,
+            datum_type,
+            created: Utc::now(),
+        };
 
-        assert!(TimeseriesName::try_from("_:b").is_err());
-        assert!(TimeseriesName::try_from("a_:b").is_err());
-        assert!(TimeseriesName::try_from("0:b").is_err());
-        assert!(TimeseriesName::try_from(":b").is_err());
-        assert!(TimeseriesName::try_from("a:").is_err());
-        assert!(TimeseriesName::try_from("123").is_err());
+        // The fields here are sorted by target and then metric, which is how we
+        // used to insert them into the DB. We're checking that they are totally
+        // sorted when we read them out of the DB, even though they are not in
+        // the extracted model type.
+        let db_fields = DbFieldList {
+            names: vec![target_field.name.clone(), metric_field.name.clone()],
+            types: vec![
+                target_field.field_type.into(),
+                metric_field.field_type.into(),
+            ],
+            sources: vec![
+                target_field.source.into(),
+                metric_field.source.into(),
+            ],
+        };
+        let db_schema = DbTimeseriesSchema {
+            timeseries_name: timeseries_name.to_string(),
+            field_schema: db_fields,
+            datum_type: datum_type.into(),
+            created: expected_schema.created,
+        };
+        assert_eq!(expected_schema, TimeseriesSchema::from(db_schema));
     }
 }

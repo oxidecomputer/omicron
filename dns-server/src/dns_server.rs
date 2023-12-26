@@ -56,8 +56,8 @@ impl Drop for ServerHandle {
 }
 
 impl ServerHandle {
-    pub fn local_address(&self) -> &SocketAddr {
-        &self.local_address
+    pub fn local_address(&self) -> SocketAddr {
+        self.local_address
     }
 }
 
@@ -213,6 +213,49 @@ impl From<QueryError> for RequestError {
     }
 }
 
+fn dns_record_to_record(
+    name: &Name,
+    record: DnsRecord,
+) -> Result<Record, RequestError> {
+    match record {
+        DnsRecord::A(addr) => {
+            let mut a = Record::new();
+            a.set_name(name.clone())
+                .set_rr_type(RecordType::A)
+                .set_data(Some(RData::A(addr)));
+            Ok(a)
+        }
+
+        DnsRecord::AAAA(addr) => {
+            let mut aaaa = Record::new();
+            aaaa.set_name(name.clone())
+                .set_rr_type(RecordType::AAAA)
+                .set_data(Some(RData::AAAA(addr)));
+            Ok(aaaa)
+        }
+
+        DnsRecord::SRV(crate::dns_types::SRV {
+            prio,
+            weight,
+            port,
+            target,
+        }) => {
+            let tgt = Name::from_str(&target).map_err(|error| {
+                RequestError::ServFail(anyhow!(
+                    "serialization failed due to bad SRV target {:?}: {:#}",
+                    &target,
+                    error
+                ))
+            })?;
+            let mut srv = Record::new();
+            srv.set_name(name.clone())
+                .set_rr_type(RecordType::SRV)
+                .set_data(Some(RData::SRV(SRV::new(prio, weight, port, tgt))));
+            Ok(srv)
+        }
+    }
+}
+
 /// Handle a well-formed, decoded DNS query
 async fn handle_dns_message(
     request: &Request,
@@ -227,55 +270,70 @@ async fn handle_dns_message(
     let name = query.original().name().clone();
     let records = store.query(mr)?;
     let rb = MessageResponseBuilder::from_message_request(mr);
+    let mut additional_records = vec![];
     let response_records = records
         .into_iter()
-        .map(|record| match record {
-            DnsRecord::A(addr) => {
-                let mut a = Record::new();
-                a.set_name(name.clone())
-                    .set_rr_type(RecordType::A)
-                    .set_data(Some(RData::A(addr)));
-                Ok(a)
-            }
+        .map(|record| {
+            let record = dns_record_to_record(&name, record)?;
 
-            DnsRecord::AAAA(addr) => {
-                let mut aaaa = Record::new();
-                aaaa.set_name(name.clone())
-                    .set_rr_type(RecordType::AAAA)
-                    .set_data(Some(RData::AAAA(addr)));
-                Ok(aaaa)
+            // DNS allows for the server to return additional records
+            // that weren't explicitly asked for by the client but that
+            // the server expects the client will want. The records
+            // corresponding to a lookup on a SRV target is one such case.
+            // We opportunistically attempt to resolve the target here
+            // and if successful return those additional records in the
+            // response.
+            // NOTE: we only do this one-layer deep.
+            if let Some(RData::SRV(srv)) = record.data() {
+                let target_records =
+                    store.query_name(srv.target()).map(|records| {
+                        records
+                            .into_iter()
+                            .map(|record| {
+                                dns_record_to_record(srv.target(), record)
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                    });
+                match target_records {
+                    Ok(Ok(target_records)) => {
+                        additional_records.extend(target_records);
+                    }
+                    // Don't bail out if we failed to lookup or
+                    // handle the response as the original request
+                    // did succeed and we only care to do this on
+                    // a best-effort basis.
+                    Err(error) => {
+                        slog::warn!(
+                            &log,
+                            "SRV target lookup failed";
+                            "original_mr" => #?mr,
+                            "target" => ?srv.target(),
+                            "error" => ?error,
+                        );
+                    }
+                    Ok(Err(error)) => {
+                        slog::warn!(
+                            &log,
+                            "SRV target unexpected response";
+                            "original_mr" => #?mr,
+                            "target" => ?srv.target(),
+                            "error" => ?error,
+                        );
+                    }
+                }
             }
-
-            DnsRecord::SRV(crate::dns_types::SRV {
-                prio,
-                weight,
-                port,
-                target,
-            }) => {
-                let tgt = Name::from_str(&target).map_err(|error| {
-                    RequestError::ServFail(anyhow!(
-                        "serialization failed due to bad SRV target {:?}: {:#}",
-                        &target,
-                        error
-                    ))
-                })?;
-                let mut srv = Record::new();
-                srv.set_name(name.clone())
-                    .set_rr_type(RecordType::SRV)
-                    .set_data(Some(RData::SRV(SRV::new(
-                        prio, weight, port, tgt,
-                    ))));
-                Ok(srv)
-            }
+            Ok(record)
         })
         .collect::<Result<Vec<_>, RequestError>>()?;
     debug!(
         &log,
         "dns response";
         "query" => ?query,
-        "records" => ?&response_records
+        "records" => ?&response_records,
+        "additional_records" => ?&additional_records,
     );
-    respond_records(request, rb, header, &response_records).await
+    respond_records(request, rb, header, &response_records, &additional_records)
+        .await
 }
 
 /// Respond to a DNS query with the given set of DNS records
@@ -284,13 +342,14 @@ async fn respond_records(
     rb: MessageResponseBuilder<'_>,
     header: Header,
     response_records: &[Record],
+    additional_records: &[Record],
 ) -> Result<(), RequestError> {
     let mresp = rb.build(
         header,
         response_records.iter().collect::<Vec<&Record>>(),
         vec![],
         vec![],
-        vec![],
+        additional_records,
     );
 
     encode_and_send(&request, mresp, "records").await.map_err(|error| {

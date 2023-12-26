@@ -209,8 +209,12 @@ impl<S: SecretRetriever> KeyManager<S> {
             } else {
                 warn!(
                     self.log,
-                    "Failed to receive from a storage key requester",
+                    concat!(
+                        "KeyManager shutting down: ",
+                        "all storage key requesters dropped.",
+                    )
                 );
+                return;
             }
         }
     }
@@ -305,6 +309,12 @@ pub enum SecretState {
 pub enum SecretRetrieverError {
     #[error("Secret does not exist for {0}")]
     NoSuchEpoch(u64),
+
+    #[error("Rack must be initialized for secret access")]
+    RackNotInitialized,
+
+    #[error("Bootstore error: {0}")]
+    Bootstore(String),
 }
 
 /// A mechanism for retrieving a secrets to use as input key material to HKDF-
@@ -329,10 +339,6 @@ pub trait SecretRetriever {
     ///
     /// Return an error if its not possible to recover the old secret given the
     /// latest secret.
-    ///
-    /// TODO(AJS): Ensure that we store the epoch of the actual key protecting
-    /// data in a ZFS property for each drive. This will allow us to retrieve
-    /// the correct keys when needed.
     async fn get(
         &self,
         epoch: u64,

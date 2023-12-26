@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use crate::authn;
-use crate::authz;
-use crate::db;
-use crate::db::lookup;
-use crate::db::lookup::LookupPath;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db;
+use nexus_db_queries::db::lookup;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::DiskSelector;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -57,7 +57,7 @@ impl super::Nexus {
         }
     }
 
-    pub async fn snapshot_create(
+    pub(crate) async fn snapshot_create(
         self: &Arc<Self>,
         opctx: &OpContext,
         // Is passed by value due to `disk_name` taking ownership of `self` below
@@ -93,41 +93,43 @@ impl super::Nexus {
 
         // If there isn't a running propolis, Nexus needs to use the Crucible
         // Pantry to make this snapshot
-        let use_the_pantry = if let Some(attach_instance_id) =
+        let instance_and_sled = if let Some(attach_instance_id) =
             &db_disk.runtime_state.attach_instance_id
         {
-            let (.., db_instance) = LookupPath::new(opctx, &self.db_datastore)
-                .instance_id(*attach_instance_id)
-                .fetch_for(authz::Action::Read)
+            let (.., authz_instance) =
+                LookupPath::new(opctx, &self.db_datastore)
+                    .instance_id(*attach_instance_id)
+                    .lookup_for(authz::Action::Read)
+                    .await?;
+
+            let instance_state = self
+                .datastore()
+                .instance_fetch_with_vmm(&opctx, &authz_instance)
                 .await?;
 
-            let instance_state: InstanceState = db_instance.runtime().state.0;
-
-            match instance_state {
-                // If there's a propolis running, use that
-                InstanceState::Running |
-                // Rebooting doesn't deactivate the volume
-                InstanceState::Rebooting
-                => false,
-
-                // If there's definitely no propolis running, then use the
-                // pantry
-                InstanceState::Stopped | InstanceState::Destroyed => true,
-
-                // If there *may* be a propolis running, then fail: we can't
-                // know if that propolis has activated the Volume or not, or if
-                // it's in the process of deactivating.
-                _ => {
-                    return Err(
-                        Error::invalid_request(
-                            &format!("cannot snapshot attached disk for instance in state {}", instance_state)
-                        )
-                    );
-                }
+            match instance_state.vmm().as_ref() {
+                None => None,
+                Some(vmm) => match vmm.runtime.state.0 {
+                    // If the VM might be running, or it's rebooting (which
+                    // doesn't deactivate the volume), send the snapshot request
+                    // to the relevant VMM. Otherwise, there's no way to know if
+                    // the instance has attached the volume or is in the process
+                    // of detaching it, so bail.
+                    InstanceState::Running | InstanceState::Rebooting => {
+                        Some((*attach_instance_id, vmm.sled_id))
+                    }
+                    _ => {
+                        return Err(Error::invalid_request(&format!(
+                            "cannot snapshot attached disk for instance in \
+                            state {}",
+                            vmm.runtime.state.0
+                        )));
+                    }
+                },
             }
         } else {
             // This disk is not attached to an instance, use the pantry.
-            true
+            None
         };
 
         let saga_params = sagas::snapshot_create::Params {
@@ -135,7 +137,7 @@ impl super::Nexus {
             silo_id: authz_silo.id(),
             project_id: authz_project.id(),
             disk_id: authz_disk.id(),
-            use_the_pantry,
+            attached_instance_and_sled: instance_and_sled,
             create_params: params.clone(),
         };
 
@@ -154,7 +156,7 @@ impl super::Nexus {
         Ok(snapshot_created)
     }
 
-    pub async fn snapshot_list(
+    pub(crate) async fn snapshot_list(
         &self,
         opctx: &OpContext,
         project_lookup: &lookup::Project<'_>,
@@ -166,18 +168,11 @@ impl super::Nexus {
         self.db_datastore.snapshot_list(opctx, &authz_project, pagparams).await
     }
 
-    pub async fn snapshot_delete(
+    pub(crate) async fn snapshot_delete(
         self: &Arc<Self>,
         opctx: &OpContext,
         snapshot_lookup: &lookup::Snapshot<'_>,
     ) -> DeleteResult {
-        // TODO-correctness
-        // This also requires solving how to clean up the associated resources
-        // (on-disk snapshots, running read-only downstairs) because disks
-        // *could* still be using them (if the snapshot has not yet been turned
-        // into a regular crucible volume). It will involve some sort of
-        // reference counting for volumes.
-
         let (.., authz_snapshot, db_snapshot) =
             snapshot_lookup.fetch_for(authz::Action::Delete).await?;
 
@@ -186,10 +181,12 @@ impl super::Nexus {
             authz_snapshot,
             snapshot: db_snapshot,
         };
+
         self.execute_saga::<sagas::snapshot_delete::SagaSnapshotDelete>(
             saga_params,
         )
         .await?;
+
         Ok(())
     }
 }

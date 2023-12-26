@@ -10,4 +10,4 @@ This package is not built or run by default (it is excluded from `default-member
 2. Serve a Debian image over HTTP. The tests add a Debian image sourced from `http://[fd00:1122:3344:101::1]:54321/debian-11-genericcloud-amd64.raw`; that IP address belongs to the global zone. You can download the image from https://cloud.debian.org/images/cloud/bullseye/latest/. https://github.com/joseluisq/static-web-server[static-web-server] works well for this.
 3. Run the bootstrap bin target: `cargo run -p end-to-end-tests --bin bootstrap`
 
-Then you can `cargo test -p end-to-end-tests`.
+Then you can `cargo nextest run -p end-to-end-tests`.

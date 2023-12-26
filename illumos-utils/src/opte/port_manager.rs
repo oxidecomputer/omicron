@@ -6,6 +6,7 @@
 
 use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
+use crate::opte::params::DeleteVirtualNetworkInterfaceHost;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
 use crate::opte::params::VpcFirewallRule;
 use crate::opte::Error;
@@ -18,6 +19,8 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use oxide_vpc::api::AddRouterEntryReq;
+use oxide_vpc::api::DhcpCfg;
+use oxide_vpc::api::ExternalIpCfg;
 use oxide_vpc::api::IpCfg;
 use oxide_vpc::api::IpCidr;
 use oxide_vpc::api::Ipv4Cfg;
@@ -97,8 +100,10 @@ impl PortManager {
         &self,
         nic: &NetworkInterface,
         source_nat: Option<SourceNatConfig>,
-        external_ips: &[IpAddr],
+        ephemeral_ip: Option<IpAddr>,
+        floating_ips: &[IpAddr],
         firewall_rules: &[VpcFirewallRule],
+        dhcp_config: DhcpCfg,
     ) -> Result<(Port, PortTicket), Error> {
         let mac = *nic.mac;
         let vni = Vni::new(nic.vni).unwrap();
@@ -108,13 +113,6 @@ impl PortManager {
         let boundary_services = default_boundary_services();
 
         // Describe the external IP addresses for this port.
-        //
-        // Note that we're currently only taking the first address, which is all
-        // that OPTE supports. The array is guaranteed to be limited by Nexus.
-        // See https://github.com/oxidecomputer/omicron/issues/1467
-        // See https://github.com/oxidecomputer/opte/issues/196
-        let external_ip = external_ips.get(0);
-
         macro_rules! ip_cfg {
             ($ip:expr, $log_prefix:literal, $ip_t:path, $cidr_t:path,
              $ipcfg_e:path, $ipcfg_t:ident, $snat_t:ident) => {{
@@ -149,25 +147,43 @@ impl PortManager {
                     }
                     None => None,
                 };
-                let external_ip = match external_ip {
-                    Some($ip_t(ip)) => Some((*ip).into()),
+                let ephemeral_ip = match ephemeral_ip {
+                    Some($ip_t(ip)) => Some(ip.into()),
                     Some(_) => {
                         error!(
                             self.inner.log,
-                            concat!($log_prefix, " external IP");
-                            "external_ip" => ?external_ip,
+                            concat!($log_prefix, " ephemeral IP");
+                            "ephemeral_ip" => ?ephemeral_ip,
                         );
                         return Err(Error::InvalidPortIpConfig);
                     }
                     None => None,
                 };
+                let floating_ips: Vec<_> = floating_ips
+                    .iter()
+                    .copied()
+                    .map(|ip| match ip {
+                        $ip_t(ip) => Ok(ip.into()),
+                        _ => {
+                            error!(
+                                self.inner.log,
+                                concat!($log_prefix, " ephemeral IP");
+                                "ephemeral_ip" => ?ephemeral_ip,
+                            );
+                            Err(Error::InvalidPortIpConfig)
+                        }
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 $ipcfg_e($ipcfg_t {
                     vpc_subnet,
                     private_ip: $ip.into(),
                     gateway_ip: gateway_ip.into(),
-                    snat,
-                    external_ips: external_ip,
+                    external_ips: ExternalIpCfg {
+                        ephemeral_ip,
+                        snat,
+                        floating_ips,
+                    },
                 })
             }}
         }
@@ -204,8 +220,6 @@ impl PortManager {
             vni,
             phys_ip: self.inner.underlay_ip.into(),
             boundary_services,
-            // TODO-completeness (#2153): Plumb domain search list
-            domain_list: vec![],
         };
 
         // Create the xde device.
@@ -226,11 +240,17 @@ impl PortManager {
             "Creating xde device";
             "port_name" => &port_name,
             "vpc_cfg" => ?&vpc_cfg,
+            "dhcp_config" => ?&dhcp_config,
         );
         #[cfg(target_os = "illumos")]
         let hdl = {
             let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
-            hdl.create_xde(&port_name, vpc_cfg, /* passthru = */ false)?;
+            hdl.create_xde(
+                &port_name,
+                vpc_cfg,
+                dhcp_config,
+                /* passthru = */ false,
+            )?;
             hdl
         };
 
@@ -480,9 +500,10 @@ impl PortManager {
     #[cfg(target_os = "illumos")]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &SetVirtualNetworkInterfaceHost,
+        _mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         // TODO requires https://github.com/oxidecomputer/opte/issues/332
+
         slog::warn!(self.inner.log, "unset_virtual_nic_host unimplmented");
         Ok(())
     }
@@ -490,7 +511,7 @@ impl PortManager {
     #[cfg(not(target_os = "illumos"))]
     pub fn unset_virtual_nic_host(
         &self,
-        _mapping: &SetVirtualNetworkInterfaceHost,
+        _mapping: &DeleteVirtualNetworkInterfaceHost,
     ) -> Result<(), Error> {
         info!(self.inner.log, "Ignoring unset of virtual NIC mapping");
         Ok(())

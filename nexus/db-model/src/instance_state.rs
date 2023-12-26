@@ -6,6 +6,7 @@ use super::impl_enum_wrapper;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt;
 use std::io::Write;
 
 impl_enum_wrapper!(
@@ -37,6 +38,12 @@ impl InstanceState {
 
     pub fn state(&self) -> &external::InstanceState {
         &self.0
+    }
+}
+
+impl fmt::Display for InstanceState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

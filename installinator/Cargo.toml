@@ -10,6 +10,7 @@ async-trait.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
 camino.workspace = true
+cancel-safe-futures.workspace = true
 clap.workspace = true
 ddm-admin-client.workspace = true
 display-error-chain.workspace = true
@@ -22,13 +23,11 @@ installinator-common.workspace = true
 ipcc-key-value.workspace = true
 itertools.workspace = true
 libc.workspace = true
-once_cell.workspace = true
 omicron-common.workspace = true
-progenitor-client.workspace = true
 reqwest.workspace = true
-serde.workspace = true
 sha2.workspace = true
 sled-hardware.workspace = true
+sled-storage.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
@@ -37,10 +36,10 @@ smf.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-toml.workspace = true
 tufaceous-lib.workspace = true
 update-engine.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
@@ -55,3 +54,4 @@ tokio-stream.workspace = true
 [features]
 image-standard = []
 image-trampoline = []
+rack-topology-single-sled = []

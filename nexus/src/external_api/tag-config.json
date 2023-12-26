@@ -8,6 +8,12 @@
         "url": "http://docs.oxide.computer/api/disks"
       }
     },
+    "floating-ips": {
+      "description": "Floating IPs allow a project to allocate well-known IPs to instances.",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/floating-ips"
+      }
+    },
     "hidden": {
       "description": "TODO operations that will not ship to customers",
       "external_docs": {
@@ -78,6 +84,12 @@
       "description": "Virtual Private Clouds (VPCs) provide isolated network environments for managing and deploying services.",
       "external_docs": {
         "url": "http://docs.oxide.computer/api/vpcs"
+      }
+    },
+    "system/status": {
+      "description": "Endpoints related to system health",
+      "external_docs": {
+        "url": "http://docs.oxide.computer/api/system-status"
       }
     },
     "system/hardware": {

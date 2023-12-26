@@ -5,19 +5,28 @@
 // Copyright 2023 Oxide Computer Company
 
 use anyhow::{bail, Context, Result};
-use hubtools::RawHubrisArchive;
+use hubtools::{Caboose, RawHubrisArchive};
 
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     match args.next().context("subcommand required")?.as_str() {
+        "read-board" => {
+            let caboose = read_caboose(args.next())?;
+            println!("{}", std::str::from_utf8(caboose.board()?)?);
+            Ok(())
+        }
         "read-version" => {
-            let archive = RawHubrisArchive::load(
-                &args.next().context("path to hubris archive required")?,
-            )?;
-            let caboose = archive.read_caboose()?;
+            let caboose = read_caboose(args.next())?;
             println!("{}", std::str::from_utf8(caboose.version()?)?);
             Ok(())
         }
         unknown => bail!("unknown command {}", unknown),
     }
+}
+
+fn read_caboose(path: Option<String>) -> Result<Caboose> {
+    let archive = RawHubrisArchive::load(
+        &path.context("path to hubris archive required")?,
+    )?;
+    Ok(archive.read_caboose()?)
 }

@@ -4,7 +4,6 @@
 
 //! Error handling and conversions.
 
-use async_bb8_diesel::{ConnectionError, PoolError, PoolResult};
 use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
@@ -18,36 +17,73 @@ pub enum TransactionError<T> {
     /// The customizable error type.
     ///
     /// This error should be used for all non-Diesel transaction failures.
-    #[error("Custom transaction error; {0}")]
+    #[error("Custom transaction error: {0}")]
     CustomError(T),
 
     /// The Diesel error type.
     ///
     /// This error covers failure due to accessing the DB pool or errors
     /// propagated from the DB itself.
-    #[error("Pool error: {0}")]
-    Pool(#[from] async_bb8_diesel::PoolError),
+    #[error("Database error: {0}")]
+    Database(#[from] DieselError),
 }
 
-// Maps a "diesel error" into a "pool error", which
-// is already contained within the error type.
-impl<T> From<DieselError> for TransactionError<T> {
-    fn from(err: DieselError) -> Self {
-        Self::Pool(PoolError::Connection(ConnectionError::Query(err)))
+pub fn retryable(error: &DieselError) -> bool {
+    match error {
+        DieselError::DatabaseError(kind, boxed_error_information) => match kind
+        {
+            DieselErrorKind::SerializationFailure => {
+                return boxed_error_information
+                    .message()
+                    .starts_with("restart transaction");
+            }
+            _ => false,
+        },
+        _ => false,
     }
 }
 
-// Maps a "connection error" into a "pool error", which
-// is already contained within the error type.
-impl<T> From<async_bb8_diesel::ConnectionError> for TransactionError<T> {
-    fn from(err: async_bb8_diesel::ConnectionError) -> Self {
-        Self::Pool(PoolError::Connection(err))
+/// Identifies if the error is retryable or not.
+pub enum MaybeRetryable<T> {
+    /// The error isn't retryable.
+    NotRetryable(T),
+    /// The error is retryable.
+    Retryable(DieselError),
+}
+
+impl<T> TransactionError<T> {
+    /// Identifies that the error could be returned from a Diesel transaction.
+    ///
+    /// Allows callers to propagate arbitrary errors out of transaction contexts
+    /// without losing information that might be valuable to the calling context,
+    /// such as "does this particular error indicate that the entire transaction
+    /// should retry?".
+    pub fn retryable(self) -> MaybeRetryable<Self> {
+        use MaybeRetryable::*;
+
+        match self {
+            TransactionError::Database(err) if retryable(&err) => {
+                Retryable(err)
+            }
+            _ => NotRetryable(self),
+        }
     }
 }
 
 impl From<PublicError> for TransactionError<PublicError> {
     fn from(err: PublicError) -> Self {
         TransactionError::CustomError(err)
+    }
+}
+
+impl From<TransactionError<PublicError>> for PublicError {
+    fn from(err: TransactionError<PublicError>) -> Self {
+        match err {
+            TransactionError::CustomError(err) => err,
+            TransactionError::Database(err) => {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            }
+        }
     }
 }
 
@@ -77,21 +113,6 @@ fn format_database_error(
         rv.push_str(&format!("STATEMENT POSITION: {}\n", statement_position));
     }
     rv
-}
-
-/// Like [`diesel::result::OptionalExtension<T>::optional`]. This turns Ok(v)
-/// into Ok(Some(v)), Err("NotFound") into Ok(None), and leave all other values
-/// unchanged.
-pub fn diesel_pool_result_optional<T>(
-    result: PoolResult<T>,
-) -> PoolResult<Option<T>> {
-    match result {
-        Ok(v) => Ok(Some(v)),
-        Err(PoolError::Connection(ConnectionError::Query(
-            DieselError::NotFound,
-        ))) => Ok(None),
-        Err(e) => Err(e),
-    }
 }
 
 /// Allows the caller to handle user-facing errors, and provide additional
@@ -125,15 +146,15 @@ pub enum ErrorHandler<'a> {
     Server,
 }
 
-/// Converts a Diesel pool error to a public-facing error.
+/// Converts a Diesel connection error to a public-facing error.
 ///
 /// [`ErrorHandler`] may be used to add additional handlers for the error
 /// being returned.
-pub fn public_error_from_diesel_pool(
-    error: PoolError,
+pub fn public_error_from_diesel(
+    error: DieselError,
     handler: ErrorHandler<'_>,
 ) -> PublicError {
-    public_error_from_diesel_pool_helper(error, |error| match handler {
+    match handler {
         ErrorHandler::NotFoundByResource(resource) => {
             public_error_from_diesel_lookup(
                 error,
@@ -151,31 +172,6 @@ pub fn public_error_from_diesel_pool(
             "unexpected database error: {:#}",
             error
         )),
-    })
-}
-
-/// Handles the common cases for all pool errors (particularly around transient
-/// errors while delegating the special case of
-/// `PoolError::Connection(ConnectionError::Query(diesel_error))` to
-/// `make_query_error(diesel_error)`, allowing the caller to decide how to
-/// format a message for that case.
-fn public_error_from_diesel_pool_helper<F>(
-    error: PoolError,
-    make_query_error: F,
-) -> PublicError
-where
-    F: FnOnce(DieselError) -> PublicError,
-{
-    match error {
-        PoolError::Connection(error) => match error {
-            ConnectionError::Connection(error) => PublicError::unavail(
-                &format!("Failed to access connection pool: {}", error),
-            ),
-            ConnectionError::Query(error) => make_query_error(error),
-        },
-        PoolError::Timeout => {
-            PublicError::unavail("Timeout accessing connection pool")
-        }
     }
 }
 

@@ -9,14 +9,10 @@ branch = "main"
 
 requires_token = true
 
-# Debounce values are used to batch together multiple pushes that occur in a relatively short
-# timeframe
+# Run in response to the image buildomat job in dendrite completing
 
 [[on]]
 repository = "oxidecomputer/dendrite"
-paths = [
-  "**",
-]
-
-# Wait one hour for binary builds to complete
-debounce = 3600
+event = "check_run"
+action = "completed"
+check = "image"

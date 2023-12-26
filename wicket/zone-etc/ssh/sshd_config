@@ -20,6 +20,7 @@ PermitRootLogin no
 AuthorizedKeysFile none
 AllowAgentForwarding no
 AllowTcpForwarding no
+PrintMotd no
 
 #
 # Allow the user to pass through a limited set of environment variables for
@@ -37,7 +38,6 @@ Match User wicket
         ForceCommand /opt/oxide/wicket/bin/wicket
 
 Match User support
-        PermitEmptyPasswords yes
-        PasswordAuthentication yes
-        # TODO: authentication as described in https://rfd.shared.oxide.computer/rfd/0354
-        AuthenticationMethods none
+        PubkeyAuthentication yes
+        AuthenticationMethods publickey
+        AuthorizedKeysFile /opt/oxide/support/authorized_keys

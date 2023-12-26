@@ -64,7 +64,14 @@ impl Into<external::SwitchInterfaceKind> for DbSwitchInterfaceKind {
 }
 
 #[derive(
-    Queryable, Insertable, Selectable, Clone, Debug, Serialize, Deserialize,
+    Queryable,
+    Insertable,
+    Selectable,
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    AsChangeset,
 )]
 #[diesel(table_name = switch_vlan_interface_config)]
 pub struct SwitchVlanInterfaceConfig {
@@ -106,6 +113,7 @@ pub struct LoopbackAddress {
     pub rack_id: Uuid,
     pub switch_location: String,
     pub address: IpNetwork,
+    pub anycast: bool,
 }
 
 impl LoopbackAddress {
@@ -116,6 +124,7 @@ impl LoopbackAddress {
         rack_id: Uuid,
         switch_location: String,
         address: IpNetwork,
+        anycast: bool,
     ) -> Self {
         Self {
             identity: LoopbackAddressIdentity::new(
@@ -126,6 +135,7 @@ impl LoopbackAddress {
             rack_id,
             switch_location,
             address,
+            anycast,
         }
     }
 }

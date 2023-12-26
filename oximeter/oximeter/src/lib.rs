@@ -95,7 +95,7 @@
 //! `Producer`s may be registered with the same `ProducerServer`, each with potentially different
 //! sampling intervals.
 
-// Copyright 2021 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 pub use oximeter_macro_impl::*;
 
@@ -108,14 +108,25 @@ pub use oximeter_macro_impl::*;
 extern crate self as oximeter;
 
 pub mod histogram;
+pub mod schema;
 pub mod test_util;
 pub mod traits;
 pub mod types;
-pub use traits::{Metric, Producer, Target};
-pub use types::{
-    Datum, DatumType, Field, FieldType, FieldValue, Measurement, MetricsError,
-    Sample,
-};
+
+pub use schema::FieldSchema;
+pub use schema::TimeseriesName;
+pub use schema::TimeseriesSchema;
+pub use traits::Metric;
+pub use traits::Producer;
+pub use traits::Target;
+pub use types::Datum;
+pub use types::DatumType;
+pub use types::Field;
+pub use types::FieldType;
+pub use types::FieldValue;
+pub use types::Measurement;
+pub use types::MetricsError;
+pub use types::Sample;
 
 /// Construct the timeseries name for a Target and Metric.
 pub fn timeseries_name<T, M>(target: &T, metric: &M) -> String

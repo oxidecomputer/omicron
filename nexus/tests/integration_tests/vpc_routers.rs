@@ -12,11 +12,11 @@ use nexus_test_utils::resource_helpers::create_router;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{create_project, create_vpc};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::params;
+use nexus_types::external_api::views::VpcRouter;
+use nexus_types::external_api::views::VpcRouterKind;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
-use omicron_nexus::external_api::params;
-use omicron_nexus::external_api::views::VpcRouter;
-use omicron_nexus::external_api::views::VpcRouterKind;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
