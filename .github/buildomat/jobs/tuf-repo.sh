@@ -2,7 +2,7 @@
 #:
 #: name = "helios / build TUF repo"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-2.0-20231220"
 #: output_rules = [
 #:	"=/work/manifest*.toml",
 #:	"=/work/repo-*.zip.part*",

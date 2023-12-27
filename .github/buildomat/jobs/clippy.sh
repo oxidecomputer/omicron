@@ -2,7 +2,7 @@
 #:
 #: name = "clippy (helios)"
 #: variety = "basic"
-#: target = "helios-2.0"
+#: target = "helios-2.0-20231220"
 #: rust_toolchain = "1.72.1"
 #: output_rules = []
 
