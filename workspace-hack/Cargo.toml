@@ -110,7 +110,7 @@ trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.13" }
 unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
-uuid = { version = "1.6.1", features = ["serde", "v4"] }
+uuid = { version = "1.6.1", features = ["serde", "v4", "v5"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.31", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
@@ -214,7 +214,7 @@ trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.13" }
 unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
-uuid = { version = "1.6.1", features = ["serde", "v4"] }
+uuid = { version = "1.6.1", features = ["serde", "v4", "v5"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.31", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
