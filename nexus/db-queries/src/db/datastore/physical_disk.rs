@@ -47,9 +47,7 @@ impl DataStore {
     ) -> Result<(String, String, String), Error> {
         use db::schema::physical_disk::dsl;
 
-        let conn = self
-            .pool_connection_unauthorized()
-            .await?;
+        let conn = self.pool_connection_unauthorized().await?;
 
         dsl::physical_disk
             .filter(dsl::time_deleted.is_null())
@@ -158,9 +156,7 @@ impl DataStore {
 
         let (vendor, serial, model) = authz_physical_disk.id();
 
-        let conn = self
-            .pool_connection_authorized(opctx)
-            .await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         diesel::update(dsl::physical_disk)
             .filter(dsl::time_deleted.is_null())

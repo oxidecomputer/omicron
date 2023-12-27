@@ -854,7 +854,7 @@ mod test {
         datastore: Arc<DataStore>,
         number_of_sleds: usize,
     ) -> Vec<TestDataset> {
-        RegionAllocationTestCtxBuilder::default()
+        let sleds = RegionAllocationTestCtxBuilder::default()
             .sleds(number_of_sleds)
             // create 9 disks per sled
             .disks_per_sled(9)
@@ -862,15 +862,20 @@ mod test {
             .datasets_per_zpool(3)
             .build(&opctx, &datastore)
             .await
-            .sleds
-            .into_iter()
-            .map(|sled_info| {
-                TestDataset {
-                    sled_id: sled_info.id,
-                    dataset_id: sled_info.disks[0].datasets[0],
+            .sleds;
+
+        let mut result = vec![];
+        for sled_info in &sleds {
+            for disk in &sled_info.disks {
+                for dataset_id in &disk.datasets {
+                    result.push(TestDataset {
+                        sled_id: sled_info.id,
+                        dataset_id: *dataset_id,
+                    });
                 }
-            })
-            .collect()
+            }
+        }
+        result
     }
 
     #[tokio::test]

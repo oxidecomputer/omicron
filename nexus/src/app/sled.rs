@@ -4,11 +4,11 @@
 
 //! Sleds, and the hardware and services within them.
 
+use crate::external_api::params;
 use crate::internal_api::params::{
     PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
     SledRole, ZpoolPutRequest,
 };
-use crate::external_api::params;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;

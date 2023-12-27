@@ -17,9 +17,7 @@ use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::{
-    PhysicalDiskKind, PhysicalDiskUpdate,
-};
+use nexus_types::external_api::params::{PhysicalDiskKind, PhysicalDiskUpdate};
 use nexus_types::external_api::views::{
     PhysicalDisk, PhysicalDiskState, Sled, SledInstance,
 };

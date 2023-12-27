@@ -295,6 +295,20 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
   'u2'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_state AS ENUM (
+    -- The disk is actively being used, and should be a target
+    -- for future allocations.
+    'active',
+    -- The disk may still be in usage, but should not be used
+    -- for subsequent allocations.
+    --
+    -- This state could be set when we have, for example, datasets
+    -- actively being used by the disk which we haven't fully retired.
+    'draining',
+    -- The disk is not currently being used.
+    'inactive'
+);
+
 -- A physical disk which exists inside the rack.
 CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
@@ -311,6 +325,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
 
     -- FK into the Sled table
     sled_id UUID NOT NULL,
+
+    -- Describes how the control plane manages this disk
+    state omicron.public.physical_disk_state NOT NULL,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.
@@ -3096,7 +3113,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '21.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '22.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
