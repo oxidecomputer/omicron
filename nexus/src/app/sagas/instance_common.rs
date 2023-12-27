@@ -362,7 +362,7 @@ pub async fn instance_ip_remove_opte(
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
-    // If we didn't push OPTE before, don't undo it.
+    // No physical sled? Don't inform OPTE.
     let Some(sled_uuid) =
         sagactx.lookup::<InstanceStateForIp>("instance_state")?.sled_id
     else {
@@ -382,7 +382,7 @@ pub async fn instance_ip_remove_opte(
                 "sled agent client went away mid-attach",
             ))
         })?
-        .instance_put_external_ip(&authz_instance.id(), &sled_agent_body)
+        .instance_delete_external_ip(&authz_instance.id(), &sled_agent_body)
         .await
         .map_err(|e| {
             ActionError::action_failed(match e {

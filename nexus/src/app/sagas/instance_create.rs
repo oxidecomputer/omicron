@@ -733,7 +733,8 @@ async fn sic_allocate_instance_external_ip_undo(
                 error!(
                     osagactx.log(),
                     "sic_allocate_instance_external_ip_undo: failed to \
-                     completely detach ip {}", ip.id
+                     completely detach ip {}",
+                    ip.id
                 );
             }
         }

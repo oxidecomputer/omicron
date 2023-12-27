@@ -68,8 +68,8 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| {
-            panic!("failed to make \"create\" request to {path}")
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"create\" request to {path}: {e}")
         })
         .parsed_body()
         .unwrap()

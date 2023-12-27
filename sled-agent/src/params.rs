@@ -827,7 +827,9 @@ pub struct CleanupContextUpdate {
 }
 
 /// Used to dynamically update external IPs attached to an instance.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Hash, Deserialize, JsonSchema, Serialize,
+)]
 #[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum InstanceExternalIpBody {
     Ephemeral(IpAddr),

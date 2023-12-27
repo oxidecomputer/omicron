@@ -252,37 +252,247 @@ impl NexusSaga for SagaInstanceIpDetach {
 
 #[cfg(test)]
 pub(crate) mod test {
-
+    use super::*;
+    use crate::{
+        app::{
+            saga::create_saga_dag,
+            sagas::{
+                instance_ip_attach::{self, test::ip_manip_test_setup},
+                test_helpers,
+            },
+        },
+        Nexus,
+    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use diesel::{
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    };
+    use nexus_db_model::Name;
+    use nexus_db_queries::context::OpContext;
+    use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::SimpleIdentity;
+    use std::sync::Arc;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
+    const PROJECT_NAME: &str = "cafe";
+    const INSTANCE_NAME: &str = "menu";
+    const FIP_NAME: &str = "affogato";
+
+    async fn new_test_params(
+        opctx: &OpContext,
+        datastore: &db::DataStore,
+        use_floating: bool,
+    ) -> Params {
+        let delete_params = if use_floating {
+            params::ExternalIpDelete::Floating {
+                floating_ip_name: FIP_NAME.parse().unwrap(),
+            }
+        } else {
+            params::ExternalIpDelete::Ephemeral
+        };
+
+        let (.., authz_project, authz_instance) =
+            LookupPath::new(opctx, datastore)
+                .project_name(&Name(PROJECT_NAME.parse().unwrap()))
+                .instance_name(&Name(INSTANCE_NAME.parse().unwrap()))
+                .lookup_for(authz::Action::Modify)
+                .await
+                .unwrap();
+
+        Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            project_id: authz_project.id(),
+            delete_params,
+            authz_instance,
+        }
+    }
+
+    async fn attach_instance_ips(nexus: &Arc<Nexus>, opctx: &OpContext) {
+        let datastore = &nexus.db_datastore;
+
+        let proj_name = Name(PROJECT_NAME.parse().unwrap());
+        let inst_name = Name(INSTANCE_NAME.parse().unwrap());
+        let lookup = LookupPath::new(opctx, datastore)
+            .project_name(&proj_name)
+            .instance_name(&inst_name);
+
+        for use_float in [false, true] {
+            let params = instance_ip_attach::test::new_test_params(
+                opctx, datastore, use_float,
+            )
+            .await;
+            nexus
+                .instance_attach_external_ip(
+                    opctx,
+                    &lookup,
+                    &params.create_params,
+                )
+                .await
+                .unwrap();
+        }
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_saga_basic_usage_succeeds(
-        _cptestctx: &ControlPlaneTestContext,
+        cptestctx: &ControlPlaneTestContext,
     ) {
-        todo!()
+        let client = &cptestctx.external_client;
+        let apictx = &cptestctx.server.apictx();
+        let nexus = &apictx.nexus;
+
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let datastore = &nexus.db_datastore;
+        let _ = ip_manip_test_setup(&client).await;
+        let _instance =
+            create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+        attach_instance_ips(nexus, &opctx).await;
+
+        for use_float in [false, true] {
+            let params = new_test_params(&opctx, datastore, use_float).await;
+
+            let dag = create_saga_dag::<SagaInstanceIpDetach>(params).unwrap();
+            let saga = nexus.create_runnable_saga(dag).await.unwrap();
+            nexus.run_saga(saga).await.expect("Detach saga should succeed");
+        }
+    }
+
+    pub(crate) async fn verify_clean_slate(
+        cptestctx: &ControlPlaneTestContext,
+        instance_id: Uuid,
+    ) {
+        use nexus_db_queries::db::schema::external_ip::dsl;
+
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let sled_agent = &cptestctx.sled_agent.sled_agent;
+        let datastore = cptestctx.server.apictx().nexus.datastore();
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // No IPs in transitional states w/ current instance.
+        assert!(dsl::external_ip
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::parent_id.eq(instance_id))
+            .filter(dsl::state.ne(IpAttachState::Attached))
+            .select(ExternalIp::as_select())
+            .first_async::<ExternalIp>(&*conn,)
+            .await
+            .optional()
+            .unwrap()
+            .is_none());
+
+        // No external IPs in detached state.
+        assert!(dsl::external_ip
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::state.eq(IpAttachState::Detached))
+            .select(ExternalIp::as_select())
+            .first_async::<ExternalIp>(&*conn,)
+            .await
+            .optional()
+            .unwrap()
+            .is_none());
+
+        // Instance still has one Ephemeral IP, and one Floating IP.
+        let db_eips = datastore
+            .instance_lookup_external_ips(&opctx, instance_id)
+            .await
+            .unwrap();
+        assert_eq!(db_eips.len(), 3);
+        assert!(db_eips.iter().find(|v| v.kind == IpKind::Ephemeral).is_some());
+        assert!(db_eips.iter().find(|v| v.kind == IpKind::Floating).is_some());
+        assert!(db_eips.iter().find(|v| v.kind == IpKind::SNat).is_some());
+
+        // No IP bindings remain on sled-agent.
+        let eips = &*sled_agent.external_ips.lock().await;
+        for (_nic_id, eip_set) in eips {
+            assert_eq!(eip_set.len(), 2);
+        }
     }
 
     #[nexus_test(server = crate::Server)]
     async fn test_action_failure_can_unwind(
-        _cptestctx: &ControlPlaneTestContext,
+        cptestctx: &ControlPlaneTestContext,
     ) {
-        todo!()
+        let log = &cptestctx.logctx.log;
+        let client = &cptestctx.external_client;
+        let apictx = &cptestctx.server.apictx();
+        let nexus = &apictx.nexus;
+
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let datastore = &nexus.db_datastore;
+        let project_id = ip_manip_test_setup(&client).await;
+        let instance =
+            create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+        attach_instance_ips(nexus, &opctx).await;
+
+        for use_float in [false, true] {
+            test_helpers::action_failure_can_unwind::<SagaInstanceIpDetach, _, _>(
+                nexus,
+                || Box::pin(new_test_params(&opctx, datastore, use_float) ),
+                || Box::pin(verify_clean_slate(&cptestctx, instance.id())),
+                log,
+            )
+            .await;
+        }
     }
 
     #[nexus_test(server = crate::Server)]
     async fn test_action_failure_can_unwind_idempotently(
-        _cptestctx: &ControlPlaneTestContext,
+        cptestctx: &ControlPlaneTestContext,
     ) {
-        todo!()
+        let log = &cptestctx.logctx.log;
+        let client = &cptestctx.external_client;
+        let apictx = &cptestctx.server.apictx();
+        let nexus = &apictx.nexus;
+
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let datastore = &nexus.db_datastore;
+        let project_id = ip_manip_test_setup(&client).await;
+        let instance =
+            create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+        attach_instance_ips(nexus, &opctx).await;
+
+        for use_float in [false, true] {
+            test_helpers::action_failure_can_unwind_idempotently::<
+                SagaInstanceIpDetach,
+                _,
+                _,
+            >(
+                nexus,
+                || Box::pin(new_test_params(&opctx, datastore, use_float)),
+                || Box::pin(verify_clean_slate(&cptestctx, instance.id())),
+                log,
+            )
+            .await;
+        }
     }
 
     #[nexus_test(server = crate::Server)]
     async fn test_actions_succeed_idempotently(
-        _cptestctx: &ControlPlaneTestContext,
+        cptestctx: &ControlPlaneTestContext,
     ) {
-        todo!()
+        let log = &cptestctx.logctx.log;
+        let client = &cptestctx.external_client;
+        let apictx = &cptestctx.server.apictx();
+        let nexus = &apictx.nexus;
+
+        let opctx = test_helpers::test_opctx(cptestctx);
+        let datastore = &nexus.db_datastore;
+        let project_id = ip_manip_test_setup(&client).await;
+        let _instance =
+            create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
+
+        attach_instance_ips(nexus, &opctx).await;
+
+        for use_float in [false, true] {
+            let params = new_test_params(&opctx, datastore, use_float).await;
+            let dag = create_saga_dag::<SagaInstanceIpDetach>(params).unwrap();
+            test_helpers::actions_succeed_idempotently(nexus, dag).await;
+        }
     }
 }

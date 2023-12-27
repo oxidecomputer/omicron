@@ -358,12 +358,9 @@ impl super::Nexus {
         // This is performed so that an IP attach/detach will block the
         // instance_start saga. Return service unavailable to indicate
         // the request is retryable.
-        if ips_of_interest
-            .iter()
-            .any(|ip| {
-                must_all_be_attached && ip.state != IpAttachState::Attached
-            })
-        {
+        if ips_of_interest.iter().any(|ip| {
+            must_all_be_attached && ip.state != IpAttachState::Attached
+        }) {
             return Err(Error::unavail(
                 "cannot push all DPD state: IP attach/detach in progress",
             ));
