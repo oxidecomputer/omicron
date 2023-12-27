@@ -168,11 +168,10 @@ impl super::Nexus {
     ) -> Result<lookup::PhysicalDisk<'a>, Error> {
         let (v, s, m) = self
             .db_datastore
-            .physical_disk_id_to_name_no_auth(disk_selector.id)
+            .physical_disk_id_to_name_no_auth(disk_selector.disk_id)
             .await?;
 
-        Ok(LookupPath::new(&opctx, &self.db_datastore)
-            .physical_disk(&v, &s, &m))
+        Ok(LookupPath::new(&opctx, &self.db_datastore).physical_disk(v, s, m))
     }
 
     pub(crate) async fn sled_list_physical_disks(
@@ -278,9 +277,9 @@ impl super::Nexus {
         let (_authz_disk, db_disk) =
             LookupPath::new(&opctx, &self.db_datastore)
                 .physical_disk(
-                    &info.disk_vendor,
-                    &info.disk_serial,
-                    &info.disk_model,
+                    info.disk_vendor,
+                    info.disk_serial,
+                    info.disk_model,
                 )
                 .fetch()
                 .await?;

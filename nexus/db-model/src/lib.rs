@@ -9,6 +9,8 @@ extern crate diesel;
 #[macro_use]
 extern crate newtype_derive;
 
+use uuid::Uuid;
+
 mod address_lot;
 mod bgp;
 mod block_size;
@@ -306,6 +308,15 @@ macro_rules! impl_enum_type {
 }
 
 pub(crate) use impl_enum_type;
+
+/// This is an arbitrary UUID, but it's stable because it's embedded as a
+/// constant. This defines a namespace, according to
+/// <https://www.rfc-editor.org/rfc/rfc4122>, which allows generation of v5
+/// UUIDs which are deterministic.
+///
+/// This UUID is used to identify hardware.
+pub(crate) const HARDWARE_UUID_NAMESPACE: Uuid =
+    Uuid::from_u128(206230429496795504636731999500138461979);
 
 /// Describes a type that's represented in the database using a String
 ///

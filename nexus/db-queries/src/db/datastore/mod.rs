@@ -1348,7 +1348,7 @@ mod test {
             .unwrap();
 
         let (.., physical_disk_authz) = LookupPath::new(&opctx, &datastore)
-            .physical_disk(&disk.vendor, &disk.serial, &disk.model)
+            .physical_disk(disk.vendor, disk.serial, disk.model)
             .lookup_for(authz::Action::Modify)
             .await
             .unwrap();

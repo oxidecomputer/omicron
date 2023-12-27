@@ -3604,7 +3604,7 @@
         }
       }
     },
-    "/v1/system/hardware/disks/{id}": {
+    "/v1/system/hardware/disks/{disk_id}": {
       "get": {
         "tags": [
           "system/hardware"
@@ -3614,7 +3614,8 @@
         "parameters": [
           {
             "in": "path",
-            "name": "id",
+            "name": "disk_id",
+            "description": "ID of the physical_disk",
             "required": true,
             "schema": {
               "type": "string",
@@ -3650,7 +3651,8 @@
         "parameters": [
           {
             "in": "path",
-            "name": "id",
+            "name": "disk_id",
+            "description": "ID of the physical_disk",
             "required": true,
             "schema": {
               "type": "string",

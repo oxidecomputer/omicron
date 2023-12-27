@@ -388,7 +388,7 @@ tufaceous-lib = { path = "tufaceous-lib" }
 unicode-width = "0.1.11"
 update-engine = { path = "update-engine" }
 usdt = "0.3"
-uuid = { version = "1.6.1", features = ["serde", "v4"] }
+uuid = { version = "1.6.1", features = ["serde", "v4", "v5"] }
 walkdir = "2.4"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }

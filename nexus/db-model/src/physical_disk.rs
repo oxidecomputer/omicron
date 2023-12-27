@@ -36,8 +36,24 @@ impl PhysicalDisk {
         variant: PhysicalDiskKind,
         sled_id: Uuid,
     ) -> Self {
+        // NOTE: We may want to be more restrictive when parsing the vendor,
+        // serial, and model values, so that we can supply a separator
+        // distinguishing them.
+        //
+        // Theoretically, we could have the following problem:
+        //
+        // - A Disk vendor "Foo" makes a disk with serial "Bar", and model "Rev1".
+        //   - This becomes: "FooBarRev1".
+        // - A Disk vendor "FooBar" makes a disk with serial "Rev", and model "1".
+        //   - This becomes: "FooBarRev1", and conflicts.
+        let interpolated_name = format!("{vendor}{serial}{model}");
+        let disk_id = Uuid::new_v5(
+            &crate::HARDWARE_UUID_NAMESPACE,
+            interpolated_name.as_bytes(),
+        );
+        println!("Physical Disk ID: {disk_id}, from {interpolated_name}");
         Self {
-            identity: PhysicalDiskIdentity::new(Uuid::new_v4()),
+            identity: PhysicalDiskIdentity::new(disk_id),
             time_deleted: None,
             rcgen: Generation::new(),
             vendor,

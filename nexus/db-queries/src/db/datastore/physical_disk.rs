@@ -34,7 +34,7 @@ use uuid::Uuid;
 impl DataStore {
     /// - Sled Agents like to look up physical disks by "Vendor, Serial, Model"
     /// - The external API likes to look up physical disks by UUID
-    /// - LookuPath objects are opinionated about how they perform lookups. They
+    /// - LookupPath objects are opinionated about how they perform lookups. They
     /// support "primary keys" or "names", but they're opinionated about the
     /// name objects being a single string.
     ///

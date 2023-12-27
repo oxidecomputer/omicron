@@ -370,15 +370,15 @@ impl<'a> LookupPath<'a> {
     /// Select a resource of type PhysicalDisk, identified by its id
     pub fn physical_disk(
         self,
-        vendor: &str,
-        serial: &str,
-        model: &str,
+        vendor: String,
+        serial: String,
+        model: String,
     ) -> PhysicalDisk<'a> {
         PhysicalDisk::PrimaryKey(
             Root { lookup_root: self },
-            vendor.to_string(),
-            serial.to_string(),
-            model.to_string(),
+            vendor,
+            serial,
+            model,
         )
     }
 

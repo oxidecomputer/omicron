@@ -4869,7 +4869,7 @@ async fn physical_disk_list(
 /// Get a physical disk
 #[endpoint {
     method = GET,
-    path = "/v1/system/hardware/disks/{id}",
+    path = "/v1/system/hardware/disks/{disk_id}",
     tags = ["system/hardware"],
 }]
 async fn physical_disk_view(
@@ -4892,7 +4892,7 @@ async fn physical_disk_view(
 /// Update a physical disk's state
 #[endpoint {
     method = PUT,
-    path = "/v1/system/hardware/disks/{id}",
+    path = "/v1/system/hardware/disks/{disk_id}",
     tags = ["system/hardware"],
 }]
 async fn physical_disk_update(

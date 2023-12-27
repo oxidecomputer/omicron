@@ -70,16 +70,7 @@ id_path_param!(GroupPath, group_id, "group");
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
-
-pub struct SledSelector {
-    /// ID of the sled
-    pub sled: Uuid,
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskPath {
-    pub id: Uuid,
-}
+id_path_param!(PhysicalDiskPath, disk_id, "physical_disk");
 
 /// Updateable properties of a `PhysicalDisk`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
