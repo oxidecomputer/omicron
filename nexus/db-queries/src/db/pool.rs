@@ -151,10 +151,8 @@ impl CustomizeConnection<Connection<DbConnection>, ConnectionError>
         // TODO: Should be stored in a struct, to not be a static variable...
         static OIDS: OnceCell<Vec<InnerPgTypeMetadata>> = OnceCell::const_new();
         let oids = if let Some(oids) = OIDS.get() {
-            println!("OIDS already set!");
             oids
         } else {
-            println!("OIDS not set, querying!");
             let oids: Vec<InnerPgTypeMetadata> =
                 pg_type::table.select((pg_type::oid, pg_type::typarray))
                     .inner_join(pg_namespace::table)
@@ -162,7 +160,6 @@ impl CustomizeConnection<Connection<DbConnection>, ConnectionError>
                     .filter(pg_namespace::nspname.eq(SCHEMA))
                     .load_async(&*conn)
                     .await?;
-            println!("Oids: {:?}", oids);
             let _ = OIDS.set(oids);
             OIDS.get().unwrap()
         };
