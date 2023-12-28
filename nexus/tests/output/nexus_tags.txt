@@ -117,7 +117,6 @@ snapshot_view                            GET      /v1/snapshots/{snapshot}
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
-add_sled_to_initialized_rack             POST     /v1/system/hardware/sleds
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
@@ -126,6 +125,7 @@ physical_disk_update                     PUT      /v1/system/hardware/disks/{dis
 physical_disk_view                       GET      /v1/system/hardware/disks/{disk_id}
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
+sled_add                                 POST     /v1/system/hardware/sleds
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
 sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized

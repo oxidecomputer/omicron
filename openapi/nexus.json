@@ -3851,12 +3851,12 @@
           "system/hardware"
         ],
         "summary": "Add a sled to an initialized rack",
-        "operationId": "add_sled_to_initialized_rack",
+        "operationId": "sled_add",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UninitializedSled"
+                "$ref": "#/components/schemas/UninitializedSledId"
               }
             }
           },
@@ -15034,6 +15034,22 @@
           "baseboard",
           "cubby",
           "rack_id"
+        ]
+      },
+      "UninitializedSledId": {
+        "description": "The unique hardware ID for a sled",
+        "type": "object",
+        "properties": {
+          "part": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "part",
+          "serial"
         ]
       },
       "UninitializedSledResultsPage": {
