@@ -14,25 +14,14 @@ use crate::external_api::params;
 use nexus_db_model::{ExternalIp, IpAttachState, IpKind};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
-use omicron_common::api::external::{Error, InstanceState};
+use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
 use uuid::Uuid;
 
-// rough sequence of evts:
-// - take temp ownership of instance while interacting w/ sled agent
-//  -> mark instance migration id as Some(0) if None
-// - Withdraw routes
-//  -> ensure_dpd... (?) Do we actually need to?
-//  -> must precede OPTE: host may change its sending
-//     behaviour prematurely
-// - Deregister addr in OPTE
-//  -> Put addr in sled-agent endpoint
-// - Detach and Delete EIP iff. Ephemeral
-//   -> why so late? Risk that we can't recover our IP in an unwind.
-// - free up migration_id of instance.
-//  -> mark instance migration id as None
+// This runs on similar logic to instance IP attach: see its head
+// comment for an explanation of the structure wrt. other sagas.
 
 declare_saga_actions! {
     instance_ip_detach;
@@ -177,13 +166,17 @@ async fn siid_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
 async fn siid_nat_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    instance_ip_add_nat(
+    if let Err(e) = instance_ip_add_nat(
         &sagactx,
         &params.serialized_authn,
         &params.authz_instance,
     )
-    .await?;
+    .await
+    {
+        error!(log, "siid_nat_undo: failed to notify DPD: {e}");
+    }
 
     Ok(())
 }
@@ -198,8 +191,12 @@ async fn siid_update_opte(
 async fn siid_update_opte_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    instance_ip_add_opte(&sagactx, &params.authz_instance).await?;
+    if let Err(e) = instance_ip_add_opte(&sagactx, &params.authz_instance).await
+    {
+        error!(log, "siid_update_opte_undo: failed to notify sled-agent: {e}");
+    }
     Ok(())
 }
 
@@ -220,7 +217,7 @@ async fn siid_complete_detach(
     {
         warn!(
             log,
-            "siia_complete_attach: external IP was deleted or call was idempotent"
+            "siid_complete_attach: external IP was deleted or call was idempotent"
         )
     }
 
@@ -263,7 +260,7 @@ pub(crate) mod test {
         },
         Nexus,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
@@ -342,11 +339,12 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let apictx = &cptestctx.server.apictx();
         let nexus = &apictx.nexus;
+        let sled_agent = &cptestctx.sled_agent.sled_agent;
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
         let _ = ip_manip_test_setup(&client).await;
-        let _instance =
+        let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
         attach_instance_ips(nexus, &opctx).await;
@@ -358,6 +356,21 @@ pub(crate) mod test {
             let saga = nexus.create_runnable_saga(dag).await.unwrap();
             nexus.run_saga(saga).await.expect("Detach saga should succeed");
         }
+
+        let instance_id = instance.id();
+
+        // Sled agent has removed its records of the external IPs.
+        let mut eips = sled_agent.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+        assert!(my_eips.is_empty());
+
+        // DB only has record for SNAT.
+        let db_eips = datastore
+            .instance_lookup_external_ips(&opctx, instance_id)
+            .await
+            .unwrap();
+        assert_eq!(db_eips.len(), 1);
+        assert!(db_eips.iter().any(|v| v.kind == IpKind::SNat));
     }
 
     pub(crate) async fn verify_clean_slate(
@@ -401,9 +414,9 @@ pub(crate) mod test {
             .await
             .unwrap();
         assert_eq!(db_eips.len(), 3);
-        assert!(db_eips.iter().find(|v| v.kind == IpKind::Ephemeral).is_some());
-        assert!(db_eips.iter().find(|v| v.kind == IpKind::Floating).is_some());
-        assert!(db_eips.iter().find(|v| v.kind == IpKind::SNat).is_some());
+        assert!(db_eips.iter().any(|v| v.kind == IpKind::Ephemeral));
+        assert!(db_eips.iter().any(|v| v.kind == IpKind::Floating));
+        assert!(db_eips.iter().any(|v| v.kind == IpKind::SNat));
 
         // No IP bindings remain on sled-agent.
         let eips = &*sled_agent.external_ips.lock().await;
@@ -423,7 +436,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(&client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -451,7 +464,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(&client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -476,14 +489,13 @@ pub(crate) mod test {
     async fn test_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
         let apictx = &cptestctx.server.apictx();
         let nexus = &apictx.nexus;
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(&client).await;
         let _instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 

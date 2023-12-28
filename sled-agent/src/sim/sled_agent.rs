@@ -640,17 +640,13 @@ impl SledAgent {
         // High-level behaviour: this should always succeed UNLESS
         // trying to add a double ephemeral.
         if let InstanceExternalIpBody::Ephemeral(curr_ip) = &body_args {
-            if my_eips
-                .iter()
-                .find(|v| {
-                    if let InstanceExternalIpBody::Ephemeral(other_ip) = v {
-                        curr_ip != other_ip
-                    } else {
-                        false
-                    }
-                })
-                .is_some()
-            {
+            if my_eips.iter().any(|v| {
+                if let InstanceExternalIpBody::Ephemeral(other_ip) = v {
+                    curr_ip != other_ip
+                } else {
+                    false
+                }
+            }) {
                 return Err(Error::invalid_request("cannot replace exisitng ephemeral IP without explicit removal"));
             }
         }

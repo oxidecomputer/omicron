@@ -34,6 +34,13 @@ use uuid::Uuid;
 // sled-agent as temporary errors and unwinding. For the delete case, we
 // allow the attach/detach completion to have a missing record.
 // See `instance_common::instance_ip_get_instance_state` for more info.
+//
+// One more consequence of sled state being able to change beneath us
+// is that the central undo actions (DPD/OPTE state) *must* be best-effort.
+// This is not bad per-se: instance stop does not itself remove NAT routing
+// rules. The only reason these should fail is because an instance has stopped,
+// at which point there's no good in e.g. adding another entry to a non-existent
+// sled-agent regardless.
 
 declare_saga_actions! {
     instance_ip_attach;
@@ -70,9 +77,6 @@ pub struct Params {
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
 }
-
-// TODO: factor this out for attach, detach, and instance create
-//       to share an impl.
 
 async fn siia_begin_attach_ip(
     sagactx: NexusActionContext,
@@ -169,13 +173,17 @@ async fn siia_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
 async fn siia_nat_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    instance_ip_remove_nat(
+    if let Err(e) = instance_ip_remove_nat(
         &sagactx,
         &params.serialized_authn,
         &params.authz_instance,
     )
-    .await?;
+    .await
+    {
+        error!(log, "siia_nat_undo: failed to notify DPD: {e}");
+    }
 
     Ok(())
 }
@@ -190,8 +198,13 @@ async fn siia_update_opte(
 async fn siia_update_opte_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    instance_ip_remove_opte(&sagactx, &params.authz_instance).await?;
+    if let Err(e) =
+        instance_ip_remove_opte(&sagactx, &params.authz_instance).await
+    {
+        error!(log, "siia_update_opte_undo: failed to notify sled-agent: {e}");
+    }
     Ok(())
 }
 
@@ -219,8 +232,6 @@ async fn siia_complete_attach(
     target_ip.try_into().map_err(ActionError::action_failed)
 }
 
-// TODO: backout changes if run state changed illegally?
-
 #[derive(Debug)]
 pub struct SagaInstanceIpAttach;
 impl NexusSaga for SagaInstanceIpAttach {
@@ -247,11 +258,8 @@ impl NexusSaga for SagaInstanceIpAttach {
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::app::{
-        saga::create_saga_dag,
-        sagas::test_helpers::{self, instance_simulate},
-    };
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use crate::app::{saga::create_saga_dag, sagas::test_helpers};
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
@@ -259,15 +267,10 @@ pub(crate) mod test {
     use nexus_db_model::{IpKind, Name};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::{
-        create_disk, create_floating_ip, create_instance, create_project,
-        object_create, populate_ip_pool,
+        create_floating_ip, create_instance, create_project, populate_ip_pool,
     };
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::external_api::params::ExternalIpCreate;
-    use omicron_common::api::external::{
-        ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
-        SimpleIdentity,
-    };
+    use omicron_common::api::external::SimpleIdentity;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -327,11 +330,12 @@ pub(crate) mod test {
         let client = &cptestctx.external_client;
         let apictx = &cptestctx.server.apictx();
         let nexus = &apictx.nexus;
+        let sled_agent = &cptestctx.sled_agent.sled_agent;
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let project_id = ip_manip_test_setup(&client).await;
-        let _instance =
+        let _project_id = ip_manip_test_setup(&client).await;
+        let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
         for use_float in [false, true] {
@@ -340,9 +344,31 @@ pub(crate) mod test {
             let dag = create_saga_dag::<SagaInstanceIpAttach>(params).unwrap();
             let saga = nexus.create_runnable_saga(dag).await.unwrap();
             nexus.run_saga(saga).await.expect("Attach saga should succeed");
-
-            // TODO: assert sled agent, dpd happy, ...
         }
+
+        let instance_id = instance.id();
+
+        // Sled agent has a record of the new external IPs.
+        let mut eips = sled_agent.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+        assert!(my_eips.iter().any(|v| matches!(
+            v,
+            omicron_sled_agent::params::InstanceExternalIpBody::Floating(_)
+        )));
+        assert!(my_eips.iter().any(|v| matches!(
+            v,
+            omicron_sled_agent::params::InstanceExternalIpBody::Ephemeral(_)
+        )));
+
+        // DB has records for SNAT plus the new IPs.
+        let db_eips = datastore
+            .instance_lookup_external_ips(&opctx, instance_id)
+            .await
+            .unwrap();
+        assert_eq!(db_eips.len(), 3);
+        assert!(db_eips.iter().any(|v| v.kind == IpKind::Ephemeral));
+        assert!(db_eips.iter().any(|v| v.kind == IpKind::Floating));
+        assert!(db_eips.iter().any(|v| v.kind == IpKind::SNat));
     }
 
     pub(crate) async fn verify_clean_slate(
@@ -381,10 +407,9 @@ pub(crate) mod test {
             .is_none());
 
         // No IP bindings remain on sled-agent.
-        let eips = &*sled_agent.external_ips.lock().await;
-        for (_nic_id, eip_set) in eips {
-            assert!(eip_set.is_empty());
-        }
+        let mut eips = sled_agent.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+        assert!(my_eips.is_empty());
     }
 
     #[nexus_test(server = crate::Server)]
@@ -398,7 +423,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(&client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -424,7 +449,7 @@ pub(crate) mod test {
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(&client).await;
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
@@ -447,14 +472,13 @@ pub(crate) mod test {
     async fn test_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let log = &cptestctx.logctx.log;
         let client = &cptestctx.external_client;
         let apictx = &cptestctx.server.apictx();
         let nexus = &apictx.nexus;
 
         let opctx = test_helpers::test_opctx(cptestctx);
         let datastore = &nexus.db_datastore;
-        let project_id = ip_manip_test_setup(&client).await;
+        let _project_id = ip_manip_test_setup(&client).await;
         let _instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
