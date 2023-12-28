@@ -313,6 +313,10 @@ lazy_static! {
         format!("/v1/network-interfaces?project={}&instance={}", *DEMO_PROJECT_NAME, *DEMO_INSTANCE_NAME);
     pub static ref DEMO_INSTANCE_EXTERNAL_IPS_URL: String =
         format!("/v1/instances/{}/external-ips?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
+    pub static ref DEMO_INSTANCE_EXTERNAL_IP_ATTACH_URL: String =
+        format!("/v1/instances/{}/external-ips/attach?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
+    pub static ref DEMO_INSTANCE_EXTERNAL_IP_DETACH_URL: String =
+        format!("/v1/instances/{}/external-ips/detach?{}", *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR);
     pub static ref DEMO_INSTANCE_CREATE: params::InstanceCreate =
         params::InstanceCreate {
             identity: IdentityMetadataCreateParams {
@@ -592,6 +596,10 @@ lazy_static! {
             address: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
             pool: None,
         };
+    pub static ref DEMO_FLOAT_IP_ATTACH: params::ExternalIpCreate =
+        params::ExternalIpCreate::Floating { floating_ip_name: DEMO_FLOAT_IP_NAME.clone() };
+    pub static ref DEMO_FLOAT_IP_DETACH: params::ExternalIpDelete =
+        params::ExternalIpDelete::Floating { floating_ip_name: DEMO_FLOAT_IP_NAME.clone() };
 }
 
 lazy_static! {
@@ -1591,6 +1599,24 @@ lazy_static! {
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INSTANCE_EXTERNAL_IP_ATTACH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::to_value(&*DEMO_FLOAT_IP_ATTACH).unwrap()
+            )],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INSTANCE_EXTERNAL_IP_DETACH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Post(
+                serde_json::to_value(&*DEMO_FLOAT_IP_DETACH).unwrap()
+            )],
         },
 
         /* IAM */
