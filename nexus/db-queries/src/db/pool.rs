@@ -25,6 +25,8 @@
 // TODO-design Need TLS support (the types below hardcode NoTls).
 
 use super::Config as DbConfig;
+use async_bb8_diesel::AsyncConnection;
+use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use async_bb8_diesel::Connection;
 use async_bb8_diesel::ConnectionError;
@@ -32,7 +34,11 @@ use async_bb8_diesel::ConnectionManager;
 use async_trait::async_trait;
 use bb8::CustomizeConnection;
 use diesel::PgConnection;
+use diesel::prelude::*;
+use diesel::pg::GetPgMetadataCache;
+use diesel::pg::PgMetadataCacheKey;
 use diesel_dtrace::DTraceConnection;
+use tokio::sync::OnceCell;
 
 pub type DbConnection = DTraceConnection<PgConnection>;
 
@@ -101,11 +107,115 @@ impl CustomizeConnection<Connection<DbConnection>, ConnectionError>
         &self,
         conn: &mut Connection<DbConnection>,
     ) -> Result<(), ConnectionError> {
+        let keys = vec![
+            "sled_provision_state",
+            "sled_resource_kind",
+            "service_kind",
+            "physical_disk_kind",
+            "dataset_kind",
+            "authentication_mode",
+            "user_provision_type",
+            "provider_type",
+            "instance_state",
+            "block_size",
+            "snapshot_state",
+            "producer_kind",
+            "network_interface_kind",
+            "vpc_firewall_rule_status",
+            "vpc_firewall_rule_direction",
+            "vpc_firewall_rule_action",
+            "vpc_firewall_rule_protocol",
+            "vpc_router_kind",
+            "router_route_kind",
+            "ip_kind",
+            "saga_state",
+            "update_artifact_kind",
+            "updateable_component_type",
+            "update_status",
+            "dns_group",
+            "identity_type",
+            "address_lot_kind",
+            "switch_port_geometry",
+            "switch_interface_kind",
+            "hw_power_state",
+            "hw_rot_slot",
+            "sp_type",
+            "caboose_which",
+            "root_of_trust_page_which",
+            "switch_link_fec",
+            "switch_link_speed",
+        ];
+
+        const SCHEMA: &'static str = "public";
+
+        // TODO: Should be stored in a struct, to not be a static variable...
+        static OIDS: OnceCell<Vec<InnerPgTypeMetadata>> = OnceCell::const_new();
+        let oids = if let Some(oids) = OIDS.get() {
+            println!("OIDS already set!");
+            oids
+        } else {
+            println!("OIDS not set, querying!");
+            let oids: Vec<InnerPgTypeMetadata> =
+                pg_type::table.select((pg_type::oid, pg_type::typarray))
+                    .inner_join(pg_namespace::table)
+                    .filter(pg_type::typname.eq_any(keys.clone()))
+                    .filter(pg_namespace::nspname.eq(SCHEMA))
+                    .load_async(&*conn)
+                    .await?;
+            println!("Oids: {:?}", oids);
+            let _ = OIDS.set(oids);
+            OIDS.get().unwrap()
+        };
+
+
+        // TODO: Don't love that this is blocking? But I'm trying to access the
+        // inner type here...
+        //
+        // TODO: Could I communicate through async-bb8-diesel that this is for
+        // PG?
+        {
+            let mut sync_conn = conn.as_sync_conn();
+            let cache = sync_conn.get_metadata_cache();
+            let cache_key_for = |name: &'static str| {
+                PgMetadataCacheKey::new(Some(SCHEMA.into()), name.into())
+            };
+
+            for (key, InnerPgTypeMetadata { oid, array_oid }) in keys.into_iter().zip(oids.into_iter()) {
+                cache.store_type(cache_key_for(key), (*oid, *array_oid));
+            }
+        }
+
         conn.batch_execute_async(DISALLOW_FULL_TABLE_SCAN_SQL)
             .await
             .map_err(|e| e.into())
     }
 }
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Queryable)]
+pub struct InnerPgTypeMetadata {
+    oid: u32,
+    array_oid: u32,
+}
+
+table! {
+    pg_type (oid) {
+        oid -> Oid,
+        typname -> Text,
+        typarray -> Oid,
+        typnamespace -> Oid,
+    }
+}
+
+
+table! {
+    pg_namespace (oid) {
+        oid -> Oid,
+        nspname -> Text,
+    }
+}
+
+joinable!(pg_type -> pg_namespace(typnamespace));
+allow_tables_to_appear_in_same_query!(pg_type, pg_namespace);
 
 #[derive(Clone, Debug)]
 struct LoggingErrorSink {

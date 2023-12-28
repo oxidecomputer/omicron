@@ -556,4 +556,7 @@ async fn test_ping(cptestctx: &ControlPlaneTestContext) {
         .execute_and_parse_unwrap::<views::Ping>()
         .await;
     assert_eq!(health.status, views::PingStatus::Ok);
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
 }
