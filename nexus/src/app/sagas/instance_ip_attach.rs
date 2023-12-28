@@ -28,8 +28,8 @@ use uuid::Uuid;
 // The main means of access control here is an external IP's `state`.
 // Entering either saga begins with an atomic swap from Attached/Detached
 // to Attaching/Detaching. This prevents concurrent attach/detach on the
-// same EIP, and prevents instance start from executing with an
-// Error::unavail.
+// same EIP, and prevents instance start and migrate from completing with an
+// Error::unavail via instance_ensure_registered and/or DPD.
 //
 // Overlap with stop is handled by treating comms failures with
 // sled-agent as temporary errors and unwinding. For the delete case, we

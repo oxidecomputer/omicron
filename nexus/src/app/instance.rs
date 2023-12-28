@@ -17,6 +17,7 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -1051,6 +1052,15 @@ impl super::Nexus {
                     external_ips.len(),
                 )
                 .as_str(),
+            ));
+        }
+
+        // If there are any external IPs not yet fully attached/detached,then
+        // there are attach/detach sagas in progress. That should complete in
+        // its own time, so return a 503 to indicate a possible retry.
+        if external_ips.iter().any(|v| v.state != IpAttachState::Attached) {
+            return Err(Error::unavail(
+                "External IP attach/detach is in progress during instance_ensure_registered"
             ));
         }
 

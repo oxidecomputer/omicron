@@ -628,6 +628,7 @@ impl DataStore {
     }
 
     /// Fetch all external IP addresses of any kind for the provided instance
+    /// in all attachment states.
     pub async fn instance_lookup_external_ips(
         &self,
         opctx: &OpContext,

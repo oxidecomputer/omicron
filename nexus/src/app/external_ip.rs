@@ -6,6 +6,7 @@
 
 use crate::external_api::views::ExternalIp;
 use crate::external_api::views::FloatingIp;
+use nexus_db_model::IpAttachState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
@@ -34,7 +35,9 @@ impl super::Nexus {
             .await?
             .into_iter()
             .filter_map(|ip| {
-                if ip.kind == IpKind::SNat {
+                if ip.kind == IpKind::SNat
+                    || ip.state != IpAttachState::Attached
+                {
                     None
                 } else {
                     Some(ip.try_into().unwrap())
