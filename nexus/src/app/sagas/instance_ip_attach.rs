@@ -5,15 +5,16 @@
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
     instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
-    InstanceStateForIp,
+    InstanceStateForIp, ModifyStateForExternalIp,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use nexus_db_model::{ExternalIp, IpAttachState};
+use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
+use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -80,7 +81,7 @@ pub struct Params {
 
 async fn siia_begin_attach_ip(
     sagactx: NexusActionContext,
-) -> Result<ExternalIp, ActionError> {
+) -> Result<ModifyStateForExternalIp, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
@@ -100,9 +101,14 @@ async fn siia_begin_attach_ip(
                     Uuid::new_v4(),
                     params.authz_instance.id(),
                     pool_name,
+                    false,
                 )
                 .await
                 .map_err(ActionError::action_failed)
+                .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
+                    external_ip: Some(external_ip),
+                    do_saga,
+                })
         }
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpCreate::Floating { ref floating_ip_name } => {
@@ -123,6 +129,10 @@ async fn siia_begin_attach_ip(
                 )
                 .await
                 .map_err(ActionError::action_failed)
+                .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
+                    external_ip: Some(external_ip),
+                    do_saga,
+                })
         }
     }
 }
@@ -213,7 +223,7 @@ async fn siia_complete_attach(
 ) -> Result<views::ExternalIp, ActionError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    let target_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
 
     if !instance_ip_move_state(
         &sagactx,
@@ -229,7 +239,15 @@ async fn siia_complete_attach(
         )
     }
 
-    target_ip.try_into().map_err(ActionError::action_failed)
+    target_ip
+        .external_ip
+        .ok_or_else(|| {
+            Error::internal_error(
+                "must always have a defined external IP during instance attach",
+            )
+        })
+        .and_then(TryInto::try_into)
+        .map_err(ActionError::action_failed)
 }
 
 #[derive(Debug)]
@@ -264,7 +282,7 @@ pub(crate) mod test {
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_model::{IpKind, Name};
+    use nexus_db_model::{ExternalIp, IpKind, Name};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::{
         create_floating_ip, create_instance, create_project, populate_ip_pool,

@@ -1733,11 +1733,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     ),
 
     /*
-     * Only nullable if this is a floating IP, which may exist not
-     * attached to any instance or service yet.
+     * Only nullable if this is a floating/ephemeral IP, which may exist not
+     * attached to any instance or service yet. Ephemeral IPs should not exist
+     * without parent instances/services, but need to temporarily exist in this
+     * state for live attachment.
      */
-    CONSTRAINT null_non_fip_parent_id CHECK (
-        (kind != 'floating' AND parent_id is NOT NULL) OR (kind = 'floating')
+    CONSTRAINT null_snat_parent_id CHECK (
+        (kind != 'snat') OR (parent_id IS NOT NULL)
     ),
 
     /* Ephemeral IPs are not supported for services. */

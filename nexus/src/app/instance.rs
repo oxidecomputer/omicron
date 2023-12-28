@@ -1942,7 +1942,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         ext_ip: &params::ExternalIpDelete,
-    ) -> UpdateResult<views::ExternalIp> {
+    ) -> UpdateResult<Option<views::ExternalIp>> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -1960,7 +1960,7 @@ impl super::Nexus {
             .await?;
 
         saga_outputs
-            .lookup_node_output::<views::ExternalIp>("output")
+            .lookup_node_output::<Option<views::ExternalIp>>("output")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
             .internal_context("looking up output from ip attach saga")
     }

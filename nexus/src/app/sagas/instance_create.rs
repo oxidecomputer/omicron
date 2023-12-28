@@ -634,9 +634,11 @@ async fn sic_allocate_instance_external_ip(
                     ip_id,
                     instance_id,
                     pool_name,
+                    true,
                 )
                 .await
                 .map_err(ActionError::action_failed)?
+                .0
         }
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpCreate::Floating { ref floating_ip_name } => {
@@ -652,6 +654,7 @@ async fn sic_allocate_instance_external_ip(
                 .floating_ip_begin_attach(&opctx, &authz_fip, instance_id, true)
                 .await
                 .map_err(ActionError::action_failed)?
+                .0
         }
     };
 

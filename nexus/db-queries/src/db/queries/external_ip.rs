@@ -1065,9 +1065,11 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
+                true,
             )
             .await
-            .expect("Failed to allocate Ephemeral IP when there is space");
+            .expect("Failed to allocate Ephemeral IP when there is space")
+            .0;
         assert_eq!(ephemeral_ip.ip.ip(), range.last_address());
         assert_eq!(ephemeral_ip.first_port.0, 0);
         assert_eq!(ephemeral_ip.last_port.0, super::MAX_PORT);
@@ -1105,6 +1107,7 @@ mod tests {
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
+                true,
             )
             .await;
         assert!(
@@ -1250,9 +1253,11 @@ mod tests {
                 id,
                 instance_id,
                 pool_name,
+                true,
             )
             .await
-            .expect("Failed to allocate instance ephemeral IP address");
+            .expect("Failed to allocate instance ephemeral IP address")
+            .0;
         assert_eq!(ip.kind, IpKind::Ephemeral);
         assert_eq!(ip.ip.ip(), range.first_address());
         assert_eq!(ip.first_port.0, 0);
@@ -1780,9 +1785,11 @@ mod tests {
                 id,
                 instance_id,
                 pool_name,
+                true,
             )
             .await
-            .expect("Failed to allocate instance ephemeral IP address");
+            .expect("Failed to allocate instance ephemeral IP address")
+            .0;
         assert_eq!(ip.kind, IpKind::Ephemeral);
         assert_eq!(ip.ip.ip(), second_range.first_address());
         assert_eq!(ip.first_port.0, 0);
@@ -1823,9 +1830,11 @@ mod tests {
                     Uuid::new_v4(),
                     instance_id,
                     pool_name.clone(),
+                    true,
                 )
                 .await
-                .expect("Failed to allocate instance ephemeral IP address");
+                .expect("Failed to allocate instance ephemeral IP address")
+                .0;
             println!("{ip:#?}");
             if let IpAddr::V4(addr) = ip.ip.ip() {
                 assert_eq!(addr.octets()[3], octet);
@@ -1842,6 +1851,7 @@ mod tests {
                 Uuid::new_v4(),
                 Uuid::new_v4(),
                 pool_name,
+                true,
             )
             .await
             .expect_err("Should not use IP addresses from a different pool");

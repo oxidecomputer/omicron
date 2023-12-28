@@ -151,6 +151,19 @@ pub struct InstanceStateForIp {
     pub state: InstanceState,
 }
 
+/// External IP state needed for IP attach/detachment.
+///
+/// This holds a record of the mid-processing external IP, where possible.
+/// there are cases where this might not be known (e.g., double detach of an
+/// ephemeral IP).
+/// In particular we need to explicitly no-op if not `do_saga`, to prevent
+/// failures borne from instance state changes from knocking out a valid IP binding.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ModifyStateForExternalIp {
+    pub external_ip: Option<ExternalIp>,
+    pub do_saga: bool,
+}
+
 /// Move an external IP from one state to another as a saga operation,
 /// returning `Ok(true)` if the record was successfully moved and `Ok(false)`
 /// if the record was lost.
@@ -168,7 +181,16 @@ pub async fn instance_ip_move_state(
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
-    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
+    let new_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+
+    if !new_ip.do_saga {
+        return Ok(true);
+    }
+    let Some(new_ip) = new_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
 
     match datastore
         .external_ip_complete_op(&opctx, new_ip.id, new_ip.kind, from, to)
@@ -265,7 +287,15 @@ pub async fn instance_ip_add_nat(
         return Ok(());
     };
 
-    let target_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    if !target_ip.do_saga {
+        return Ok(());
+    }
+    let Some(target_ip) = target_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
 
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
@@ -305,7 +335,15 @@ pub async fn instance_ip_remove_nat(
         return Ok(());
     };
 
-    let target_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    if !target_ip.do_saga {
+        return Ok(());
+    }
+    let Some(target_ip) = target_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
 
     osagactx
         .nexus()
@@ -329,9 +367,18 @@ pub async fn instance_ip_add_opte(
         return Ok(());
     };
 
-    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    if !target_ip.do_saga {
+        return Ok(());
+    }
+    let Some(target_ip) = target_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
+
     let sled_agent_body =
-        new_ip.try_into().map_err(ActionError::action_failed)?;
+        target_ip.try_into().map_err(ActionError::action_failed)?;
 
     osagactx
         .nexus()
@@ -369,9 +416,18 @@ pub async fn instance_ip_remove_opte(
         return Ok(());
     };
 
-    let new_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    if !target_ip.do_saga {
+        return Ok(());
+    }
+    let Some(target_ip) = target_ip.external_ip else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "tried to `do_saga` without valid external IP",
+        )));
+    };
+
     let sled_agent_body =
-        new_ip.try_into().map_err(ActionError::action_failed)?;
+        target_ip.try_into().map_err(ActionError::action_failed)?;
 
     osagactx
         .nexus()

@@ -342,18 +342,19 @@ impl super::Nexus {
             .instance_lookup_external_ips(&opctx, instance_id)
             .await?;
 
-        let (ips_of_interest, must_all_be_attached) =
-            if let Some(wanted_id) = ip_filter {
-                if let Some(ip) = ips.iter().find(|v| v.id == wanted_id) {
-                    (std::slice::from_ref(ip), false)
-                } else {
-                    return Err(Error::internal_error(&format!(
-                    "failed to find external ip address with id: {wanted_id}",
-                )));
-                }
+        let (ips_of_interest, must_all_be_attached) = if let Some(wanted_id) =
+            ip_filter
+        {
+            if let Some(ip) = ips.iter().find(|v| v.id == wanted_id) {
+                (std::slice::from_ref(ip), false)
             } else {
-                (&ips[..], true)
-            };
+                return Err(Error::internal_error(&format!(
+                    "failed to find external ip address with id: {wanted_id}, saw {ips:?}",
+                )));
+            }
+        } else {
+            (&ips[..], true)
+        };
 
         // This is performed so that an IP attach/detach will block the
         // instance_start saga. Return service unavailable to indicate
@@ -482,7 +483,7 @@ impl super::Nexus {
                 std::slice::from_ref(ip)
             } else {
                 return Err(Error::internal_error(&format!(
-                    "failed to find external ip address with id: {wanted_id}",
+                    "failed to find external ip address with id: {wanted_id}, saw {external_ips:?}",
                 )));
             }
         } else {

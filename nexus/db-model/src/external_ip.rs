@@ -183,7 +183,7 @@ impl IncompleteExternalIp {
         }
     }
 
-    pub fn for_ephemeral(id: Uuid, instance_id: Uuid, pool_id: Uuid) -> Self {
+    pub fn for_ephemeral(id: Uuid, pool_id: Uuid) -> Self {
         let kind = IpKind::Ephemeral;
         Self {
             id,
@@ -192,7 +192,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind,
             is_service: false,
-            parent_id: Some(instance_id),
+            parent_id: None,
             pool_id,
             project_id: None,
             explicit_ip: None,
@@ -402,7 +402,7 @@ impl IpKind {
     pub fn initial_state(&self) -> IpAttachState {
         match &self {
             IpKind::SNat => IpAttachState::Attached,
-            IpKind::Ephemeral => IpAttachState::Attaching,
+            IpKind::Ephemeral => IpAttachState::Detached,
             IpKind::Floating => IpAttachState::Detached,
         }
     }

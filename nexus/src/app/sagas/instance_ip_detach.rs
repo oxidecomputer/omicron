@@ -5,16 +5,15 @@
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
     instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
-    InstanceStateForIp,
+    InstanceStateForIp, ModifyStateForExternalIp,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use nexus_db_model::{ExternalIp, IpAttachState, IpKind};
+use nexus_db_model::{IpAttachState, IpKind};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
-use omicron_common::api::external::Error;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -61,7 +60,7 @@ pub struct Params {
 
 async fn siid_begin_detach_ip(
     sagactx: NexusActionContext,
-) -> Result<ExternalIp, ActionError> {
+) -> Result<ModifyStateForExternalIp, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let params = sagactx.saga_params::<Params>()?;
@@ -80,23 +79,28 @@ async fn siid_begin_detach_ip(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            let eph_ip = eips
-                .iter()
-                .find(|e| e.kind == IpKind::Ephemeral)
-                .ok_or_else(|| {
-                    ActionError::action_failed(Error::invalid_request(
-                    "instance does not have an attached ephemeral IP address"
-                ))
-                })?;
-
-            datastore
-                .begin_deallocate_ephemeral_ip(
-                    &opctx,
-                    eph_ip.id,
-                    params.authz_instance.id(),
-                )
-                .await
-                .map_err(ActionError::action_failed)
+            // XXX: cleanup.
+            if let Some(eph_ip) =
+                eips.iter().find(|e| e.kind == IpKind::Ephemeral)
+            {
+                datastore
+                    .begin_deallocate_ephemeral_ip(
+                        &opctx,
+                        eph_ip.id,
+                        params.authz_instance.id(),
+                    )
+                    .await
+                    .map_err(ActionError::action_failed)
+                    .map(|external_ip| ModifyStateForExternalIp {
+                        do_saga: external_ip.is_some(),
+                        external_ip,
+                    })
+            } else {
+                Ok(ModifyStateForExternalIp {
+                    do_saga: false,
+                    external_ip: None,
+                })
+            }
         }
         params::ExternalIpDelete::Floating { ref floating_ip_name } => {
             let floating_ip_name = db::model::Name(floating_ip_name.clone());
@@ -116,6 +120,10 @@ async fn siid_begin_detach_ip(
                 )
                 .await
                 .map_err(ActionError::action_failed)
+                .map(|(external_ip, do_saga)| ModifyStateForExternalIp {
+                    external_ip: Some(external_ip),
+                    do_saga,
+                })
         }
     }
 }
@@ -202,10 +210,10 @@ async fn siid_update_opte_undo(
 
 async fn siid_complete_detach(
     sagactx: NexusActionContext,
-) -> Result<views::ExternalIp, ActionError> {
+) -> Result<Option<views::ExternalIp>, ActionError> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    let target_ip = sagactx.lookup::<ExternalIp>("target_ip")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
 
     if !instance_ip_move_state(
         &sagactx,
@@ -217,11 +225,15 @@ async fn siid_complete_detach(
     {
         warn!(
             log,
-            "siid_complete_attach: external IP was deleted or call was idempotent"
+            "siid_complete_detach: external IP was deleted or call was idempotent"
         )
     }
 
-    target_ip.try_into().map_err(ActionError::action_failed)
+    target_ip
+        .external_ip
+        .map(TryInto::try_into)
+        .transpose()
+        .map_err(ActionError::action_failed)
 }
 
 #[derive(Debug)]
@@ -264,7 +276,7 @@ pub(crate) mod test {
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
-    use nexus_db_model::Name;
+    use nexus_db_model::{ExternalIp, Name};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils_macros::nexus_test;
