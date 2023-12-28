@@ -871,7 +871,11 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
+    use nexus_db_model::ByteCount;
+    use nexus_db_model::Instance;
+    use nexus_db_model::InstanceCpuCount;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params::InstanceCreate;
     use nexus_types::external_api::shared::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
     use omicron_common::api::external::Error;
@@ -973,6 +977,37 @@ mod tests {
             .expect("Failed to create IP Pool range");
         }
 
+        async fn create_instance(&self, name: &str) -> Uuid {
+            let instance_id = Uuid::new_v4();
+            let project_id = Uuid::new_v4();
+            let instance = Instance::new(instance_id, project_id, &InstanceCreate {
+                identity: IdentityMetadataCreateParams { name: String::from(name).parse().unwrap(), description: format!("instance {}", name) },
+                ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
+                memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
+                hostname: "test".into(),
+                user_data: vec![],
+                network_interfaces: Default::default(),
+                external_ips: vec![],
+                disks: vec![],
+                start: false,
+            });
+
+            let conn = self
+                .db_datastore
+                .pool_connection_authorized(&self.opctx)
+                .await
+                .unwrap();
+
+            use crate::db::schema::instance::dsl as instance_dsl;
+            diesel::insert_into(instance_dsl::instance)
+                .values(instance.clone())
+                .execute_async(&*conn)
+                .await
+                .expect("Failed to create Instance");
+
+            instance_id
+        }
+
         async fn default_pool_id(&self) -> Uuid {
             let pool = self
                 .db_datastore
@@ -1057,7 +1092,7 @@ mod tests {
 
         // Allocate an Ephemeral IP, which should take the entire port range of
         // the only address in the pool.
-        let instance_id = Uuid::new_v4();
+        let instance_id = context.create_instance("for-eph").await;
         let ephemeral_ip = context
             .db_datastore
             .allocate_instance_ephemeral_ip(
@@ -1076,7 +1111,7 @@ mod tests {
 
         // At this point, we should be able to allocate neither a new Ephemeral
         // nor any SNAT IPs.
-        let instance_id = Uuid::new_v4();
+        let instance_id = context.create_instance("for-snat").await;
         let res = context
             .db_datastore
             .allocate_instance_snat_ip(
@@ -1242,7 +1277,7 @@ mod tests {
         .unwrap();
         context.initialize_ip_pool("default", range).await;
 
-        let instance_id = Uuid::new_v4();
+        let instance_id = context.create_instance("all-the-ports").await;
         let id = Uuid::new_v4();
         let pool_name = None;
 
@@ -1774,7 +1809,7 @@ mod tests {
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
-        let instance_id = Uuid::new_v4();
+        let instance_id = context.create_instance("test").await;
         let id = Uuid::new_v4();
         let pool_name = Some(Name("p1".parse().unwrap()));
 
@@ -1822,7 +1857,8 @@ mod tests {
         let first_octet = first_address.octets()[3];
         let last_octet = last_address.octets()[3];
         for octet in first_octet..=last_octet {
-            let instance_id = Uuid::new_v4();
+            let instance_id =
+                context.create_instance(&format!("o{octet}")).await;
             let ip = context
                 .db_datastore
                 .allocate_instance_ephemeral_ip(
@@ -1844,12 +1880,13 @@ mod tests {
         }
 
         // Allocating another address should _fail_, and not use the first pool.
+        let instance_id = context.create_instance("final").await;
         context
             .db_datastore
             .allocate_instance_ephemeral_ip(
                 &context.opctx,
                 Uuid::new_v4(),
-                Uuid::new_v4(),
+                instance_id,
                 pool_name,
                 true,
             )

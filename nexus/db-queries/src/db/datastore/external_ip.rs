@@ -176,7 +176,11 @@ impl DataStore {
             AttachError::NoUpdate { attached_count, resource, collection } => {
                 match resource.state {
                     // Idempotent errors: is in progress forsame resource pair -- this is fine.
-                    IpAttachState::Attaching if resource.parent_id == Some(instance_id) => return Ok(Some((collection, resource))),
+                    // Double attach can be hit by, e.g., repeated call during instance create.
+                    IpAttachState::Attaching
+                        | IpAttachState::Attached
+                        if resource.parent_id == Some(instance_id) =>
+                            return Ok(Some((collection, resource))),
                     IpAttachState::Attached => return Err(Error::invalid_request(
                         "floating IP cannot be attached to one \
                          instance while still attached to another"
@@ -225,8 +229,6 @@ impl DataStore {
             }
             // Idempotent cases:
             Ok(Some((_, eip))) if eip.id != temp_ip.id => {
-                // Is this even possible?
-                eprintln!("mismatch?");
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
                 Ok((eip, true))
             }

@@ -1965,9 +1965,10 @@ mod test {
                 .execute_async(&*conn)
                 .await;
             let ip_type = if is_service { "Service" } else { "Instance" };
+            let null_snat_parent = parent_id.is_none() && kind == IpKind::SNat;
             if name.is_none()
                 && description.is_none()
-                && parent_id.is_some()
+                && !null_snat_parent
                 && project_id.is_none()
             {
                 // Name/description must be NULL, instance ID cannot
