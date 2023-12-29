@@ -363,11 +363,11 @@ impl DataStore {
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
-            &*authn::USER_SERVICE_BALANCER,
-            &*authn::USER_INTERNAL_API,
-            &*authn::USER_INTERNAL_READ,
-            &*authn::USER_EXTERNAL_AUTHN,
-            &*authn::USER_SAGA_RECOVERY,
+            &authn::USER_SERVICE_BALANCER,
+            &authn::USER_INTERNAL_API,
+            &authn::USER_INTERNAL_READ,
+            &authn::USER_EXTERNAL_AUTHN,
+            &authn::USER_SAGA_RECOVERY,
         ]
         .iter()
         .map(|u| {

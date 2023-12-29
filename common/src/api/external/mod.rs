@@ -316,7 +316,7 @@ impl JsonSchema for Name {
                         r#"^"#,
                         // Cannot match a UUID
                         r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
-                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]*"#,
+                        r#"^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?"#,
                         r#"$"#,
                     )
                     .to_string(),

@@ -6,7 +6,7 @@
 
 use super::{
     console_api, device_auth, params,
-    params::ProjectSelector,
+    params::{ProjectSelector, UninitializedSledId},
     shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
@@ -230,7 +230,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(switch_list)?;
         api.register(switch_view)?;
         api.register(sled_list_uninitialized)?;
-        api.register(add_sled_to_initialized_rack)?;
+        api.register(sled_add)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -4733,8 +4733,16 @@ async fn rack_view(
 }]
 async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
+    query: Query<PaginationParams<EmptyScanParams, String>>,
 ) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
+    // We don't actually support real pagination
+    let pag_params = query.into_inner();
+    if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
+        return Err(
+            Error::invalid_value(last_seen.clone(), "bad page token").into()
+        );
+    }
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -4755,15 +4763,15 @@ async fn sled_list_uninitialized(
     path = "/v1/system/hardware/sleds/",
     tags = ["system/hardware"]
 }]
-async fn add_sled_to_initialized_rack(
+async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
-    sled: TypedBody<UninitializedSled>,
+    sled: TypedBody<UninitializedSledId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.add_sled_to_initialized_rack(&opctx, sled.into_inner()).await?;
+        nexus.sled_add(&opctx, sled.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
