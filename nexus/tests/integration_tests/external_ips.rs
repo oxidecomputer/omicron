@@ -727,6 +727,88 @@ async fn test_external_ip_attach_detach_fail_if_in_use_by_other(
     );
 }
 
+#[nexus_test]
+async fn test_external_ip_attach_fails_after_maximum(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    populate_ip_pool(&client, "default", None).await;
+    let project = create_project(client, PROJECT_NAME).await;
+
+    // Create 33 floating IPs, and bind the first 32 to an instance.
+    let mut fip_names = vec![];
+    for i in 0..33 {
+        let fip_name = format!("fip-{i}");
+        create_floating_ip(
+            client,
+            &fip_name,
+            project.identity.name.as_str(),
+            None,
+            None,
+        )
+        .await;
+        fip_names.push(fip_name);
+    }
+
+    let fip_name_slice =
+        fip_names.iter().map(String::as_str).collect::<Vec<_>>();
+    let instance_name = INSTANCE_NAMES[0];
+    instance_for_external_ips(
+        client,
+        instance_name,
+        true,
+        false,
+        &fip_name_slice[..32],
+    )
+    .await;
+
+    // Attempt to attach the final FIP should fail.
+    let url = attach_instance_external_ip_url(instance_name, PROJECT_NAME);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::ExternalIpCreate::Floating {
+                floating_ip_name: fip_name_slice
+                    .last()
+                    .unwrap()
+                    .parse()
+                    .unwrap(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "an instance may not have more than 32 external IP addresses"
+            .to_string()
+    );
+
+    // Attempt to attach an ephemeral IP should fail.
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::ExternalIpCreate::Ephemeral {
+                pool_name: None,
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "an instance may not have more than 32 external IP addresses"
+            .to_string()
+    );
+}
+
 pub async fn floating_ip_get(
     client: &ClientTestContext,
     fip_url: &str,
