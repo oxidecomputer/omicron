@@ -25,7 +25,6 @@ use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;
 use std::str::FromStr;
-
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -287,9 +286,11 @@ impl super::Nexus {
     /// - `ip_filter`: An optional filter on the index into the instance's
     ///   external IP array.
     ///   - If this is `Some(id)`, this routine configures DPD state for only the
-    ///     external IP with `id` in the collection returned from CRDB.
+    ///     external IP with `id` in the collection returned from CRDB. This will
+    ///     proceed even when the target IP is 'attaching'.
     ///   - If this is `None`, this routine configures DPD for all external
-    ///     IPs.
+    ///     IPs and *will back out* if any IPs are not yet fully attached to
+    ///     the instance.
     pub(crate) async fn instance_ensure_dpd_config(
         &self,
         opctx: &OpContext,
@@ -359,9 +360,11 @@ impl super::Nexus {
         // This is performed so that an IP attach/detach will block the
         // instance_start saga. Return service unavailable to indicate
         // the request is retryable.
-        if ips_of_interest.iter().any(|ip| {
-            must_all_be_attached && ip.state != IpAttachState::Attached
-        }) {
+        if must_all_be_attached
+            && ips_of_interest
+                .iter()
+                .any(|ip| ip.state != IpAttachState::Attached)
+        {
             return Err(Error::unavail(
                 "cannot push all DPD state: IP attach/detach in progress",
             ));
@@ -445,6 +448,10 @@ impl super::Nexus {
 
     /// Attempts to delete all of the Dendrite NAT configuration for the
     /// instance identified by `authz_instance`.
+    ///
+    /// Unlike `instance_ensure_dpd_config`, this function will disregard the
+    /// attachment states of any external IPs because likely callers (instance
+    /// delete) cannot be piecewise undone.
     ///
     /// # Return value
     ///

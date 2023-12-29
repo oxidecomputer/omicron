@@ -1917,7 +1917,7 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// Attach a disk to an instance.
+    /// Attach an external IP to an instance.
     pub(crate) async fn instance_attach_external_ip(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -1972,7 +1972,7 @@ impl super::Nexus {
         saga_outputs
             .lookup_node_output::<Option<views::ExternalIp>>("output")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
-            .internal_context("looking up output from ip attach saga")
+            .internal_context("looking up output from ip detach saga")
     }
 }
 

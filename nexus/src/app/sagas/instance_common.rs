@@ -144,13 +144,6 @@ pub(super) async fn allocate_sled_ipv6(
         .map_err(ActionError::action_failed)
 }
 
-/// Instance state needed for IP attach/detachment.
-#[derive(Debug, Deserialize, Serialize)]
-pub struct InstanceStateForIp {
-    pub sled_id: Option<Uuid>,
-    pub state: InstanceState,
-}
-
 /// External IP state needed for IP attach/detachment.
 ///
 /// This holds a record of the mid-processing external IP, where possible.
@@ -210,7 +203,7 @@ pub async fn instance_ip_get_instance_state(
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
     verb: &str,
-) -> Result<InstanceStateForIp, ActionError> {
+) -> Result<Option<Uuid>, ActionError> {
     // XXX: we can get instance state (but not sled ID) in same transaction
     //      as attach (but not detach) wth current design. We need to re-query
     //      for sled ID anyhow, so keep consistent between attach/detach.
@@ -240,14 +233,13 @@ pub async fn instance_ip_get_instance_state(
     // - deleting: can only be called from stopped -- we won't push to dpd
     //             or sled-agent, and IP record might be deleted or forcibly
     //             detached. Catch here just in case.
-    let state = match found_state {
+    match found_state {
         InstanceState::Stopped
         | InstanceState::Starting
         | InstanceState::Stopping => {
             sled_id = None;
-            InstanceState::Stopped
         }
-        InstanceState::Running => InstanceState::Running,
+        InstanceState::Running => {}
         state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state.into()) => {
             return Err(ActionError::action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"
@@ -259,15 +251,15 @@ pub async fn instance_ip_get_instance_state(
                 &authz_instance.id(),
             )))
         }
-        // Final cases are rebooting/failed.
+        // Final cases are repairing/failed.
         _ => {
             return Err(ActionError::action_failed(Error::invalid_request(
                 "cannot modify instance IPs, instance is in unhealthy state",
             )))
         }
-    };
+    }
 
-    Ok(InstanceStateForIp { sled_id, state })
+    Ok(sled_id)
 }
 
 pub async fn instance_ip_add_nat(
@@ -281,8 +273,7 @@ pub async fn instance_ip_add_nat(
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
     // No physical sled? Don't push NAT.
-    let Some(sled_uuid) =
-        sagactx.lookup::<InstanceStateForIp>("instance_state")?.sled_id
+    let Some(sled_uuid) = sagactx.lookup::<Option<Uuid>>("instance_state")?
     else {
         return Ok(());
     };
@@ -329,9 +320,7 @@ pub async fn instance_ip_remove_nat(
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
     // No physical sled? Don't push NAT.
-    let Some(_) =
-        sagactx.lookup::<InstanceStateForIp>("instance_state")?.sled_id
-    else {
+    let Some(_) = sagactx.lookup::<Option<Uuid>>("instance_state")? else {
         return Ok(());
     };
 
@@ -361,8 +350,7 @@ pub async fn instance_ip_add_opte(
     let osagactx = sagactx.user_data();
 
     // No physical sled? Don't inform OPTE.
-    let Some(sled_uuid) =
-        sagactx.lookup::<InstanceStateForIp>("instance_state")?.sled_id
+    let Some(sled_uuid) = sagactx.lookup::<Option<Uuid>>("instance_state")?
     else {
         return Ok(());
     };
@@ -386,7 +374,7 @@ pub async fn instance_ip_add_opte(
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(
-                "sled agent client went away mid-attach",
+                "sled agent client went away mid-attach/detach",
             ))
         })?
         .instance_put_external_ip(&authz_instance.id(), &sled_agent_body)
@@ -394,7 +382,9 @@ pub async fn instance_ip_add_opte(
         .map_err(|e| {
             ActionError::action_failed(match e {
                 progenitor_client::Error::CommunicationError(_) => {
-                    Error::unavail("sled agent client went away mid-attach")
+                    Error::unavail(
+                        "sled agent client went away mid-attach/detach",
+                    )
                 }
                 e => Error::internal_error(&format!("{e}")),
             })
@@ -410,8 +400,7 @@ pub async fn instance_ip_remove_opte(
     let osagactx = sagactx.user_data();
 
     // No physical sled? Don't inform OPTE.
-    let Some(sled_uuid) =
-        sagactx.lookup::<InstanceStateForIp>("instance_state")?.sled_id
+    let Some(sled_uuid) = sagactx.lookup::<Option<Uuid>>("instance_state")?
     else {
         return Ok(());
     };
@@ -435,7 +424,7 @@ pub async fn instance_ip_remove_opte(
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(
-                "sled agent client went away mid-attach",
+                "sled agent client went away mid-attach/detach",
             ))
         })?
         .instance_delete_external_ip(&authz_instance.id(), &sled_agent_body)
@@ -443,7 +432,9 @@ pub async fn instance_ip_remove_opte(
         .map_err(|e| {
             ActionError::action_failed(match e {
                 progenitor_client::Error::CommunicationError(_) => {
-                    Error::unavail("sled agent client went away mid-attach")
+                    Error::unavail(
+                        "sled agent client went away mid-attach/detach",
+                    )
                 }
                 e => Error::internal_error(&format!("{e}")),
             })

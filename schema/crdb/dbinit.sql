@@ -1734,9 +1734,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
     /*
      * Only nullable if this is a floating/ephemeral IP, which may exist not
-     * attached to any instance or service yet. Ephemeral IPs should not exist
-     * without parent instances/services, but need to temporarily exist in this
-     * state for live attachment.
+     * attached to any instance or service yet. Ephemeral IPs should not generally
+     * exist without parent instances/services, but need to temporarily exist in
+     * this state for live attachment.
      */
     CONSTRAINT null_snat_parent_id CHECK (
         (kind != 'snat') OR (parent_id IS NOT NULL)
@@ -1749,7 +1749,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
 
     /*
      * (Not detached) => non-null parent_id.
-     * This is not a two-way implication because SNAT/Ephemeral IPs
+     * This is not a two-way implication because SNAT IPs
      * cannot have a null parent_id.
      */
     CONSTRAINT detached_null_parent_id CHECK (

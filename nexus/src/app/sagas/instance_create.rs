@@ -618,10 +618,9 @@ async fn sic_allocate_instance_external_ip(
     // We perform the 'complete_op' in this saga stage because our IPs are
     // created in the attaching state, and we need to move them to attached.
     // We *can* do so because the `creating` state will block the IP attach/detach
-    // sagas from running, so we can safely undo without worrying they have been
-    // detached by another API call.
+    // sagas from running, so we can safely undo in event of later error in this saga
+    // without worrying they have been detached by another API call.
     // Runtime state should never be able to make 'complete_op' fallible.
-
     let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
         params::ExternalIpCreate::Ephemeral { ref pool_name } => {
@@ -659,7 +658,7 @@ async fn sic_allocate_instance_external_ip(
     };
 
     // Ignore row count here, this is infallible with correct
-    // (state, state', kind) but may be zero  on repeat call for
+    // (state, state', kind) but may be zero on repeat call for
     // idempotency.
     _ = datastore
         .external_ip_complete_op(
@@ -688,7 +687,7 @@ async fn sic_allocate_instance_external_ip_undo(
         &saga_params.serialized_authn,
     );
 
-    // We store and lookup `ExternalIp` so that we can do the detach
+    // We store and lookup `ExternalIp` so that we can detach
     // and/or deallocate without double name resolution.
     let new_ip = sagactx
         .lookup::<Option<ExternalIp>>(&format!("external-ip-{ip_index}"))?;

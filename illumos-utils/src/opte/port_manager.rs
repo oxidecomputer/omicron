@@ -417,8 +417,7 @@ impl PortManager {
             Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
         })?;
 
-        // TODO: massively cleanup.
-        // Describe the external IP addresses for this port.
+        // XXX: duplicates parts of macro logic in `create_port`.
         macro_rules! ext_ip_cfg {
             ($ip:expr, $log_prefix:literal, $ip_t:path, $cidr_t:path,
              $ipcfg_e:path, $ipcfg_t:ident, $snat_t:ident) => {{
@@ -473,6 +472,9 @@ impl PortManager {
             }}
         }
 
+        // TODO-completeness: support dual-stack. We'll need to explicitly store
+        // a v4 and a v6 ephemeral IP + SNat + gateway + ... in `InstanceInner`
+        // to have enough info to build both.
         let mut v4_cfg = None;
         let mut v6_cfg = None;
         match port.gateway().ip {

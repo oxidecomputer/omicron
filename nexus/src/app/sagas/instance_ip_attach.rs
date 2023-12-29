@@ -5,7 +5,7 @@
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
     instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
-    InstanceStateForIp, ModifyStateForExternalIp,
+    ModifyStateForExternalIp,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
@@ -159,7 +159,7 @@ async fn siia_begin_attach_ip_undo(
 
 async fn siia_get_instance_state(
     sagactx: NexusActionContext,
-) -> Result<InstanceStateForIp, ActionError> {
+) -> Result<Option<Uuid>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     instance_ip_get_instance_state(
         &sagactx,

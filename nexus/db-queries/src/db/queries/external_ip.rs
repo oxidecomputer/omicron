@@ -36,9 +36,6 @@ use uuid::Uuid;
 
 // Broadly, we want users to be able to attach/detach at will
 // once an instance is created and functional.
-// If we're in a state which will naturally resolve to either
-// stopped/running, we want users to know that the request can be
-// retried safely.
 pub const SAFE_TO_ATTACH_INSTANCE_STATES_CREATING: [DbInstanceState; 3] = [
     DbInstanceState(ApiInstanceState::Stopped),
     DbInstanceState(ApiInstanceState::Running),
@@ -48,8 +45,11 @@ pub const SAFE_TO_ATTACH_INSTANCE_STATES: [DbInstanceState; 2] = [
     DbInstanceState(ApiInstanceState::Stopped),
     DbInstanceState(ApiInstanceState::Running),
 ];
-// TODO: Currently stop if there's a migration or other state change.
-//       This may be a good case for RPWing
+// If we're in a state which will naturally resolve to either
+// stopped/running, we want users to know that the request can be
+// retried safely via Error::unavail.
+// TODO: We currently stop if there's a migration or other state change.
+//       There may be a good case for RPWing
 //       external_ip_state -> { NAT RPW, sled-agent } in future.
 pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbInstanceState; 5] = [
     DbInstanceState(ApiInstanceState::Starting),

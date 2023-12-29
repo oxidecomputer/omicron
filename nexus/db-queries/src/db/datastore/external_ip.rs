@@ -242,10 +242,7 @@ impl DataStore {
                     .ok_or_else(|| Error::internal_error("hmm"))?;
                 Ok((eip, false))
             }
-            Ok(Some((_, eip))) => {
-                eprintln!("");
-                Ok((eip, true))
-            }
+            Ok(Some((_, eip))) => Ok((eip, true)),
         }
     }
 
@@ -621,6 +618,7 @@ impl DataStore {
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::kind.eq(IpKind::Floating))
             .set((
+                dsl::time_modified.eq(Utc::now()),
                 dsl::parent_id.eq(Option::<Uuid>::None),
                 dsl::state.eq(IpAttachState::Detached),
             ))
