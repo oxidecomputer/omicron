@@ -651,6 +651,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         &params::InstanceNetworkInterfaceAttachment::Default,
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
     let instance_id = instance.identity.id;
@@ -754,6 +755,7 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // located with their instances.
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
     let instance_id = instance.identity.id;
@@ -1113,6 +1115,7 @@ async fn test_instance_metrics_with_migration(
         &params::InstanceNetworkInterfaceAttachment::Default,
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
     let instance_id = instance.identity.id;
@@ -3752,13 +3755,14 @@ async fn test_instance_attach_several_external_ips(
         &params::InstanceNetworkInterfaceAttachment::Default,
         vec![],
         external_ip_create,
+        true,
     )
     .await;
 
     // Verify that all external IPs are visible on the instance and have
     // been allocated in order.
     let external_ips =
-        fetch_instance_external_ips(&client, instance_name).await;
+        fetch_instance_external_ips(&client, instance_name, PROJECT_NAME).await;
     assert_eq!(external_ips.len(), 8);
     eprintln!("{external_ips:?}");
     for (i, eip) in external_ips
@@ -3858,17 +3862,18 @@ async fn create_instance_with_pool(
         vec![params::ExternalIpCreate::Ephemeral {
             pool_name: pool_name.map(|name| name.parse().unwrap()),
         }],
+        true,
     )
     .await
 }
 
-async fn fetch_instance_external_ips(
+pub async fn fetch_instance_external_ips(
     client: &ClientTestContext,
     instance_name: &str,
+    project_name: &str,
 ) -> Vec<views::ExternalIp> {
     let ips_url = format!(
-        "/v1/instances/{}/external-ips?project={}",
-        instance_name, PROJECT_NAME
+        "/v1/instances/{instance_name}/external-ips?project={project_name}",
     );
     let ips = NexusRequest::object_get(client, &ips_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -3884,7 +3889,7 @@ async fn fetch_instance_ephemeral_ip(
     client: &ClientTestContext,
     instance_name: &str,
 ) -> views::ExternalIp {
-    fetch_instance_external_ips(client, instance_name)
+    fetch_instance_external_ips(client, instance_name, PROJECT_NAME)
         .await
         .into_iter()
         .find(|v| v.kind == IpKind::Ephemeral)

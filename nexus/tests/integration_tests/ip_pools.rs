@@ -805,6 +805,7 @@ async fn test_ip_pool_list_usable_by_project(
             &InstanceNetworkInterfaceAttachment::Default,
             Vec::<InstanceDiskAttachment>::new(),
             vec![ExternalIpCreate::Ephemeral { pool_name }],
+            true,
         )
         .await;
     }

@@ -313,7 +313,7 @@ pub struct IpPoolRange {
 
 // INSTANCE EXTERNAL IP ADDRESSES
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ExternalIp {
     pub ip: IpAddr,
