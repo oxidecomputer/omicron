@@ -1387,14 +1387,14 @@ pub struct SwtichPortSettingsGroupCreate {
 pub struct SwitchPortSettingsCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub port_config: SwitchPortConfig,
+    pub port_config: SwitchPortConfigCreate,
     pub groups: Vec<NameOrId>,
     /// Links indexed by phy name. On ports that are not broken out, this is
     /// always phy0. On a 2x breakout the options are phy0 and phy1, on 4x
     /// phy0-phy3, etc.
-    pub links: HashMap<String, LinkConfig>,
+    pub links: HashMap<String, LinkConfigCreate>,
     /// Interfaces indexed by link name.
-    pub interfaces: HashMap<String, SwitchInterfaceConfig>,
+    pub interfaces: HashMap<String, SwitchInterfaceConfigCreate>,
     /// Routes indexed by interface name.
     pub routes: HashMap<String, RouteConfig>,
     /// BGP peers indexed by interface name.
@@ -1407,7 +1407,7 @@ impl SwitchPortSettingsCreate {
     pub fn new(identity: IdentityMetadataCreateParams) -> Self {
         Self {
             identity,
-            port_config: SwitchPortConfig {
+            port_config: SwitchPortConfigCreate {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
             groups: Vec::new(),
@@ -1423,7 +1423,7 @@ impl SwitchPortSettingsCreate {
 /// Physical switch port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SwitchPortConfig {
+pub struct SwitchPortConfigCreate {
     /// Link geometry for the switch port.
     pub geometry: SwitchPortGeometry,
 }
@@ -1526,12 +1526,12 @@ impl From<omicron_common::api::internal::shared::PortSpeed> for LinkSpeed {
 
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LinkConfig {
+pub struct LinkConfigCreate {
     /// Maximum transmission unit for the link.
     pub mtu: u16,
 
     /// The link-layer discovery protocol (LLDP) configuration for the link.
-    pub lldp: LldpServiceConfig,
+    pub lldp: LldpServiceConfigCreate,
 
     /// The forward error correction mode of the link.
     pub fec: LinkFec,
@@ -1546,7 +1546,7 @@ pub struct LinkConfig {
 /// The LLDP configuration associated with a port. LLDP may be either enabled or
 /// disabled, if enabled, an LLDP configuration must be provided by name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LldpServiceConfig {
+pub struct LldpServiceConfigCreate {
     /// Whether or not LLDP is enabled.
     pub enabled: bool,
 
@@ -1558,7 +1558,7 @@ pub struct LldpServiceConfig {
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
 /// address will be created for the interface.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SwitchInterfaceConfig {
+pub struct SwitchInterfaceConfigCreate {
     /// Whether or not IPv6 is enabled.
     pub v6_enabled: bool,
 
