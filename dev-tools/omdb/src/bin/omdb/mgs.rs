@@ -9,10 +9,13 @@ use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
+use gateway_client::types::MeasurementErrorCode;
+use gateway_client::types::MeasurementKind;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotSlot;
 use gateway_client::types::RotState;
 use gateway_client::types::SpComponentCaboose;
+use gateway_client::types::SpComponentDetails;
 use gateway_client::types::SpComponentInfo;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpIgnition;
@@ -20,7 +23,10 @@ use gateway_client::types::SpIgnitionInfo;
 use gateway_client::types::SpIgnitionSystemType;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
+use multimap::MultiMap;
 use tabled::Tabled;
+
+use std::collections::HashMap;
 
 /// Arguments to the "omdb mgs" subcommand
 #[derive(Debug, Args)]
@@ -35,12 +41,36 @@ pub struct MgsArgs {
 
 #[derive(Debug, Subcommand)]
 enum MgsCommands {
+    /// Dashboard of SPs
+    Dashboard(DashboardArgs),
+
     /// Show information about devices and components visible to MGS
     Inventory(InventoryArgs),
+
+    /// Show information about sensors, as gleaned by MGS
+    Sensors(SensorsArgs),
 }
 
 #[derive(Debug, Args)]
+struct DashboardArgs {}
+
+#[derive(Debug, Args)]
 struct InventoryArgs {}
+
+#[derive(Debug, Args)]
+struct SensorsArgs {
+    /// verbose messages
+    #[clap(long, short)]
+    verbose: bool,
+
+    /// restrict to specified sled(s)
+    #[clap(long, short, use_value_delimiter = true)]
+    sled: Vec<u32>,
+
+    /// exclude specified targets rather than include them
+    #[clap(long, short, requires = "sled")]
+    exclude: bool,
+}
 
 impl MgsArgs {
     pub(crate) async fn run_cmd(
@@ -71,11 +101,27 @@ impl MgsArgs {
         let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
 
         match &self.command {
+            MgsCommands::Dashboard(dashboard_args) => {
+                cmd_mgs_dashboard(&mgs_client, dashboard_args).await
+            }
             MgsCommands::Inventory(inventory_args) => {
                 cmd_mgs_inventory(&mgs_client, inventory_args).await
             }
+            MgsCommands::Sensors(sensors_args) => {
+                cmd_mgs_sensors(&mgs_client, sensors_args).await
+            }
         }
     }
+}
+
+///
+/// Runs `omdb mgs dashboard`
+///
+async fn cmd_mgs_dashboard(
+    _mgs_client: &gateway_client::Client,
+    _args: &DashboardArgs,
+) -> Result<(), anyhow::Error> {
+    anyhow::bail!("not yet");
 }
 
 /// Runs `omdb mgs inventory`
@@ -143,6 +189,293 @@ async fn cmd_mgs_inventory(
     // Print detailed information about each SP that we've found so far.
     for (sp_id, sp_state) in &sp_infos {
         show_sp_details(&mgs_client, sp_id, sp_state).await?;
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+struct Sensor {
+    name: String,
+    kind: MeasurementKind,
+}
+
+impl Sensor {
+    fn units(&self) -> &str {
+        match self.kind {
+            MeasurementKind::Temperature => "°C",
+            MeasurementKind::Current | MeasurementKind::InputCurrent => "A",
+            MeasurementKind::Voltage | MeasurementKind::InputVoltage => "V",
+            MeasurementKind::Speed => "RPM",
+            MeasurementKind::Power => "W",
+        }
+    }
+
+    fn format(&self, value: f32) -> String {
+        match self.kind {
+            MeasurementKind::Speed => {
+                format!("{value:0} RPM")
+            }
+            _ => {
+                format!("{value:.2}{}", self.units())
+            }
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+struct SensorId(u32);
+
+#[derive(Debug)]
+struct SensorMetadata {
+    sensors_by_sensor: MultiMap<Sensor, SensorId>,
+    sensors_by_sensor_and_sp: HashMap<(Sensor, SpIdentifier), SensorId>,
+    sensors_by_id: HashMap<SensorId, (SpIdentifier, Sensor, String)>,
+    sensors_by_sp: MultiMap<SpIdentifier, SensorId>,
+    work_by_sp: HashMap<SpIdentifier, Vec<(String, Vec<SensorId>)>>,
+}
+
+struct SensorValues(HashMap<SensorId, Option<f32>>);
+
+struct SpInfo {
+    devices: MultiMap<String, (Sensor, Option<f32>)>,
+    timestamps: Vec<std::time::Instant>,
+}
+
+async fn sp_info(
+    mgs_client: gateway_client::Client,
+    type_: SpType,
+    slot: u32,
+) -> Result<SpInfo, anyhow::Error> {
+    let mut devices = MultiMap::new();
+    let mut timestamps = vec![];
+
+    timestamps.push(std::time::Instant::now());
+
+    //
+    // First, get a component list.
+    //
+    let components = mgs_client.sp_component_list(type_, slot).await?;
+    timestamps.push(std::time::Instant::now());
+
+    //
+    // Now, for every component, we're going to get its details:  for those
+    // that are sensors (and contain measurements), we will store the name
+    // of the sensor as well as the retrieved value.
+    //
+    for c in &components.components {
+        for s in mgs_client
+            .sp_component_get(type_, slot, &c.component)
+            .await?
+            .iter()
+            .filter_map(|detail| match detail {
+                SpComponentDetails::Measurement { kind, name, value } => Some(
+                    (Sensor { name: name.clone(), kind: *kind }, Some(*value)),
+                ),
+                SpComponentDetails::MeasurementError { kind, name, error } => {
+                    match error {
+                        MeasurementErrorCode::NoReading
+                        | MeasurementErrorCode::NotPresent => None,
+                        _ => Some((
+                            Sensor { name: name.clone(), kind: *kind },
+                            None,
+                        )),
+                    }
+                }
+                _ => None,
+            })
+        {
+            devices.insert(c.component.clone(), s);
+        }
+    }
+
+    timestamps.push(std::time::Instant::now());
+
+    Ok(SpInfo { devices, timestamps })
+}
+
+async fn sensor_metadata(
+    mgs_client: &gateway_client::Client,
+    args: &SensorsArgs,
+) -> Result<(SensorMetadata, SensorValues), anyhow::Error> {
+    //
+    // First, get all of the SPs that we can see via Ignition
+    //
+    let all_sp_list =
+        mgs_client.ignition_list().await.context("listing ignition")?;
+
+    let mut sp_list = all_sp_list
+        .iter()
+        .filter_map(|ignition| {
+            if matches!(ignition.details, SpIgnition::Yes { .. }) {
+                let matched = if args.sled.len() > 0 {
+                    if ignition.id.type_ == SpType::Sled {
+                        args.sled
+                            .iter()
+                            .find(|&&v| v == ignition.id.slot)
+                            .is_some()
+                    } else {
+                        false
+                    }
+                } else {
+                    true
+                };
+
+                match (matched, args.exclude) {
+                    (true, true) | (false, false) => None,
+                    _ => Some(ignition.id),
+                }
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    sp_list.sort();
+
+    let now = std::time::Instant::now();
+
+    let mut handles = vec![];
+    for sp_id in sp_list {
+        let mgs_client = mgs_client.clone();
+        let type_ = sp_id.type_;
+        let slot = sp_id.slot;
+
+        let handle =
+            tokio::spawn(async move { sp_info(mgs_client, type_, slot).await });
+
+        handles.push((sp_id, handle));
+    }
+
+    let mut sensors_by_sensor = MultiMap::new();
+    let mut sensors_by_sensor_and_sp = HashMap::new();
+    let mut sensors_by_id = HashMap::new();
+    let mut sensors_by_sp = MultiMap::new();
+    let mut all_values = HashMap::new();
+    let mut work_by_sp = HashMap::new();
+
+    let mut current = 0;
+
+    for (sp_id, handle) in handles {
+        let mut sp_work = vec![];
+
+        match handle.await.unwrap() {
+            Ok(info) => {
+                for (device, sensors) in info.devices {
+                    let mut device_work = vec![];
+
+                    for (sensor, value) in sensors {
+                        let id = SensorId(current);
+                        current += 1;
+
+                        sensors_by_id.insert(
+                            id,
+                            (sp_id, sensor.clone(), device.clone()),
+                        );
+
+                        if value.is_none() && args.verbose {
+                            eprintln!(
+                                "{sp_id:?}: error on {sensor:?} ({device})"
+                            );
+                        }
+
+                        sensors_by_sensor.insert(sensor.clone(), id);
+                        sensors_by_sensor_and_sp.insert((sensor, sp_id), id);
+                        sensors_by_sp.insert(sp_id, id);
+                        all_values.insert(id, value);
+
+                        device_work.push(id);
+                    }
+
+                    sp_work.push((device, device_work));
+                }
+
+                if args.verbose {
+                    eprintln!(
+                        "{:?} {:?} {:?}",
+                        sp_id,
+                        info.timestamps[2].duration_since(info.timestamps[1]),
+                        info.timestamps[1].duration_since(info.timestamps[0])
+                    );
+                }
+            }
+            Err(err) => {
+                eprintln!("failed to read devices for {:?}: {:?}", sp_id, err);
+            }
+        }
+
+        work_by_sp.insert(sp_id, sp_work);
+    }
+
+    if args.verbose {
+        eprintln!("total discovery time {:?}", now.elapsed());
+    }
+
+    Ok((
+        SensorMetadata {
+            sensors_by_sensor,
+            sensors_by_sensor_and_sp,
+            sensors_by_id,
+            sensors_by_sp,
+            work_by_sp,
+        },
+        SensorValues(all_values),
+    ))
+}
+
+///
+/// Runs `omdb mgs sensors`
+///
+async fn cmd_mgs_sensors(
+    mgs_client: &gateway_client::Client,
+    args: &SensorsArgs,
+) -> Result<(), anyhow::Error> {
+    let (metadata, values) = sensor_metadata(mgs_client, args).await?;
+
+    let mut sensors = metadata.sensors_by_sensor.keys().collect::<Vec<_>>();
+    sensors.sort();
+
+    let mut sps = metadata.sensors_by_sp.keys().collect::<Vec<_>>();
+    sps.sort();
+
+    print!("{:20} ", "NAME");
+
+    for sp in &sps {
+        print!(
+            " {:>8}",
+            format!("{}-{}", sp_type_to_str(&sp.type_).to_uppercase(), sp.slot)
+        );
+    }
+
+    println!();
+
+    for sensor in sensors {
+        print!("{:20} ", sensor.name);
+
+        for sp in &sps {
+            let lookup = sensor.clone();
+
+            if let Some(id) =
+                metadata.sensors_by_sensor_and_sp.get(&(lookup, **sp))
+            {
+                if let Some(value) = values.0.get(id) {
+                    match value {
+                        Some(value) => {
+                            print!(" {:>8}", sensor.format(*value))
+                        }
+                        None => {
+                            print!(" {:>8}", "X");
+                        }
+                    }
+                } else {
+                    print!(" {:>8}", "?");
+                }
+            } else {
+                print!(" {:>8}", "-");
+            }
+        }
+
+        println!();
     }
 
     Ok(())
