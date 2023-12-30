@@ -30,7 +30,6 @@ use nexus_types::external_api::params::BgpPeer;
 use nexus_types::external_api::params::LinkConfigCreate;
 use nexus_types::external_api::params::LldpServiceConfigCreate;
 use nexus_types::external_api::params::RouteConfig;
-use nexus_types::external_api::params::SwitchPortConfig;
 use nexus_types::external_api::params::SwitchPortConfigCreate;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::params::{
