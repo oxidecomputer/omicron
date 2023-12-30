@@ -27,10 +27,11 @@ use nexus_types::external_api::params::BgpAnnounceSetCreate;
 use nexus_types::external_api::params::BgpAnnouncementCreate;
 use nexus_types::external_api::params::BgpConfigCreate;
 use nexus_types::external_api::params::BgpPeer;
-use nexus_types::external_api::params::LinkConfig;
-use nexus_types::external_api::params::LldpServiceConfig;
+use nexus_types::external_api::params::LinkConfigCreate;
+use nexus_types::external_api::params::LldpServiceConfigCreate;
 use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfig;
+use nexus_types::external_api::params::SwitchPortConfigCreate;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::params::{
     AddressLotCreate, BgpPeerConfig, LoopbackAddressCreate, Route, SiloCreate,
@@ -587,7 +588,7 @@ impl super::Nexus {
                     description: "initial uplink configuration".to_string(),
                 };
 
-                let port_config = SwitchPortConfig {
+                let port_config = SwitchPortConfigCreate {
                     geometry: nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
                 };
 
@@ -653,9 +654,9 @@ impl super::Nexus {
                     .bgp_peers
                     .insert("phy0".to_string(), BgpPeerConfig { peers });
 
-                let link = LinkConfig {
+                let link = LinkConfigCreate {
                     mtu: 1500, //TODO https://github.com/oxidecomputer/omicron/issues/2274
-                    lldp: LldpServiceConfig {
+                    lldp: LldpServiceConfigCreate {
                         enabled: false,
                         lldp_config: None,
                     },

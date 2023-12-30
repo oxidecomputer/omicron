@@ -1196,7 +1196,7 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeer, BgpPeerConfig,
-        SwitchPortConfig, SwitchPortGeometry, SwitchPortSettingsCreate,
+        SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
         IdentityMetadataCreateParams, Name, NameOrId,
@@ -1250,7 +1250,7 @@ mod test {
                 name: "test-settings".parse().unwrap(),
                 description: "test settings".into(),
             },
-            port_config: SwitchPortConfig {
+            port_config: SwitchPortConfigCreate {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
             groups: Vec::new(),
