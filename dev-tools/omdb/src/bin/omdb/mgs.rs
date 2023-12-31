@@ -64,12 +64,24 @@ struct SensorsArgs {
     verbose: bool,
 
     /// restrict to specified sled(s)
-    #[clap(long, short, use_value_delimiter = true)]
+    #[clap(long, use_value_delimiter = true)]
     sled: Vec<u32>,
 
-    /// exclude specified targets rather than include them
-    #[clap(long, short, requires = "sled")]
+    /// exclude sleds rather than include them
+    #[clap(long, short)]
     exclude: bool,
+
+    /// include switches
+    #[clap(long)]
+    switches: bool,
+
+    /// include PSC
+    #[clap(long)]
+    psc: bool,
+
+    /// sleep
+    #[clap(long, short)]
+    sleep: bool,
 }
 
 impl MgsArgs {
@@ -308,28 +320,33 @@ async fn sensor_metadata(
         .iter()
         .filter_map(|ignition| {
             if matches!(ignition.details, SpIgnition::Yes { .. }) {
-                let matched = if args.sled.len() > 0 {
-                    if ignition.id.type_ == SpType::Sled {
+                if ignition.id.type_ == SpType::Sled {
+                    let matched = if args.sled.len() > 0 {
                         args.sled
                             .iter()
                             .find(|&&v| v == ignition.id.slot)
                             .is_some()
                     } else {
-                        false
-                    }
-                } else {
-                    true
-                };
+                        true
+                    };
 
-                match (matched, args.exclude) {
-                    (true, true) | (false, false) => None,
-                    _ => Some(ignition.id),
+                    if matched != args.exclude {
+                        return Some(ignition.id);
+                    }
                 }
-            } else {
-                None
             }
+            None
         })
         .collect::<Vec<_>>();
+
+    if args.switches {
+        sp_list.push(SpIdentifier { type_: SpType::Switch, slot: 0 });
+        sp_list.push(SpIdentifier { type_: SpType::Switch, slot: 1 });
+    }
+
+    if args.psc {
+        sp_list.push(SpIdentifier { type_: SpType::Power, slot: 0 });
+    }
 
     sp_list.sort();
 
@@ -423,6 +440,71 @@ async fn sensor_metadata(
     ))
 }
 
+async fn sp_read_sensors(
+    mgs_client: &gateway_client::Client,
+    id: &SpIdentifier,
+    metadata: std::sync::Arc<&SensorMetadata>,
+) -> Result<Vec<(SensorId, Option<f32>)>, anyhow::Error> {
+    let work = metadata.work_by_sp.get(id).unwrap();
+    let mut rval = vec![];
+
+    for (component, ids) in work.iter() {
+        for (value, id) in mgs_client
+            .sp_component_get(id.type_, id.slot, component)
+            .await?
+            .iter()
+            .filter_map(|detail| match detail {
+                SpComponentDetails::Measurement { kind: _, name: _, value } => {
+                    Some(Some(*value))
+                }
+                SpComponentDetails::MeasurementError { kind, name, error } => {
+                    match error {
+                        MeasurementErrorCode::NoReading
+                        | MeasurementErrorCode::NotPresent => None,
+                        _ => Some(None),
+                    }
+                }
+                _ => None,
+            })
+            .zip(ids.iter())
+        {
+            rval.push((*id, value));
+        }
+    }
+
+    Ok(rval)
+}
+
+async fn sensor_data(
+    mgs_client: &gateway_client::Client,
+    metadata: std::sync::Arc<&'static SensorMetadata>,
+) -> Result<SensorValues, anyhow::Error> {
+    let mut all_values = HashMap::new();
+    let mut handles = vec![];
+
+    for sp_id in metadata.sensors_by_sp.keys() {
+        let mgs_client = mgs_client.clone();
+        let id = *sp_id;
+        let metadata = metadata.clone();
+
+        let handle = tokio::spawn(async move {
+            sp_read_sensors(&mgs_client, &id, metadata).await
+        });
+
+        handles.push((sp_id, handle));
+    }
+
+    for (sp_id, handle) in handles {
+        let rval = handle.await.unwrap()?;
+
+        for (id, value) in rval {
+            all_values.insert(id, value);
+        }
+    }
+
+    Ok(SensorValues(all_values))
+}
+
 ///
 /// Runs `omdb mgs sensors`
 ///
@@ -430,7 +512,15 @@ async fn cmd_mgs_sensors(
     mgs_client: &gateway_client::Client,
     args: &SensorsArgs,
 ) -> Result<(), anyhow::Error> {
-    let (metadata, values) = sensor_metadata(mgs_client, args).await?;
+    let (metadata, mut values) = sensor_metadata(mgs_client, args).await?;
+
+    //
+    // A bit of shenangians to force metadata to be 'static -- which allows
+    // us to share it with tasks.
+    //
+    let metadata = Box::leak(Box::new(metadata));
+    let metadata: &_ = metadata;
+    let metadata = std::sync::Arc::new(metadata);
 
     let mut sensors = metadata.sensors_by_sensor.keys().collect::<Vec<_>>();
     sensors.sort();
@@ -438,44 +528,63 @@ async fn cmd_mgs_sensors(
     let mut sps = metadata.sensors_by_sp.keys().collect::<Vec<_>>();
     sps.sort();
 
-    print!("{:20} ", "NAME");
-
-    for sp in &sps {
-        print!(
-            " {:>8}",
-            format!("{}-{}", sp_type_to_str(&sp.type_).to_uppercase(), sp.slot)
-        );
-    }
-
-    println!();
-
-    for sensor in sensors {
-        print!("{:20} ", sensor.name);
+    loop {
+        print!("{:20} ", "NAME");
 
         for sp in &sps {
-            let lookup = sensor.clone();
-
-            if let Some(id) =
-                metadata.sensors_by_sensor_and_sp.get(&(lookup, **sp))
-            {
-                if let Some(value) = values.0.get(id) {
-                    match value {
-                        Some(value) => {
-                            print!(" {:>8}", sensor.format(*value))
-                        }
-                        None => {
-                            print!(" {:>8}", "X");
-                        }
-                    }
-                } else {
-                    print!(" {:>8}", "?");
-                }
-            } else {
-                print!(" {:>8}", "-");
-            }
+            print!(
+                " {:>8}",
+                format!(
+                    "{}-{}",
+                    sp_type_to_str(&sp.type_).to_uppercase(),
+                    sp.slot
+                )
+            );
         }
 
         println!();
+
+        for sensor in &sensors {
+            print!("{:20} ", sensor.name);
+
+            for sp in &sps {
+                let lookup = sensor.clone();
+
+                if let Some(id) = metadata
+                    .sensors_by_sensor_and_sp
+                    .get(&(lookup.clone(), **sp))
+                {
+                    if let Some(value) = values.0.get(id) {
+                        match value {
+                            Some(value) => {
+                                print!(" {:>8}", sensor.format(*value))
+                            }
+                            None => {
+                                print!(" {:>8}", "X");
+                            }
+                        }
+                    } else {
+                        print!(" {:>8}", "?");
+                    }
+                } else {
+                    print!(" {:>8}", "-");
+                }
+            }
+
+            println!();
+        }
+
+        if !args.sleep {
+            break;
+        }
+
+        tokio::time::sleep_until(
+            tokio::time::Instant::now()
+                + tokio::time::Duration::from_millis(1000),
+        )
+        .await;
+
+        values = sensor_data(mgs_client, metadata.clone()).await?;
     }
 
     Ok(())
