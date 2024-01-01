@@ -58,7 +58,7 @@ impl MgsArgs {
     async fn mgs_client(
         &self,
         omdb: &Omdb,
-        log: &slog::Logger
+        log: &slog::Logger,
     ) -> Result<gateway_client::Client, anyhow::Error> {
         let mgs_url = match &self.mgs_url {
             Some(cli_or_env_url) => cli_or_env_url.clone(),
@@ -98,7 +98,7 @@ impl MgsArgs {
                 cmd_mgs_inventory(&mgs_client, inventory_args).await
             }
             MgsCommands::Sensors(sensors_args) => {
-                sensors::cmd_mgs_sensors(&mgs_client, sensors_args).await
+                sensors::cmd_mgs_sensors(omdb, log, self, sensors_args).await
             }
         }
     }

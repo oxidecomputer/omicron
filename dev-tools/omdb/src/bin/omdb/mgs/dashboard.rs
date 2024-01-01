@@ -7,11 +7,7 @@
 use clap::Args;
 
 #[derive(Debug, Args)]
-pub(crate) struct DashboardArgs {
-    /// simulate using specified file as input
-    #[clap(long, short)]
-    input: Option<String>,
-}
+pub(crate) struct DashboardArgs {}
 
 ///
 /// Runs `omdb mgs dashboard`

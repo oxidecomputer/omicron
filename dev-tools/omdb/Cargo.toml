@@ -13,6 +13,7 @@ async-bb8-diesel.workspace = true
 chrono.workspace = true
 clap.workspace = true
 crucible-agent-client.workspace = true
+csv.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
 futures.workspace = true

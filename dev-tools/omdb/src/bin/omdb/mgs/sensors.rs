@@ -14,6 +14,7 @@ use gateway_client::types::SpIgnition;
 use gateway_client::types::SpType;
 use multimap::MultiMap;
 use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::time::{Duration, SystemTime};
 
 #[derive(Debug, Args)]
@@ -63,6 +64,10 @@ pub(crate) struct SensorsArgs {
         use_value_delimiter = true
     )]
     named: Option<Vec<String>>,
+
+    /// simulate using specified file as input
+    #[clap(long, short)]
+    input: Option<String>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -129,9 +134,9 @@ impl Sensor {
     }
 }
 
-enum SensorInput<'a> {
-    MgsClient(&'a gateway_client::Client),
-    File(String),
+enum SensorInput<R> {
+    MgsClient(gateway_client::Client),
+    CsvReader(csv::Reader<R>),
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -205,37 +210,11 @@ async fn sp_info(
     Ok(SpInfo { devices, timestamps })
 }
 
-async fn sensor_metadata (
-    input: SensorInput<'_>,
+async fn sp_info_mgs(
+    mgs_client: &gateway_client::Client,
     args: &SensorsArgs,
-) -> Result<(SensorMetadata, SensorValues), anyhow::Error> {
-    let mgs_client = match input {
-        SensorInput::MgsClient(client) => client,
-        _ => {
-            bail!("not yet");
-        }
-    };
-
-    let by_kind = if let Some(types) = &args.types {
-        let mut h = HashSet::new();
-
-        for t in types {
-            h.insert(match Sensor::from_string("", &t) {
-                None => bail!("invalid sensor kind {t}"),
-                Some(s) => s.kind,
-            });
-        }
-
-        Some(h)
-    } else {
-        None
-    };
-
-    let by_name = if let Some(named) = &args.named {
-        Some(named.into_iter().collect::<HashSet<_>>())
-    } else {
-        None
-    };
+) -> Result<Vec<(SpIdentifier, SpInfo)>, anyhow::Error> {
+    let mut rval = vec![];
 
     //
     // First, get all of the SPs that we can see via Ignition
@@ -291,6 +270,68 @@ async fn sensor_metadata (
         handles.push((sp_id, handle));
     }
 
+    for (sp_id, handle) in handles {
+        match handle.await.unwrap() {
+            Ok(info) => {
+                if args.verbose {
+                    eprintln!(
+                        "mgs: latencies for {sp_id:?}: {:.1?} {:.1?}",
+                        info.timestamps[2].duration_since(info.timestamps[1]),
+                        info.timestamps[1].duration_since(info.timestamps[0])
+                    );
+                }
+
+                rval.push((sp_id, info));
+            }
+
+            Err(err) => {
+                eprintln!("failed to read devices for {:?}: {:?}", sp_id, err);
+            }
+        }
+    }
+
+    if args.verbose {
+        eprintln!("total discovery time {:?}", now.elapsed());
+    }
+
+    Ok(rval)
+}
+
+async fn sensor_metadata<R>(
+    input: &mut SensorInput<R>,
+    args: &SensorsArgs,
+) -> Result<(SensorMetadata, SensorValues), anyhow::Error> {
+    let by_kind = if let Some(types) = &args.types {
+        let mut h = HashSet::new();
+
+        for t in types {
+            h.insert(match Sensor::from_string("", &t) {
+                None => bail!("invalid sensor kind {t}"),
+                Some(s) => s.kind,
+            });
+        }
+
+        Some(h)
+    } else {
+        None
+    };
+
+    let by_name = if let Some(named) = &args.named {
+        Some(named.into_iter().collect::<HashSet<_>>())
+    } else {
+        None
+    };
+
+    let info = match input {
+        SensorInput::MgsClient(ref mgs_client) => {
+            sp_info_mgs(mgs_client, args).await?
+        }
+        // SensorInput::CsvReader(XXX) => sp_info_csv(mgs_client),
+        _ => {
+            bail!("not yet");
+        }
+    };
+
     let mut sensors_by_sensor = MultiMap::new();
     let mut sensors_by_sensor_and_sp = HashMap::new();
     let mut sensors_by_id = HashMap::new();
@@ -300,74 +341,53 @@ async fn sensor_metadata (
 
     let mut current = 0;
 
-    for (sp_id, handle) in handles {
+    for (sp_id, info) in info {
         let mut sp_work = vec![];
 
-        match handle.await.unwrap() {
-            Ok(info) => {
-                for (device, sensors) in info.devices {
-                    let mut device_work = vec![];
+        for (device, sensors) in info.devices {
+            let mut device_work = vec![];
 
-                    for (sensor, value) in sensors {
-                        if let Some(ref by_kind) = by_kind {
-                            if by_kind.get(&sensor.kind).is_none() {
-                                continue;
-                            }
-                        }
-
-                        if let Some(ref by_name) = by_name {
-                            if by_name.get(&sensor.name).is_none() {
-                                continue;
-                            }
-                        }
-
-                        let id = SensorId(current);
-                        current += 1;
-
-                        sensors_by_id.insert(
-                            id,
-                            (sp_id, sensor.clone(), device.clone()),
-                        );
-
-                        if value.is_none() && args.verbose {
-                            eprintln!(
-                                "mgs: error for {sp_id:?} on {sensor:?} ({device})"
-                            );
-                        }
-
-                        sensors_by_sensor.insert(sensor.clone(), id);
-
-                        let by_sp = sensors_by_sensor_and_sp
-                            .entry(sensor)
-                            .or_insert_with(|| HashMap::new());
-                        by_sp.insert(sp_id, id);
-                        sensors_by_sp.insert(sp_id, id);
-                        all_values.insert(id, value);
-
-                        device_work.push(id);
+            for (sensor, value) in sensors {
+                if let Some(ref by_kind) = by_kind {
+                    if by_kind.get(&sensor.kind).is_none() {
+                        continue;
                     }
-
-                    sp_work.push((device, device_work));
                 }
 
-                if args.verbose {
+                if let Some(ref by_name) = by_name {
+                    if by_name.get(&sensor.name).is_none() {
+                        continue;
+                    }
+                }
+
+                let id = SensorId(current);
+                current += 1;
+
+                sensors_by_id
+                    .insert(id, (sp_id, sensor.clone(), device.clone()));
+
+                if value.is_none() && args.verbose {
                     eprintln!(
-                        "mgs: latencies for {sp_id:?}: {:.1?} {:.1?}",
-                        info.timestamps[2].duration_since(info.timestamps[1]),
-                        info.timestamps[1].duration_since(info.timestamps[0])
+                        "mgs: error for {sp_id:?} on {sensor:?} ({device})"
                     );
                 }
+
+                sensors_by_sensor.insert(sensor.clone(), id);
+
+                let by_sp = sensors_by_sensor_and_sp
+                    .entry(sensor)
+                    .or_insert_with(|| HashMap::new());
+                by_sp.insert(sp_id, id);
+                sensors_by_sp.insert(sp_id, id);
+                all_values.insert(id, value);
+
+                device_work.push(id);
             }
-            Err(err) => {
-                eprintln!("failed to read devices for {:?}: {:?}", sp_id, err);
-            }
+
+            sp_work.push((device, device_work));
         }
 
         work_by_sp.insert(sp_id, sp_work);
-    }
-
-    if args.verbose {
-        eprintln!("total discovery time {:?}", now.elapsed());
     }
 
     Ok((
@@ -451,11 +471,19 @@ async fn sensor_data(
 /// Runs `omdb mgs sensors`
 ///
 pub(crate) async fn cmd_mgs_sensors(
-    mgs_client: &gateway_client::Client,
+    omdb: &crate::Omdb,
+    log: &slog::Logger,
+    mgs_args: &crate::mgs::MgsArgs,
     args: &SensorsArgs,
 ) -> Result<(), anyhow::Error> {
-    let input = SensorInput::MgsClient(mgs_client);
-    let (metadata, mut values) = sensor_metadata(input, args).await?;
+    let mut input = if let Some(ref input) = args.input {
+        let file = File::open(input)?;
+        SensorInput::CsvReader(csv::Reader::from_reader(file))
+    } else {
+        SensorInput::MgsClient(mgs_args.mgs_client(omdb, log).await?)
+    };
+
+    let (metadata, mut values) = sensor_metadata(&mut input, args).await?;
 
     //
     // A bit of shenangians to force metadata to be 'static -- which allows
@@ -464,6 +492,13 @@ pub(crate) async fn cmd_mgs_sensors(
     let metadata = Box::leak(Box::new(metadata));
     let metadata: &_ = metadata;
     let metadata = std::sync::Arc::new(metadata);
+
+    let mgs_client = match input {
+        SensorInput::MgsClient(ref client) => client,
+        _ => {
+            bail!("not yet");
+        }
+    };
 
     let mut sensors = metadata.sensors_by_sensor.keys().collect::<Vec<_>>();
     sensors.sort();
