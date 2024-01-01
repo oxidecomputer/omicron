@@ -129,6 +129,11 @@ impl Sensor {
     }
 }
 
+enum SensorInput<'a> {
+    MgsClient(&'a gateway_client::Client),
+    File(String),
+}
+
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 struct SensorId(u32);
 
@@ -200,10 +205,17 @@ async fn sp_info(
     Ok(SpInfo { devices, timestamps })
 }
 
-async fn sensor_metadata(
-    mgs_client: &gateway_client::Client,
+async fn sensor_metadata (
+    input: SensorInput<'_>,
     args: &SensorsArgs,
 ) -> Result<(SensorMetadata, SensorValues), anyhow::Error> {
+    let mgs_client = match input {
+        SensorInput::MgsClient(client) => client,
+        _ => {
+            bail!("not yet");
+        }
+    };
+
     let by_kind = if let Some(types) = &args.types {
         let mut h = HashSet::new();
 
@@ -442,7 +454,8 @@ pub(crate) async fn cmd_mgs_sensors(
     mgs_client: &gateway_client::Client,
     args: &SensorsArgs,
 ) -> Result<(), anyhow::Error> {
-    let (metadata, mut values) = sensor_metadata(mgs_client, args).await?;
+    let input = SensorInput::MgsClient(mgs_client);
+    let (metadata, mut values) = sensor_metadata(input, args).await?;
 
     //
     // A bit of shenangians to force metadata to be 'static -- which allows

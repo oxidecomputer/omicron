@@ -55,11 +55,11 @@ enum MgsCommands {
 struct InventoryArgs {}
 
 impl MgsArgs {
-    pub(crate) async fn run_cmd(
+    async fn mgs_client(
         &self,
         omdb: &Omdb,
-        log: &slog::Logger,
-    ) -> Result<(), anyhow::Error> {
+        log: &slog::Logger
+    ) -> Result<gateway_client::Client, anyhow::Error> {
         let mgs_url = match &self.mgs_url {
             Some(cli_or_env_url) => cli_or_env_url.clone(),
             None => {
@@ -80,7 +80,15 @@ impl MgsArgs {
             }
         };
         eprintln!("note: using MGS URL {}", &mgs_url);
-        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
+        Ok(gateway_client::Client::new(&mgs_url, log.clone()))
+    }
+
+    pub(crate) async fn run_cmd(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> Result<(), anyhow::Error> {
+        let mgs_client = self.mgs_client(omdb, log).await?;
 
         match &self.command {
             MgsCommands::Dashboard(dashboard_args) => {
