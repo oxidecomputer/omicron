@@ -5,7 +5,7 @@
 //! Prototype code for collecting information from systems in the rack
 
 use crate::Omdb;
-use anyhow::Context;
+use anyhow::{bail, Context};
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
@@ -26,7 +26,8 @@ use gateway_client::types::SpType;
 use multimap::MultiMap;
 use tabled::Tabled;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, SystemTime};
 
 /// Arguments to the "omdb mgs" subcommand
 #[derive(Debug, Args)]
@@ -65,7 +66,7 @@ struct SensorsArgs {
 
     /// restrict to specified sled(s)
     #[clap(long, use_value_delimiter = true)]
-    sled: Vec<u32>,
+    sleds: Vec<u32>,
 
     /// exclude sleds rather than include them
     #[clap(long, short)]
@@ -79,9 +80,31 @@ struct SensorsArgs {
     #[clap(long)]
     psc: bool,
 
-    /// sleep
+    /// print sensors every second
     #[clap(long, short)]
     sleep: bool,
+
+    /// parseable output
+    #[clap(long, short)]
+    parseable: bool,
+
+    /// restrict sensors by type of sensor
+    #[clap(
+        long,
+        short,
+        value_name = "sensor type",
+        use_value_delimiter = true
+    )]
+    types: Option<Vec<String>>,
+
+    /// restrict sensors by name
+    #[clap(
+        long,
+        short,
+        value_name = "sensor name",
+        use_value_delimiter = true
+    )]
+    named: Option<Vec<String>>,
 }
 
 impl MgsArgs {
@@ -223,14 +246,49 @@ impl Sensor {
         }
     }
 
-    fn format(&self, value: f32) -> String {
+    fn format(&self, value: f32, parseable: bool) -> String {
+        if parseable {
+            format!("{value}")
+        } else {
+            match self.kind {
+                MeasurementKind::Speed => {
+                    format!("{value:0} RPM")
+                }
+                _ => {
+                    format!("{value:.2}{}", self.units())
+                }
+            }
+        }
+    }
+
+    pub fn to_kind_string(&self) -> &str {
         match self.kind {
-            MeasurementKind::Speed => {
-                format!("{value:0} RPM")
-            }
-            _ => {
-                format!("{value:.2}{}", self.units())
-            }
+            MeasurementKind::Temperature => "temp",
+            MeasurementKind::Power => "power",
+            MeasurementKind::Current => "current",
+            MeasurementKind::Voltage => "voltage",
+            MeasurementKind::InputCurrent => "input-current",
+            MeasurementKind::InputVoltage => "input-voltage",
+            MeasurementKind::Speed => "speed",
+        }
+    }
+
+    pub fn from_string(name: &str, kind: &str) -> Option<Self> {
+        let k = match kind {
+            "temp" | "temperature" => Some(MeasurementKind::Temperature),
+            "power" => Some(MeasurementKind::Power),
+            "current" => Some(MeasurementKind::Current),
+            "voltage" => Some(MeasurementKind::Voltage),
+            "input-current" => Some(MeasurementKind::InputCurrent),
+            "input-voltage" => Some(MeasurementKind::InputVoltage),
+            "speed" => Some(MeasurementKind::Speed),
+            _ => None,
+        };
+
+        if let Some(kind) = k {
+            Some(Sensor { name: name.to_string(), kind })
+        } else {
+            None
         }
     }
 }
@@ -241,7 +299,7 @@ struct SensorId(u32);
 #[derive(Debug)]
 struct SensorMetadata {
     sensors_by_sensor: MultiMap<Sensor, SensorId>,
-    sensors_by_sensor_and_sp: HashMap<(Sensor, SpIdentifier), SensorId>,
+    sensors_by_sensor_and_sp: HashMap<Sensor, HashMap<SpIdentifier, SensorId>>,
     sensors_by_id: HashMap<SensorId, (SpIdentifier, Sensor, String)>,
     sensors_by_sp: MultiMap<SpIdentifier, SensorId>,
     work_by_sp: HashMap<SpIdentifier, Vec<(String, Vec<SensorId>)>>,
@@ -310,6 +368,27 @@ async fn sensor_metadata(
     mgs_client: &gateway_client::Client,
     args: &SensorsArgs,
 ) -> Result<(SensorMetadata, SensorValues), anyhow::Error> {
+    let by_kind = if let Some(types) = &args.types {
+        let mut h = HashSet::new();
+
+        for t in types {
+            h.insert(match Sensor::from_string("", &t) {
+                None => bail!("invalid sensor kind {t}"),
+                Some(s) => s.kind,
+            });
+        }
+
+        Some(h)
+    } else {
+        None
+    };
+
+    let by_name = if let Some(named) = &args.named {
+        Some(named.into_iter().collect::<HashSet<_>>())
+    } else {
+        None
+    };
+
     //
     // First, get all of the SPs that we can see via Ignition
     //
@@ -321,8 +400,8 @@ async fn sensor_metadata(
         .filter_map(|ignition| {
             if matches!(ignition.details, SpIgnition::Yes { .. }) {
                 if ignition.id.type_ == SpType::Sled {
-                    let matched = if args.sled.len() > 0 {
-                        args.sled
+                    let matched = if args.sleds.len() > 0 {
+                        args.sleds
                             .iter()
                             .find(|&&v| v == ignition.id.slot)
                             .is_some()
@@ -382,6 +461,18 @@ async fn sensor_metadata(
                     let mut device_work = vec![];
 
                     for (sensor, value) in sensors {
+                        if let Some(ref by_kind) = by_kind {
+                            if by_kind.get(&sensor.kind).is_none() {
+                                continue;
+                            }
+                        }
+
+                        if let Some(ref by_name) = by_name {
+                            if by_name.get(&sensor.name).is_none() {
+                                continue;
+                            }
+                        }
+
                         let id = SensorId(current);
                         current += 1;
 
@@ -392,12 +483,16 @@ async fn sensor_metadata(
 
                         if value.is_none() && args.verbose {
                             eprintln!(
-                                "{sp_id:?}: error on {sensor:?} ({device})"
+                                "mgs: error for {sp_id:?} on {sensor:?} ({device})"
                             );
                         }
 
                         sensors_by_sensor.insert(sensor.clone(), id);
-                        sensors_by_sensor_and_sp.insert((sensor, sp_id), id);
+
+                        let by_sp = sensors_by_sensor_and_sp
+                            .entry(sensor)
+                            .or_insert_with(|| HashMap::new());
+                        by_sp.insert(sp_id, id);
                         sensors_by_sp.insert(sp_id, id);
                         all_values.insert(id, value);
 
@@ -409,8 +504,7 @@ async fn sensor_metadata(
 
                 if args.verbose {
                     eprintln!(
-                        "{:?} {:?} {:?}",
-                        sp_id,
+                        "mgs: latencies for {sp_id:?}: {:.1?} {:.1?}",
                         info.timestamps[2].duration_since(info.timestamps[1]),
                         info.timestamps[1].duration_since(info.timestamps[0])
                     );
@@ -457,7 +551,7 @@ async fn sp_read_sensors(
                 SpComponentDetails::Measurement { kind: _, name: _, value } => {
                     Some(Some(*value))
                 }
-                SpComponentDetails::MeasurementError { kind, name, error } => {
+                SpComponentDetails::MeasurementError { error, .. } => {
                     match error {
                         MeasurementErrorCode::NoReading
                         | MeasurementErrorCode::NotPresent => None,
@@ -491,10 +585,10 @@ async fn sensor_data(
             sp_read_sensors(&mgs_client, &id, metadata).await
         });
 
-        handles.push((sp_id, handle));
+        handles.push(handle);
     }
 
-    for (sp_id, handle) in handles {
+    for handle in handles {
         let rval = handle.await.unwrap()?;
 
         for (id, value) in rval {
@@ -528,47 +622,73 @@ async fn cmd_mgs_sensors(
     let mut sps = metadata.sensors_by_sp.keys().collect::<Vec<_>>();
     sps.sort();
 
-    loop {
-        print!("{:20} ", "NAME");
+    let print_value = |v| {
+        if args.parseable {
+            print!(",{v}");
+        } else {
+            print!(" {v:>8}");
+        }
+    };
+
+    let print_header = || {
+        if !args.parseable {
+            print!("{:20} ", "NAME");
+        } else {
+            print!("TIME,SENSOR");
+        }
 
         for sp in &sps {
-            print!(
-                " {:>8}",
-                format!(
-                    "{}-{}",
-                    sp_type_to_str(&sp.type_).to_uppercase(),
-                    sp.slot
-                )
-            );
+            print_value(format!(
+                "{}-{}",
+                sp_type_to_str(&sp.type_).to_uppercase(),
+                sp.slot
+            ));
         }
 
         println!();
+    };
+
+    let print_name = |sensor: &Sensor, now: Duration| {
+        if !args.parseable {
+            print!("{:20} ", sensor.name);
+        } else {
+            print!(
+                "{},{},{}",
+                now.as_secs(),
+                sensor.name,
+                sensor.to_kind_string()
+            );
+        }
+    };
+
+    let mut wakeup =
+        tokio::time::Instant::now() + tokio::time::Duration::from_millis(1000);
+
+    print_header();
+
+    loop {
+        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
 
         for sensor in &sensors {
-            print!("{:20} ", sensor.name);
+            print_name(sensor, now);
+
+            let by_sp = metadata.sensors_by_sensor_and_sp.get(sensor).unwrap();
 
             for sp in &sps {
-                let lookup = sensor.clone();
-
-                if let Some(id) = metadata
-                    .sensors_by_sensor_and_sp
-                    .get(&(lookup.clone(), **sp))
-                {
+                print_value(if let Some(id) = by_sp.get(sp) {
                     if let Some(value) = values.0.get(id) {
                         match value {
                             Some(value) => {
-                                print!(" {:>8}", sensor.format(*value))
+                                sensor.format(*value, args.parseable)
                             }
-                            None => {
-                                print!(" {:>8}", "X");
-                            }
+                            None => "X".to_string(),
                         }
                     } else {
-                        print!(" {:>8}", "?");
+                        "?".to_string()
                     }
                 } else {
-                    print!(" {:>8}", "-");
-                }
+                    "-".to_string()
+                });
             }
 
             println!();
@@ -578,13 +698,14 @@ async fn cmd_mgs_sensors(
             break;
         }
 
-        tokio::time::sleep_until(
-            tokio::time::Instant::now()
-                + tokio::time::Duration::from_millis(1000),
-        )
-        .await;
+        tokio::time::sleep_until(wakeup).await;
+        wakeup += tokio::time::Duration::from_millis(1000);
 
         values = sensor_data(mgs_client, metadata.clone()).await?;
+
+        if !args.parseable {
+            print_header();
+        }
     }
 
     Ok(())
