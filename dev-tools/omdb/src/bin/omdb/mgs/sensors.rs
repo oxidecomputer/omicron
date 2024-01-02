@@ -181,9 +181,14 @@ impl DeviceIdentifier {
     fn device(&self) -> &String {
         match self {
             Self::Device(ref device) => device,
-            _ => {
-                panic!("tried to treat non-device as device")
-            }
+            _ => panic!(),
+        }
+    }
+
+    fn field(&self) -> usize {
+        match self {
+            Self::Field(field) => *field,
+            _ => panic!(),
         }
     }
 }
@@ -572,7 +577,7 @@ async fn sp_read_sensors(
     Ok(rval)
 }
 
-async fn sensor_data(
+async fn sp_data_mgs(
     mgs_client: &gateway_client::Client,
     metadata: std::sync::Arc<&'static SensorMetadata>,
 ) -> Result<SensorValues, anyhow::Error> {
@@ -600,6 +605,75 @@ async fn sensor_data(
     }
 
     Ok(SensorValues(all_values))
+}
+
+fn sp_data_csv<R: std::io::Read + std::io::Seek>(
+    reader: &mut csv::Reader<R>,
+    position: &mut csv::Position,
+    metadata: std::sync::Arc<&'static SensorMetadata>,
+) -> Result<SensorValues, anyhow::Error> {
+    let headers = reader.headers()?;
+    let hlen = headers.len();
+    let mut all_values = HashMap::new();
+
+    reader.seek(position.clone())?;
+    let mut iter = reader.records();
+
+    let mut time: Option<String> = None;
+
+    loop {
+        *position = iter.reader().position().clone();
+
+        if let Some(record) = iter.next() {
+            let record = record?;
+
+            if record.len() != hlen {
+                bail!("bad record length at line {}", position.line());
+            }
+
+            if let Some(ref time) = time {
+                if &record[0] != time {
+                    break;
+                }
+            } else {
+                time = Some(record[0].to_string());
+            }
+
+            if let Some(sensor) = Sensor::from_string(&record[1], &record[2]) {
+                if let Some(ids) = metadata.sensors_by_sensor.get_vec(&sensor) {
+                    for id in ids {
+                        let (_, _, d) = metadata.sensors_by_id.get(id).unwrap();
+                        let field = d.field() + 3;
+
+                        let value = match record[field].parse::<f32>() {
+                            Ok(value) => Some(value),
+                            _ => None,
+                        };
+
+                        all_values.insert(*id, value);
+                    }
+                }
+            } else {
+                bail!("bad sensor at line {}", position.line());
+            }
+        }
+    }
+
+    Ok(SensorValues(all_values))
+}
+
+async fn sensor_data<R: std::io::Read + std::io::Seek>(
+    input: &mut SensorInput<R>,
+    metadata: std::sync::Arc<&'static SensorMetadata>,
+) -> Result<SensorValues, anyhow::Error> {
+    match input {
+        SensorInput::MgsClient(ref mgs_client) => {
+            sp_data_mgs(mgs_client, metadata).await
+        }
+        SensorInput::CsvReader(reader, position) => {
+            sp_data_csv(reader, position, metadata)
+        }
+    }
 }
 
 ///
@@ -715,15 +789,7 @@ pub(crate) async fn cmd_mgs_sensors(
 
         tokio::time::sleep_until(wakeup).await;
         wakeup += tokio::time::Duration::from_millis(1000);
-
-        let mgs_client = match input {
-            SensorInput::MgsClient(ref client) => client,
-            _ => {
-                bail!("nope");
-            }
-        };
-
-        values = sensor_data(mgs_client, metadata.clone()).await?;
+        values = sensor_data(&mut input, metadata.clone()).await?;
 
         if !args.parseable {
             print_header();
