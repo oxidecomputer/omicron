@@ -5,7 +5,7 @@
 //! Prototype code for collecting information from systems in the rack
 
 use crate::Omdb;
-use anyhow::Context;
+use anyhow::{bail, Context};
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;
@@ -88,13 +88,12 @@ impl MgsArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let mgs_client = self.mgs_client(omdb, log).await?;
-
         match &self.command {
             MgsCommands::Dashboard(dashboard_args) => {
-                dashboard::cmd_mgs_dashboard(&mgs_client, dashboard_args).await
+                bail!("no");
             }
             MgsCommands::Inventory(inventory_args) => {
+                let mgs_client = self.mgs_client(omdb, log).await?;
                 cmd_mgs_inventory(&mgs_client, inventory_args).await
             }
             MgsCommands::Sensors(sensors_args) => {

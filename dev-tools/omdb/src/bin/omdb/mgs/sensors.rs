@@ -70,6 +70,24 @@ pub(crate) struct SensorsArgs {
     input: Option<String>,
 }
 
+impl SensorsArgs {
+    fn matches_sp(&self, sp: &SpIdentifier) -> bool {
+        match sp.type_ {
+            SpType::Sled => {
+                let matched = if self.sleds.len() > 0 {
+                    self.sleds.iter().find(|&&v| v == sp.slot).is_some()
+                } else {
+                    true
+                };
+
+                matched != self.exclude
+            }
+            SpType::Switch => self.switches,
+            SpType::Power => self.psc,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 struct Sensor {
     name: String,
@@ -136,7 +154,7 @@ impl Sensor {
 
 enum SensorInput<R> {
     MgsClient(gateway_client::Client),
-    CsvReader(csv::Reader<R>),
+    CsvReader(csv::Reader<R>, csv::Position),
 }
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
@@ -146,15 +164,32 @@ struct SensorId(u32);
 struct SensorMetadata {
     sensors_by_sensor: MultiMap<Sensor, SensorId>,
     sensors_by_sensor_and_sp: HashMap<Sensor, HashMap<SpIdentifier, SensorId>>,
-    sensors_by_id: HashMap<SensorId, (SpIdentifier, Sensor, String)>,
+    sensors_by_id: HashMap<SensorId, (SpIdentifier, Sensor, DeviceIdentifier)>,
     sensors_by_sp: MultiMap<SpIdentifier, SensorId>,
-    work_by_sp: HashMap<SpIdentifier, Vec<(String, Vec<SensorId>)>>,
+    work_by_sp: HashMap<SpIdentifier, Vec<(DeviceIdentifier, Vec<SensorId>)>>,
 }
 
 struct SensorValues(HashMap<SensorId, Option<f32>>);
 
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+enum DeviceIdentifier {
+    Field(usize),
+    Device(String),
+}
+
+impl DeviceIdentifier {
+    fn device(&self) -> &String {
+        match self {
+            Self::Device(ref device) => device,
+            _ => {
+                panic!("tried to treat non-device as device")
+            }
+        }
+    }
+}
+
 struct SpInfo {
-    devices: MultiMap<String, (Sensor, Option<f32>)>,
+    devices: MultiMap<DeviceIdentifier, (Sensor, Option<f32>)>,
     timestamps: Vec<std::time::Instant>,
 }
 
@@ -201,7 +236,7 @@ async fn sp_info(
                 _ => None,
             })
         {
-            devices.insert(c.component.clone(), s);
+            devices.insert(DeviceIdentifier::Device(c.component.clone()), s);
         }
     }
 
@@ -227,16 +262,7 @@ async fn sp_info_mgs(
         .filter_map(|ignition| {
             if matches!(ignition.details, SpIgnition::Yes { .. }) {
                 if ignition.id.type_ == SpType::Sled {
-                    let matched = if args.sleds.len() > 0 {
-                        args.sleds
-                            .iter()
-                            .find(|&&v| v == ignition.id.slot)
-                            .is_some()
-                    } else {
-                        true
-                    };
-
-                    if matched != args.exclude {
+                    if args.matches_sp(&ignition.id) {
                         return Some(ignition.id);
                     }
                 }
@@ -297,7 +323,117 @@ async fn sp_info_mgs(
     Ok(rval)
 }
 
-async fn sensor_metadata<R>(
+fn sp_info_csv<R: std::io::Read>(
+    reader: &mut csv::Reader<R>,
+    position: &mut csv::Position,
+    args: &SensorsArgs,
+) -> Result<Vec<(SpIdentifier, SpInfo)>, anyhow::Error> {
+    let mut sps = vec![];
+    let headers = reader.headers()?;
+
+    let expected = ["TIME", "SENSOR", "KIND"];
+    let len = expected.len();
+    let hlen = headers.len();
+
+    if hlen < len {
+        bail!("expected as least {len} fields (found {headers:?})");
+    }
+
+    for ndx in 0..len {
+        if &headers[ndx] != expected[ndx] {
+            bail!(
+                "malformed headers: expected {}, found {} ({headers:?})",
+                &expected[ndx],
+                &headers[ndx]
+            );
+        }
+    }
+
+    for ndx in len..hlen {
+        let field = &headers[ndx];
+        let parts: Vec<&str> = field.splitn(2, '-').collect();
+
+        if parts.len() != 2 {
+            bail!("malformed field \"{field}\"");
+        }
+
+        let type_ = match parts[0] {
+            "SLED" => SpType::Sled,
+            "SWITCH" => SpType::Switch,
+            "POWER" => SpType::Power,
+            _ => {
+                bail!("unknown type {}", parts[0]);
+            }
+        };
+
+        let slot = parts[1].parse::<u32>().or_else(|_| {
+            bail!("invalid slot in \"{field}\"");
+        })?;
+
+        let sp = SpIdentifier { type_, slot };
+
+        if args.matches_sp(&sp) {
+            sps.push(Some(sp));
+        } else {
+            sps.push(None);
+        }
+    }
+
+    let mut iter = reader.records();
+    let mut sensors = HashSet::new();
+    let mut by_sp = MultiMap::new();
+
+    loop {
+        *position = iter.reader().position().clone();
+
+        if let Some(record) = iter.next() {
+            let record = record?;
+
+            if record.len() != hlen {
+                bail!("bad record length at line {}", position.line());
+            }
+
+            if let Some(sensor) = Sensor::from_string(&record[1], &record[2]) {
+                if sensors.get(&sensor).is_some() {
+                    break;
+                }
+
+                sensors.insert(sensor.clone());
+
+                for (ndx, sp) in sps.iter().enumerate() {
+                    if let Some(sp) = sp {
+                        let value = match record[ndx + 3].parse::<f32>() {
+                            Ok(value) => Some(value),
+                            _ => None,
+                        };
+
+                        by_sp.insert(sp, (sensor.clone(), value));
+                    }
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    let mut rval = vec![];
+
+    for (field, sp) in sps.iter().enumerate() {
+        let mut devices = MultiMap::new();
+
+        if let Some(sp) = sp {
+            if let Some(v) = by_sp.remove(sp) {
+                devices.insert_many(DeviceIdentifier::Field(field), v);
+            }
+
+            rval.push((*sp, SpInfo { devices, timestamps: vec![] }));
+        }
+    }
+
+    Ok(rval)
+}
+
+async fn sensor_metadata<R: std::io::Read>(
     input: &mut SensorInput<R>,
     args: &SensorsArgs,
 ) -> Result<(SensorMetadata, SensorValues), anyhow::Error> {
@@ -326,9 +462,8 @@ async fn sensor_metadata<R>(
         SensorInput::MgsClient(ref mgs_client) => {
             sp_info_mgs(mgs_client, args).await?
         }
-        // SensorInput::CsvReader(XXX) => sp_info_csv(mgs_client),
-        _ => {
-            bail!("not yet");
+        SensorInput::CsvReader(reader, position) => {
+            sp_info_csv(reader, position, args)?
         }
     };
 
@@ -368,7 +503,7 @@ async fn sensor_metadata<R>(
 
                 if value.is_none() && args.verbose {
                     eprintln!(
-                        "mgs: error for {sp_id:?} on {sensor:?} ({device})"
+                        "mgs: error for {sp_id:?} on {sensor:?} ({device:?})"
                     );
                 }
 
@@ -412,7 +547,7 @@ async fn sp_read_sensors(
 
     for (component, ids) in work.iter() {
         for (value, id) in mgs_client
-            .sp_component_get(id.type_, id.slot, component)
+            .sp_component_get(id.type_, id.slot, component.device())
             .await?
             .iter()
             .filter_map(|detail| match detail {
@@ -478,7 +613,10 @@ pub(crate) async fn cmd_mgs_sensors(
 ) -> Result<(), anyhow::Error> {
     let mut input = if let Some(ref input) = args.input {
         let file = File::open(input)?;
-        SensorInput::CsvReader(csv::Reader::from_reader(file))
+        SensorInput::CsvReader(
+            csv::Reader::from_reader(file),
+            csv::Position::new(),
+        )
     } else {
         SensorInput::MgsClient(mgs_args.mgs_client(omdb, log).await?)
     };
@@ -492,13 +630,6 @@ pub(crate) async fn cmd_mgs_sensors(
     let metadata = Box::leak(Box::new(metadata));
     let metadata: &_ = metadata;
     let metadata = std::sync::Arc::new(metadata);
-
-    let mgs_client = match input {
-        SensorInput::MgsClient(ref client) => client,
-        _ => {
-            bail!("not yet");
-        }
-    };
 
     let mut sensors = metadata.sensors_by_sensor.keys().collect::<Vec<_>>();
     sensors.sort();
@@ -584,6 +715,13 @@ pub(crate) async fn cmd_mgs_sensors(
 
         tokio::time::sleep_until(wakeup).await;
         wakeup += tokio::time::Duration::from_millis(1000);
+
+        let mgs_client = match input {
+            SensorInput::MgsClient(ref client) => client,
+            _ => {
+                bail!("nope");
+            }
+        };
 
         values = sensor_data(mgs_client, metadata.clone()).await?;
 
