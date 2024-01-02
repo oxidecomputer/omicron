@@ -9,6 +9,7 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::params::UninitializedSledId;
 use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
@@ -152,6 +153,12 @@ pub struct BaseboardId {
 
 impl From<Baseboard> for BaseboardId {
     fn from(value: Baseboard) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
+}
+
+impl From<UninitializedSledId> for BaseboardId {
+    fn from(value: UninitializedSledId) -> Self {
         BaseboardId { part_number: value.part, serial_number: value.serial }
     }
 }

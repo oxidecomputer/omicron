@@ -77,7 +77,7 @@ pub fn api() -> SledApiDescription {
         api.register(uplink_ensure)?;
         api.register(read_network_bootstore_config_cache)?;
         api.register(write_network_bootstore_config)?;
-        api.register(add_sled_to_initialized_rack)?;
+        api.register(sled_add)?;
         api.register(metrics_collect)?;
         api.register(host_os_write_start)?;
         api.register(host_os_write_status_get)?;
@@ -714,7 +714,7 @@ async fn write_network_bootstore_config(
     method = PUT,
     path = "/sleds"
 }]
-async fn add_sled_to_initialized_rack(
+async fn sled_add(
     rqctx: RequestContext<SledAgent>,
     body: TypedBody<AddSledRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -732,7 +732,7 @@ async fn add_sled_to_initialized_rack(
         ));
     }
 
-    crate::sled_agent::add_sled_to_initialized_rack(
+    crate::sled_agent::sled_add(
         sa.logger().clone(),
         request.sled_id,
         request.start_request,

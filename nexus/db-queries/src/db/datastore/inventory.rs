@@ -1175,7 +1175,7 @@ impl DataStore {
     pub async fn find_hw_baseboard_id(
         &self,
         opctx: &OpContext,
-        baseboard_id: BaseboardId,
+        baseboard_id: &BaseboardId,
     ) -> Result<Uuid, Error> {
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1872,7 +1872,7 @@ mod test {
             part_number: "some-part".into(),
         };
         let err = datastore
-            .find_hw_baseboard_id(&opctx, baseboard_id)
+            .find_hw_baseboard_id(&opctx, &baseboard_id)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound { .. }));

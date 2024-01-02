@@ -20,10 +20,8 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::shared::UninitializedSled;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -41,7 +39,6 @@ use once_cell::sync::Lazy;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
-use uuid::Uuid;
 
 pub static HARDWARE_RACK_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
@@ -69,15 +66,10 @@ pub static HARDWARE_SLED_DISK_URL: Lazy<String> = Lazy::new(|| {
 pub static SLED_INSTANCES_URL: Lazy<String> = Lazy::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
-pub static DEMO_UNINITIALIZED_SLED: Lazy<UninitializedSled> =
-    Lazy::new(|| UninitializedSled {
-        baseboard: Baseboard {
-            serial: "demo-serial".to_string(),
-            part: "demo-part".to_string(),
-            revision: 6,
-        },
-        rack_id: Uuid::new_v4(),
-        cubby: 1,
+pub static DEMO_UNINITIALIZED_SLED: Lazy<params::UninitializedSledId> =
+    Lazy::new(|| params::UninitializedSledId {
+        serial: "demo-serial".to_string(),
+        part: "demo-part".to_string(),
     });
 
 // Global policy

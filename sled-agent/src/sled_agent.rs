@@ -1165,7 +1165,7 @@ pub enum AddSledError {
 }
 
 /// Add a sled to an initialized rack.
-pub async fn add_sled_to_initialized_rack(
+pub async fn sled_add(
     log: Logger,
     sled_id: Baseboard,
     request: StartSledAgentRequest,
