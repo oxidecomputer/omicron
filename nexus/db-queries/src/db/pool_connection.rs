@@ -17,7 +17,7 @@ use diesel::prelude::*;
 use diesel::PgConnection;
 use diesel_dtrace::DTraceConnection;
 use std::collections::HashMap;
-use tokio::sync::OnceCell;
+use tokio::sync::Mutex;
 
 pub type DbConnection = DTraceConnection<PgConnection>;
 
@@ -80,89 +80,118 @@ const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
     "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
 
 #[derive(Debug)]
+struct OIDCache(HashMap<PgMetadataCacheKey<'static>, (u32, u32)>);
+
+impl OIDCache {
+    // Populate a new OID cache by pre-filling values
+    async fn new(
+        conn: &mut Connection<DbConnection>,
+    ) -> Result<Self, ConnectionError> {
+        // Lookup all the OIDs for custom types.
+        //
+        // As a reminder, this is an optimization:
+        // - If we supply a value in CUSTOM_TYPE_KEYS that does not
+        // exist in the schema, the corresponding row won't be
+        // found, so the value will be ignored.
+        // - If we don't supply a value in CUSTOM_TYPE_KEYS, even
+        // though it DOES exist in the schema, it'll likewise not
+        // get pre-populated into the cache. Diesel would observe
+        // the cache miss, and perform the lookup later.
+        let results: Vec<PgTypeMetadata> = pg_type::table
+            .select((pg_type::typname, pg_type::oid, pg_type::typarray))
+            .inner_join(
+                pg_namespace::table
+                    .on(pg_type::typnamespace.eq(pg_namespace::oid)),
+            )
+            .filter(pg_type::typname.eq_any(CUSTOM_TYPE_KEYS))
+            .filter(pg_namespace::nspname.eq(CUSTOM_TYPE_SCHEMA))
+            .load_async(&*conn)
+            .await?;
+
+        // Convert the OIDs into a ("Cache Key", "OID Tuple") pair,
+        // and store the result in a HashMap.
+        //
+        // We'll iterate over this HashMap to pre-populate the connection-local cache for all
+        // future connections, including this one.
+        Ok::<_, ConnectionError>(Self(HashMap::from_iter(
+            results.into_iter().map(
+                |PgTypeMetadata { typname, oid, array_oid }| {
+                    (
+                        PgMetadataCacheKey::new(
+                            Some(CUSTOM_TYPE_SCHEMA.into()),
+                            std::borrow::Cow::Owned(typname),
+                        ),
+                        (oid, array_oid),
+                    )
+                },
+            ),
+        )))
+    }
+}
+
+// String-based representation of the CockroachDB version.
+//
+// We currently do minimal parsing of this value, but it should
+// be distinct between different revisions of CockroachDB.
+// This version includes the semver version of the DB, but also
+// build and target information.
+#[derive(Debug, Eq, PartialEq, Hash)]
+struct CockroachVersion(String);
+
+impl CockroachVersion {
+    async fn new(
+        conn: &Connection<DbConnection>,
+    ) -> Result<Self, ConnectionError> {
+        diesel::sql_function!(fn version() -> Text);
+
+        let version =
+            diesel::select(version()).get_result_async::<String>(conn).await?;
+        Ok(Self(version))
+    }
+}
+
+/// A customizer for all new connections made to CockroachDB, from Diesel.
+#[derive(Debug)]
 pub(crate) struct ConnectionCustomizer {
-    oid_cache: OnceCell<HashMap<PgMetadataCacheKey<'static>, (u32, u32)>>,
+    oid_caches: Mutex<HashMap<CockroachVersion, OIDCache>>,
 }
 
 impl ConnectionCustomizer {
     pub(crate) fn new() -> Self {
-        Self { oid_cache: OnceCell::new() }
-    }
-
-    // Access the OID cache, or populate it if it hasn't already been created.
-    async fn get_or_try_init_oid_cache(
-        &self,
-        conn: &mut Connection<DbConnection>,
-    ) -> Result<
-        &HashMap<PgMetadataCacheKey<'static>, (u32, u32)>,
-        ConnectionError,
-    > {
-        self.oid_cache
-            .get_or_try_init(|| {
-                let conn = conn.get_owned_connection();
-                async move {
-                    // Lookup all the OIDs for custom types.
-                    //
-                    // As a reminder, this is an optimization:
-                    // - If we supply a value in CUSTOM_TYPE_KEYS that does not
-                    // exist in the schema, the corresponding row won't be
-                    // found, so the value will be ignored.
-                    // - If we don't supply a value in CUSTOM_TYPE_KEYS, even
-                    // though it DOES exist in the schema, it'll likewise not
-                    // get pre-populated into the cache. Diesel would observe
-                    // the cache miss, and perform the lookup later.
-                    let results: Vec<PgTypeMetadata> =
-                        pg_type::table
-                            .select((
-                                pg_type::typname,
-                                pg_type::oid,
-                                pg_type::typarray,
-                            ))
-                            .inner_join(pg_namespace::table.on(
-                                pg_type::typnamespace.eq(pg_namespace::oid),
-                            ))
-                            .filter(pg_type::typname.eq_any(CUSTOM_TYPE_KEYS))
-                            .filter(
-                                pg_namespace::nspname.eq(CUSTOM_TYPE_SCHEMA),
-                            )
-                            .load_async(&conn)
-                            .await?;
-
-                    // Convert the OIDs into a ("Cache Key", "OID Tuple") pair,
-                    // and store the result in a HashMap.
-                    //
-                    // We'll iterate over this HashMap to pre-populate the connection-local cache for all
-                    // future connections, including this one.
-                    Ok::<_, ConnectionError>(HashMap::from_iter(
-                        results.into_iter().map(
-                            |PgTypeMetadata { typname, oid, array_oid }| {
-                                (
-                                    PgMetadataCacheKey::new(
-                                        Some(CUSTOM_TYPE_SCHEMA.into()),
-                                        std::borrow::Cow::Owned(typname),
-                                    ),
-                                    (oid, array_oid),
-                                )
-                            },
-                        ),
-                    ))
-                }
-            })
-            .await
+        Self { oid_caches: Mutex::new(HashMap::new()) }
     }
 
     async fn populate_metadata_cache(
         &self,
         conn: &mut Connection<DbConnection>,
     ) -> Result<(), ConnectionError> {
-        let oid_cache = self.get_or_try_init_oid_cache(conn).await?;
+        // Look up the CockroachDB version for new connections, to ensure
+        // that OID caches are distinct between different CRDB versions.
+        //
+        // This step is performed out of an abundance of caution: OIDs are not
+        // necessarily stable across major releases of CRDB, and this ensures
+        // that the OID lookups on custom types do not cross this version
+        // boundary.
+        let version = CockroachVersion::new(conn).await?;
 
+        // Lookup the OID cache, or populate it if we haven't previously
+        // established a connection to this database version.
+        let mut oid_caches = self.oid_caches.lock().await;
+        let entry = oid_caches.entry(version);
+        use std::collections::hash_map::Entry::*;
+        let oid_cache = match entry {
+            Occupied(ref entry) => entry.get(),
+            Vacant(entry) => entry.insert(OIDCache::new(conn).await?),
+        };
+
+        // Copy the OID cache into this specific connection.
+        //
         // NOTE: I don't love that this is blocking (due to "as_sync_conn"), but the
         // "get_metadata_cache" method does not seem implemented for types that could have a
         // non-Postgres backend.
         let mut sync_conn = conn.as_sync_conn();
         let cache = sync_conn.get_metadata_cache();
-        for (k, v) in oid_cache {
+        for (k, v) in &oid_cache.0 {
             cache.store_type(k.clone(), *v);
         }
         Ok(())
