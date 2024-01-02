@@ -169,7 +169,10 @@ struct SensorMetadata {
     work_by_sp: HashMap<SpIdentifier, Vec<(DeviceIdentifier, Vec<SensorId>)>>,
 }
 
-struct SensorValues(HashMap<SensorId, Option<f32>>);
+struct SensorValues {
+    values: HashMap<SensorId, Option<f32>>,
+    time: u64,
+}
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 enum DeviceIdentifier {
@@ -253,7 +256,7 @@ async fn sp_info(
 async fn sp_info_mgs(
     mgs_client: &gateway_client::Client,
     args: &SensorsArgs,
-) -> Result<Vec<(SpIdentifier, SpInfo)>, anyhow::Error> {
+) -> Result<(Vec<(SpIdentifier, SpInfo)>, u64), anyhow::Error> {
     let mut rval = vec![];
 
     //
@@ -325,14 +328,17 @@ async fn sp_info_mgs(
         eprintln!("total discovery time {:?}", now.elapsed());
     }
 
-    Ok(rval)
+    Ok((
+        rval,
+        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
+    ))
 }
 
 fn sp_info_csv<R: std::io::Read>(
     reader: &mut csv::Reader<R>,
     position: &mut csv::Position,
     args: &SensorsArgs,
-) -> Result<Vec<(SpIdentifier, SpInfo)>, anyhow::Error> {
+) -> Result<(Vec<(SpIdentifier, SpInfo)>, u64), anyhow::Error> {
     let mut sps = vec![];
     let headers = reader.headers()?;
 
@@ -387,6 +393,7 @@ fn sp_info_csv<R: std::io::Read>(
     let mut iter = reader.records();
     let mut sensors = HashSet::new();
     let mut by_sp = MultiMap::new();
+    let mut time = None;
 
     loop {
         *position = iter.reader().position().clone();
@@ -398,6 +405,12 @@ fn sp_info_csv<R: std::io::Read>(
                 bail!("bad record length at line {}", position.line());
             }
 
+            if time.is_none() {
+                time = Some(record[0].parse::<u64>().or_else(|_| {
+                    bail!("bad time at line {}", position.line());
+                })?);
+            }
+
             if let Some(sensor) = Sensor::from_string(&record[1], &record[2]) {
                 if sensors.get(&sensor).is_some() {
                     break;
@@ -407,7 +420,7 @@ fn sp_info_csv<R: std::io::Read>(
 
                 for (ndx, sp) in sps.iter().enumerate() {
                     if let Some(sp) = sp {
-                        let value = match record[ndx + 3].parse::<f32>() {
+                        let value = match record[ndx + len].parse::<f32>() {
                             Ok(value) => Some(value),
                             _ => None,
                         };
@@ -428,14 +441,14 @@ fn sp_info_csv<R: std::io::Read>(
 
         if let Some(sp) = sp {
             if let Some(v) = by_sp.remove(sp) {
-                devices.insert_many(DeviceIdentifier::Field(field), v);
+                devices.insert_many(DeviceIdentifier::Field(field + len), v);
             }
 
             rval.push((*sp, SpInfo { devices, timestamps: vec![] }));
         }
     }
 
-    Ok(rval)
+    Ok((rval, time.unwrap()))
 }
 
 async fn sensor_metadata<R: std::io::Read>(
@@ -463,7 +476,7 @@ async fn sensor_metadata<R: std::io::Read>(
         None
     };
 
-    let info = match input {
+    let (info, time) = match input {
         SensorInput::MgsClient(ref mgs_client) => {
             sp_info_mgs(mgs_client, args).await?
         }
@@ -476,7 +489,7 @@ async fn sensor_metadata<R: std::io::Read>(
     let mut sensors_by_sensor_and_sp = HashMap::new();
     let mut sensors_by_id = HashMap::new();
     let mut sensors_by_sp = MultiMap::new();
-    let mut all_values = HashMap::new();
+    let mut values = HashMap::new();
     let mut work_by_sp = HashMap::new();
 
     let mut current = 0;
@@ -519,7 +532,7 @@ async fn sensor_metadata<R: std::io::Read>(
                     .or_insert_with(|| HashMap::new());
                 by_sp.insert(sp_id, id);
                 sensors_by_sp.insert(sp_id, id);
-                all_values.insert(id, value);
+                values.insert(id, value);
 
                 device_work.push(id);
             }
@@ -538,7 +551,7 @@ async fn sensor_metadata<R: std::io::Read>(
             sensors_by_sp,
             work_by_sp,
         },
-        SensorValues(all_values),
+        SensorValues { values, time },
     ))
 }
 
@@ -581,7 +594,7 @@ async fn sp_data_mgs(
     mgs_client: &gateway_client::Client,
     metadata: std::sync::Arc<&'static SensorMetadata>,
 ) -> Result<SensorValues, anyhow::Error> {
-    let mut all_values = HashMap::new();
+    let mut values = HashMap::new();
     let mut handles = vec![];
 
     for sp_id in metadata.sensors_by_sp.keys() {
@@ -600,11 +613,16 @@ async fn sp_data_mgs(
         let rval = handle.await.unwrap()?;
 
         for (id, value) in rval {
-            all_values.insert(id, value);
+            values.insert(id, value);
         }
     }
 
-    Ok(SensorValues(all_values))
+    Ok(SensorValues {
+        values,
+        time: SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)?
+            .as_secs(),
+    })
 }
 
 fn sp_data_csv<R: std::io::Read + std::io::Seek>(
@@ -614,12 +632,12 @@ fn sp_data_csv<R: std::io::Read + std::io::Seek>(
 ) -> Result<SensorValues, anyhow::Error> {
     let headers = reader.headers()?;
     let hlen = headers.len();
-    let mut all_values = HashMap::new();
+    let mut values = HashMap::new();
 
     reader.seek(position.clone())?;
     let mut iter = reader.records();
 
-    let mut time: Option<String> = None;
+    let mut time = None;
 
     loop {
         *position = iter.reader().position().clone();
@@ -631,35 +649,40 @@ fn sp_data_csv<R: std::io::Read + std::io::Seek>(
                 bail!("bad record length at line {}", position.line());
             }
 
-            if let Some(ref time) = time {
-                if &record[0] != time {
+            let now = record[0].parse::<u64>().or_else(|_| {
+                bail!("bad time at line {}", position.line());
+            })?;
+
+            if let Some(time) = time {
+                if now != time {
                     break;
                 }
             } else {
-                time = Some(record[0].to_string());
+                time = Some(now);
             }
 
             if let Some(sensor) = Sensor::from_string(&record[1], &record[2]) {
                 if let Some(ids) = metadata.sensors_by_sensor.get_vec(&sensor) {
                     for id in ids {
                         let (_, _, d) = metadata.sensors_by_id.get(id).unwrap();
-                        let field = d.field() + 3;
-
-                        let value = match record[field].parse::<f32>() {
+                        let value = match record[d.field()].parse::<f32>() {
                             Ok(value) => Some(value),
                             _ => None,
                         };
 
-                        all_values.insert(*id, value);
+                        values.insert(*id, value);
                     }
                 }
             } else {
                 bail!("bad sensor at line {}", position.line());
             }
+        } else {
+            time = Some(0);
+            break;
         }
     }
 
-    Ok(SensorValues(all_values))
+    Ok(SensorValues { values, time: time.unwrap() })
 }
 
 async fn sensor_data<R: std::io::Read + std::io::Seek>(
@@ -723,7 +746,7 @@ pub(crate) async fn cmd_mgs_sensors(
         if !args.parseable {
             print!("{:20} ", "NAME");
         } else {
-            print!("TIME,SENSOR");
+            print!("TIME,SENSOR,KIND");
         }
 
         for sp in &sps {
@@ -737,16 +760,11 @@ pub(crate) async fn cmd_mgs_sensors(
         println!();
     };
 
-    let print_name = |sensor: &Sensor, now: Duration| {
+    let print_name = |sensor: &Sensor, now: u64| {
         if !args.parseable {
             print!("{:20} ", sensor.name);
         } else {
-            print!(
-                "{},{},{}",
-                now.as_secs(),
-                sensor.name,
-                sensor.to_kind_string()
-            );
+            print!("{now},{},{}", sensor.name, sensor.to_kind_string());
         }
     };
 
@@ -756,16 +774,14 @@ pub(crate) async fn cmd_mgs_sensors(
     print_header();
 
     loop {
-        let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
-
         for sensor in &sensors {
-            print_name(sensor, now);
+            print_name(sensor, values.time);
 
             let by_sp = metadata.sensors_by_sensor_and_sp.get(sensor).unwrap();
 
             for sp in &sps {
                 print_value(if let Some(id) = by_sp.get(sp) {
-                    if let Some(value) = values.0.get(id) {
+                    if let Some(value) = values.values.get(id) {
                         match value {
                             Some(value) => {
                                 sensor.format(*value, args.parseable)
@@ -784,12 +800,19 @@ pub(crate) async fn cmd_mgs_sensors(
         }
 
         if !args.sleep {
-            break;
+            if args.input.is_none() {
+                break;
+            }
+        } else {
+            tokio::time::sleep_until(wakeup).await;
+            wakeup += tokio::time::Duration::from_millis(1000);
         }
 
-        tokio::time::sleep_until(wakeup).await;
-        wakeup += tokio::time::Duration::from_millis(1000);
         values = sensor_data(&mut input, metadata.clone()).await?;
+
+        if args.input.is_some() && values.time == 0 {
+            break;
+        }
 
         if !args.parseable {
             print_header();
