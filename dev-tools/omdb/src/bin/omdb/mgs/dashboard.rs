@@ -31,8 +31,8 @@ use ratatui::{
 };
 
 use crate::mgs::sensors::{
-    sensor_metadata, Sensor, SensorId, SensorInput, SensorMetadata,
-    SensorValues, SensorsArgs,
+    sensor_data, sensor_metadata, Sensor, SensorId, SensorInput,
+    SensorMetadata, SensorValues, SensorsArgs,
 };
 use clap::Args;
 use gateway_client::types::MeasurementKind;
@@ -42,7 +42,7 @@ use multimap::MultiMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 #[derive(Debug, Args)]
 pub(crate) struct DashboardArgs {
@@ -156,6 +156,7 @@ impl Attributes for CurrentGraph {
     fn label(&self) -> String {
         "Output current".to_string()
     }
+
     fn legend_label(&self) -> String {
         "Regulators".to_string()
     }
@@ -170,6 +171,30 @@ impl Attributes for CurrentGraph {
 
     fn legend_value(&self, val: f64) -> String {
         format!("{:3.2}A", val)
+    }
+}
+
+struct SensorGraph;
+
+impl Attributes for SensorGraph {
+    fn label(&self) -> String {
+        "Sensor output".to_string()
+    }
+
+    fn legend_label(&self) -> String {
+        "Sensors".to_string()
+    }
+
+    fn y_axis_label(&self) -> String {
+        "Units".to_string()
+    }
+
+    fn axis_value(&self, val: f64) -> String {
+        format!("{:2.2}", val)
+    }
+
+    fn legend_value(&self, val: f64) -> String {
+        format!("{:3.2}", val)
     }
 }
 
@@ -345,6 +370,7 @@ impl Graph {
 
 struct Dashboard {
     graphs: HashMap<(SpIdentifier, MeasurementKind), Graph>,
+    sids: HashMap<(SpIdentifier, MeasurementKind), Vec<SensorId>>,
     current: usize,
     sps: Vec<SpIdentifier>,
     sensor_to_graph: HashMap<SensorId, (SpIdentifier, MeasurementKind, usize)>,
@@ -352,6 +378,7 @@ struct Dashboard {
     last: Instant,
     interval: u32,
     outstanding: bool,
+    status: String,
 }
 
 impl Dashboard {
@@ -363,6 +390,7 @@ impl Dashboard {
         let mut sps =
             metadata.sensors_by_sp.keys().map(|m| *m).collect::<Vec<_>>();
         let mut graphs = HashMap::new();
+        let mut sids = HashMap::new();
         sps.sort();
 
         for sp in sps.iter() {
@@ -390,13 +418,27 @@ impl Dashboard {
 
                 graphs.insert(
                     (sp, k),
-                    Graph::new(labels.as_slice(), Box::new(TempGraph))?,
+                    Graph::new(
+                        labels.as_slice(),
+                        match k {
+                            MeasurementKind::Temperature => Box::new(TempGraph),
+                            MeasurementKind::Current => Box::new(CurrentGraph),
+                            MeasurementKind::Speed => Box::new(FanGraph),
+                            _ => Box::new(SensorGraph),
+                        },
+                    )?,
+                );
+
+                sids.insert(
+                    (sp, k),
+                    v.iter().map(|(_, sid)| *sid).collect::<Vec<_>>(),
                 );
             }
         }
 
         Ok(Dashboard {
             graphs,
+            sids,
             current: 0,
             sps,
             sensor_to_graph,
@@ -404,11 +446,12 @@ impl Dashboard {
             outstanding: true,
             last: Instant::now(),
             interval: 1000,
+            status: "Init".to_string(),
         })
     }
 
     fn status(&self) -> Vec<(&str, &str)> {
-        vec![("Foo", "bar")]
+        vec![("Status", &self.status)]
     }
 
     fn need_update(&mut self) -> Result<bool> {
@@ -448,56 +491,70 @@ impl Dashboard {
             graph.zoom_out();
         }
     }
+
+    fn values(&mut self, values: &SensorValues) {
+        for (graph, sids) in &self.sids {
+            let mut data = vec![];
+
+            for sid in sids {
+                if let Some(value) = values.values.get(&sid) {
+                    data.push(*value);
+                } else {
+                    data.push(None);
+                }
+            }
+
+            let graph = self.graphs.get_mut(graph).unwrap();
+            graph.data(data.as_slice());
+        }
+    }
 }
 
 fn run_dashboard<B: Backend>(
     terminal: &mut Terminal<B>,
-    mut dashboard: Dashboard,
-) -> Result<()> {
-    let mut last_tick = Instant::now();
-    let tick_rate = Duration::from_millis(100);
-
-    loop {
-        let timeout = tick_rate
-            .checked_sub(last_tick.elapsed())
-            .unwrap_or_else(|| Duration::from_secs(0));
-
-        let update = if crossterm::event::poll(timeout)? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => return Ok(()),
-                    KeyCode::Char('+') => dashboard.zoom_in(),
-                    KeyCode::Char('-') => dashboard.zoom_out(),
-                    KeyCode::Char('l') => {
-                        //
-                        // ^L -- form feed -- is historically used to clear and
-                        // redraw the screen.  And, notably, it is what dtach(1)
-                        // will send when attaching to a dashboard.  If we
-                        // see ^L, clear the terminal to force a total redraw.
-                        //
-                        if key.modifiers == KeyModifiers::CONTROL {
-                            terminal.clear()?;
-                        }
+    dashboard: &mut Dashboard,
+    force_update: bool,
+) -> Result<bool> {
+    let update = if crossterm::event::poll(Duration::from_secs(0))? {
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Char('q') => return Ok(true),
+                KeyCode::Char('+') => dashboard.zoom_in(),
+                KeyCode::Char('-') => dashboard.zoom_out(),
+                KeyCode::Char('l') => {
+                    //
+                    // ^L -- form feed -- is historically used to clear and
+                    // redraw the screen.  And, notably, it is what dtach(1)
+                    // will send when attaching to a dashboard.  If we
+                    // see ^L, clear the terminal to force a total redraw.
+                    //
+                    if key.modifiers == KeyModifiers::CONTROL {
+                        terminal.clear()?;
                     }
-                    KeyCode::Up => dashboard.up(),
-                    KeyCode::Down => dashboard.down(),
-                    KeyCode::Esc => dashboard.esc(),
-                    KeyCode::Tab => dashboard.tab(),
-                    _ => {}
                 }
+                KeyCode::Up => dashboard.up(),
+                KeyCode::Down => dashboard.down(),
+                KeyCode::Esc => dashboard.esc(),
+                KeyCode::Tab => dashboard.tab(),
+                _ => {}
             }
-            true
-        } else {
-            dashboard.need_update()?
-        };
-
-        if update {
-            dashboard.update_data();
-            terminal.draw(|f| draw(f, &mut dashboard))?;
         }
+        true
+    } else {
+        force_update
+    };
 
-        last_tick = Instant::now();
+    if update {
+        dashboard.update_data();
+        terminal.draw(|f| draw(f, dashboard))?;
     }
+
+    Ok(false)
+}
+
+fn secs() -> Result<u64> {
+    let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?;
+    Ok(now.as_secs())
 }
 
 ///
@@ -537,9 +594,52 @@ pub(crate) async fn cmd_mgs_dashboard(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let dashboard = Dashboard::new(&args, metadata)?;
+    let mut dashboard = Dashboard::new(&args, metadata.clone())?;
+    let mut last = secs()?;
+    let mut update = true;
 
-    let res = run_dashboard(&mut terminal, dashboard);
+    let res = 'outer: loop {
+        match run_dashboard(&mut terminal, &mut dashboard, update) {
+            Err(err) => {
+                break Err(err);
+            }
+            Ok(true) => {
+                break Ok(());
+            }
+            _ => {}
+        }
+
+        update = false;
+        let now = secs()?;
+
+        if now != last {
+            let kicked = Instant::now();
+            let f = sensor_data(&mut input, metadata.clone());
+            last = now;
+
+            while Instant::now().duration_since(kicked).as_millis() < 800 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+
+                match run_dashboard(&mut terminal, &mut dashboard, update) {
+                    Err(err) => {
+                        break 'outer Err(err);
+                    }
+                    Ok(true) => {
+                        break 'outer Ok(());
+                    }
+                    _ => {}
+                }
+            }
+
+            let values = f.await?;
+            dashboard.values(&values);
+            dashboard.status = format!("{}", values.time);
+            update = true;
+            continue;
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    };
 
     // restore terminal
     disable_raw_mode()?;

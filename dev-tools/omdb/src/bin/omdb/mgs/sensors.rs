@@ -173,8 +173,8 @@ pub(crate) struct SensorMetadata {
 }
 
 pub(crate) struct SensorValues {
-    values: HashMap<SensorId, Option<f32>>,
-    time: u64,
+    pub values: HashMap<SensorId, Option<f32>>,
+    pub time: u64,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
