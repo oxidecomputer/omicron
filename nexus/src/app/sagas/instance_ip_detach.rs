@@ -11,7 +11,7 @@ use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use nexus_db_model::{IpAttachState, IpKind};
+use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 use serde::Deserialize;
@@ -71,18 +71,15 @@ async fn siid_begin_detach_ip(
 
     match params.delete_params {
         params::ExternalIpDelete::Ephemeral => {
-            let eips = datastore
-                .instance_lookup_external_ips(
+            let eip = datastore
+                .instance_lookup_ephemeral_ip(
                     &opctx,
                     params.authz_instance.id(),
                 )
                 .await
                 .map_err(ActionError::action_failed)?;
 
-            // XXX: cleanup.
-            if let Some(eph_ip) =
-                eips.iter().find(|e| e.kind == IpKind::Ephemeral)
-            {
+            if let Some(eph_ip) = eip {
                 datastore
                     .begin_deallocate_ephemeral_ip(
                         &opctx,
@@ -276,7 +273,7 @@ pub(crate) mod test {
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
-    use nexus_db_model::{ExternalIp, Name};
+    use nexus_db_model::{ExternalIp, IpKind, Name};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils_macros::nexus_test;

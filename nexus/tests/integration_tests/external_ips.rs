@@ -724,7 +724,7 @@ async fn test_external_ip_attach_detach_fail_if_in_use_by_other(
     .unwrap();
     assert_eq!(
         error.message,
-        "Floating IP is not attached to the target instance".to_string()
+        "floating IP is not attached to the target instance".to_string()
     );
 }
 

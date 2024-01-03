@@ -68,6 +68,16 @@ impl std::fmt::Display for IpAttachState {
     }
 }
 
+impl std::fmt::Display for IpKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            IpKind::Floating => "floating",
+            IpKind::Ephemeral => "ephemeral",
+            IpKind::SNat => "SNAT",
+        })
+    }
+}
+
 /// The main model type for external IP addresses for instances
 /// and externally-facing services.
 ///
