@@ -208,7 +208,7 @@ heck = "0.4"
 hex = "0.4.3"
 hex-literal = "0.4.1"
 highway = "1.1.0"
-hkdf = "0.12.3"
+hkdf = "0.12.4"
 http = "0.2.11"
 httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
