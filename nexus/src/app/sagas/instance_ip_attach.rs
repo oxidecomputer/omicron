@@ -23,7 +23,7 @@ use uuid::Uuid;
 // The IP attach/detach sagas do some resource locking -- because we
 // allow them to be called in [Running, Stopped], they must contend
 // with each other/themselves, instance start, instance delete, and
-// the instance stop action (noting the latter is not a saga.
+// the instance stop action (noting the latter is not a saga).
 //
 // The main means of access control here is an external IP's `state`.
 // Entering either saga begins with an atomic swap from Attached/Detached
