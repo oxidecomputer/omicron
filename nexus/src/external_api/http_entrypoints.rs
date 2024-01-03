@@ -1296,7 +1296,7 @@ async fn project_policy_update(
 
 // IP Pools
 
-/// List all IP Pools that can be used by a given project.
+/// List all IP pools that can be used by a given project
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools",
@@ -1454,7 +1454,7 @@ async fn ip_pool_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an IP Pool
+/// Delete an IP pool
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}",
@@ -1476,7 +1476,7 @@ async fn ip_pool_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update an IP Pool
+/// Update an IP pool
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}",
@@ -1703,7 +1703,7 @@ async fn ip_pool_service_range_remove(
 
 // Floating IP Addresses
 
-/// List all Floating IPs
+/// List all floating IPs
 #[endpoint {
     method = GET,
     path = "/v1/floating-ips",
@@ -1735,7 +1735,7 @@ async fn floating_ip_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a Floating IP
+/// Create a floating IP
 #[endpoint {
     method = POST,
     path = "/v1/floating-ips",
@@ -1761,7 +1761,7 @@ async fn floating_ip_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a Floating IP
+/// Delete a floating IP
 #[endpoint {
     method = DELETE,
     path = "/v1/floating-ips/{floating_ip}",
@@ -4831,7 +4831,7 @@ async fn sled_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set the sled's provision state.
+/// Set the sled's provision state
 #[endpoint {
     method = PUT,
     path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
