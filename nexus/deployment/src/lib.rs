@@ -109,7 +109,7 @@
 //!
 //! An **execution** background task periodically evaluates whether the state
 //! reflected in the latest inventory collection is consistent with the current
-//! target plan.  If not, executes operations to bring reality into line with
+//! target plan.  If not, it executes operations to bring reality into line with
 //! the plan.  This means provisioning new zones, removing old zones, adding
 //! instances to DNS, removing instances from DNS, carrying out firmware
 //! updates, etc.
