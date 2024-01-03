@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "identity_type"))]
+    #[diesel(postgres_type(name = "identity_type", schema = "public"))]
     pub struct IdentityTypeEnum;
 
     #[derive(

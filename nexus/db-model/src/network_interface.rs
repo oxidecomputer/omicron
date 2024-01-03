@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 impl_enum_type! {
     #[derive(SqlType, QueryId, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "network_interface_kind"))]
+    #[diesel(postgres_type(name = "network_interface_kind", schema = "public"))]
     pub struct NetworkInterfaceKindEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]

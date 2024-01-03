@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_interface_kind"))]
+    #[diesel(postgres_type(name = "switch_interface_kind", schema = "public"))]
     pub struct DbSwitchInterfaceKindEnum;
 
     #[derive(
