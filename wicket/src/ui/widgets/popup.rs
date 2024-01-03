@@ -464,7 +464,7 @@ pub fn draw_buttons(
     let button_rects = Layout::default()
         .direction(Direction::Horizontal)
         .horizontal_margin(2)
-        .constraints(constraints.as_ref())
+        .constraints(constraints)
         .split(rect);
 
     let block = Block::default()

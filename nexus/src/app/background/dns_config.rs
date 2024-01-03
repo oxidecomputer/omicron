@@ -166,7 +166,6 @@ mod test {
     use crate::app::background::init::test::read_internal_dns_zone_id;
     use crate::app::background::init::test::write_test_dns_generation;
     use assert_matches::assert_matches;
-    use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::ExpressionMethods;
@@ -237,11 +236,11 @@ mod test {
         );
 
         // Similarly, wipe all of the state and verify that we handle that okay.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
         datastore
-            .pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+            .transaction_retry_wrapper("dns_config_test_basic")
+            .transaction(&conn, |conn| async move {
                 conn.batch_execute_async(
                     nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
                 )
@@ -265,7 +264,7 @@ mod test {
                 .execute_async(&conn)
                 .await
                 .unwrap();
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(())
+                Ok(())
             })
             .await
             .unwrap();

@@ -28,6 +28,7 @@ banner end-to-end-tests
 #
 export CARGO_PROFILE_DEV_DEBUG=1
 export CARGO_PROFILE_TEST_DEBUG=1
+export CARGO_INCREMENTAL=0
 
 ptime -m cargo build --locked -p end-to-end-tests --tests --bin bootstrap \
 	--message-format json-render-diagnostics >/tmp/output.end-to-end.json

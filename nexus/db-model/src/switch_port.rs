@@ -355,6 +355,7 @@ pub struct SwitchPortLinkConfig {
     pub mtu: SqlU16,
     pub fec: SwitchLinkFec,
     pub speed: SwitchLinkSpeed,
+    pub autoneg: bool,
 }
 
 impl SwitchPortLinkConfig {
@@ -365,6 +366,7 @@ impl SwitchPortLinkConfig {
         mtu: u16,
         fec: SwitchLinkFec,
         speed: SwitchLinkSpeed,
+        autoneg: bool,
     ) -> Self {
         Self {
             port_settings_id,
@@ -372,6 +374,7 @@ impl SwitchPortLinkConfig {
             link_name,
             fec,
             speed,
+            autoneg,
             mtu: mtu.into(),
         }
     }

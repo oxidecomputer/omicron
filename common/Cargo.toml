@@ -15,18 +15,14 @@ dropshot.workspace = true
 futures.workspace = true
 hex.workspace = true
 http.workspace = true
-hyper.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
-lazy_static.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
-ring.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
 serde.workspace = true
-serde_derive.workspace = true
 serde_human_bytes.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
@@ -41,6 +37,7 @@ uuid.workspace = true
 parse-display.workspace = true
 progenitor.workspace = true
 omicron-workspace-hack.workspace = true
+once_cell.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

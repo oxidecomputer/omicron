@@ -30,6 +30,7 @@ use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -1092,6 +1093,7 @@ pub async fn start_producer_server(
     let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
     let server_info = ProducerEndpoint {
         id,
+        kind: ProducerKind::Service,
         address: producer_address,
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(1),

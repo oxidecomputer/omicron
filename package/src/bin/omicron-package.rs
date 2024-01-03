@@ -29,6 +29,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
+use swrite::{swrite, SWrite};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
@@ -153,12 +154,11 @@ async fn do_for_all_rust_packages(
         })
         .partition(|(_, release)| *release);
 
-    let features = config
-        .target
-        .0
-        .iter()
-        .map(|(name, value)| format!("{}-{} ", name, value))
-        .collect::<String>();
+    let features =
+        config.target.0.iter().fold(String::new(), |mut acc, (name, value)| {
+            swrite!(acc, "{}-{} ", name, value);
+            acc
+        });
 
     // Execute all the release / debug packages at the same time.
     if !release_pkgs.is_empty() {

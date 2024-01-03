@@ -111,8 +111,8 @@ impl Host {
 ///
 /// `DnsConfigBuilder` provides a much simpler interface for constructing DNS
 /// zone data than using `DnsConfig` directly.  That's because it makes a number
-/// of assumptions that are true of the control plane DNS zone (all described in
-/// RFD 248), but not true in general about DNS zones:
+/// of assumptions that are true of the control plane DNS zones (all described
+/// in RFD 248), but not true in general about DNS zones:
 ///
 /// - We assume that there are only two kinds of hosts: a "sled" (an illumos
 ///   global zone) or a "zone" (an illumos non-global zone).  (Both of these are

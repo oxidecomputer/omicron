@@ -14,7 +14,10 @@ use super::extracted_artifacts::HashingNamedUtf8TempFile;
 use super::ArtifactIdData;
 use super::Board;
 use super::ExtractedArtifactDataHandle;
-use anyhow::anyhow;
+use bytes::Bytes;
+use futures::Stream;
+use futures::StreamExt;
+use futures::TryStreamExt;
 use hubtools::RawHubrisArchive;
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
@@ -28,7 +31,6 @@ use std::collections::btree_map;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
-use std::io::Read;
 use tufaceous_lib::HostPhaseImages;
 use tufaceous_lib::RotArchives;
 
@@ -143,24 +145,26 @@ impl<'a> UpdatePlanBuilder<'a> {
         })
     }
 
-    pub(super) fn add_artifact(
+    pub(super) async fn add_artifact(
         &mut self,
         artifact_id: ArtifactId,
         artifact_hash: ArtifactHash,
-        reader: io::BufReader<impl io::Read>,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
         // If we don't know this artifact kind, we'll still serve it up by hash,
         // but we don't do any further processing on it.
         let Some(artifact_kind) = artifact_id.kind.to_known() else {
-            return self.add_unknown_artifact(
-                artifact_id,
-                artifact_hash,
-                reader,
-                by_id,
-                by_hash,
-            );
+            return self
+                .add_unknown_artifact(
+                    artifact_id,
+                    artifact_hash,
+                    stream,
+                    by_id,
+                    by_hash,
+                )
+                .await;
         };
 
         // If we do know the artifact kind, we may have additional work to do,
@@ -170,48 +174,57 @@ impl<'a> UpdatePlanBuilder<'a> {
         match artifact_kind {
             KnownArtifactKind::GimletSp
             | KnownArtifactKind::PscSp
-            | KnownArtifactKind::SwitchSp => self.add_sp_artifact(
-                artifact_id,
-                artifact_kind,
-                artifact_hash,
-                reader,
-                by_id,
-                by_hash,
-            ),
+            | KnownArtifactKind::SwitchSp => {
+                self.add_sp_artifact(
+                    artifact_id,
+                    artifact_kind,
+                    artifact_hash,
+                    stream,
+                    by_id,
+                    by_hash,
+                )
+                .await
+            }
             KnownArtifactKind::GimletRot
             | KnownArtifactKind::PscRot
-            | KnownArtifactKind::SwitchRot => self.add_rot_artifact(
-                artifact_id,
-                artifact_kind,
-                reader,
-                by_id,
-                by_hash,
-            ),
+            | KnownArtifactKind::SwitchRot => {
+                self.add_rot_artifact(
+                    artifact_id,
+                    artifact_kind,
+                    stream,
+                    by_id,
+                    by_hash,
+                )
+                .await
+            }
             KnownArtifactKind::Host => {
-                self.add_host_artifact(artifact_id, reader, by_id, by_hash)
+                self.add_host_artifact(artifact_id, stream, by_id, by_hash)
             }
             KnownArtifactKind::Trampoline => self.add_trampoline_artifact(
                 artifact_id,
-                reader,
+                stream,
                 by_id,
                 by_hash,
             ),
-            KnownArtifactKind::ControlPlane => self.add_control_plane_artifact(
-                artifact_id,
-                artifact_hash,
-                reader,
-                by_id,
-                by_hash,
-            ),
+            KnownArtifactKind::ControlPlane => {
+                self.add_control_plane_artifact(
+                    artifact_id,
+                    artifact_hash,
+                    stream,
+                    by_id,
+                    by_hash,
+                )
+                .await
+            }
         }
     }
 
-    fn add_sp_artifact(
+    async fn add_sp_artifact(
         &mut self,
         artifact_id: ArtifactId,
         artifact_kind: KnownArtifactKind,
         artifact_hash: ArtifactHash,
-        mut reader: io::BufReader<impl io::Read>,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
@@ -228,15 +241,18 @@ impl<'a> UpdatePlanBuilder<'a> {
             | KnownArtifactKind::SwitchRot => unreachable!(),
         };
 
+        let mut stream = std::pin::pin!(stream);
+
         // SP images are small, and hubtools wants a `&[u8]` to parse, so we'll
         // read the whole thing into memory.
         let mut data = Vec::new();
-        reader.read_to_end(&mut data).map_err(|error| {
-            RepositoryError::CopyExtractedArtifact {
+        while let Some(res) = stream.next().await {
+            let chunk = res.map_err(|error| RepositoryError::ReadArtifact {
                 kind: artifact_kind.into(),
-                error: anyhow!(error),
-            }
-        })?;
+                error: Box::new(error),
+            })?;
+            data.extend_from_slice(&chunk);
+        }
 
         let (artifact_id, board) =
             read_hubris_board_from_archive(artifact_id, data.clone())?;
@@ -255,7 +271,11 @@ impl<'a> UpdatePlanBuilder<'a> {
             ArtifactHashId { kind: artifact_kind.into(), hash: artifact_hash };
         let data = self
             .extracted_artifacts
-            .store(artifact_hash_id, io::Cursor::new(&data))?;
+            .store(
+                artifact_hash_id,
+                futures::stream::iter([Ok(Bytes::from(data))]),
+            )
+            .await?;
         slot.insert(ArtifactIdData {
             id: artifact_id.clone(),
             data: data.clone(),
@@ -273,11 +293,11 @@ impl<'a> UpdatePlanBuilder<'a> {
         Ok(())
     }
 
-    fn add_rot_artifact(
+    async fn add_rot_artifact(
         &mut self,
         artifact_id: ArtifactId,
         artifact_kind: KnownArtifactKind,
-        reader: io::BufReader<impl io::Read>,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
@@ -310,9 +330,12 @@ impl<'a> UpdatePlanBuilder<'a> {
         };
 
         let (rot_a_data, rot_b_data) = Self::extract_nested_artifact_pair(
+            stream,
             &mut self.extracted_artifacts,
             artifact_kind,
-            |out_a, out_b| RotArchives::extract_into(reader, out_a, out_b),
+            |reader, out_a, out_b| {
+                RotArchives::extract_into(reader, out_a, out_b)
+            },
         )?;
 
         // Technically we've done all we _need_ to do with the RoT images. We
@@ -358,7 +381,7 @@ impl<'a> UpdatePlanBuilder<'a> {
     fn add_host_artifact(
         &mut self,
         artifact_id: ArtifactId,
-        reader: io::BufReader<impl io::Read>,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
@@ -369,9 +392,12 @@ impl<'a> UpdatePlanBuilder<'a> {
         }
 
         let (phase_1_data, phase_2_data) = Self::extract_nested_artifact_pair(
+            stream,
             &mut self.extracted_artifacts,
             KnownArtifactKind::Host,
-            |out_1, out_2| HostPhaseImages::extract_into(reader, out_1, out_2),
+            |reader, out_1, out_2| {
+                HostPhaseImages::extract_into(reader, out_1, out_2)
+            },
         )?;
 
         // Similarly to the RoT, we need to create new, non-conflicting artifact
@@ -409,7 +435,7 @@ impl<'a> UpdatePlanBuilder<'a> {
     fn add_trampoline_artifact(
         &mut self,
         artifact_id: ArtifactId,
-        reader: io::BufReader<impl io::Read>,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
@@ -422,9 +448,12 @@ impl<'a> UpdatePlanBuilder<'a> {
         }
 
         let (phase_1_data, phase_2_data) = Self::extract_nested_artifact_pair(
+            stream,
             &mut self.extracted_artifacts,
             KnownArtifactKind::Trampoline,
-            |out_1, out_2| HostPhaseImages::extract_into(reader, out_1, out_2),
+            |reader, out_1, out_2| {
+                HostPhaseImages::extract_into(reader, out_1, out_2)
+            },
         )?;
 
         // Similarly to the RoT, we need to create new, non-conflicting artifact
@@ -466,11 +495,11 @@ impl<'a> UpdatePlanBuilder<'a> {
         Ok(())
     }
 
-    fn add_control_plane_artifact(
+    async fn add_control_plane_artifact(
         &mut self,
         artifact_id: ArtifactId,
         artifact_hash: ArtifactHash,
-        reader: io::BufReader<impl io::Read>,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
@@ -487,7 +516,8 @@ impl<'a> UpdatePlanBuilder<'a> {
             hash: artifact_hash,
         };
 
-        let data = self.extracted_artifacts.store(artifact_hash_id, reader)?;
+        let data =
+            self.extracted_artifacts.store(artifact_hash_id, stream).await?;
 
         self.control_plane_hash = Some(data.hash());
 
@@ -503,11 +533,11 @@ impl<'a> UpdatePlanBuilder<'a> {
         Ok(())
     }
 
-    fn add_unknown_artifact(
+    async fn add_unknown_artifact(
         &mut self,
         artifact_id: ArtifactId,
         artifact_hash: ArtifactHash,
-        reader: io::BufReader<impl io::Read>,
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
         by_id: &mut BTreeMap<ArtifactId, Vec<ArtifactHashId>>,
         by_hash: &mut HashMap<ArtifactHashId, ExtractedArtifactDataHandle>,
     ) -> Result<(), RepositoryError> {
@@ -515,7 +545,8 @@ impl<'a> UpdatePlanBuilder<'a> {
         let artifact_hash_id =
             ArtifactHashId { kind: artifact_kind.clone(), hash: artifact_hash };
 
-        let data = self.extracted_artifacts.store(artifact_hash_id, reader)?;
+        let data =
+            self.extracted_artifacts.store(artifact_hash_id, stream).await?;
 
         record_extracted_artifact(
             artifact_id,
@@ -529,11 +560,80 @@ impl<'a> UpdatePlanBuilder<'a> {
         Ok(())
     }
 
-    // RoT, host OS, and trampoline OS artifacts all contain a pair of artifacts
-    // we actually care about (RoT: A/B images; host/trampoline: phase1/phase2
-    // images). This method is a helper that converts a single artifact `reader`
-    // into a pair of extracted artifacts.
+    /// A helper that converts a single artifact `stream` into a pair of
+    /// extracted artifacts.
+    ///
+    /// RoT, host OS, and trampoline OS artifacts all contain a pair of
+    /// artifacts we actually care about (RoT: A/B images; host/trampoline:
+    /// phase1/phase2 images). This method is a helper to extract that.
+    ///
+    /// This method uses a `block_in_place` into synchronous code, because the
+    /// value of changing tufaceous to do async tarball extraction is honestly
+    /// pretty dubious.
+    ///
+    /// The main costs of this are that:
+    /// 1. This code can only be used with multithreaded Tokio executors. (This
+    ///    is OK for production, but does require that our tests use `flavor =
+    ///    "multi_thread`.)
+    /// 2. Parallelizing extraction is harder if we ever want to do that in the
+    ///    future. (It can be done using the async-scoped crate, though.)
+    ///
+    /// Depending on how things shake out, we may want to revisit this in the
+    /// future.
     fn extract_nested_artifact_pair<F>(
+        stream: impl Stream<Item = Result<bytes::Bytes, tough::error::Error>> + Send,
+        extracted_artifacts: &mut ExtractedArtifacts,
+        kind: KnownArtifactKind,
+        extract: F,
+    ) -> Result<
+        (ExtractedArtifactDataHandle, ExtractedArtifactDataHandle),
+        RepositoryError,
+    >
+    where
+        F: FnOnce(
+                &mut dyn io::BufRead,
+                &mut HashingNamedUtf8TempFile,
+                &mut HashingNamedUtf8TempFile,
+            ) -> anyhow::Result<()>
+            + Send,
+    {
+        // Since stream isn't guaranteed to be 'static, we have to use
+        // block_in_place here, not spawn_blocking. This does mean that the
+        // current task is taken over, and that this function can only be used
+        // from a multithreaded Tokio runtime.
+        //
+        // An alternative would be to use the `async-scoped` crate. However:
+        //
+        // - We would only spawn one task there.
+        // - The only safe use of async-scoped is with the `scope_and_block`
+        //   call, which uses `tokio::task::block_in_place` anyway.
+        // - async-scoped also requires a multithreaded Tokio runtime.
+        //
+        // If we ever want to parallelize extraction across all the different
+        // artifacts, `async-scoped` would be a good fit.
+        tokio::task::block_in_place(|| {
+            let stream = std::pin::pin!(stream);
+            let reader =
+                tokio_util::io::StreamReader::new(stream.map_err(|error| {
+                    // StreamReader requires a conversion from tough's errors to
+                    // std::io::Error.
+                    std::io::Error::new(io::ErrorKind::Other, error)
+                }));
+
+            // RotArchives::extract_into takes a synchronous reader, so we need
+            // to use this bridge. The bridge can only be used from a blocking
+            // context.
+            let mut reader = tokio_util::io::SyncIoBridge::new(reader);
+
+            Self::extract_nested_artifact_pair_impl(
+                extracted_artifacts,
+                kind,
+                |out_a, out_b| extract(&mut reader, out_a, out_b),
+            )
+        })
+    }
+
+    fn extract_nested_artifact_pair_impl<F>(
         extracted_artifacts: &mut ExtractedArtifacts,
         kind: KnownArtifactKind,
         extract: F,
@@ -587,6 +687,59 @@ impl<'a> UpdatePlanBuilder<'a> {
         ] {
             if no_artifacts {
                 return Err(RepositoryError::MissingArtifactKind(kind));
+            }
+        }
+
+        // Ensure that all A/B RoT images for each board kind have the same
+        // version number.
+        for (kind, mut single_board_rot_artifacts) in [
+            (
+                KnownArtifactKind::GimletRot,
+                self.gimlet_rot_a.iter().chain(&self.gimlet_rot_b),
+            ),
+            (
+                KnownArtifactKind::PscRot,
+                self.psc_rot_a.iter().chain(&self.psc_rot_b),
+            ),
+            (
+                KnownArtifactKind::SwitchRot,
+                self.sidecar_rot_a.iter().chain(&self.sidecar_rot_b),
+            ),
+        ] {
+            // We know each of these iterators has at least 2 elements (one from
+            // the A artifacts and one from the B artifacts, checked above) so
+            // we can safely unwrap the first.
+            let version =
+                &single_board_rot_artifacts.next().unwrap().id.version;
+            for artifact in single_board_rot_artifacts {
+                if artifact.id.version != *version {
+                    return Err(RepositoryError::MultipleVersionsPresent {
+                        kind,
+                        v1: version.clone(),
+                        v2: artifact.id.version.clone(),
+                    });
+                }
+            }
+        }
+
+        // Repeat the same version check for all SP images. (This is a separate
+        // loop because the types of the iterators don't match.)
+        for (kind, mut single_board_sp_artifacts) in [
+            (KnownArtifactKind::GimletSp, self.gimlet_sp.values()),
+            (KnownArtifactKind::PscSp, self.psc_sp.values()),
+            (KnownArtifactKind::SwitchSp, self.sidecar_sp.values()),
+        ] {
+            // We know each of these iterators has at least 1 element (checked
+            // above) so we can safely unwrap the first.
+            let version = &single_board_sp_artifacts.next().unwrap().id.version;
+            for artifact in single_board_sp_artifacts {
+                if artifact.id.version != *version {
+                    return Err(RepositoryError::MultipleVersionsPresent {
+                        kind,
+                        v1: version.clone(),
+                        v2: artifact.id.version.clone(),
+                    });
+                }
             }
         }
 
@@ -785,7 +938,9 @@ mod tests {
         builder.build_to_vec().unwrap()
     }
 
-    #[tokio::test]
+    // See documentation for extract_nested_artifact_pair for why multi_thread
+    // is required.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_update_plan_from_artifacts() {
         const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
 
@@ -814,10 +969,11 @@ mod tests {
                 .add_artifact(
                     id,
                     hash,
-                    io::BufReader::new(io::Cursor::new(&data)),
+                    futures::stream::iter([Ok(Bytes::from(data))]),
                     &mut by_id,
                     &mut by_hash,
                 )
+                .await
                 .unwrap();
         }
 
@@ -836,10 +992,11 @@ mod tests {
                 .add_artifact(
                     id,
                     hash,
-                    io::BufReader::new(io::Cursor::new(&data)),
+                    futures::stream::iter([Ok(Bytes::from(data))]),
                     &mut by_id,
                     &mut by_hash,
                 )
+                .await
                 .unwrap();
         }
 
@@ -864,10 +1021,11 @@ mod tests {
                     .add_artifact(
                         id,
                         hash,
-                        io::BufReader::new(io::Cursor::new(&data)),
+                        futures::stream::iter([Ok(Bytes::from(data))]),
                         &mut by_id,
                         &mut by_hash,
                     )
+                    .await
                     .unwrap();
             }
         }
@@ -892,10 +1050,11 @@ mod tests {
                 .add_artifact(
                     id,
                     hash,
-                    io::BufReader::new(io::Cursor::new(data)),
+                    futures::stream::iter([Ok(data.clone())]),
                     &mut by_id,
                     &mut by_hash,
                 )
+                .await
                 .unwrap();
         }
 
@@ -919,10 +1078,11 @@ mod tests {
                 .add_artifact(
                     id,
                     hash,
-                    io::BufReader::new(io::Cursor::new(data)),
+                    futures::stream::iter([Ok(data.clone())]),
                     &mut by_id,
                     &mut by_hash,
                 )
+                .await
                 .unwrap();
         }
 

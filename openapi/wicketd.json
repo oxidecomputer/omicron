@@ -131,44 +131,31 @@
         }
       }
     },
-    "/clear-update-state/{type}/{slot}": {
+    "/clear-update-state": {
       "post": {
         "summary": "Resets update state for a sled.",
         "description": "Use this to clear update state after a failed update.",
         "operationId": "post_clear_update_state",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "slot",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "uint32",
-              "minimum": 0
-            }
-          },
-          {
-            "in": "path",
-            "name": "type",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/SpType"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+                "$ref": "#/components/schemas/ClearUpdateStateParams"
               }
             }
           },
           "required": true
         },
         "responses": {
-          "204": {
-            "description": "resource updated"
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearUpdateStateResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -690,18 +677,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "AbortUpdateOptions": {
         "type": "object",
@@ -874,6 +849,41 @@
             "format": "uint32",
             "minimum": 0
           },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer. In seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
           "port": {
             "description": "Switch port the peer is reachable on.",
             "type": "string"
@@ -1013,6 +1023,56 @@
             ]
           }
         }
+      },
+      "ClearUpdateStateParams": {
+        "type": "object",
+        "properties": {
+          "options": {
+            "description": "Options for clearing update state",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClearUpdateStateOptions"
+              }
+            ]
+          },
+          "targets": {
+            "description": "The SP identifiers to clear the update state for. Must be non-empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "options",
+          "targets"
+        ]
+      },
+      "ClearUpdateStateResponse": {
+        "type": "object",
+        "properties": {
+          "cleared": {
+            "description": "The SPs for which update data was cleared.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          },
+          "no_update_data": {
+            "description": "The SPs that had no update state to clear.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SpIdentifier"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "cleared",
+          "no_update_data"
+        ]
       },
       "CurrentRssUserConfig": {
         "type": "object",
@@ -1484,6 +1544,11 @@
             "items": {
               "$ref": "#/components/schemas/IpNetwork"
             }
+          },
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "default": false,
+            "type": "boolean"
           },
           "bgp_peers": {
             "description": "BGP peers on this port",
@@ -4633,6 +4698,18 @@
           "power_off",
           "power_reset"
         ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

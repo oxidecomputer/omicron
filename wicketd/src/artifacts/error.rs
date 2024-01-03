@@ -5,6 +5,7 @@
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
+use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use omicron_common::update::{ArtifactHashId, ArtifactId, ArtifactKind};
 use slog::error;
@@ -56,6 +57,13 @@ pub(super) enum RepositoryError {
     )]
     MissingTarget(String),
 
+    #[error("error reading artifact of kind `{kind}` from repository")]
+    ReadArtifact {
+        kind: ArtifactKind,
+        #[source]
+        error: Box<tough::error::Error>,
+    },
+
     #[error("error copying artifact of kind `{kind}` from repository")]
     CopyExtractedArtifact {
         kind: ArtifactKind,
@@ -106,6 +114,15 @@ pub(super) enum RepositoryError {
     MissingArtifactKind(KnownArtifactKind),
 
     #[error(
+        "muliple versions present for artifact of kind `{kind:?}`: {v1}, {v2}"
+    )]
+    MultipleVersionsPresent {
+        kind: KnownArtifactKind,
+        v1: SemverVersion,
+        v2: SemverVersion,
+    },
+
+    #[error(
         "duplicate hash entries found in artifacts.json for kind `{}`, hash `{}`", .0.kind, .0.hash
     )]
     DuplicateHashEntry(ArtifactHashId),
@@ -134,7 +151,8 @@ impl RepositoryError {
             | RepositoryError::ParsingHubrisArchive { .. }
             | RepositoryError::ReadHubrisCaboose { .. }
             | RepositoryError::ReadHubrisCabooseBoard { .. }
-            | RepositoryError::ReadHubrisCabooseBoardUtf8(_) => {
+            | RepositoryError::ReadHubrisCabooseBoardUtf8(_)
+            | RepositoryError::MultipleVersionsPresent { .. } => {
                 HttpError::for_bad_request(None, message)
             }
 
@@ -149,6 +167,7 @@ impl RepositoryError {
             | RepositoryError::LoadRepository(_)
             | RepositoryError::ReadArtifactsDocument(_)
             | RepositoryError::TargetHashRead { .. }
+            | RepositoryError::ReadArtifact { .. }
             | RepositoryError::CopyExtractedArtifact { .. } => {
                 HttpError::for_bad_request(None, message)
             }

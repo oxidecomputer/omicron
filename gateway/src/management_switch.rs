@@ -383,7 +383,14 @@ impl ManagementSwitch {
     > {
         let controller = self.ignition_controller();
         let location_map = self.location_map()?;
-        let bulk_state = controller.bulk_ignition_state().await?;
+        let bulk_state =
+            controller.bulk_ignition_state().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed {
+                    sp: location_map
+                        .port_to_id(self.local_ignition_controller_port),
+                    err,
+                }
+            })?;
 
         Ok(bulk_state.into_iter().enumerate().filter_map(|(target, state)| {
             // If the SP returns an ignition target we don't have a port
@@ -402,11 +409,8 @@ impl ManagementSwitch {
                 None => {
                     warn!(
                         self.log,
-                        concat!(
-                            "ignoring unknown ignition target {}",
-                            " returned by ignition controller SP"
-                        ),
-                        target,
+                        "ignoring unknown ignition target {target} \
+                         returned by ignition controller SP",
                     );
                     None
                 }

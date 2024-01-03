@@ -19,7 +19,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 mod gpt;
@@ -589,11 +588,11 @@ async fn hardware_tracking_task(
 ///
 /// This structure provides interfaces for both querying and for receiving new
 /// events.
+#[derive(Clone)]
 pub struct HardwareManager {
     log: Logger,
     inner: Arc<Mutex<HardwareView>>,
     tx: broadcast::Sender<HardwareUpdate>,
-    _worker: JoinHandle<()>,
 }
 
 impl HardwareManager {
@@ -611,34 +610,37 @@ impl HardwareManager {
         // receiver will receive a tokio::sync::broadcast::error::RecvError::Lagged
         // error, indicating they should re-scan the hardware themselves.
         let (tx, _) = broadcast::channel(1024);
-        let hw = match sled_mode {
-            // Treat as a possible scrimlet and setup to scan for real Tofino device.
-            SledMode::Auto
-            | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
-                HardwareView::new()
-            }
+        let hw =
+            match sled_mode {
+                // Treat as a possible scrimlet and setup to scan for real Tofino device.
+                SledMode::Auto
+                | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
+                    HardwareView::new()
+                }
 
-            // Treat sled as gimlet and ignore any attached Tofino device.
-            SledMode::Gimlet => HardwareView::new_stub_tofino(
-                // active=
-                false,
-            ),
+                // Treat sled as gimlet and ignore any attached Tofino device.
+                SledMode::Gimlet => HardwareView::new_stub_tofino(
+                    // active=
+                    false,
+                ),
 
-            // Treat as scrimlet and use the stub Tofino device.
-            SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
-                HardwareView::new_stub_tofino(true)
-            }
+                // Treat as scrimlet and use the stub Tofino device.
+                SledMode::Scrimlet { asic: DendriteAsic::TofinoStub } => {
+                    HardwareView::new_stub_tofino(true)
+                }
 
-            // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
-            // TODO-correctness:
-            // I'm not sure whether or not we should be treating softnpu
-            // as a stub or treating it as a different HardwareView variant,
-            // so this might change.
-            SledMode::Scrimlet { asic: DendriteAsic::SoftNpu } => {
-                HardwareView::new_stub_tofino(true)
+                // Treat as scrimlet (w/ SoftNPU) and use the stub Tofino device.
+                // TODO-correctness:
+                // I'm not sure whether or not we should be treating softnpu
+                // as a stub or treating it as a different HardwareView variant,
+                // so this might change.
+                SledMode::Scrimlet {
+                    asic:
+                        DendriteAsic::SoftNpuZone
+                        | DendriteAsic::SoftNpuPropolisDevice,
+                } => HardwareView::new_stub_tofino(true),
             }
-        }
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
         let inner = Arc::new(Mutex::new(hw));
 
         // Force the device tree to be polled at least once before returning.
@@ -660,11 +662,11 @@ impl HardwareManager {
         let log2 = log.clone();
         let inner2 = inner.clone();
         let tx2 = tx.clone();
-        let _worker = tokio::task::spawn(async move {
+        tokio::task::spawn(async move {
             hardware_tracking_task(log2, inner2, tx2).await
         });
 
-        Ok(Self { log, inner, tx, _worker })
+        Ok(Self { log, inner, tx })
     }
 
     pub fn baseboard(&self) -> Baseboard {

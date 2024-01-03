@@ -11,7 +11,6 @@ dropshot.workspace = true
 nexus-client.workspace = true
 omicron-common.workspace = true
 oximeter.workspace = true
-reqwest = { workspace = true, features = [ "json" ] }
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
 slog.workspace = true

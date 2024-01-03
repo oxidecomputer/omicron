@@ -19,12 +19,47 @@ use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::RotPage;
+use nexus_types::inventory::RotPageFound;
+use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use thiserror::Error;
 use uuid::Uuid;
+
+/// Describes an operational error encountered during the collection process
+///
+/// Examples include a down MGS instance, failure to parse a response from some
+/// other service, etc.  We currently don't need to distinguish these
+/// programmatically.
+#[derive(Debug, Error)]
+pub struct InventoryError(#[from] anyhow::Error);
+
+impl std::fmt::Display for InventoryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+
+/// Describes a mis-use of the [`CollectionBuilder`] object
+///
+/// Example: reporting information about a caboose when the caller has not
+/// already reported information about the corresopnding baseboard.
+///
+/// Unlike `InventoryError`s, which can always happen in a real system, these
+/// errors are not ever expected.  Ideally, all of these problems would be
+/// compile errors.
+#[derive(Debug, Error)]
+pub struct CollectorBug(#[from] anyhow::Error);
+
+impl std::fmt::Display for CollectorBug {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
 
 /// Build an inventory [`Collection`]
 ///
@@ -34,15 +69,18 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct CollectionBuilder {
     // For field documentation, see the corresponding fields in `Collection`.
-    errors: Vec<anyhow::Error>,
+    errors: Vec<InventoryError>,
     time_started: DateTime<Utc>,
     collector: String,
     baseboards: BTreeSet<Arc<BaseboardId>>,
     cabooses: BTreeSet<Arc<Caboose>>,
+    rot_pages: BTreeSet<Arc<RotPage>>,
     sps: BTreeMap<Arc<BaseboardId>, ServiceProcessor>,
     rots: BTreeMap<Arc<BaseboardId>, RotState>,
     cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
+    rot_pages_found:
+        BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
 }
 
 impl CollectionBuilder {
@@ -58,9 +96,11 @@ impl CollectionBuilder {
             collector: collector.to_owned(),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
+            rot_pages: BTreeSet::new(),
             sps: BTreeMap::new(),
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
+            rot_pages_found: BTreeMap::new(),
         }
     }
 
@@ -68,19 +108,17 @@ impl CollectionBuilder {
     pub fn build(self) -> Collection {
         Collection {
             id: Uuid::new_v4(),
-            errors: self
-                .errors
-                .into_iter()
-                .map(|e| format!("{:#}", e))
-                .collect(),
+            errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
             time_started: self.time_started,
             time_done: now(),
             collector: self.collector,
             baseboards: self.baseboards,
             cabooses: self.cabooses,
+            rot_pages: self.rot_pages,
             sps: self.sps,
             rots: self.rots,
             cabooses_found: self.cabooses_found,
+            rot_pages_found: self.rot_pages_found,
         }
     }
 
@@ -105,12 +143,12 @@ impl CollectionBuilder {
         // can stick it into a u16 (which still seems generous).  This will
         // allow us to store it into an Int32 in the database.
         let Ok(sp_slot) = u16::try_from(slot) else {
-            self.found_error(anyhow!(
+            self.found_error(InventoryError::from(anyhow!(
                 "MGS {:?}: SP {:?} slot {}: slot number did not fit into u16",
                 source,
                 sp_type,
                 slot
-            ));
+            )));
             return None;
         };
 
@@ -167,12 +205,12 @@ impl CollectionBuilder {
             gateway_client::types::RotState::CommunicationFailed {
                 message,
             } => {
-                self.found_error(anyhow!(
+                self.found_error(InventoryError::from(anyhow!(
                     "MGS {:?}: reading RoT state for {:?}: {}",
                     source,
                     baseboard,
                     message
-                ));
+                )));
             }
         }
 
@@ -208,7 +246,7 @@ impl CollectionBuilder {
         which: CabooseWhich,
         source: &str,
         caboose: SpComponentCaboose,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), CollectorBug> {
         // Normalize the caboose contents: i.e., if we've seen this exact
         // caboose contents before, use the same record from before.  Otherwise,
         // make a new one.
@@ -233,7 +271,7 @@ impl CollectionBuilder {
             },
         ) {
             let error = if *previous.caboose == *sw_caboose {
-                anyhow!("reported multiple times (same value)",)
+                anyhow!("reported multiple times (same value)")
             } else {
                 anyhow!(
                     "reported caboose multiple times (previously {:?}, \
@@ -242,10 +280,79 @@ impl CollectionBuilder {
                     sw_caboose
                 )
             };
-            Err(error.context(format!(
+            Err(CollectorBug::from(error.context(format!(
                 "baseboard {:?} caboose {:?}",
                 baseboard, which
-            )))
+            ))))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns true if we already found the root of trust page for `which` for
+    /// baseboard `baseboard`
+    ///
+    /// This is used to avoid requesting it multiple times (from multiple MGS
+    /// instances).
+    pub fn found_rot_page_already(
+        &self,
+        baseboard: &BaseboardId,
+        which: RotPageWhich,
+    ) -> bool {
+        self.rot_pages_found
+            .get(&which)
+            .map(|map| map.contains_key(baseboard))
+            .unwrap_or(false)
+    }
+
+    /// Record the given root of trust page found for the given baseboard
+    ///
+    /// The baseboard must previously have been reported using
+    /// `found_sp_state()`.
+    ///
+    /// `source` is an arbitrary string for debugging that describes the MGS
+    /// that reported this data (generally a URL string).
+    pub fn found_rot_page(
+        &mut self,
+        baseboard: &BaseboardId,
+        which: RotPageWhich,
+        source: &str,
+        page: RotPage,
+    ) -> Result<(), CollectorBug> {
+        // Normalize the page contents: i.e., if we've seen this exact page
+        // before, use the same record from before.  Otherwise, make a new one.
+        let sw_rot_page = Self::normalize_item(&mut self.rot_pages, page);
+        let (baseboard, _) =
+            self.sps.get_key_value(baseboard).ok_or_else(|| {
+                anyhow!(
+                    "reporting rot page for unknown baseboard: {:?} ({:?})",
+                    baseboard,
+                    sw_rot_page
+                )
+            })?;
+        let by_id = self.rot_pages_found.entry(which).or_default();
+        if let Some(previous) = by_id.insert(
+            baseboard.clone(),
+            RotPageFound {
+                time_collected: now(),
+                source: source.to_owned(),
+                page: sw_rot_page.clone(),
+            },
+        ) {
+            let error = if *previous.page == *sw_rot_page {
+                anyhow!("reported multiple times (same value)",)
+            } else {
+                anyhow!(
+                    "reported rot page multiple times (previously {:?}, \
+                    now {:?})",
+                    previous,
+                    sw_rot_page
+                )
+            };
+            Err(CollectorBug::from(error.context(format!(
+                "baseboard {:?} rot page {:?}",
+                baseboard, which
+            ))))
         } else {
             Ok(())
         }
@@ -272,11 +379,12 @@ impl CollectionBuilder {
 
     /// Record a collection error
     ///
-    /// This is used for operational errors encountered during the collection
-    /// process (e.g., a down MGS instance).  It's not intended for mis-uses of
-    /// this API, which are conveyed instead through returned errors (and should
-    /// probably cause the caller to stop collection altogether).
-    pub fn found_error(&mut self, error: anyhow::Error) {
+    /// See [`InventoryError`] for more on what kinds of errors are reported
+    /// this way.  These errors are stored as part of the collection so that
+    /// future readers can see what problems might make the collection
+    /// incomplete.  By contrast, [`CollectorBug`]s are not reported and stored
+    /// this way.
+    pub fn found_error(&mut self, error: InventoryError) {
         self.errors.push(error);
     }
 }
@@ -301,6 +409,8 @@ mod test {
     use crate::examples::representative;
     use crate::examples::sp_state;
     use crate::examples::Representative;
+    use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use base64::Engine;
     use gateway_client::types::PowerState;
     use gateway_client::types::RotSlot;
     use gateway_client::types::RotState;
@@ -310,6 +420,8 @@ mod test {
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::Caboose;
     use nexus_types::inventory::CabooseWhich;
+    use nexus_types::inventory::RotPage;
+    use nexus_types::inventory::RotPageWhich;
 
     // Verify the contents of an empty collection.
     #[test]
@@ -326,9 +438,11 @@ mod test {
         assert_eq!(collection.collector, "test_empty");
         assert!(collection.baseboards.is_empty());
         assert!(collection.cabooses.is_empty());
+        assert!(collection.rot_pages.is_empty());
         assert!(collection.sps.is_empty());
         assert!(collection.rots.is_empty());
         assert!(collection.cabooses_found.is_empty());
+        assert!(collection.rot_pages_found.is_empty());
     }
 
     // Simple test of a single, fairly typical collection that contains just
@@ -428,6 +542,33 @@ mod test {
         }
         assert!(collection.cabooses.contains(&common_caboose));
 
+        // Verify the common RoT page data.
+        let common_rot_page_baseboards = [&sled1_bb, &sled3_bb, &switch];
+        let common_rot_page = nexus_types::inventory::RotPage {
+            // base64("1") == "MQ=="
+            data_base64: "MQ==".to_string(),
+        };
+        for bb in &common_rot_page_baseboards {
+            let _ = collection.sps.get(*bb).unwrap();
+            let p0 = collection.rot_page_for(RotPageWhich::Cmpa, bb).unwrap();
+            let p1 =
+                collection.rot_page_for(RotPageWhich::CfpaActive, bb).unwrap();
+            let p2 = collection
+                .rot_page_for(RotPageWhich::CfpaInactive, bb)
+                .unwrap();
+            let p3 =
+                collection.rot_page_for(RotPageWhich::CfpaScratch, bb).unwrap();
+            assert_eq!(p0.source, "test suite");
+            assert_eq!(*p0.page, common_rot_page);
+            assert_eq!(p1.source, "test suite");
+            assert_eq!(*p1.page, common_rot_page);
+            assert_eq!(p2.source, "test suite");
+            assert_eq!(*p2.page, common_rot_page);
+            assert_eq!(p3.source, "test suite");
+            assert_eq!(*p3.page, common_rot_page);
+        }
+        assert!(collection.rot_pages.contains(&common_rot_page));
+
         // Verify the specific, different data for the healthy SPs and RoTs that
         // we reported.
         // sled1
@@ -473,6 +614,20 @@ mod test {
             "slotBdigest2"
         );
         assert_eq!(rot.transient_boot_preference, Some(RotSlot::B));
+
+        // sled 2 did not have any RoT pages reported
+        assert!(collection
+            .rot_page_for(RotPageWhich::Cmpa, &sled2_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaActive, &sled2_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaInactive, &sled2_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaScratch, &sled2_bb)
+            .is_none());
 
         // switch
         let sp = collection.sps.get(&switch).unwrap();
@@ -544,6 +699,38 @@ mod test {
         assert!(collection.cabooses.contains(c));
         assert_eq!(c.board, "board_psc_rot_b");
 
+        // The PSC also has four different RoT pages!
+        let p =
+            &collection.rot_page_for(RotPageWhich::Cmpa, &psc).unwrap().page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cmpa"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaActive, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa active"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaInactive, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa inactive"
+        );
+        let p = &collection
+            .rot_page_for(RotPageWhich::CfpaScratch, &psc)
+            .unwrap()
+            .page;
+        assert_eq!(
+            BASE64_STANDARD.decode(&p.data_base64).unwrap(),
+            b"psc cfpa scratch"
+        );
+
         // Verify the reported SP state for sled3, which did not have a healthy
         // RoT, nor any cabooses.
         let sp = collection.sps.get(&sled3_bb).unwrap();
@@ -565,8 +752,9 @@ mod test {
         assert_eq!(collection.sps.len(), collection.rots.len() + 1);
 
         // There should be five cabooses: the four used for the PSC (see above),
-        // plus the common one.
+        // plus the common one; same for RoT pages.
         assert_eq!(collection.cabooses.len(), 5);
+        assert_eq!(collection.rot_pages.len(), 5);
     }
 
     // Exercises all the failure cases that shouldn't happen in real systems.
@@ -704,7 +892,7 @@ mod test {
         assert_eq!(error.to_string(), error2.to_string(),);
 
         // report the same caboose twice with the same contents
-        let _ = builder
+        builder
             .found_caboose(
                 &sled1_bb,
                 CabooseWhich::SpSlot0,
@@ -747,12 +935,74 @@ mod test {
         ));
         assert!(message.contains(", now "));
 
+        // report RoT page for an unknown baseboard
+        let rot_page1 = RotPage { data_base64: "page1".to_string() };
+        let rot_page2 = RotPage { data_base64: "page2".to_string() };
+        assert!(!builder
+            .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa));
+        let error = builder
+            .found_rot_page(
+                &bogus_baseboard,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "reporting rot page for unknown baseboard: \
+            BaseboardId { part_number: \"p1\", serial_number: \"bogus\" } \
+            (RotPage { data_base64: \"page1\" })"
+        );
+        assert!(!builder
+            .found_rot_page_already(&bogus_baseboard, RotPageWhich::Cmpa));
+
+        // report the same rot page twice with the same contents
+        builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap();
+        let error = builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page1.clone(),
+            )
+            .unwrap_err();
+        assert_eq!(
+            format!("{:#}", error),
+            "baseboard BaseboardId { part_number: \"model1\", \
+            serial_number: \"s1\" } rot page Cmpa: reported multiple \
+            times (same value)"
+        );
+        // report the same rot page again with different contents
+        let error = builder
+            .found_rot_page(
+                &sled1_bb,
+                RotPageWhich::Cmpa,
+                "dummy",
+                rot_page2.clone(),
+            )
+            .unwrap_err();
+        let message = format!("{:#}", error);
+        println!("found error: {}", message);
+        assert!(message.contains(
+            "rot page Cmpa: reported rot page multiple times (previously"
+        ));
+        assert!(message.contains(", now RotPage { data_base64: \"page2\" }"));
+
         // We should still get a valid collection.
         let collection = builder.build();
         println!("{:#?}", collection);
         assert_eq!(collection.collector, "test_problems");
 
-        // We should still have the one sled and its SP slot0 caboose.
+        // We should still have the one sled, its SP slot0 caboose, and its Cmpa
+        // RoT page.
         assert!(collection.baseboards.contains(&sled1_bb));
         let _ = collection.sps.get(&sled1_bb).unwrap();
         let caboose =
@@ -768,6 +1018,28 @@ mod test {
             .is_none());
         assert!(collection
             .caboose_for(CabooseWhich::RotSlotB, &sled1_bb)
+            .is_none());
+        let rot_page =
+            collection.rot_page_for(RotPageWhich::Cmpa, &sled1_bb).unwrap();
+        assert!(collection.rot_pages.contains(&rot_page.page));
+
+        // TODO-correctness Is this test correct? We reported the same RoT page
+        // with different data (rot_page1, then rot_page2). The second
+        // `found_rot_page` returned an error, but we overwrote the original
+        // data and did not record the error in `collection.errors`. Should we
+        // either have kept the original data or returned Ok while returning an
+        // error? It seems a little strange we returned Err but accepted the new
+        // data.
+        assert_eq!(rot_page.page.data_base64, rot_page2.data_base64);
+
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaActive, &sled1_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaInactive, &sled1_bb)
+            .is_none());
+        assert!(collection
+            .rot_page_for(RotPageWhich::CfpaScratch, &sled1_bb)
             .is_none());
 
         // We should see an error.

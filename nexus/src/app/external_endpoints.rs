@@ -827,6 +827,7 @@ mod test {
                 name: name.parse().unwrap(),
                 description: String::new(),
             },
+            quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode,
             admin_group_name: None,
@@ -1539,7 +1540,7 @@ mod test {
                     Err(Error::InvalidRequest { message }) => {
                         assert_eq!(rx_label, "empty");
                         assert_eq!(
-                            message,
+                            message.external_message(),
                             format!(
                                 "HTTP request for unknown server name {:?}",
                                 authority.host()

@@ -13,7 +13,6 @@ use headers::authorization::Credentials;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
-use lazy_static::lazy_static;
 use nexus_db_queries::authn::external::spoof;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -21,6 +20,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
+use once_cell::sync::Lazy;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -158,8 +158,8 @@ enum SetupReq {
     },
 }
 
-lazy_static! {
-    pub static ref HTTP_SERVER: httptest::Server = {
+pub static HTTP_SERVER: Lazy<httptest::Server> =
+    Lazy::new(|| {
         // Run a httptest server
         let server = ServerBuilder::new().run().unwrap();
 
@@ -167,12 +167,10 @@ lazy_static! {
         server.expect(
             Expectation::matching(request::method_path("HEAD", "/image.raw"))
                 .times(1..)
-                .respond_with(
-                    status_code(200).append_header(
-                        "Content-Length",
-                        format!("{}", 4096 * 1000),
-                    ),
-                ),
+                .respond_with(status_code(200).append_header(
+                    "Content-Length",
+                    format!("{}", 4096 * 1000),
+                )),
         );
 
         server.expect(
@@ -182,10 +180,11 @@ lazy_static! {
         );
 
         server
-    };
+    });
 
-    /// List of requests to execute at setup time
-    static ref SETUP_REQUESTS: Vec<SetupReq> = vec![
+/// List of requests to execute at setup time
+static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
+    vec![
         // Create a separate Silo
         SetupReq::Post {
             url: "/v1/system/silos",
@@ -203,10 +202,7 @@ lazy_static! {
             ],
         },
         // Get the default IP pool
-        SetupReq::Get {
-            url: &DEMO_IP_POOL_URL,
-            id_routes: vec![],
-        },
+        SetupReq::Get { url: &DEMO_IP_POOL_URL, id_routes: vec![] },
         // Create an IP pool range
         SetupReq::Post {
             url: &DEMO_IP_POOL_RANGES_ADD_URL,
@@ -278,6 +274,12 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_IMAGE_CREATE).unwrap(),
             id_routes: vec!["/v1/images/{id}"],
         },
+        // Create a Floating IP in the project
+        SetupReq::Post {
+            url: &DEMO_PROJECT_URL_FIPS,
+            body: serde_json::to_value(&*DEMO_FLOAT_IP_CREATE).unwrap(),
+            id_routes: vec!["/v1/floating-ips/{id}"],
+        },
         // Create a SAML identity provider
         SetupReq::Post {
             url: &SAML_IDENTITY_PROVIDERS_URL,
@@ -296,8 +298,8 @@ lazy_static! {
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
             id_routes: vec![],
         },
-    ];
-}
+    ]
+});
 
 /// Contents returned from an endpoint that creates a resource that has an id
 ///

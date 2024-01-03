@@ -69,7 +69,7 @@ async fn test_router_routes(cptestctx: &ControlPlaneTestContext) {
     // It errors if you try to delete the default route
     let error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
         client,
-        StatusCode::METHOD_NOT_ALLOWED,
+        StatusCode::BAD_REQUEST,
         Method::DELETE,
         get_route_url("system", "default").as_str(),
     )
