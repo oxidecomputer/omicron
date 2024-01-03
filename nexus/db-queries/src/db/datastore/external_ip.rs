@@ -136,7 +136,21 @@ impl DataStore {
 
         let pool_id = pool.identity.id;
         let data = IncompleteExternalIp::for_ephemeral(ip_id, pool_id);
-        let temp_ip = self.allocate_external_ip(opctx, data).await?;
+
+        // We might not be able to acquire a new IP, but in the event of an
+        // idempotent or double attach this failure is allowed.
+        let temp_ip = self.allocate_external_ip(opctx, data).await;
+        if let Err(e) = temp_ip {
+            let eip = self
+                .instance_lookup_external_ips(opctx, instance_id)
+                .await?
+                .into_iter()
+                .find(|v| v.kind == IpKind::Ephemeral)
+                .ok_or(e)?;
+
+            return Ok((eip, false));
+        }
+        let temp_ip = temp_ip?;
 
         let safe_states = if creating_instance {
             &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]

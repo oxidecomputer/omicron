@@ -630,7 +630,7 @@ impl SledAgent {
     ) -> Result<(), Error> {
         if !self.instances.contains_key(&instance_id).await {
             return Err(Error::internal_error(
-                "can't alter IP state for nonexistant instance",
+                "can't alter IP state for nonexistent instance",
             ));
         }
 
@@ -647,7 +647,7 @@ impl SledAgent {
                     false
                 }
             }) {
-                return Err(Error::invalid_request("cannot replace exisitng ephemeral IP without explicit removal"));
+                return Err(Error::invalid_request("cannot replace existing ephemeral IP without explicit removal"));
             }
         }
 
@@ -663,7 +663,7 @@ impl SledAgent {
     ) -> Result<(), Error> {
         if !self.instances.contains_key(&instance_id).await {
             return Err(Error::internal_error(
-                "can't alter IP state for nonexistant instance",
+                "can't alter IP state for nonexistent instance",
             ));
         }
 

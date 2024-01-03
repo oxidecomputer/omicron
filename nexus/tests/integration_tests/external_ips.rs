@@ -31,6 +31,7 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use uuid::Uuid;
 
@@ -807,6 +808,74 @@ async fn test_external_ip_attach_fails_after_maximum(
         "an instance may not have more than 32 external IP addresses"
             .to_string()
     );
+}
+
+#[nexus_test]
+async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    populate_ip_pool(&client, "default", None).await;
+    let other_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 1))
+            .unwrap(),
+    );
+    create_ip_pool(&client, "other-pool", Some(other_pool_range), None).await;
+
+    create_project(client, PROJECT_NAME).await;
+
+    // Create two instances, to which we will later add eph IPs from 'other-pool'.
+    for name in &INSTANCE_NAMES[..2] {
+        instance_for_external_ips(client, name, false, false, &[]).await;
+    }
+
+    let pool_name: Name = "other-pool".parse().unwrap();
+
+    // Attach a new EIP from other-pool to both instances.
+    // This should succeed for the first, and fail for the second
+    // due to pool exhaustion.
+    let eph_resp = external_ip_attach(
+        client,
+        INSTANCE_NAMES[0],
+        &params::ExternalIpCreate::Ephemeral {
+            pool_name: Some(pool_name.clone()),
+        },
+    )
+    .await;
+    assert_eq!(eph_resp.ip, other_pool_range.first_address());
+    assert_eq!(eph_resp.ip, other_pool_range.last_address());
+
+    let url = attach_instance_external_ip_url(INSTANCE_NAMES[1], PROJECT_NAME);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::ExternalIpCreate::Ephemeral {
+                pool_name: Some(pool_name.clone()),
+            }))
+            .expect_status(Some(StatusCode::INSUFFICIENT_STORAGE)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "Insufficient capacity: No external IP addresses available".to_string()
+    );
+
+    // Idempotent re-add to the first instance should succeed even if
+    // an internal attempt to alloc a new EIP would fail.
+    let eph_resp_2 = external_ip_attach(
+        client,
+        INSTANCE_NAMES[0],
+        &params::ExternalIpCreate::Ephemeral {
+            pool_name: Some(pool_name.clone()),
+        },
+    )
+    .await;
+    assert_eq!(eph_resp_2, eph_resp);
 }
 
 pub async fn floating_ip_get(
