@@ -6,13 +6,10 @@
 
 use super::{
     console_api, device_auth, params,
-    params::{ProjectSelector, UninitializedSledId},
-    shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
-        Sled, SledInstance, Snapshot, SshKey, Switch, User, UserBuiltin, Vpc,
-        VpcRouter, VpcSubnet,
+        PhysicalDisk, Project, Rack, Role, Silo, SiloUtilization, Sled,
+        Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -40,32 +37,13 @@ use dropshot::{
 use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::AssetIdentityMetadata;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-<<<<<<< HEAD
 use nexus_types::external_api::views::SiloQuotas;
-use nexus_types::{
-    external_api::views::{SledInstance, Switch},
-    identity::AssetIdentityMetadata,
-};
-||||||| 7c3cd6abe
-use nexus_db_queries::{
-    authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
-};
-use nexus_types::external_api::{params::ProjectSelector, views::SiloQuotas};
-use nexus_types::{
-    external_api::views::{SledInstance, Switch},
-    identity::AssetIdentityMetadata,
-};
-=======
-use nexus_db_queries::{
-    authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
-};
 use nexus_types::external_api::views::Utilization;
->>>>>>> main
+use nexus_types::identity::AssetIdentityMetadata;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -1315,13 +1293,7 @@ async fn project_policy_update(
 
 // IP Pools
 
-<<<<<<< HEAD
 /// List all IP pools
-||||||| 7c3cd6abe
-/// List all IP Pools that can be used by a given project.
-=======
-/// List all IP pools that can be used by a given project
->>>>>>> main
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools",
@@ -4788,7 +4760,7 @@ async fn rack_view(
 async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
     query: Query<PaginationParams<EmptyScanParams, String>>,
-) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<shared::UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
     // We don't actually support real pagination
     let pag_params = query.into_inner();
@@ -4819,7 +4791,7 @@ async fn sled_list_uninitialized(
 }]
 async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
-    sled: TypedBody<UninitializedSledId>,
+    sled: TypedBody<params::UninitializedSledId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -4933,7 +4905,7 @@ async fn sled_instance_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SledPath>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<SledInstance>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::SledInstance>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -4954,7 +4926,7 @@ async fn sled_instance_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             sled_instances,
-            &|_, sled_instance: &SledInstance| sled_instance.identity.id,
+            &|_, sled_instance: &views::SledInstance| sled_instance.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5003,7 +4975,7 @@ async fn physical_disk_list(
 async fn switch_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Switch>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::Switch>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -5018,7 +4990,7 @@ async fn switch_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             switches,
-            &|_, switch: &Switch| switch.identity.id,
+            &|_, switch: &views::Switch| switch.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5033,7 +5005,7 @@ async fn switch_list(
 async fn switch_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SwitchPath>,
-) -> Result<HttpResponseOk<Switch>, HttpError> {
+) -> Result<HttpResponseOk<views::Switch>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;

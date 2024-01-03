@@ -2154,13 +2154,7 @@
         "tags": [
           "projects"
         ],
-<<<<<<< HEAD
         "summary": "List all IP pools",
-||||||| 7c3cd6abe
-        "summary": "List all IP Pools that can be used by a given project.",
-=======
-        "summary": "List all IP pools that can be used by a given project",
->>>>>>> main
         "operationId": "project_ip_pool_list",
         "parameters": [
           {

@@ -1782,18 +1782,10 @@ mod test {
     const DISK_NAME: &str = "disky-mcdiskface";
     const INSTANCE_NAME: &str = "base-instance";
 
-<<<<<<< HEAD
     async fn create_project_and_disk_and_pool(
         client: &ClientTestContext,
     ) -> Uuid {
         create_default_ip_pool(&client).await;
-||||||| 7c3cd6abe
-    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
-=======
-    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None, None).await;
->>>>>>> main
         create_project(client, PROJECT_NAME).await;
         create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }

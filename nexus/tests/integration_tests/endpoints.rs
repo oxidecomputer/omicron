@@ -579,87 +579,12 @@ pub static DEMO_PROJECT_PROMOTE_IMAGE_URL: Lazy<String> = Lazy::new(|| {
     )
 });
 
-<<<<<<< HEAD
-    // IP Pools
-    pub static ref DEMO_IP_POOLS_PROJ_URL: String = "/v1/ip-pools".to_string();
-    pub static ref DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
-    pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
-    pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
-        params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DEMO_IP_POOL_NAME.clone(),
-                description: String::from("an IP pool"),
-            },
-        };
-    pub static ref DEMO_IP_POOL_PROJ_URL: String = format!("/v1/ip-pools/{}", *DEMO_IP_POOL_NAME);
-    pub static ref DEMO_IP_POOL_URL: String = format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
-    pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
-        params::IpPoolUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: Some(String::from("a new IP pool")),
-            },
-        };
-    pub static ref DEMO_IP_POOL_SILOS_URL: String = format!("{}/silos", *DEMO_IP_POOL_URL);
-    pub static ref DEMO_IP_POOL_SILOS_BODY: params::IpPoolSiloLink =
-        params::IpPoolSiloLink {
-            silo: NameOrId::Id(DEFAULT_SILO.identity().id),
-            is_default: true, // necessary for demo instance create to go through
-        };
-
-    pub static ref DEMO_IP_POOL_SILO_URL: String = format!("{}/silos/{}", *DEMO_IP_POOL_URL, *DEMO_SILO_NAME);
-    pub static ref DEMO_IP_POOL_SILO_UPDATE_BODY: params::IpPoolSiloUpdate =
-        params::IpPoolSiloUpdate {
-            is_default: false,
-        };
-
-    pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
-        std::net::Ipv4Addr::new(10, 0, 0, 0),
-        std::net::Ipv4Addr::new(10, 0, 0, 255),
-    ).unwrap());
-    pub static ref DEMO_IP_POOL_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_URL);
-    pub static ref DEMO_IP_POOL_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_RANGES_URL);
-    pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
-||||||| 7c3cd6abe
-    // IP Pools
-    pub static ref DEMO_IP_POOLS_PROJ_URL: String =
-        format!("/v1/ip-pools?project={}", *DEMO_PROJECT_NAME);
-    pub static ref DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
-    pub static ref DEMO_IP_POOL_NAME: Name = "default".parse().unwrap();
-    pub static ref DEMO_IP_POOL_CREATE: params::IpPoolCreate =
-        params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
-                name: DEMO_IP_POOL_NAME.clone(),
-                description: String::from("an IP pool"),
-            },
-            silo: None,
-            is_default: true,
-        };
-    pub static ref DEMO_IP_POOL_PROJ_URL: String =
-        format!("/v1/ip-pools/{}?project={}", *DEMO_IP_POOL_NAME, *DEMO_PROJECT_NAME);
-    pub static ref DEMO_IP_POOL_URL: String = format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME);
-    pub static ref DEMO_IP_POOL_UPDATE: params::IpPoolUpdate =
-        params::IpPoolUpdate {
-            identity: IdentityMetadataUpdateParams {
-                name: None,
-                description: Some(String::from("a new IP pool")),
-            },
-        };
-    pub static ref DEMO_IP_POOL_RANGE: IpRange = IpRange::V4(Ipv4Range::new(
-        std::net::Ipv4Addr::new(10, 0, 0, 0),
-        std::net::Ipv4Addr::new(10, 0, 0, 255),
-    ).unwrap());
-    pub static ref DEMO_IP_POOL_RANGES_URL: String = format!("{}/ranges", *DEMO_IP_POOL_URL);
-    pub static ref DEMO_IP_POOL_RANGES_ADD_URL: String = format!("{}/add", *DEMO_IP_POOL_RANGES_URL);
-    pub static ref DEMO_IP_POOL_RANGES_DEL_URL: String = format!("{}/remove", *DEMO_IP_POOL_RANGES_URL);
-=======
 pub static DEMO_SILO_DEMOTE_IMAGE_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/images/{}/demote?project={}",
         *DEMO_IMAGE_NAME, *DEMO_PROJECT_NAME
     )
 });
->>>>>>> main
 
 pub static DEMO_IMAGE_CREATE: Lazy<params::ImageCreate> =
     Lazy::new(|| params::ImageCreate {
@@ -674,7 +599,7 @@ pub static DEMO_IMAGE_CREATE: Lazy<params::ImageCreate> =
 
 // IP Pools
 pub static DEMO_IP_POOLS_PROJ_URL: Lazy<String> =
-    Lazy::new(|| format!("/v1/ip-pools?project={}", *DEMO_PROJECT_NAME));
+    Lazy::new(|| "/v1/ip-pools".to_string());
 pub const DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
 pub static DEMO_IP_POOL_NAME: Lazy<Name> =
     Lazy::new(|| "default".parse().unwrap());
@@ -684,8 +609,6 @@ pub static DEMO_IP_POOL_CREATE: Lazy<params::IpPoolCreate> =
             name: DEMO_IP_POOL_NAME.clone(),
             description: String::from("an IP pool"),
         },
-        silo: None,
-        is_default: true,
     });
 pub static DEMO_IP_POOL_PROJ_URL: Lazy<String> = Lazy::new(|| {
     format!(
@@ -702,6 +625,19 @@ pub static DEMO_IP_POOL_UPDATE: Lazy<params::IpPoolUpdate> =
             description: Some(String::from("a new IP pool")),
         },
     });
+pub static DEMO_IP_POOL_SILOS_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/silos", *DEMO_IP_POOL_URL));
+pub static DEMO_IP_POOL_SILOS_BODY: Lazy<params::IpPoolSiloLink> =
+    Lazy::new(|| params::IpPoolSiloLink {
+        silo: NameOrId::Id(DEFAULT_SILO.identity().id),
+        is_default: true, // necessary for demo instance create to go through
+    });
+
+pub static DEMO_IP_POOL_SILO_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/silos/{}", *DEMO_IP_POOL_URL, *DEMO_SILO_NAME));
+pub static DEMO_IP_POOL_SILO_UPDATE_BODY: Lazy<params::IpPoolSiloUpdate> =
+    Lazy::new(|| params::IpPoolSiloUpdate { is_default: false });
+
 pub static DEMO_IP_POOL_RANGE: Lazy<IpRange> = Lazy::new(|| {
     IpRange::V4(
         Ipv4Range::new(

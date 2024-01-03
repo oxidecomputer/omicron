@@ -882,7 +882,7 @@ async fn test_instance_failed_after_sled_agent_error(
     let instance_name = "losing-is-fun";
 
     // Create and start the test instance.
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
     instance_simulate(nexus, &instance.identity.id).await;
@@ -3643,7 +3643,6 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         )
         .unwrap(),
     );
-<<<<<<< HEAD
 
     // make first pool the default for the priv user's silo
     create_ip_pool(&client, "pool1", Some(range1)).await;
@@ -3652,13 +3651,6 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     // second pool is associated with the silo but not default
     create_ip_pool(&client, "pool2", Some(range2)).await;
     link_ip_pool(&client, "pool2", &DEFAULT_SILO.id(), /*default*/ false).await;
-||||||| 7c3cd6abe
-    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
-=======
-    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
-    create_ip_pool(&client, "other-pool", Some(other_pool_range), None).await;
->>>>>>> main
 
     // Create an instance with pool name blank, expect IP from default pool
     create_instance_with_pool(client, "pool1-inst", None).await;

@@ -8,7 +8,6 @@
 
 use omicron_common::api::external::SemverVersion;
 
-<<<<<<< HEAD
 /// The version of the database schema this particular version of Nexus was
 /// built against.
 ///
@@ -16,16 +15,6 @@ use omicron_common::api::external::SemverVersion;
 /// refer to: schema/crdb/README.adoc
 pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(22, 0, 1);
 
-||||||| 7c3cd6abe
-=======
-/// The version of the database schema this particular version of Nexus was
-/// built against.
-///
-/// This should be updated whenever the schema is changed. For more details,
-/// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(21, 0, 0);
-
->>>>>>> main
 table! {
     disk (id) {
         id -> Uuid,

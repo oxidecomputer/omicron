@@ -201,23 +201,12 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
                 &*DEMO_SILO_USER_ID_SET_PASSWORD_URL,
             ],
         },
-<<<<<<< HEAD
         // Create the default IP pool
         SetupReq::Post {
             url: &DEMO_IP_POOLS_URL,
             body: serde_json::to_value(&*DEMO_IP_POOL_CREATE).unwrap(),
             id_routes: vec!["/v1/ip-pools/{id}"],
         },
-||||||| 7c3cd6abe
-        // Get the default IP pool
-        SetupReq::Get {
-            url: &DEMO_IP_POOL_URL,
-            id_routes: vec![],
-        },
-=======
-        // Get the default IP pool
-        SetupReq::Get { url: &DEMO_IP_POOL_URL, id_routes: vec![] },
->>>>>>> main
         // Create an IP pool range
         SetupReq::Post {
             url: &DEMO_IP_POOL_RANGES_ADD_URL,

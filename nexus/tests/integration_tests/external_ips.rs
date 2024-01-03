@@ -21,18 +21,12 @@ use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
-<<<<<<< HEAD
+use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::object_delete;
 use nexus_test_utils::resource_helpers::object_delete_error;
-||||||| 7c3cd6abe
-use nexus_test_utils::resource_helpers::populate_ip_pool;
-=======
-use nexus_test_utils::resource_helpers::create_silo;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
->>>>>>> main
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
@@ -126,14 +120,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
             .unwrap(),
     );
-<<<<<<< HEAD
     // not automatically linked to currently silo. see below
     create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
-||||||| 7c3cd6abe
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
-=======
-    create_ip_pool(&client, "other-pool", Some(other_pool_range), None).await;
->>>>>>> main
 
     let project = create_project(client, PROJECT_NAME).await;
 
@@ -168,13 +156,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
 
-<<<<<<< HEAD
     // Creating with other-pool fails with 404 until it is linked to the current silo
-||||||| 7c3cd6abe
-    // Create with no chosen IP from named pool.
-=======
-    // Create with no chosen IP from fleet-scoped named pool.
->>>>>>> main
     let fip_name = FIP_NAMES[2];
     let params = params::FloatingIpCreate {
         identity: IdentityMetadataCreateParams {
@@ -223,12 +205,13 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
 ) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    // TODO
+    // populate_ip_pool(&client, "default", None).await;
 
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create other silo and pool linked to that silo
-    let other_silo = create_silo(
+    let _other_silo = create_silo(
         &client,
         "not-my-silo",
         true,
@@ -243,7 +226,8 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
         &client,
         "external-silo-pool",
         Some(other_pool_range),
-        Some(other_silo.identity.id),
+        // TODO
+        // Some(other_silo.identity.id),
     )
     .await;
 

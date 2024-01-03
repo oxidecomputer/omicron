@@ -851,22 +851,6 @@ pub(crate) mod test {
     const DISK_NAME: &str = "my-disk";
     const PROJECT_NAME: &str = "springfield-squidport";
 
-<<<<<<< HEAD
-||||||| 7c3cd6abe
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
-        let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
-    }
-
-=======
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None, None).await;
-        let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
-    }
-
->>>>>>> main
     pub fn new_disk_create_params() -> params::DiskCreate {
         params::DiskCreate {
             identity: IdentityMetadataCreateParams {
