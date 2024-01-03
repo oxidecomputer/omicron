@@ -400,7 +400,7 @@ pub(crate) mod test {
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::state.ne(IpAttachState::Attached))
             .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(&*conn,)
+            .first_async::<ExternalIp>(&*conn)
             .await
             .optional()
             .unwrap()
@@ -411,7 +411,7 @@ pub(crate) mod test {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::state.eq(IpAttachState::Detached))
             .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(&*conn,)
+            .first_async::<ExternalIp>(&*conn)
             .await
             .optional()
             .unwrap()

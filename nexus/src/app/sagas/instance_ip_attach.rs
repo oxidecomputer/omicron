@@ -40,8 +40,7 @@ use uuid::Uuid;
 // is that the central undo actions (DPD/OPTE state) *must* be best-effort.
 // This is not bad per-se: instance stop does not itself remove NAT routing
 // rules. The only reason these should fail is because an instance has stopped,
-// at which point there's no good in e.g. adding another entry to a non-existent
-// sled-agent regardless.
+// or DPD has died.
 
 declare_saga_actions! {
     instance_ip_attach;
@@ -407,7 +406,7 @@ pub(crate) mod test {
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::state.ne(IpAttachState::Detached))
             .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(&*conn,)
+            .first_async::<ExternalIp>(&*conn)
             .await
             .optional()
             .unwrap()
@@ -418,7 +417,7 @@ pub(crate) mod test {
             .filter(dsl::kind.eq(IpKind::Ephemeral))
             .filter(dsl::time_deleted.is_null())
             .select(ExternalIp::as_select())
-            .first_async::<ExternalIp>(&*conn,)
+            .first_async::<ExternalIp>(&*conn)
             .await
             .optional()
             .unwrap()
