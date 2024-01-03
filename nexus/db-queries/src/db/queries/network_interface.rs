@@ -30,6 +30,7 @@ use nexus_db_model::NetworkInterfaceKindEnum;
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use once_cell::sync::Lazy;
 use std::net::IpAddr;
 use uuid::Uuid;
 
@@ -42,36 +43,35 @@ pub(crate) const MAX_NICS: usize = 8;
 
 // These are sentinel values and other constants used to verify the state of the
 // system when operating on network interfaces
-lazy_static::lazy_static! {
-    // States an instance must be in to operate on its network interfaces, in
-    // most situations.
-    static ref INSTANCE_STOPPED: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Stopped);
 
-    static ref INSTANCE_FAILED: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Failed);
+// States an instance must be in to operate on its network interfaces, in
+// most situations.
+static INSTANCE_STOPPED: Lazy<db::model::InstanceState> =
+    Lazy::new(|| db::model::InstanceState(external::InstanceState::Stopped));
 
-    // An instance can be in the creating state while we manipulate its
-    // interfaces. The intention is for this only to be the case during sagas.
-    static ref INSTANCE_CREATING: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Creating);
+static INSTANCE_FAILED: Lazy<db::model::InstanceState> =
+    Lazy::new(|| db::model::InstanceState(external::InstanceState::Failed));
 
-    // A sentinel value for the instance state when the instance actually does
-    // not exist.
-    static ref INSTANCE_DESTROYED: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Destroyed);
+// An instance can be in the creating state while we manipulate its
+// interfaces. The intention is for this only to be the case during sagas.
+static INSTANCE_CREATING: Lazy<db::model::InstanceState> =
+    Lazy::new(|| db::model::InstanceState(external::InstanceState::Creating));
 
-    // A sentinel value for the instance state when the instance has an active
-    // VMM, irrespective of that VMM's actual state.
-    static ref INSTANCE_RUNNING: db::model::InstanceState =
-        db::model::InstanceState(external::InstanceState::Running);
+// A sentinel value for the instance state when the instance actually does
+// not exist.
+static INSTANCE_DESTROYED: Lazy<db::model::InstanceState> =
+    Lazy::new(|| db::model::InstanceState(external::InstanceState::Destroyed));
 
-    static ref NO_INSTANCE_SENTINEL_STRING: String =
-        String::from(NO_INSTANCE_SENTINEL);
+// A sentinel value for the instance state when the instance has an active
+// VMM, irrespective of that VMM's actual state.
+static INSTANCE_RUNNING: Lazy<db::model::InstanceState> =
+    Lazy::new(|| db::model::InstanceState(external::InstanceState::Running));
 
-    static ref INSTANCE_BAD_STATE_SENTINEL_STRING: String =
-        String::from(INSTANCE_BAD_STATE_SENTINEL);
-}
+static NO_INSTANCE_SENTINEL_STRING: Lazy<String> =
+    Lazy::new(|| String::from(NO_INSTANCE_SENTINEL));
+
+static INSTANCE_BAD_STATE_SENTINEL_STRING: Lazy<String> =
+    Lazy::new(|| String::from(INSTANCE_BAD_STATE_SENTINEL));
 
 // Uncastable sentinel used to detect when an instance exists, but is not
 // in the right state to have its network interfaces altered

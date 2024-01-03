@@ -69,6 +69,7 @@ service_name = "overlay"
 source.type = "composite"
 source.packages = [
   "logadm.tar.gz",
+  "profile.tar.gz",
 ]
 output.type = "zone"
 
@@ -80,6 +81,18 @@ source.type = "local"
 source.paths = [
   { from = "smf/logadm/crontab.root", to = "/var/spool/cron/crontabs/root" },
   { from = "smf/logadm/logadm.conf", to = "/etc/logadm.conf" },
+]
+output.type = "zone"
+output.intermediate_only = true
+#
+# The profile package is an overlay for all non-global zones to configure
+# root's bash environment.
+[package.profile]
+service_name = "profile"
+source.type = "local"
+source.paths = [
+  { from = "smf/profile/profile", to = "/root/.profile" },
+  { from = "smf/profile/bashrc", to = "/root/.bashrc" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -335,7 +348,6 @@ source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
-  { from = "smf/switch_zone_setup/root.profile", to = "/root/.profile" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -476,8 +488,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "45e05b2a90203d84510e0c8e902d9449b09ffd9b"
-source.sha256 = "b14e73c8091a004472f9825b9b81b2c685bc5a48801704380a80481499060ad9"
+source.commit = "1c2f91a493c8b3c5fb7b853c570b2901ac3c22a7"
+source.sha256 = "052d97370515189465e4e835edb4a2d7e1e0b55ace0230ba18f045a03d975e80"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -501,8 +513,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "45e05b2a90203d84510e0c8e902d9449b09ffd9b"
-source.sha256 = "06575bea6173d16f6d206b580956ae2cdc72c65df2eb2f40dac01468ab49e336"
+source.commit = "1c2f91a493c8b3c5fb7b853c570b2901ac3c22a7"
+source.sha256 = "3ebc1ee37c4d7a0657a78abbaad2fe81570da88128505bfdc4ea47e3e05c6277"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -519,8 +531,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "45e05b2a90203d84510e0c8e902d9449b09ffd9b"
-source.sha256 = "db2a398426fe59bd911eed91a3db7731a7a4d57e31dd357d89828d04b0891e2a"
+source.commit = "1c2f91a493c8b3c5fb7b853c570b2901ac3c22a7"
+source.sha256 = "18079b2ce1003facb476e28499f2e31ebe092510ecd6c685fa1a91f1a34f2dda"
 output.type = "zone"
 output.intermediate_only = true
 

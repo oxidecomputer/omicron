@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "dataset_kind"))]
+    #[diesel(postgres_type(name = "dataset_kind", schema = "public"))]
     pub struct DatasetKindEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]

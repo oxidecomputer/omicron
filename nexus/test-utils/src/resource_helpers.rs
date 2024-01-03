@@ -213,6 +213,7 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
+    silo: Option<Uuid>,
 ) -> (IpPool, IpPoolRange) {
     let pool = object_create(
         client,
@@ -222,6 +223,14 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
+<<<<<<< HEAD
+||||||| 7c3cd6abe
+            silo: None,
+            is_default: false,
+=======
+            silo: silo.map(|id| NameOrId::Id(id)),
+            is_default: false,
+>>>>>>> main
         },
     )
     .await;
