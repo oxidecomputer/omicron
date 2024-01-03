@@ -26,6 +26,7 @@ use crate::db::model::Name;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
 use crate::db::queries::external_ip::NextExternalIp;
+use crate::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES;
 use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES_CREATING;
 use crate::db::queries::external_ip::SAFE_TRANSIENT_INSTANCE_STATES;
@@ -51,9 +52,6 @@ use ref_cast::RefCast;
 use std::net::IpAddr;
 use uuid::Uuid;
 
-// FIXME: should be exported from a shared location, original lives in
-//        nexus/app.
-const MAX_EXTERNAL_IPS_PER_INSTANCE: u32 = 32;
 const MAX_EXTERNAL_IPS_PLUS_SNAT: u32 = MAX_EXTERNAL_IPS_PER_INSTANCE + 1;
 
 impl DataStore {
@@ -142,7 +140,7 @@ impl DataStore {
         }
         let temp_ip = temp_ip?;
 
-        let result = self
+        match self
             .begin_attach_ip(
                 opctx,
                 temp_ip.id,
@@ -150,9 +148,8 @@ impl DataStore {
                 IpKind::Ephemeral,
                 creating_instance,
             )
-            .await;
-
-        match result {
+            .await
+        {
             Err(e) => {
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
                 Err(e)
@@ -313,7 +310,7 @@ impl DataStore {
                     }
                 }
                 // Floating IP: name conflict
-                DatabaseError(UniqueViolation, ..) => {
+                DatabaseError(UniqueViolation, ..) if name.is_some() => {
                     TransactionError::CustomError(public_error_from_diesel(
                         e,
                         ErrorHandler::Conflict(
@@ -486,8 +483,8 @@ impl DataStore {
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         if attached_count >= MAX_EXTERNAL_IPS_PLUS_SNAT as i64 {
                             Error::invalid_request(&format!(
-                                "an instance may not have more than {} external IP addresses",
-                                MAX_EXTERNAL_IPS_PER_INSTANCE,
+                                "an instance may not have more than \
+                                {MAX_EXTERNAL_IPS_PER_INSTANCE} external IP addresses",
                             ))
                         } else {
                             Error::internal_error(&format!("failed to attach {kind} IP"))
@@ -651,7 +648,7 @@ impl DataStore {
     ///
     /// To support idempotency, this method will succeed if the instance
     /// has no ephemeral IP or one is actively being removed. As a result,
-    /// information on an actual ExternalIp is best-effort.
+    /// information on an actual `ExternalIp` is best-effort.
     pub async fn begin_deallocate_ephemeral_ip(
         &self,
         opctx: &OpContext,
@@ -906,7 +903,7 @@ impl DataStore {
         .and_then(|v| {
             v.ok_or_else(|| {
                 Error::internal_error(
-                    "floating IP should never return `None` from begin_attach",
+                    "floating IP should never return `None` from begin_detach",
                 )
             })
         })
@@ -944,20 +941,17 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::state.eq(expected_state));
 
-        // This leaves out SNat for now, double check where it fits in with
-        // instance destroy.
         let now = Utc::now();
         let conn = self.pool_connection_authorized(opctx).await?;
         match (ip_kind, target_state) {
-            (IpKind::SNat, _) => {
-                return Err(Error::internal_error(
-                    "shouldn't need to multistage for SNAT",
-                ))
-            }
+            (IpKind::SNat, _) => return Err(Error::internal_error(
+                "SNAT should not be removed via `external_ip_complete_op`, \
+                    use `deallocate_external_ip`",
+            )),
             (IpKind::Ephemeral, IpAttachState::Detached) => {
                 part_out
                     .set((
-                        // dsl::parent_id.eq(Option::<Uuid>::None),
+                        dsl::parent_id.eq(Option::<Uuid>::None),
                         dsl::time_modified.eq(now),
                         dsl::time_deleted.eq(now),
                         dsl::state.eq(target_state),

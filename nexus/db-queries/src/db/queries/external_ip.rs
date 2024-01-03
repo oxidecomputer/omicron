@@ -59,6 +59,9 @@ pub const SAFE_TRANSIENT_INSTANCE_STATES: [DbInstanceState; 5] = [
     DbInstanceState(ApiInstanceState::Migrating),
 ];
 
+/// The maximum number of disks that can be attached to an instance.
+pub const MAX_EXTERNAL_IPS_PER_INSTANCE: u32 = 32;
+
 type FromClause<T> =
     diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
 type IpPoolRangeFromClause = FromClause<schema::ip_pool_range::table>;
