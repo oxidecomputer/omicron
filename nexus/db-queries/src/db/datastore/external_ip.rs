@@ -142,10 +142,8 @@ impl DataStore {
         let temp_ip = self.allocate_external_ip(opctx, data).await;
         if let Err(e) = temp_ip {
             let eip = self
-                .instance_lookup_external_ips(opctx, instance_id)
+                .instance_lookup_ephemeral_ip(opctx, instance_id)
                 .await?
-                .into_iter()
-                .find(|v| v.kind == IpKind::Ephemeral)
                 .ok_or(e)?;
 
             return Ok((eip, false));
@@ -249,11 +247,11 @@ impl DataStore {
             Ok(None) => {
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
                 let eip = self
-                    .instance_lookup_external_ips(opctx, instance_id)
+                    .instance_lookup_ephemeral_ip(opctx, instance_id)
                     .await?
-                    .into_iter()
-                    .find(|v| v.kind == IpKind::Ephemeral)
-                    .ok_or_else(|| Error::internal_error("hmm"))?;
+                    .ok_or_else(|| Error::internal_error(
+                        "failed to lookup current ephemeral IP for idempotent attach"
+                    ))?;
                 Ok((eip, false))
             }
             Ok(Some((_, eip))) => Ok((eip, true)),
@@ -657,6 +655,20 @@ impl DataStore {
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Fetch the ephmeral IP address assigned to the provided instance, if this
+    /// has been configured.
+    pub async fn instance_lookup_ephemeral_ip(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> LookupResult<Option<ExternalIp>> {
+        Ok(self
+            .instance_lookup_external_ips(opctx, instance_id)
+            .await?
+            .into_iter()
+            .find(|v| v.kind == IpKind::Ephemeral))
     }
 
     /// Fetch all Floating IP addresses for the provided project.
