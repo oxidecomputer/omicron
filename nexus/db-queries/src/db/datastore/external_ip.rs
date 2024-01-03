@@ -93,18 +93,10 @@ impl DataStore {
         pool_name: Option<Name>,
         creating_instance: bool,
     ) -> CreateResult<(ExternalIp, bool)> {
-        use db::schema::external_ip::dsl;
-        use db::schema::external_ip::table;
-        use db::schema::instance::dsl as inst_dsl;
-        use db::schema::instance::table as inst_table;
-        use diesel::result::DatabaseErrorKind::UniqueViolation;
-
         // This is slightly hacky: we need to create an unbound ephemeral IP, and
         // then attempt to bind it to respect two separate constraints:
         // - At most one Ephemeral IP per instance
         // - At most MAX external IPs per instance
-        // We already catch and convert a UniqueViolation on ephemeral IPs:
-        // if we see this occur, then
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
         let pool = match pool_name {
@@ -150,100 +142,22 @@ impl DataStore {
         }
         let temp_ip = temp_ip?;
 
-        let safe_states = if creating_instance {
-            &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
-        } else {
-            &SAFE_TO_ATTACH_INSTANCE_STATES[..]
-        };
-
-        let query = Instance::attach_resource(
-            instance_id,
-            temp_ip.id,
-            inst_table.into_boxed().filter(inst_dsl::state.eq_any(safe_states)),
-            table
-                .into_boxed()
-                .filter(dsl::state.eq(IpAttachState::Detached))
-                .filter(dsl::kind.eq(IpKind::Ephemeral)),
-            MAX_EXTERNAL_IPS_PLUS_SNAT,
-            diesel::update(dsl::external_ip).set((
-                dsl::parent_id.eq(Some(instance_id)),
-                dsl::time_modified.eq(Utc::now()),
-                dsl::state.eq(IpAttachState::Attaching),
-            )),
-        );
-
-        let result = query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map(Some)
-        .or_else(|e: AttachError<ExternalIp, _, _>| match e {
-            AttachError::CollectionNotFound => {
-                Err(Error::not_found_by_id(
-                    ResourceType::Instance,
-                    &instance_id,
-                ))
-            },
-            AttachError::ResourceNotFound => {
-                Err(Error::internal_error("call-scoped ephemeral IP was lost"))
-            },
-            AttachError::NoUpdate { attached_count, resource, collection } => {
-                match resource.state {
-                    // Idempotent errors: is in progress forsame resource pair -- this is fine.
-                    // Double attach can be hit by, e.g., repeated call during instance create.
-                    IpAttachState::Attaching
-                        | IpAttachState::Attached
-                        if resource.parent_id == Some(instance_id) =>
-                            return Ok(Some((collection, resource))),
-                    IpAttachState::Attached => return Err(Error::invalid_request(
-                        "floating IP cannot be attached to one \
-                         instance while still attached to another"
-                    )),
-                    // User can reattempt depending on how the current saga unfolds.
-                    IpAttachState::Attaching | IpAttachState::Detaching => return Err(Error::unavail(
-                        "tried to attach floating IP mid-attach/detach"
-                    )),
-
-                    IpAttachState::Detached => {},
-                }
-
-                Err(match &collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail(
-                        "tried to attach floating IP while instance was changing state"
-                    ),
-                    state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
-                        if attached_count >= MAX_EXTERNAL_IPS_PLUS_SNAT as i64 {
-                            Error::invalid_request(&format!(
-                                "an instance may not have more than {} external IP addresses",
-                                MAX_EXTERNAL_IPS_PER_INSTANCE,
-                            ))
-                        } else {
-                            eprintln!("{resource:?}, {collection:?}");
-                            Error::internal_error("failed to attach ephemeral IP")
-                        }
-                    },
-                    state => Error::invalid_request(&format!("cannot attach floating IP to instance in {state} state")),
-                })
-            },
-            // This case occurs for both currently attaching and attached IPs:
-            AttachError::DatabaseError(diesel::result::Error::DatabaseError(UniqueViolation, ..)) => {
-                Ok(None)
-            },
-            AttachError::DatabaseError(e) => {
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
-            },
-        });
-
-        // if completed (!do_saga), we need to attempt
+        let result = self
+            .begin_attach_ip(
+                opctx,
+                temp_ip.id,
+                instance_id,
+                IpKind::Ephemeral,
+                creating_instance,
+            )
+            .await;
 
         match result {
             Err(e) => {
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
                 Err(e)
             }
-            // Idempotent cases:
-            Ok(Some((_, eip))) if eip.id != temp_ip.id => {
-                self.deallocate_external_ip(opctx, temp_ip.id).await?;
-                Ok((eip, true))
-            }
+            // Idempotent case: attach failed due to a caught UniqueViolation.
             Ok(None) => {
                 self.deallocate_external_ip(opctx, temp_ip.id).await?;
                 let eip = self
@@ -252,9 +166,10 @@ impl DataStore {
                     .ok_or_else(|| Error::internal_error(
                         "failed to lookup current ephemeral IP for idempotent attach"
                     ))?;
-                Ok((eip, false))
+                let do_saga = eip.state != IpAttachState::Attached;
+                Ok((eip, do_saga))
             }
-            Ok(Some((_, eip))) => Ok((eip, true)),
+            Ok(Some(v)) => Ok(v),
         }
     }
 
@@ -467,6 +382,142 @@ impl DataStore {
             port_range,
         );
         self.allocate_external_ip(opctx, data).await
+    }
+
+    /// Attempt to move a target external IP from detached to attaching,
+    /// checking that its parent instance does not have too many addresses
+    /// and is in a valid state.
+    ///
+    /// Returns the `ExternalIp` which was modified, where possible. This
+    /// is only nullable when trying to double-attach ephemeral IPs.
+    /// To better handle idempotent attachment, this method returns an
+    /// additional bool:
+    /// - true: EIP was detached or attaching. proceed with saga.
+    /// - false: EIP was attached. No-op for remainder of saga.
+    async fn begin_attach_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        instance_id: Uuid,
+        kind: IpKind,
+        creating_instance: bool,
+    ) -> Result<Option<(ExternalIp, bool)>, Error> {
+        use db::schema::external_ip::dsl;
+        use db::schema::external_ip::table;
+        use db::schema::instance::dsl as inst_dsl;
+        use db::schema::instance::table as inst_table;
+        use diesel::result::DatabaseErrorKind::UniqueViolation;
+        use diesel::result::Error::DatabaseError;
+
+        let label = match kind {
+            IpKind::Floating => "floating",
+            IpKind::Ephemeral => "ephemeral",
+            IpKind::SNat => {
+                return Err(Error::internal_error(
+                    "cannot dynamically attach SNAT IP to instance",
+                ))
+            }
+        };
+
+        let safe_states = if creating_instance {
+            &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
+        } else {
+            &SAFE_TO_ATTACH_INSTANCE_STATES[..]
+        };
+
+        let query = Instance::attach_resource(
+            instance_id,
+            ip_id,
+            inst_table.into_boxed().filter(inst_dsl::state.eq_any(safe_states)),
+            table
+                .into_boxed()
+                .filter(dsl::state.eq(IpAttachState::Detached))
+                .filter(dsl::kind.eq(kind))
+                .filter(dsl::parent_id.is_null()),
+            MAX_EXTERNAL_IPS_PLUS_SNAT,
+            diesel::update(dsl::external_ip).set((
+                dsl::parent_id.eq(Some(instance_id)),
+                dsl::time_modified.eq(Utc::now()),
+                dsl::state.eq(IpAttachState::Attaching),
+            )),
+        );
+
+        let mut do_saga = true;
+        query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map(|(_, resource)| Some(resource))
+        .or_else(|e: AttachError<ExternalIp, _, _>| match e {
+            AttachError::CollectionNotFound => {
+                Err(Error::not_found_by_id(
+                    ResourceType::Instance,
+                    &instance_id,
+                ))
+            },
+            AttachError::ResourceNotFound => {
+                Err(if kind == IpKind::Ephemeral {
+                    Error::internal_error("call-scoped ephemeral IP was lost")
+                } else {
+                    Error::not_found_by_id(
+                        ResourceType::FloatingIp,
+                        &ip_id,
+                    )
+                })
+            },
+            AttachError::NoUpdate { attached_count, resource, collection } => {
+                match resource.state {
+                    // Idempotent errors: is in progress or complete for same resource pair -- this is fine.
+                    IpAttachState::Attaching if resource.parent_id == Some(instance_id) =>
+                        return Ok(Some(resource)),
+                    IpAttachState::Attached if resource.parent_id == Some(instance_id) => {
+                        do_saga = false;
+                        return Ok(Some(resource))
+                    },
+                    IpAttachState::Attached =>
+                        return Err(Error::invalid_request(&format!(
+                        "{label} IP cannot be attached to one \
+                         instance while still attached to another"
+                    ))),
+                    // User can reattempt depending on how the current saga unfolds.
+                    // NB; only floating IP can return this case, eph will return
+                    // a UniqueViolation.
+                    IpAttachState::Attaching | IpAttachState::Detaching
+                        => return Err(Error::unavail(&format!(
+                        "tried to attach {label} IP mid-attach/detach"
+                    ))),
+
+                    IpAttachState::Detached => {},
+                }
+
+                Err(match &collection.runtime_state.nexus_state {
+                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state)
+                        => Error::unavail(&format!(
+                        "tried to attach {label} IP while instance was changing state"
+                    )),
+                    state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
+                        if attached_count >= MAX_EXTERNAL_IPS_PLUS_SNAT as i64 {
+                            Error::invalid_request(&format!(
+                                "an instance may not have more than {} external IP addresses",
+                                MAX_EXTERNAL_IPS_PER_INSTANCE,
+                            ))
+                        } else {
+                            Error::internal_error(&format!("failed to attach {label} IP"))
+                        }
+                    },
+                    state => Error::invalid_request(&format!(
+                        "cannot attach {label} IP to instance in {state} state"
+                    )),
+                })
+            },
+            // This case occurs for both currently attaching and attached ephemeral IPs:
+            AttachError::DatabaseError(DatabaseError(UniqueViolation, ..))
+                if kind == IpKind::Ephemeral => {
+                Ok(None)
+            },
+            AttachError::DatabaseError(e) => {
+                Err(public_error_from_diesel(e, ErrorHandler::Server))
+            },
+        })
+        .map(|eip| eip.map(|v| (v, do_saga)))
     }
 
     /// Deallocate the external IP address with the provided ID.
@@ -755,11 +806,6 @@ impl DataStore {
         instance_id: Uuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
-        use db::schema::external_ip::dsl;
-        use db::schema::external_ip::table;
-        use db::schema::instance::dsl as inst_dsl;
-        use db::schema::instance::table as inst_table;
-
         let (.., authz_instance, _db_instance) = LookupPath::new(&opctx, self)
             .instance_id(instance_id)
             .fetch_for(authz::Action::Modify)
@@ -768,92 +814,21 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_fip).await?;
         opctx.authorize(authz::Action::Modify, &authz_instance).await?;
 
-        let fip_id = authz_fip.id();
-
-        let safe_states = if creating_instance {
-            &SAFE_TO_ATTACH_INSTANCE_STATES_CREATING[..]
-        } else {
-            &SAFE_TO_ATTACH_INSTANCE_STATES[..]
-        };
-
-        let query = Instance::attach_resource(
+        self.begin_attach_ip(
+            opctx,
+            authz_fip.id(),
             instance_id,
-            fip_id,
-            inst_table.into_boxed().filter(inst_dsl::state.eq_any(safe_states)),
-            table
-                .into_boxed()
-                .filter(dsl::state.eq(IpAttachState::Detached))
-                .filter(dsl::kind.eq(IpKind::Floating))
-                .filter(dsl::parent_id.is_null()),
-            MAX_EXTERNAL_IPS_PLUS_SNAT,
-            diesel::update(dsl::external_ip).set((
-                dsl::parent_id.eq(Some(instance_id)),
-                dsl::time_modified.eq(Utc::now()),
-                dsl::state.eq(IpAttachState::Attaching),
-            )),
-        );
-
-        let mut do_saga = true;
-        let (_, eip) = query.attach_and_get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            IpKind::Floating,
+            creating_instance,
+        )
         .await
-        .or_else(|e: AttachError<ExternalIp, _, _>| match e {
-            AttachError::CollectionNotFound => {
-                Err(Error::not_found_by_id(
-                    ResourceType::Instance,
-                    &instance_id,
-                ))
-            },
-            AttachError::ResourceNotFound => {
-                Err(Error::not_found_by_id(
-                    ResourceType::FloatingIp,
-                    &fip_id,
-                ))
-            },
-            AttachError::NoUpdate { attached_count, resource, collection } => {
-                match resource.state {
-                    // Idempotent errors: is in progress or complete for same resource pair -- this is fine.
-                    IpAttachState::Attaching if resource.parent_id == Some(instance_id) => return Ok((collection, resource)),
-                    IpAttachState::Attached if resource.parent_id == Some(instance_id) => {
-                        do_saga = false;
-                        return Ok((collection, resource))
-                    },
-                    IpAttachState::Attached => return Err(Error::invalid_request(
-                        "floating IP cannot be attached to one \
-                         instance while still attached to another"
-                    )),
-                    // User can reattempt depending on how the current saga unfolds.
-                    IpAttachState::Attaching | IpAttachState::Detaching => return Err(Error::unavail(
-                        "tried to attach floating IP mid-attach/detach"
-                    )),
-
-                    IpAttachState::Detached => {},
-                }
-
-                Err(match &collection.runtime_state.nexus_state {
-                    state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail(
-                        "tried to attach floating IP while instance was changing state"
-                    ),
-                    state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
-                        if attached_count >= MAX_EXTERNAL_IPS_PLUS_SNAT as i64 {
-                            Error::invalid_request(&format!(
-                                "an instance may not have more than {} external IP addresses",
-                                MAX_EXTERNAL_IPS_PER_INSTANCE,
-                            ))
-                        } else {
-                            eprintln!("{resource:?}, {collection:?}");
-                            Error::internal_error("failed to attach floating IP")
-                        }
-                    },
-                    state => Error::invalid_request(&format!("cannot attach floating IP to instance in {state} state")),
-                })
-            },
-            AttachError::DatabaseError(e) => {
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
-            },
-
-        })?;
-
-        Ok((eip, do_saga))
+        .and_then(|v| {
+            v.ok_or_else(|| {
+                Error::internal_error(
+                    "floating IP should never return `None` from begin_attach",
+                )
+            })
+        })
     }
 
     /// Detaches a Floating IP address from an instance.
