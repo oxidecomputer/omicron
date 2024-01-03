@@ -21,31 +21,31 @@ use std::time::{Duration, SystemTime};
 pub(crate) struct SensorsArgs {
     /// verbose messages
     #[clap(long, short)]
-    verbose: bool,
+    pub verbose: bool,
 
     /// restrict to specified sled(s)
     #[clap(long, use_value_delimiter = true)]
-    sleds: Vec<u32>,
+    pub sleds: Vec<u32>,
 
     /// exclude sleds rather than include them
     #[clap(long, short)]
-    exclude: bool,
+    pub exclude: bool,
 
     /// include switches
     #[clap(long)]
-    switches: bool,
+    pub switches: bool,
 
     /// include PSC
     #[clap(long)]
-    psc: bool,
+    pub psc: bool,
 
     /// print sensors every second
     #[clap(long, short)]
-    sleep: bool,
+    pub sleep: bool,
 
     /// parseable output
     #[clap(long, short)]
-    parseable: bool,
+    pub parseable: bool,
 
     /// restrict sensors by type of sensor
     #[clap(
@@ -54,7 +54,7 @@ pub(crate) struct SensorsArgs {
         value_name = "sensor type",
         use_value_delimiter = true
     )]
-    types: Option<Vec<String>>,
+    pub types: Option<Vec<String>>,
 
     /// restrict sensors by name
     #[clap(
@@ -63,11 +63,11 @@ pub(crate) struct SensorsArgs {
         value_name = "sensor name",
         use_value_delimiter = true
     )]
-    named: Option<Vec<String>>,
+    pub named: Option<Vec<String>>,
 
     /// simulate using specified file as input
     #[clap(long, short)]
-    input: Option<String>,
+    pub input: Option<String>,
 }
 
 impl SensorsArgs {
@@ -89,9 +89,9 @@ impl SensorsArgs {
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-struct Sensor {
-    name: String,
-    kind: MeasurementKind,
+pub(crate) struct Sensor {
+    pub name: String,
+    pub kind: MeasurementKind,
 }
 
 impl Sensor {
@@ -152,30 +152,33 @@ impl Sensor {
     }
 }
 
-enum SensorInput<R> {
+pub(crate) enum SensorInput<R> {
     MgsClient(gateway_client::Client),
     CsvReader(csv::Reader<R>, csv::Position),
 }
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
-struct SensorId(u32);
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SensorId(u32);
 
 #[derive(Debug)]
-struct SensorMetadata {
-    sensors_by_sensor: MultiMap<Sensor, SensorId>,
-    sensors_by_sensor_and_sp: HashMap<Sensor, HashMap<SpIdentifier, SensorId>>,
-    sensors_by_id: HashMap<SensorId, (SpIdentifier, Sensor, DeviceIdentifier)>,
-    sensors_by_sp: MultiMap<SpIdentifier, SensorId>,
-    work_by_sp: HashMap<SpIdentifier, Vec<(DeviceIdentifier, Vec<SensorId>)>>,
+pub(crate) struct SensorMetadata {
+    pub sensors_by_sensor: MultiMap<Sensor, SensorId>,
+    pub sensors_by_sensor_and_sp:
+        HashMap<Sensor, HashMap<SpIdentifier, SensorId>>,
+    pub sensors_by_id:
+        HashMap<SensorId, (SpIdentifier, Sensor, DeviceIdentifier)>,
+    pub sensors_by_sp: MultiMap<SpIdentifier, SensorId>,
+    pub work_by_sp:
+        HashMap<SpIdentifier, Vec<(DeviceIdentifier, Vec<SensorId>)>>,
 }
 
-struct SensorValues {
+pub(crate) struct SensorValues {
     values: HashMap<SensorId, Option<f32>>,
     time: u64,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-enum DeviceIdentifier {
+pub(crate) enum DeviceIdentifier {
     Field(usize),
     Device(String),
 }
@@ -451,7 +454,7 @@ fn sp_info_csv<R: std::io::Read>(
     Ok((rval, time.unwrap()))
 }
 
-async fn sensor_metadata<R: std::io::Read>(
+pub(crate) async fn sensor_metadata<R: std::io::Read>(
     input: &mut SensorInput<R>,
     args: &SensorsArgs,
 ) -> Result<(SensorMetadata, SensorValues), anyhow::Error> {
@@ -685,7 +688,7 @@ fn sp_data_csv<R: std::io::Read + std::io::Seek>(
     Ok(SensorValues { values, time: time.unwrap() })
 }
 
-async fn sensor_data<R: std::io::Read + std::io::Seek>(
+pub(crate) async fn sensor_data<R: std::io::Read + std::io::Seek>(
     input: &mut SensorInput<R>,
     metadata: std::sync::Arc<&'static SensorMetadata>,
 ) -> Result<SensorValues, anyhow::Error> {

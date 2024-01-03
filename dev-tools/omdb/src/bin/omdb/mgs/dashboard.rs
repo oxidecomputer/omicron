@@ -30,14 +30,24 @@ use ratatui::{
     Frame, Terminal,
 };
 
+use crate::mgs::sensors::{
+    sensor_metadata, Sensor, SensorId, SensorInput, SensorMetadata,
+    SensorValues, SensorsArgs,
+};
 use clap::Args;
+use gateway_client::types::MeasurementKind;
+use gateway_client::types::SpIdentifier;
+use gateway_client::types::SpType;
+use multimap::MultiMap;
+use std::collections::{HashMap, HashSet};
+use std::fs::File;
 use std::io;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Args)]
 pub(crate) struct DashboardArgs {
     #[clap(flatten)]
-    sensors_args: crate::mgs::sensors::SensorsArgs,
+    sensors_args: SensorsArgs,
 }
 
 struct StatefulList {
@@ -117,14 +127,7 @@ impl Attributes for TempGraph {
     }
 }
 
-struct FanGraph(Vec<u8>);
-
-impl FanGraph {
-    fn new(len: usize) -> Self {
-        let v = vec![0; len];
-        FanGraph(v)
-    }
-}
+struct FanGraph;
 
 impl Attributes for FanGraph {
     fn label(&self) -> String {
@@ -144,28 +147,6 @@ impl Attributes for FanGraph {
 
     fn legend_value(&self, val: f64) -> String {
         format!("{:.0}", val)
-    }
-
-    fn increase(&mut self, ndx: usize) -> Option<u8> {
-        let current = self.0[ndx];
-        let nval = current + 20;
-
-        self.0[ndx] = if nval <= 100 { nval } else { 100 };
-        Some(self.0[ndx])
-    }
-
-    fn decrease(&mut self, ndx: usize) -> Option<u8> {
-        let current = self.0[ndx];
-        let nval = current as i8 - 20;
-
-        self.0[ndx] = if nval >= 0 { nval as u8 } else { 0 };
-        Some(self.0[ndx])
-    }
-
-    fn clear(&mut self) {
-        for val in self.0.iter_mut() {
-            *val = 0;
-        }
     }
 }
 
@@ -363,28 +344,63 @@ impl Graph {
 }
 
 struct Dashboard {
-    graphs: Vec<Graph>,
+    graphs: HashMap<(SpIdentifier, MeasurementKind), Graph>,
     current: usize,
+    sps: Vec<SpIdentifier>,
+    sensor_to_graph: HashMap<SensorId, (SpIdentifier, MeasurementKind, usize)>,
+    current_sp: usize,
     last: Instant,
     interval: u32,
     outstanding: bool,
 }
 
 impl Dashboard {
-    fn new(args: &DashboardArgs) -> Result<Dashboard> {
-        let temps = vec!["temp1".to_string(), "temp2".to_string()];
-        let fans = vec!["fan1".to_string(), "fan2".to_string()];
-        let current = vec!["amps".to_string()];
+    fn new(
+        args: &DashboardArgs,
+        metadata: std::sync::Arc<&SensorMetadata>,
+    ) -> Result<Dashboard> {
+        let mut sensor_to_graph = HashMap::new();
+        let mut sps =
+            metadata.sensors_by_sp.keys().map(|m| *m).collect::<Vec<_>>();
+        let mut graphs = HashMap::new();
+        sps.sort();
 
-        let graphs = vec![
-            Graph::new(&temps, Box::new(TempGraph))?,
-            Graph::new(&fans, Box::new(FanGraph::new(fans.len())))?,
-            Graph::new(&current, Box::new(CurrentGraph))?,
-        ];
+        for sp in sps.iter() {
+            let sp = *sp;
+            let sensors = metadata.sensors_by_sp.get_vec(&sp).unwrap();
+            let mut by_kind = MultiMap::new();
+
+            for sid in sensors {
+                let (_, s, _) = metadata.sensors_by_id.get(sid).unwrap();
+                by_kind.insert(s.kind, (s.name.clone(), *sid));
+            }
+
+            let keys = by_kind.keys().map(|k| *k).collect::<Vec<_>>();
+
+            for k in keys {
+                let mut v = by_kind.remove(&k).unwrap();
+                v.sort();
+
+                for (ndx, (_, sid)) in v.iter().enumerate() {
+                    sensor_to_graph.insert(*sid, (sp, k, ndx));
+                }
+
+                let labels =
+                    v.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
+
+                graphs.insert(
+                    (sp, k),
+                    Graph::new(labels.as_slice(), Box::new(TempGraph))?,
+                );
+            }
+        }
 
         Ok(Dashboard {
             graphs,
             current: 0,
+            sps,
+            sensor_to_graph,
+            current_sp: 0,
             outstanding: true,
             last: Instant::now(),
             interval: 1000,
@@ -400,35 +416,35 @@ impl Dashboard {
     }
 
     fn update_data(&mut self) {
-        for graph in self.graphs.iter_mut() {
+        for graph in self.graphs.values_mut() {
             graph.update_data();
         }
     }
 
     fn up(&mut self) {
-        self.graphs[self.current].previous();
+        // self.graphs[self.current].previous();
     }
 
     fn down(&mut self) {
-        self.graphs[self.current].next();
+        // self.graphs[self.current].next();
     }
 
     fn esc(&mut self) {
-        self.graphs[self.current].unselect();
+        // self.graphs[self.current].unselect();
     }
 
     fn tab(&mut self) {
-        self.current = (self.current + 1) % self.graphs.len();
+        // self.current = (self.current + 1) % self.graphs.len();
     }
 
     fn zoom_in(&mut self) {
-        for graph in self.graphs.iter_mut() {
+        for graph in self.graphs.values_mut() {
             graph.zoom_in();
         }
     }
 
     fn zoom_out(&mut self) {
-        for graph in self.graphs.iter_mut() {
+        for graph in self.graphs.values_mut() {
             graph.zoom_out();
         }
     }
@@ -493,7 +509,26 @@ pub(crate) async fn cmd_mgs_dashboard(
     mgs_args: &crate::mgs::MgsArgs,
     args: &DashboardArgs,
 ) -> Result<(), anyhow::Error> {
-    let dashboard = Dashboard::new(&args)?;
+    let mut input = if let Some(ref input) = args.sensors_args.input {
+        let file = File::open(input)?;
+        SensorInput::CsvReader(
+            csv::Reader::from_reader(file),
+            csv::Position::new(),
+        )
+    } else {
+        SensorInput::MgsClient(mgs_args.mgs_client(omdb, log).await?)
+    };
+
+    let (metadata, mut values) =
+        sensor_metadata(&mut input, &args.sensors_args).await?;
+
+    //
+    // A bit of shenangians to force metadata to be 'static -- which allows
+    // us to share it with tasks.
+    //
+    let metadata = Box::leak(Box::new(metadata));
+    let metadata: &_ = metadata;
+    let metadata = std::sync::Arc::new(metadata);
 
     // setup terminal
     enable_raw_mode()?;
@@ -501,6 +536,8 @@ pub(crate) async fn cmd_mgs_dashboard(
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+
+    let dashboard = Dashboard::new(&args, metadata)?;
 
     let res = run_dashboard(&mut terminal, dashboard);
 
@@ -654,9 +691,23 @@ fn draw_graphs<B: Backend>(
         )
         .split(parent);
 
-    draw_graph(f, screen[0], &mut dashboard.graphs[0]);
-    draw_graph(f, screen[1], &mut dashboard.graphs[1]);
-    draw_graph(f, screen[2], &mut dashboard.graphs[2]);
+    let sp = dashboard.sps[dashboard.current_sp];
+
+    draw_graph(
+        f,
+        screen[0],
+        dashboard.graphs.get_mut(&(sp, MeasurementKind::Temperature)).unwrap(),
+    );
+    draw_graph(
+        f,
+        screen[1],
+        dashboard.graphs.get_mut(&(sp, MeasurementKind::Speed)).unwrap(),
+    );
+    draw_graph(
+        f,
+        screen[2],
+        dashboard.graphs.get_mut(&(sp, MeasurementKind::Current)).unwrap(),
+    );
 }
 
 fn draw_status<B: Backend>(
