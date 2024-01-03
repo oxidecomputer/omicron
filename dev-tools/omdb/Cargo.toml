@@ -12,6 +12,7 @@ anyhow.workspace = true
 async-bb8-diesel.workspace = true
 chrono.workspace = true
 clap.workspace = true
+crossterm.workspace = true
 crucible-agent-client.workspace = true
 csv.workspace = true
 diesel.workspace = true
@@ -30,6 +31,7 @@ omicron-common.workspace = true
 oximeter-client.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+ratatui.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true

@@ -89,15 +89,15 @@ impl MgsArgs {
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
         match &self.command {
-            MgsCommands::Dashboard(dashboard_args) => {
-                bail!("no");
+            MgsCommands::Dashboard(args) => {
+                dashboard::cmd_mgs_dashboard(omdb, log, self, args).await
             }
-            MgsCommands::Inventory(inventory_args) => {
+            MgsCommands::Inventory(args) => {
                 let mgs_client = self.mgs_client(omdb, log).await?;
-                cmd_mgs_inventory(&mgs_client, inventory_args).await
+                cmd_mgs_inventory(&mgs_client, args).await
             }
-            MgsCommands::Sensors(sensors_args) => {
-                sensors::cmd_mgs_sensors(omdb, log, self, sensors_args).await
+            MgsCommands::Sensors(args) => {
+                sensors::cmd_mgs_sensors(omdb, log, self, args).await
             }
         }
     }
