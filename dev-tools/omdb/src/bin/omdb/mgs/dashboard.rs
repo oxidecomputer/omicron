@@ -17,6 +17,7 @@ use crossterm::{
         LeaveAlternateScreen,
     },
 };
+use dyn_clone::DynClone;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -34,6 +35,7 @@ use crate::mgs::sensors::{
     sensor_data, sensor_metadata, Sensor, SensorId, SensorInput,
     SensorMetadata, SensorValues, SensorsArgs,
 };
+use crate::mgs::sp_to_string;
 use clap::Args;
 use gateway_client::types::MeasurementKind;
 use gateway_client::types::SpIdentifier;
@@ -78,6 +80,10 @@ impl StatefulList {
     fn unselect(&mut self) {
         self.state.select(None);
     }
+
+    fn selected(&self) -> Option<usize> {
+        self.state.selected()
+    }
 }
 
 struct Series {
@@ -87,7 +93,7 @@ struct Series {
     raw: Vec<Option<f32>>,
 }
 
-trait Attributes {
+trait Attributes: DynClone {
     fn label(&self) -> String;
     fn legend_label(&self) -> String;
     fn x_axis_label(&self) -> String {
@@ -108,6 +114,9 @@ trait Attributes {
     fn clear(&mut self) {}
 }
 
+dyn_clone::clone_trait_object!(Attributes);
+
+#[derive(Clone)]
 struct TempGraph;
 
 impl Attributes for TempGraph {
@@ -131,6 +140,7 @@ impl Attributes for TempGraph {
     }
 }
 
+#[derive(Clone)]
 struct FanGraph;
 
 impl Attributes for FanGraph {
@@ -154,6 +164,7 @@ impl Attributes for FanGraph {
     }
 }
 
+#[derive(Clone)]
 struct CurrentGraph;
 
 impl Attributes for CurrentGraph {
@@ -166,7 +177,7 @@ impl Attributes for CurrentGraph {
     }
 
     fn y_axis_label(&self) -> String {
-        "Amperes".to_string()
+        "Rails".to_string()
     }
 
     fn axis_value(&self, val: f64) -> String {
@@ -178,6 +189,32 @@ impl Attributes for CurrentGraph {
     }
 }
 
+#[derive(Clone)]
+struct VoltageGraph;
+
+impl Attributes for VoltageGraph {
+    fn label(&self) -> String {
+        "Voltage".to_string()
+    }
+
+    fn legend_label(&self) -> String {
+        "Rails".to_string()
+    }
+
+    fn y_axis_label(&self) -> String {
+        "Volts".to_string()
+    }
+
+    fn axis_value(&self, val: f64) -> String {
+        format!("{:2.2}V", val)
+    }
+
+    fn legend_value(&self, val: f64) -> String {
+        format!("{:3.2}V", val)
+    }
+}
+
+#[derive(Clone)]
 struct SensorGraph;
 
 impl Attributes for SensorGraph {
@@ -207,6 +244,7 @@ struct Graph {
     legend: StatefulList,
     time: usize,
     width: usize,
+    offs: usize,
     interpolate: usize,
     bounds: [f64; 2],
     attributes: Box<dyn Attributes>,
@@ -246,10 +284,52 @@ impl Graph {
             legend: StatefulList { state: ListState::default(), n: all.len() },
             time: 0,
             width: 600,
+            offs: 0,
             interpolate: 0,
             bounds: [20.0, 120.0],
             attributes: attr,
         })
+    }
+
+    fn flip(from: &[(&Self, String)], series_ndx: usize) -> Self {
+        let rep = from[0].0;
+        let mut series = vec![];
+
+        let colors = [
+            Color::Yellow,
+            Color::Green,
+            Color::Magenta,
+            Color::White,
+            Color::Red,
+            Color::LightRed,
+            Color::Blue,
+            Color::LightMagenta,
+            Color::LightYellow,
+            Color::LightCyan,
+            Color::LightGreen,
+            Color::LightBlue,
+            Color::LightRed,
+        ];
+
+        for (ndx, (graph, name)) in from.iter().enumerate() {
+            series.push(Series {
+                name: name.clone(),
+                color: colors[ndx % colors.len()],
+                data: graph.series[series_ndx].data.clone(),
+                raw: graph.series[series_ndx].raw.clone(),
+            });
+        }
+
+        Graph {
+            series,
+            legend: StatefulList { state: ListState::default(), n: from.len() },
+            time: rep.time,
+            width: rep.width,
+            offs: rep.offs,
+            interpolate: rep.interpolate,
+            bounds: rep.bounds,
+            attributes: rep.attributes.clone(),
+        }
     }
 
     fn data(&mut self, data: &[Option<f32>]) {
@@ -258,6 +338,10 @@ impl Graph {
         }
 
         self.time += 1;
+
+        if self.offs > 0 {
+            self.offs += 1;
+        }
     }
 
     fn update_data(&mut self) {
@@ -266,11 +350,11 @@ impl Graph {
         }
 
         for i in 0..self.width {
-            if self.time < self.width - i {
+            if self.time < (self.width - i) + self.offs {
                 continue;
             }
 
-            let offs = self.time - (self.width - i);
+            let offs = self.time - (self.width - i) - self.offs;
 
             for (_ndx, s) in &mut self.series.iter_mut().enumerate() {
                 if let Some(datum) = s.raw[offs] {
@@ -351,6 +435,10 @@ impl Graph {
         self.legend.unselect();
     }
 
+    fn selected(&self) -> Option<usize> {
+        self.legend.selected()
+    }
+
     fn set_interpolate(&mut self) {
         let interpolate = (1000.0 - self.width as f64) / self.width as f64;
 
@@ -370,15 +458,31 @@ impl Graph {
         self.width = (self.width as f64 * 1.25) as usize;
         self.set_interpolate();
     }
+
+    fn time_right(&mut self) {
+        let delta = (self.width as f64 * 0.25) as usize;
+
+        if delta > self.offs {
+            self.offs = 0;
+        } else {
+            self.offs -= delta;
+        }
+    }
+
+    fn time_left(&mut self) {
+        self.offs += (self.width as f64 * 0.25) as usize;
+    }
 }
 
 struct Dashboard {
     graphs: HashMap<(SpIdentifier, MeasurementKind), Graph>,
+    flipped: HashMap<MeasurementKind, Graph>,
     sids: HashMap<(SpIdentifier, MeasurementKind), Vec<SensorId>>,
-    current: usize,
+    kinds: Vec<MeasurementKind>,
+    selected_kind: usize,
     sps: Vec<SpIdentifier>,
+    selected_sp: usize,
     sensor_to_graph: HashMap<SensorId, (SpIdentifier, MeasurementKind, usize)>,
-    current_sp: usize,
     last: Instant,
     interval: u32,
     outstanding: bool,
@@ -396,6 +500,12 @@ impl Dashboard {
         let mut graphs = HashMap::new();
         let mut sids = HashMap::new();
         sps.sort();
+
+        let kinds = vec![
+            MeasurementKind::Temperature,
+            MeasurementKind::Speed,
+            MeasurementKind::Current,
+        ];
 
         for sp in sps.iter() {
             let sp = *sp;
@@ -428,6 +538,7 @@ impl Dashboard {
                             MeasurementKind::Temperature => Box::new(TempGraph),
                             MeasurementKind::Current => Box::new(CurrentGraph),
                             MeasurementKind::Speed => Box::new(FanGraph),
+                            MeasurementKind::Voltage => Box::new(VoltageGraph),
                             _ => Box::new(SensorGraph),
                         },
                     )?,
@@ -440,15 +551,17 @@ impl Dashboard {
             }
         }
 
-        let status = format!("{:?}", sps[0]);
+        let status = sp_to_string(&sps[0]);
 
         Ok(Dashboard {
             graphs,
+            flipped: HashMap::new(),
             sids,
-            current: 0,
+            kinds,
+            selected_kind: 0,
             sps,
             sensor_to_graph,
-            current_sp: 0,
+            selected_sp: 0,
             outstanding: true,
             last: Instant::now(),
             interval: 1000,
@@ -468,44 +581,123 @@ impl Dashboard {
         for graph in self.graphs.values_mut() {
             graph.update_data();
         }
+
+        for graph in self.flipped.values_mut() {
+            graph.update_data();
+        }
     }
 
     fn up(&mut self) {
-        // self.graphs[self.current].previous();
+        let selected_kind = self.kinds[self.selected_kind];
+
+        if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
+            flipped.previous();
+            return;
+        }
+
+        for sp in &self.sps {
+            self.graphs.get_mut(&(*sp, selected_kind)).unwrap().previous();
+        }
     }
 
     fn down(&mut self) {
-        // self.graphs[self.current].next();
+        let selected_kind = self.kinds[self.selected_kind];
+
+        if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
+            flipped.next();
+            return;
+        }
+
+        for sp in &self.sps {
+            self.graphs.get_mut(&(*sp, selected_kind)).unwrap().next();
+        }
     }
 
     fn left(&mut self) {
-        self.current_sp = (self.current_sp - 1) % self.sps.len();
-        self.status = format!("{:?}", self.sps[self.current_sp]);
+        if self.selected_sp == 0 {
+            self.selected_sp = self.sps.len() - 1;
+        } else {
+            self.selected_sp -= 1;
+        }
+
+        self.status = sp_to_string(&self.sps[self.selected_sp]);
     }
 
     fn right(&mut self) {
-        self.current_sp = (self.current_sp + 1) % self.sps.len();
-        self.status = format!("{:?}", self.sps[self.current_sp]);
+        self.selected_sp = (self.selected_sp + 1) % self.sps.len();
+        self.status = sp_to_string(&self.sps[self.selected_sp]);
     }
 
     fn time_left(&mut self) {
-        // XXX
+        for graph in self.graphs.values_mut() {
+            graph.time_left();
+        }
+
+        for graph in self.flipped.values_mut() {
+            graph.time_left();
+        }
     }
 
     fn time_right(&mut self) {
-        // XXX
+        for graph in self.graphs.values_mut() {
+            graph.time_right();
+        }
+
+        for graph in self.flipped.values_mut() {
+            graph.time_right();
+        }
     }
 
     fn esc(&mut self) {
-        // self.graphs[self.current].unselect();
+        let selected_kind = self.kinds[self.selected_kind];
+
+        if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
+            flipped.unselect();
+            return;
+        }
+
+        for sp in &self.sps {
+            self.graphs.get_mut(&(*sp, selected_kind)).unwrap().unselect();
+        }
+    }
+
+    fn flip(&mut self) {
+        let selected_kind = self.kinds[self.selected_kind];
+
+        if let Some(_) = self.flipped.remove(&selected_kind) {
+            return;
+        }
+
+        let sp = self.sps[self.selected_sp];
+
+        let graph = self.graphs.get(&(sp, selected_kind)).unwrap();
+
+        if let Some(ndx) = graph.selected() {
+            let mut from = vec![];
+
+            for sp in &self.sps {
+                // XXX make sure types match
+                from.push((
+                    self.graphs.get(&(*sp, selected_kind)).unwrap(),
+                    sp_to_string(sp),
+                ));
+            }
+
+            self.flipped
+                .insert(selected_kind, Graph::flip(from.as_slice(), ndx));
+        }
     }
 
     fn tab(&mut self) {
-        // self.current = (self.current + 1) % self.graphs.len();
+        self.selected_kind = (self.selected_kind + 1) % self.kinds.len();
     }
 
     fn zoom_in(&mut self) {
         for graph in self.graphs.values_mut() {
+            graph.zoom_in();
+        }
+
+        for graph in self.flipped.values_mut() {
             graph.zoom_in();
         }
     }
@@ -513,6 +705,26 @@ impl Dashboard {
     fn zoom_out(&mut self) {
         for graph in self.graphs.values_mut() {
             graph.zoom_out();
+        }
+
+        for graph in self.flipped.values_mut() {
+            graph.zoom_out();
+        }
+    }
+
+    fn gap(&mut self, length: u64) {
+        let mut gap: Vec<Option<f32>> = vec![];
+
+        for (graph, sids) in &self.sids {
+            while gap.len() < sids.len() {
+                gap.push(None);
+            }
+
+            let graph = self.graphs.get_mut(graph).unwrap();
+
+            for _ in 0..length {
+                graph.data(&gap[0..sids.len()]);
+            }
         }
     }
 
@@ -547,6 +759,7 @@ fn run_dashboard<B: Backend>(
                 KeyCode::Char('-') => dashboard.zoom_out(),
                 KeyCode::Char('<') => dashboard.time_left(),
                 KeyCode::Char('>') => dashboard.time_right(),
+                KeyCode::Char('!') => dashboard.flip(),
                 KeyCode::Char('l') => {
                     //
                     // ^L -- form feed -- is historically used to clear and
@@ -616,16 +829,11 @@ pub(crate) async fn cmd_mgs_dashboard(
     let metadata = std::sync::Arc::new(metadata);
 
     let mut dashboard = Dashboard::new(&args, metadata.clone())?;
-    let mut last = secs()?;
+    let mut last = values.time;
     let mut force = true;
-
-    // setup terminal
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
     let mut update = true;
+
+    dashboard.values(&values);
 
     if args.sensors_args.input.is_some() && !args.simulate_realtime {
         loop {
@@ -635,11 +843,23 @@ pub(crate) async fn cmd_mgs_dashboard(
                 break;
             }
 
+            if values.time != last + 1 {
+                dashboard.gap(values.time - last - 1);
+            }
+
+            last = values.time;
             dashboard.values(&values);
         }
 
         update = false;
     }
+
+    // setup terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
 
     let res = 'outer: loop {
         match run_dashboard(&mut terminal, &mut dashboard, force) {
@@ -701,11 +921,11 @@ pub(crate) async fn cmd_mgs_dashboard(
 
 fn draw_graph<B: Backend>(f: &mut Frame<B>, parent: Rect, graph: &mut Graph) {
     //
-    // We want the right panel to be 30 characters wide (a left-justified 20
+    // We want the right panel to be 31 characters wide (a left-justified 20
     // and a right justified 8 + margins), but we don't want it to consume
     // more than 80%; calculate accordingly.
     //
-    let r = std::cmp::min((30 * 100) / parent.width, 80);
+    let r = std::cmp::min((31 * 100) / parent.width, 80);
 
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
@@ -717,11 +937,11 @@ fn draw_graph<B: Backend>(f: &mut Frame<B>, parent: Rect, graph: &mut Graph) {
 
     let x_labels = vec![
         Span::styled(
-            format!("t-{}", graph.width),
+            format!("t-{}", graph.width + graph.offs),
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("t-{}", 1),
+            format!("t-{}", graph.offs + 1),
             Style::default().add_modifier(Modifier::BOLD),
         ),
     ];
@@ -833,23 +1053,19 @@ fn draw_graphs<B: Backend>(
         )
         .split(parent);
 
-    let sp = dashboard.sps[dashboard.current_sp];
+    let sp = dashboard.sps[dashboard.selected_sp];
 
-    draw_graph(
-        f,
-        screen[0],
-        dashboard.graphs.get_mut(&(sp, MeasurementKind::Temperature)).unwrap(),
-    );
-    draw_graph(
-        f,
-        screen[1],
-        dashboard.graphs.get_mut(&(sp, MeasurementKind::Speed)).unwrap(),
-    );
-    draw_graph(
-        f,
-        screen[2],
-        dashboard.graphs.get_mut(&(sp, MeasurementKind::Current)).unwrap(),
-    );
+    for (i, k) in dashboard.kinds.iter().enumerate() {
+        if let Some(graph) = dashboard.flipped.get_mut(k) {
+            draw_graph(f, screen[i], graph);
+        } else {
+            draw_graph(
+                f,
+                screen[i],
+                dashboard.graphs.get_mut(&(sp, *k)).unwrap(),
+            );
+        }
+    }
 }
 
 fn draw_status<B: Backend>(

@@ -17,6 +17,7 @@ crucible-agent-client.workspace = true
 csv.workspace = true
 diesel.workspace = true
 dropshot.workspace = true
+dyn-clone.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 gateway-messages.workspace = true

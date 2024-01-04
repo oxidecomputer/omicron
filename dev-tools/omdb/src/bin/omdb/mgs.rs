@@ -181,6 +181,10 @@ fn sp_type_to_str(s: &SpType) -> &'static str {
     }
 }
 
+fn sp_to_string(s: &SpIdentifier) -> String {
+    format!("{} {}", sp_type_to_str(&s.type_), s.slot)
+}
+
 fn show_sp_ids(sp_ids: &[SpIdentifier]) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
