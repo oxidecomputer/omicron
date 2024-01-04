@@ -2738,7 +2738,7 @@ fn inv_collection_print_sleds(collection: &Collection) {
             );
             println!(
                 "    zones generation: {} (count: {})",
-                *zones.zones.generation,
+                zones.zones.generation,
                 zones.zones.zones.len()
             );
 

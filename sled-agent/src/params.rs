@@ -298,7 +298,7 @@ pub struct OmicronZonesConfig {
 impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
     fn from(local: OmicronZonesConfig) -> Self {
         Self {
-            generation: local.generation.into(),
+            generation: local.generation,
             zones: local.zones.into_iter().map(|s| s.into()).collect(),
         }
     }

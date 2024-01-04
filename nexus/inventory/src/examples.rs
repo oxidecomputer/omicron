@@ -19,6 +19,7 @@ use nexus_types::inventory::RotPageWhich;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
+use omicron_common::api::external::ByteCount;
 
 /// Returns an example Collection used for testing
 ///
@@ -441,13 +442,11 @@ pub fn sled_agent(
 ) -> sled_agent_client::types::Inventory {
     sled_agent_client::types::Inventory {
         baseboard,
-        reservoir_size: sled_agent_client::types::ByteCount::from(1024),
+        reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
         sled_id,
         usable_hardware_threads: 10,
-        usable_physical_ram: sled_agent_client::types::ByteCount::from(
-            1024 * 1024,
-        ),
+        usable_physical_ram: ByteCount::from(1024 * 1024),
     }
 }

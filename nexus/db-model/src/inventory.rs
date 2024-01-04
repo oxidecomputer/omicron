@@ -675,7 +675,7 @@ impl InvSledOmicronZones {
             time_collected: zones_found.time_collected,
             source: zones_found.source.clone(),
             sled_id: zones_found.sled_id,
-            generation: Generation(zones_found.zones.generation.clone().into()),
+            generation: Generation(zones_found.zones.generation),
         }
     }
 
@@ -687,7 +687,7 @@ impl InvSledOmicronZones {
             source: self.source,
             sled_id: self.sled_id,
             zones: nexus_types::inventory::OmicronZonesConfig {
-                generation: self.generation.0.into(),
+                generation: *self.generation,
                 zones: Vec::new(),
             },
         }
@@ -1123,11 +1123,7 @@ impl InvOmicronZoneNic {
                 Ok(Some(InvOmicronZoneNic {
                     inv_collection_id,
                     id: nic.id,
-                    name: Name::from(
-                        omicron_common::api::external::Name::from(
-                            nic.name.clone(),
-                        ),
-                    ),
+                    name: Name::from(nic.name.clone()),
                     ip: IpNetwork::from(nic.ip),
                     mac: MacAddr::from(
                         omicron_common::api::external::MacAddr::from(
@@ -1155,7 +1151,7 @@ impl InvOmicronZoneNic {
                 zone_id,
             ),
             mac: (*self.mac).into(),
-            name: (&(*self.name)).into(),
+            name: self.name.into(),
             primary: self.is_primary,
             slot: *self.slot,
             vni: nexus_types::inventory::Vni::from(*self.vni),
