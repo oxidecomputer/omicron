@@ -17,6 +17,7 @@ pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
 use omicron_common::api::external::ByteCount;
+pub use sled_agent_client::types::Generation;
 pub use sled_agent_client::types::NetworkInterface;
 pub use sled_agent_client::types::NetworkInterfaceKind;
 pub use sled_agent_client::types::OmicronZoneConfig;

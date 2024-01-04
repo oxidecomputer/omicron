@@ -1,0 +1,16 @@
+[package]
+name = "nexus-deployment"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono.workspace = true
+internal-dns.workspace = true
+ipnet.workspace = true
+ipnetwork.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+omicron-workspace-hack.workspace = true
