@@ -48,6 +48,10 @@ use std::time::{Duration, Instant, SystemTime};
 pub(crate) struct DashboardArgs {
     #[clap(flatten)]
     sensors_args: SensorsArgs,
+
+    /// simulate real-time with input
+    #[clap(long)]
+    simulate_realtime: bool,
 }
 
 struct StatefulList {
@@ -436,6 +440,8 @@ impl Dashboard {
             }
         }
 
+        let status = format!("{:?}", sps[0]);
+
         Ok(Dashboard {
             graphs,
             sids,
@@ -446,7 +452,7 @@ impl Dashboard {
             outstanding: true,
             last: Instant::now(),
             interval: 1000,
-            status: "Init".to_string(),
+            status,
         })
     }
 
@@ -470,6 +476,24 @@ impl Dashboard {
 
     fn down(&mut self) {
         // self.graphs[self.current].next();
+    }
+
+    fn left(&mut self) {
+        self.current_sp = (self.current_sp - 1) % self.sps.len();
+        self.status = format!("{:?}", self.sps[self.current_sp]);
+    }
+
+    fn right(&mut self) {
+        self.current_sp = (self.current_sp + 1) % self.sps.len();
+        self.status = format!("{:?}", self.sps[self.current_sp]);
+    }
+
+    fn time_left(&mut self) {
+        // XXX
+    }
+
+    fn time_right(&mut self) {
+        // XXX
     }
 
     fn esc(&mut self) {
@@ -521,6 +545,8 @@ fn run_dashboard<B: Backend>(
                 KeyCode::Char('q') => return Ok(true),
                 KeyCode::Char('+') => dashboard.zoom_in(),
                 KeyCode::Char('-') => dashboard.zoom_out(),
+                KeyCode::Char('<') => dashboard.time_left(),
+                KeyCode::Char('>') => dashboard.time_right(),
                 KeyCode::Char('l') => {
                     //
                     // ^L -- form feed -- is historically used to clear and
@@ -534,6 +560,8 @@ fn run_dashboard<B: Backend>(
                 }
                 KeyCode::Up => dashboard.up(),
                 KeyCode::Down => dashboard.down(),
+                KeyCode::Right => dashboard.right(),
+                KeyCode::Left => dashboard.left(),
                 KeyCode::Esc => dashboard.esc(),
                 KeyCode::Tab => dashboard.tab(),
                 _ => {}
@@ -576,7 +604,7 @@ pub(crate) async fn cmd_mgs_dashboard(
         SensorInput::MgsClient(mgs_args.mgs_client(omdb, log).await?)
     };
 
-    let (metadata, mut values) =
+    let (metadata, values) =
         sensor_metadata(&mut input, &args.sensors_args).await?;
 
     //
@@ -587,19 +615,34 @@ pub(crate) async fn cmd_mgs_dashboard(
     let metadata: &_ = metadata;
     let metadata = std::sync::Arc::new(metadata);
 
+    let mut dashboard = Dashboard::new(&args, metadata.clone())?;
+    let mut last = secs()?;
+    let mut force = true;
+
     // setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
-    let mut dashboard = Dashboard::new(&args, metadata.clone())?;
-    let mut last = secs()?;
     let mut update = true;
 
+    if args.sensors_args.input.is_some() && !args.simulate_realtime {
+        loop {
+            let values = sensor_data(&mut input, metadata.clone()).await?;
+
+            if values.time == 0 {
+                break;
+            }
+
+            dashboard.values(&values);
+        }
+
+        update = false;
+    }
+
     let res = 'outer: loop {
-        match run_dashboard(&mut terminal, &mut dashboard, update) {
+        match run_dashboard(&mut terminal, &mut dashboard, force) {
             Err(err) => {
                 break Err(err);
             }
@@ -609,10 +652,10 @@ pub(crate) async fn cmd_mgs_dashboard(
             _ => {}
         }
 
-        update = false;
+        force = false;
         let now = secs()?;
 
-        if now != last {
+        if update && now != last {
             let kicked = Instant::now();
             let f = sensor_data(&mut input, metadata.clone());
             last = now;
@@ -620,7 +663,7 @@ pub(crate) async fn cmd_mgs_dashboard(
             while Instant::now().duration_since(kicked).as_millis() < 800 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
 
-                match run_dashboard(&mut terminal, &mut dashboard, update) {
+                match run_dashboard(&mut terminal, &mut dashboard, force) {
                     Err(err) => {
                         break 'outer Err(err);
                     }
@@ -633,8 +676,7 @@ pub(crate) async fn cmd_mgs_dashboard(
 
             let values = f.await?;
             dashboard.values(&values);
-            dashboard.status = format!("{}", values.time);
-            update = true;
+            force = true;
             continue;
         }
 

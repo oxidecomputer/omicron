@@ -68,6 +68,14 @@ pub(crate) struct SensorsArgs {
     /// simulate using specified file as input
     #[clap(long, short)]
     pub input: Option<String>,
+
+    /// start time, if using an input file
+    #[clap(long, value_name = "time", requires = "input")]
+    pub start: Option<u64>,
+
+    /// end time, if using an input file
+    #[clap(long, value_name = "time", requires = "input")]
+    pub end: Option<u64>,
 }
 
 impl SensorsArgs {
@@ -170,6 +178,8 @@ pub(crate) struct SensorMetadata {
     pub sensors_by_sp: MultiMap<SpIdentifier, SensorId>,
     pub work_by_sp:
         HashMap<SpIdentifier, Vec<(DeviceIdentifier, Vec<SensorId>)>>,
+    pub start_time: Option<u64>,
+    pub end_time: Option<u64>,
 }
 
 pub(crate) struct SensorValues {
@@ -409,9 +419,34 @@ fn sp_info_csv<R: std::io::Read>(
             }
 
             if time.is_none() {
-                time = Some(record[0].parse::<u64>().or_else(|_| {
+                let t = record[0].parse::<u64>().or_else(|_| {
                     bail!("bad time at line {}", position.line());
-                })?);
+                })?;
+
+                if let Some(start) = args.start {
+                    if t < start {
+                        continue;
+                    }
+                }
+
+                if let Some(end) = args.end {
+                    if let Some(start) = args.start {
+                        if start > end {
+                            bail!(
+                                "specified start time is later than end time"
+                            );
+                        }
+                    }
+
+                    if t > end {
+                        bail!(
+                            "specified end time ({end}) is earlier \
+                            than time of earliest record ({t})"
+                        );
+                    }
+                }
+
+                time = Some(t);
             }
 
             if let Some(sensor) = Sensor::from_string(&record[1], &record[2]) {
@@ -435,6 +470,10 @@ fn sp_info_csv<R: std::io::Read>(
         } else {
             break;
         }
+    }
+
+    if time.is_none() {
+        bail!("no data found");
     }
 
     let mut rval = vec![];
@@ -553,6 +592,8 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
             sensors_by_id,
             sensors_by_sp,
             work_by_sp,
+            start_time: args.start,
+            end_time: args.end,
         },
         SensorValues { values, time },
     ))
@@ -661,6 +702,13 @@ fn sp_data_csv<R: std::io::Read + std::io::Seek>(
                     break;
                 }
             } else {
+                if let Some(end) = metadata.end_time {
+                    if now > end {
+                        time = Some(0);
+                        break;
+                    }
+                }
+
                 time = Some(now);
             }
 
