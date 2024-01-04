@@ -24,3 +24,4 @@ gateway-client.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
+sled-agent-client.workspace = true

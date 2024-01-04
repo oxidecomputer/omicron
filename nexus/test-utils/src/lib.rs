@@ -51,6 +51,9 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
+pub use sim::TEST_HARDWARE_THREADS;
+pub use sim::TEST_RESERVOIR_RAM;
+
 pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
@@ -61,13 +64,6 @@ pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const RACK_SUBNET: &str = "fd00:1122:3344:01::/56";
-
-/// The reported amount of hardware threads for an emulated sled agent.
-pub const TEST_HARDWARE_THREADS: u32 = 16;
-/// The reported amount of physical RAM for an emulated sled agent.
-pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
-/// The reported amount of VMM reservoir RAM for an emulated sled agent.
-pub const TEST_RESERVOIR_RAM: u64 = 16 * (1 << 30);
 
 /// Password for the user created by the test suite
 ///
@@ -994,32 +990,15 @@ pub async fn start_sled_agent(
     update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
-    let config = sim::Config {
+    let config = sim::Config::for_testing(
         id,
         sim_mode,
-        nexus_address,
-        dropshot: ConfigDropshot {
-            bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
-            request_body_max_bytes: 1024 * 1024,
-            default_handler_task_mode: HandlerTaskMode::Detached,
-        },
-        // TODO-cleanup this is unused
-        log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
-        storage: sim::ConfigStorage {
-            zpools: vec![],
-            ip: IpAddr::from(Ipv6Addr::LOCALHOST),
-        },
-        updates: sim::ConfigUpdates {
-            zone_artifact_path: update_directory.to_path_buf(),
-        },
-        hardware: sim::ConfigHardware {
-            hardware_threads: TEST_HARDWARE_THREADS,
-            physical_ram: TEST_PHYSICAL_RAM,
-            reservoir_ram: TEST_RESERVOIR_RAM,
-        },
-    };
-    let server =
-        sim::Server::start(&config, &log).await.map_err(|e| e.to_string())?;
+        Some(nexus_address),
+        Some(update_directory),
+    );
+    let server = sim::Server::start(&config, &log, true)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(server)
 }
 

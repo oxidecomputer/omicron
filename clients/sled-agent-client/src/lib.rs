@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [ schemars::JsonSchema ],
+    derives = [ schemars::JsonSchema, PartialEq ],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -25,7 +25,6 @@ progenitor::generate_api!(
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
     replace = {
-        //Ipv4Network = ipnetwork::Ipv4Network,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
@@ -33,6 +32,37 @@ progenitor::generate_api!(
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
     }
 );
+
+// We cannot easily configure progenitor to derive `Eq` on all the client-
+// generated types because some have floats and other types that can't impl
+// `Eq`.  We impl it explicitly for a few types on which we need it.
+impl Eq for types::OmicronZonesConfig {}
+impl Eq for types::OmicronZoneConfig {}
+impl Eq for types::OmicronZoneType {}
+impl Eq for types::OmicronZoneDataset {}
+
+impl types::OmicronZoneType {
+    /// Human-readable label describing what kind of zone this is
+    ///
+    /// This is just use for testing and reporting.
+    pub fn label(&self) -> impl std::fmt::Display {
+        match self {
+            types::OmicronZoneType::BoundaryNtp { .. } => "boundary_ntp",
+            types::OmicronZoneType::Clickhouse { .. } => "clickhouse",
+            types::OmicronZoneType::ClickhouseKeeper { .. } => {
+                "clickhouse_keeper"
+            }
+            types::OmicronZoneType::CockroachDb { .. } => "cockroach_db",
+            types::OmicronZoneType::Crucible { .. } => "crucible",
+            types::OmicronZoneType::CruciblePantry { .. } => "crucible_pantry",
+            types::OmicronZoneType::ExternalDns { .. } => "external_dns",
+            types::OmicronZoneType::InternalDns { .. } => "internal_dns",
+            types::OmicronZoneType::InternalNtp { .. } => "internal_ntp",
+            types::OmicronZoneType::Nexus { .. } => "nexus",
+            types::OmicronZoneType::Oximeter { .. } => "oximeter",
+        }
+    }
+}
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
@@ -245,6 +275,12 @@ impl From<&omicron_common::api::external::Name> for types::Name {
     }
 }
 
+impl From<types::Name> for omicron_common::api::external::Name {
+    fn from(s: types::Name) -> Self {
+        Self::try_from(s.as_str().to_owned()).unwrap()
+    }
+}
+
 impl From<omicron_common::api::external::Vni> for types::Vni {
     fn from(v: omicron_common::api::external::Vni) -> Self {
         Self(u32::from(v))
@@ -261,6 +297,12 @@ impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
     fn from(s: omicron_common::api::external::MacAddr) -> Self {
         Self::try_from(s.0.to_string())
             .unwrap_or_else(|e| panic!("{}: {}", s.0, e))
+    }
+}
+
+impl From<types::MacAddr> for omicron_common::api::external::MacAddr {
+    fn from(s: types::MacAddr) -> Self {
+        s.parse().unwrap()
     }
 }
 
@@ -292,6 +334,12 @@ impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
     }
 }
 
+impl From<types::Ipv4Net> for ipnetwork::Ipv4Network {
+    fn from(n: types::Ipv4Net) -> Self {
+        n.parse().unwrap()
+    }
+}
+
 impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
     fn from(n: ipnetwork::Ipv4Network) -> Self {
         Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
@@ -304,12 +352,27 @@ impl From<ipnetwork::Ipv6Network> for types::Ipv6Net {
     }
 }
 
+impl From<types::Ipv6Net> for ipnetwork::Ipv6Network {
+    fn from(n: types::Ipv6Net) -> Self {
+        n.parse().unwrap()
+    }
+}
+
 impl From<ipnetwork::IpNetwork> for types::IpNet {
     fn from(n: ipnetwork::IpNetwork) -> Self {
         use ipnetwork::IpNetwork;
         match n {
             IpNetwork::V4(v4) => Self::V4(v4.into()),
             IpNetwork::V6(v6) => Self::V6(v6.into()),
+        }
+    }
+}
+
+impl From<types::IpNet> for ipnetwork::IpNetwork {
+    fn from(n: types::IpNet) -> Self {
+        match n {
+            types::IpNet::V4(v4) => ipnetwork::IpNetwork::V4(v4.into()),
+            types::IpNet::V6(v6) => ipnetwork::IpNetwork::V6(v6.into()),
         }
     }
 }

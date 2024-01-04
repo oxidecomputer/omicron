@@ -19,11 +19,14 @@ use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::OmicronZonesFound;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
+use nexus_types::inventory::SledAgent;
+use omicron_common::api::external::ByteCount;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -81,6 +84,8 @@ pub struct CollectionBuilder {
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+    sleds: BTreeMap<Uuid, SledAgent>,
+    omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
 }
 
 impl CollectionBuilder {
@@ -101,11 +106,19 @@ impl CollectionBuilder {
             rots: BTreeMap::new(),
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
+            sleds: BTreeMap::new(),
+            omicron_zones: BTreeMap::new(),
         }
     }
 
     /// Assemble a complete `Collection` representation
-    pub fn build(self) -> Collection {
+    pub fn build(mut self) -> Collection {
+        // This is not strictly necessary.  But for testing, it's helpful for
+        // things to be in sorted order.
+        for v in self.omicron_zones.values_mut() {
+            v.zones.zones.sort_by(|a, b| a.id.cmp(&b.id));
+        }
+
         Collection {
             id: Uuid::new_v4(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
@@ -119,6 +132,8 @@ impl CollectionBuilder {
             rots: self.rots,
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
+            sled_agents: self.sleds,
+            omicron_zones: self.omicron_zones,
         }
     }
 
@@ -387,6 +402,105 @@ impl CollectionBuilder {
     pub fn found_error(&mut self, error: InventoryError) {
         self.errors.push(error);
     }
+
+    /// Record information about a sled that's part of the control plane
+    pub fn found_sled_inventory(
+        &mut self,
+        source: &str,
+        inventory: sled_agent_client::types::Inventory,
+    ) -> Result<(), anyhow::Error> {
+        let sled_id = inventory.sled_id;
+
+        // Normalize the baseboard id, if any.
+        use sled_agent_client::types::Baseboard;
+        let baseboard_id = match inventory.baseboard {
+            Baseboard::Pc { .. } => None,
+            Baseboard::Gimlet { identifier, model, revision: _ } => {
+                Some(Self::normalize_item(
+                    &mut self.baseboards,
+                    BaseboardId {
+                        serial_number: identifier,
+                        part_number: model,
+                    },
+                ))
+            }
+            Baseboard::Unknown => {
+                self.found_error(InventoryError::from(anyhow!(
+                    "sled {:?}: reported unknown baseboard",
+                    sled_id
+                )));
+                None
+            }
+        };
+
+        // Socket addresses come through the OpenAPI spec as strings, which
+        // means they don't get validated when everything else does.  This
+        // error is an operational error in collecting the data, not a collector
+        // bug.
+        let sled_agent_address = match inventory.sled_agent_address.parse() {
+            Ok(addr) => addr,
+            Err(error) => {
+                self.found_error(InventoryError::from(anyhow!(
+                    "sled {:?}: bad sled agent address: {:?}: {:#}",
+                    sled_id,
+                    inventory.sled_agent_address,
+                    error,
+                )));
+                return Ok(());
+            }
+        };
+        let sled = SledAgent {
+            source: source.to_string(),
+            sled_agent_address,
+            sled_role: inventory.sled_role,
+            baseboard_id,
+            usable_hardware_threads: inventory.usable_hardware_threads,
+            usable_physical_ram: ByteCount::from(inventory.usable_physical_ram),
+            reservoir_size: ByteCount::from(inventory.reservoir_size),
+            time_collected: now(),
+            sled_id,
+        };
+
+        if let Some(previous) = self.sleds.get(&sled_id) {
+            Err(anyhow!(
+                "sled {:?}: reported sled multiple times \
+                (previously {:?}, now {:?})",
+                sled_id,
+                previous,
+                sled,
+            ))
+        } else {
+            self.sleds.insert(sled_id, sled);
+            Ok(())
+        }
+    }
+
+    /// Record information about Omicron zones found on a sled
+    pub fn found_sled_omicron_zones(
+        &mut self,
+        source: &str,
+        sled_id: Uuid,
+        zones: sled_agent_client::types::OmicronZonesConfig,
+    ) -> Result<(), anyhow::Error> {
+        if let Some(previous) = self.omicron_zones.get(&sled_id) {
+            Err(anyhow!(
+                "sled {:?} omicron zones: reported previously: {:?}",
+                sled_id,
+                previous
+            ))
+        } else {
+            self.omicron_zones.insert(
+                sled_id,
+                OmicronZonesFound {
+                    time_collected: now(),
+                    source: source.to_string(),
+                    sled_id,
+                    zones,
+                },
+            );
+            Ok(())
+        }
+    }
 }
 
 /// Returns the current time, truncated to the previous microsecond.
@@ -422,6 +536,8 @@ mod test {
     use nexus_types::inventory::CabooseWhich;
     use nexus_types::inventory::RotPage;
     use nexus_types::inventory::RotPageWhich;
+    use nexus_types::inventory::SledRole;
+    use omicron_common::api::external::ByteCount;
 
     // Verify the contents of an empty collection.
     #[test]
@@ -455,6 +571,8 @@ mod test {
     // - some missing cabooses
     // - some cabooses common to multiple baseboards; others not
     // - serial number reused across different model numbers
+    // - sled agent inventory
+    // - omicron zone inventory
     //
     // This test is admittedly pretty tedious and maybe not worthwhile but it's
     // a useful quick check.
@@ -463,9 +581,11 @@ mod test {
         let time_before = now();
         let Representative {
             builder,
-            sleds: [sled1_bb, sled2_bb, sled3_bb],
+            sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
             switch,
             psc,
+            sled_agents:
+                [sled_agent_id_basic, sled_agent_id_extra, sled_agent_id_pc, sled_agent_id_unknown],
         } = representative();
         let collection = builder.build();
         let time_after = now();
@@ -479,21 +599,27 @@ mod test {
         // no RoT information.
         assert_eq!(
             collection.errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
-            ["MGS \"fake MGS 1\": reading RoT state for BaseboardId \
+            [
+                "MGS \"fake MGS 1\": reading RoT state for BaseboardId \
                 { part_number: \"model1\", serial_number: \"s2\" }: test suite \
-                injected error"]
+                injected error",
+                "sled 5c5b4cf9-3e13-45fd-871c-f177d6537510: reported unknown \
+                baseboard"
+            ]
         );
 
         // Verify the baseboard ids found.
         let expected_baseboards =
-            &[&sled1_bb, &sled2_bb, &sled3_bb, &switch, &psc];
+            &[&sled1_bb, &sled2_bb, &sled3_bb, &sled4_bb, &switch, &psc];
         for bb in expected_baseboards {
             assert!(collection.baseboards.contains(*bb));
         }
         assert_eq!(collection.baseboards.len(), expected_baseboards.len());
 
         // Verify the stuff that's easy to verify for all SPs: timestamps.
-        assert_eq!(collection.sps.len(), collection.baseboards.len());
+        // There will be one more baseboard than SP because of the one added for
+        // the extra sled agent.
+        assert_eq!(collection.sps.len() + 1, collection.baseboards.len());
         for (bb, sp) in collection.sps.iter() {
             assert!(collection.time_started <= sp.time_collected);
             assert!(sp.time_collected <= collection.time_done);
@@ -755,6 +881,42 @@ mod test {
         // plus the common one; same for RoT pages.
         assert_eq!(collection.cabooses.len(), 5);
         assert_eq!(collection.rot_pages.len(), 5);
+
+        // Verify that we found the sled agents.
+        assert_eq!(collection.sled_agents.len(), 4);
+        for (sled_id, sled_agent) in &collection.sled_agents {
+            assert_eq!(*sled_id, sled_agent.sled_id);
+            if *sled_id == sled_agent_id_extra {
+                assert_eq!(sled_agent.sled_role, SledRole::Scrimlet);
+            } else {
+                assert_eq!(sled_agent.sled_role, SledRole::Gimlet);
+            }
+
+            assert_eq!(
+                sled_agent.sled_agent_address,
+                "[::1]:56792".parse().unwrap()
+            );
+            assert_eq!(sled_agent.usable_hardware_threads, 10);
+            assert_eq!(
+                sled_agent.usable_physical_ram,
+                ByteCount::from(1024 * 1024)
+            );
+            assert_eq!(sled_agent.reservoir_size, ByteCount::from(1024));
+        }
+
+        let sled1_agent = &collection.sled_agents[&sled_agent_id_basic];
+        let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
+        assert_eq!(sled1_bb.part_number, "model1");
+        assert_eq!(sled1_bb.serial_number, "s1");
+        let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
+        let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
+        assert_eq!(sled4_bb.serial_number, "s4");
+        assert!(collection.sled_agents[&sled_agent_id_pc]
+            .baseboard_id
+            .is_none());
+        assert!(collection.sled_agents[&sled_agent_id_unknown]
+            .baseboard_id
+            .is_none());
     }
 
     // Exercises all the failure cases that shouldn't happen in real systems.
