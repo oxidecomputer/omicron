@@ -205,13 +205,10 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
 ) {
     let client = &cptestctx.external_client;
 
-    // TODO
-    // populate_ip_pool(&client, "default", None).await;
-
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create other silo and pool linked to that silo
-    let _other_silo = create_silo(
+    let other_silo = create_silo(
         &client,
         "not-my-silo",
         true,
@@ -222,14 +219,8 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
         Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
             .unwrap(),
     );
-    create_ip_pool(
-        &client,
-        "external-silo-pool",
-        Some(other_pool_range),
-        // TODO
-        // Some(other_silo.identity.id),
-    )
-    .await;
+    create_ip_pool(&client, "external-silo-pool", Some(other_pool_range)).await;
+    // don't link pool to silo yet
 
     let fip_name = FIP_NAMES[4];
 
@@ -246,14 +237,19 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
         pool: Some(NameOrId::Name("external-silo-pool".parse().unwrap())),
     };
 
-    let error = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&body))
-            .expect_status(Some(StatusCode::NOT_FOUND)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute_and_parse_unwrap::<HttpErrorResponseBody>()
-    .await;
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"external-silo-pool\""
+    );
+
+    // error is the same after linking the pool to the other silo
+    link_ip_pool(&client, "external-silo-pool", &other_silo.identity.id, false)
+        .await;
+
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
     assert_eq!(
         error.message,
         "not found: ip-pool with name \"external-silo-pool\""

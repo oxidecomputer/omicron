@@ -253,18 +253,49 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
         "not found: ip-pool with name \"oxide-service-pool\""
     );
 
+    let not_found_id =
+        format!("not found: ip-pool with id \"{}\"", pool.identity.id);
     let error = object_delete_error(
         client,
         &internal_pool_id_url,
         StatusCode::NOT_FOUND,
     )
     .await;
-    assert_eq!(
-        error.message,
-        format!("not found: ip-pool with id \"{}\"", pool.identity.id)
-    );
+    assert_eq!(error.message, not_found_id);
 
-    // TODO: update, assoc, dissoc, add/remove range by name or ID should all fail
+    // Update not allowed
+    let put_body = params::IpPoolUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some("test".parse().unwrap()),
+            description: Some("test".to_string()),
+        },
+    };
+    let error = object_put_error(
+        client,
+        &internal_pool_id_url,
+        &put_body,
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_eq!(error.message, not_found_id);
+
+    // linking not allowed
+
+    // let link_body = params::IpPoolSiloLink {
+    //     silo: NameOrId::Name(cptestctx.silo_name.clone()),
+    //     is_default: false,
+    // };
+    // let link_url = format!("{}/silos", internal_pool_id_url);
+    // let error = object_create_error(
+    //     client,
+    //     &link_url,
+    //     &link_body,
+    //     StatusCode::NOT_FOUND,
+    // )
+    // .await;
+    // assert_eq!(error.message, not_found_id);
+
+    // TODO: link, unlink, add/remove range by name or ID should all fail
 }
 
 #[nexus_test]
@@ -304,6 +335,16 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         params::IpPoolSiloLink { silo: silo.clone(), is_default: false };
     let _: IpPoolSilo =
         object_create(client, "/v1/system/ip-pools/p0/silos", &params).await;
+
+    // second attempt to create the same link errors due to conflict
+    let error = object_create_error(
+        client,
+        "/v1/system/ip-pools/p0/silos",
+        &params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
 
     // get silo ID so we can test association by ID as well
     let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);

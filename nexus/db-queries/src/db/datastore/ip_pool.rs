@@ -445,7 +445,6 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    // TODO: should this error on conflict instead of updating?
     pub async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
@@ -458,26 +457,6 @@ impl DataStore {
 
         diesel::insert_into(dsl::ip_pool_resource)
             .values(ip_pool_resource.clone())
-            // We have two constraints that are relevant here, and we need to
-            // make this behave correctly with respect to both. If the entry
-            // matches an existing (ip pool, silo/fleet), we want to update
-            // is_default because we want to handle the case where someone is
-            // trying to change is_default on an existing association. But
-            // you can only have one default pool for a given resource, so
-            // if that update violates the unique index ensuring one default,
-            // the insert should still fail.
-            // note that this on_conflict has to have all three because that's
-            // how the pk is defined. if it only has the IDs and not the type,
-            // CRDB complains that the tuple doesn't match any constraints it's
-            // aware of
-            .on_conflict((
-                dsl::ip_pool_id,
-                dsl::resource_type,
-                dsl::resource_id,
-            ))
-            .do_update()
-            .set(dsl::is_default.eq(ip_pool_resource.is_default))
-            .returning(IpPoolResource::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
@@ -496,8 +475,6 @@ impl DataStore {
             })
     }
 
-    // TODO: make default should fail when the association doesn't exist.
-    // should it also fail when it's already default? probably not?
     pub async fn ip_pool_set_default(
         &self,
         opctx: &OpContext,
@@ -899,18 +876,19 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroU32;
+
     use crate::authz;
     use crate::db::datastore::datastore_test;
     use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
     use assert_matches::assert_matches;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Resource;
+    use omicron_common::api::external::http_pagination::PaginatedBy;
     use omicron_common::api::external::{
-        Error, IdentityMetadataCreateParams, LookupType,
+        DataPageParams, Error, IdentityMetadataCreateParams, LookupType,
     };
     use omicron_test_utils::dev;
-
-    // TODO: add calls to the list endpoint throughout all this
 
     #[tokio::test]
     async fn test_default_ip_pools() {
@@ -922,7 +900,26 @@ mod test {
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
-        let silo_id = opctx.authn.silo_required().unwrap().id();
+        let pagparams_id = DataPageParams {
+            marker: None,
+            limit: NonZeroU32::new(100).unwrap(),
+            direction: dropshot::PaginationOrder::Ascending,
+        };
+        let pagbyid = PaginatedBy::Id(pagparams_id);
+
+        let all_pools = datastore
+            .ip_pools_list(&opctx, &pagbyid)
+            .await
+            .expect("Should list IP pools");
+        assert_eq!(all_pools.len(), 0);
+        let silo_pools = datastore
+            .silo_ip_pools_list(&opctx, &pagbyid)
+            .await
+            .expect("Should list silo IP pools");
+        assert_eq!(silo_pools.len(), 0);
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+        let silo_id = authz_silo.id();
 
         // create a non-default pool for the silo
         let identity = IdentityMetadataCreateParams {
@@ -933,16 +930,40 @@ mod test {
             .ip_pool_create(&opctx, IpPool::new(&identity))
             .await
             .expect("Failed to create IP pool");
+
+        // shows up in full list but not silo list
+        let all_pools = datastore
+            .ip_pools_list(&opctx, &pagbyid)
+            .await
+            .expect("Should list IP pools");
+        assert_eq!(all_pools.len(), 1);
+        let silo_pools = datastore
+            .silo_ip_pools_list(&opctx, &pagbyid)
+            .await
+            .expect("Should list silo IP pools");
+        assert_eq!(silo_pools.len(), 0);
+
+        // make default should fail when there is no link yet
+        let authz_pool = authz::IpPool::new(
+            authz::FLEET,
+            pool1_for_silo.id(),
+            LookupType::ById(pool1_for_silo.id()),
+        );
+        let error = datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect_err("Should not be able to make non-existent link default");
+        assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // now link to silo
+        let link_body = IpPoolResource {
+            ip_pool_id: pool1_for_silo.id(),
+            resource_type: IpPoolResourceType::Silo,
+            resource_id: silo_id,
+            is_default: false,
+        };
         datastore
-            .ip_pool_link_silo(
-                &opctx,
-                IpPoolResource {
-                    ip_pool_id: pool1_for_silo.id(),
-                    resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
-                    is_default: false,
-                },
-            )
+            .ip_pool_link_silo(&opctx, link_body.clone())
             .await
             .expect("Failed to associate IP pool with silo");
 
@@ -951,20 +972,32 @@ mod test {
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
 
-        // now we can change that association to is_default=true and
-        // it should update rather than erroring out
-        datastore
-            .ip_pool_link_silo(
-                &opctx,
-                IpPoolResource {
-                    ip_pool_id: pool1_for_silo.id(),
-                    resource_type: IpPoolResourceType::Silo,
-                    resource_id: silo_id,
-                    is_default: true,
-                },
-            )
+        // now it shows up in the silo list
+        let silo_pools = datastore
+            .silo_ip_pools_list(&opctx, &pagbyid)
             .await
-            .expect("Failed to make IP pool default for silo");
+            .expect("Should list silo IP pools");
+        assert_eq!(silo_pools.len(), 1);
+        assert_eq!(silo_pools[0].id(), pool1_for_silo.id());
+
+        // linking an already linked silo errors due to PK conflict
+        let err = datastore
+            .ip_pool_link_silo(&opctx, link_body)
+            .await
+            .expect_err("Creating the same link again should conflict");
+        assert_matches!(err, Error::ObjectAlreadyExists { .. });
+
+        // now make it default
+        datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("Should be able to make pool default");
+
+        // setting default if already default is allowed
+        datastore
+            .ip_pool_set_default(&opctx, &authz_pool, &authz_silo, true)
+            .await
+            .expect("Should be able to make pool default again");
 
         // now when we ask for the default pool again, we get that one
         let (authz_pool1_for_silo, ip_pool) = datastore
@@ -1004,8 +1037,16 @@ mod test {
             .await
             .expect("Failed to unlink IP pool from silo");
 
+        // no default
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
         assert_matches!(error, Error::ObjectNotFound { .. });
+
+        // and silo pools list is empty again
+        let silo_pools = datastore
+            .silo_ip_pools_list(&opctx, &pagbyid)
+            .await
+            .expect("Should list silo IP pools");
+        assert_eq!(silo_pools.len(), 0);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

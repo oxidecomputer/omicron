@@ -73,9 +73,6 @@ impl super::Nexus {
         self.db_datastore.ip_pool_create(opctx, pool).await
     }
 
-    // TODO: this is used by a developer user to see what IP pools they can use
-    // in their silo, so it would be nice to say which one is the default
-
     /// List IP pools in current silo
     pub(crate) async fn silo_ip_pools_list(
         &self,

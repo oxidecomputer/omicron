@@ -1392,8 +1392,6 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
 
     let _disk_test = DiskTest::new(&cptestctx).await;
 
-    // TODO
-    // populate_ip_pool(&client, "default", None).await;
     let _project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
 
     // Create a 1 GB disk
