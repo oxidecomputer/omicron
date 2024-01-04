@@ -2,8 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-mod server;
-mod store;
+//! Common update types and code shared between wicketd and Nexus.
 
-pub(crate) use self::server::WicketdArtifactServer;
-pub(crate) use self::store::WicketdArtifactStore;
+pub mod artifacts;
+pub mod errors;
