@@ -35,7 +35,7 @@ use uuid::Uuid;
 // See [`nexus_types::inventory::PowerState`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "hw_power_state"))]
+    #[diesel(postgres_type(name = "hw_power_state", schema = "public"))]
     pub struct HwPowerStateEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -71,7 +71,7 @@ impl From<HwPowerState> for PowerState {
 // See [`nexus_types::inventory::RotSlot`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "hw_rot_slot"))]
+    #[diesel(postgres_type(name = "hw_rot_slot", schema = "public"))]
     pub struct HwRotSlotEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -104,7 +104,7 @@ impl From<HwRotSlot> for RotSlot {
 // See [`nexus_types::inventory::CabooseWhich`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "caboose_which"))]
+    #[diesel(postgres_type(name = "caboose_which", schema = "public"))]
     pub struct CabooseWhichEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -145,7 +145,7 @@ impl From<CabooseWhich> for nexus_types::inventory::CabooseWhich {
 // See [`nexus_types::inventory::RotPageWhich`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "root_of_trust_page_which"))]
+    #[diesel(postgres_type(name = "root_of_trust_page_which", schema = "public"))]
     pub struct RotPageWhichEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -198,7 +198,7 @@ impl From<RotPageWhich> for nexus_types::inventory::RotPageWhich {
 // See [`nexus_types::inventory::SpType`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "sp_type"))]
+    #[diesel(postgres_type(name = "sp_type", schema = "public"))]
     pub struct SpTypeEnum;
 
     #[derive(

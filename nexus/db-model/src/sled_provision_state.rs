@@ -9,7 +9,7 @@ use thiserror::Error;
 
 impl_enum_type!(
     #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "sled_provision_state"))]
+    #[diesel(postgres_type(name = "sled_provision_state", schema = "public"))]
     pub struct SledProvisionStateEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
