@@ -196,7 +196,7 @@ flate2 = "1.0.28"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
-futures = "0.3.29"
+futures = "0.3.30"
 gateway-client = { path = "clients/gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = ["std"] }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9" }
