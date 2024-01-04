@@ -16,10 +16,10 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
+use omicron_common::api::external::ByteCount;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
 use uuid::Uuid;
-use omicron_common::api::external::ByteCount;
 
 /// Returns an example Collection used for testing
 ///
