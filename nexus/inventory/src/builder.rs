@@ -26,7 +26,6 @@ use nexus_types::inventory::RotPageWhich;
 use nexus_types::inventory::RotState;
 use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
-use omicron_common::api::external::ByteCount;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -455,8 +454,8 @@ impl CollectionBuilder {
             sled_role: inventory.sled_role,
             baseboard_id,
             usable_hardware_threads: inventory.usable_hardware_threads,
-            usable_physical_ram: ByteCount::from(inventory.usable_physical_ram),
-            reservoir_size: ByteCount::from(inventory.reservoir_size),
+            usable_physical_ram: inventory.usable_physical_ram,
+            reservoir_size: inventory.reservoir_size,
             time_collected: now(),
             sled_id,
         };

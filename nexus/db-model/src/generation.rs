@@ -60,9 +60,3 @@ where
             .map_err(|e| e.into())
     }
 }
-
-impl From<Generation> for sled_agent_client::types::Generation {
-    fn from(g: Generation) -> Self {
-        Self(i64::from(&g.0) as u64)
-    }
-}
