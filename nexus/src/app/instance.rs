@@ -1952,7 +1952,7 @@ impl super::Nexus {
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
         ext_ip: &params::ExternalIpDetach,
-    ) -> UpdateResult<Option<views::ExternalIp>> {
+    ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -1973,6 +1973,15 @@ impl super::Nexus {
             .lookup_node_output::<Option<views::ExternalIp>>("output")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
             .internal_context("looking up output from ip detach saga")
+            .and_then(|eip| {
+                // Saga idempotency means we'll get Ok(None) on double detach
+                // of an ephemeral IP. Convert this case to an error here.
+                eip.ok_or_else(|| {
+                    Error::invalid_request(
+                        "instance does not have an ephemeral IP attached",
+                    )
+                })
+            })
     }
 }
 

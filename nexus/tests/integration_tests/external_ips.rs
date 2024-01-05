@@ -629,14 +629,8 @@ async fn test_external_ip_live_attach_detach(
         assert_eq!(fip.ip, fip_resp.ip);
         assert_eq!(eph_ip, &eph_resp);
 
-        // Check for idempotency: repeat requests should return same values
-        // for FIP, but in ephemeral case there is no currently known IP so we get None.
-        let eph_resp_2 = external_ip_detach(
-            client,
-            instance_name,
-            &params::ExternalIpDetach::Ephemeral,
-        )
-        .await;
+        // Check for idempotency: repeat requests should return same values for FIP,
+        // but in ephemeral case there is no currently known IP so we return an error.
         let fip_resp_2 = external_ip_detach(
             client,
             instance_name,
@@ -645,9 +639,24 @@ async fn test_external_ip_live_attach_detach(
             },
         )
         .await;
-
-        assert!(eph_resp_2.is_none());
         assert_eq!(Some(fip_resp), fip_resp_2);
+
+        let url = detach_instance_external_ip_url(instance_name, PROJECT_NAME);
+        let error: HttpErrorResponseBody = NexusRequest::new(
+            RequestBuilder::new(client, Method::POST, &url)
+                .body(Some(&params::ExternalIpDetach::Ephemeral))
+                .expect_status(Some(StatusCode::BAD_REQUEST)),
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap()
+        .parsed_body()
+        .unwrap();
+        assert_eq!(
+            error.message,
+            "instance does not have an ephemeral IP attached".to_string()
+        );
     }
 }
 

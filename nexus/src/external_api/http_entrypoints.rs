@@ -3776,7 +3776,7 @@ async fn instance_external_ip_detach(
     path_params: Path<params::InstancePath>,
     query_params: Query<params::OptionalProjectSelector>,
     ip_to_detach: TypedBody<params::ExternalIpDetach>,
-) -> Result<HttpResponseAccepted<Option<views::ExternalIp>>, HttpError> {
+) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
