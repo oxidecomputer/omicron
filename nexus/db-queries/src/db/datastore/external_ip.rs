@@ -45,7 +45,6 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
-use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
@@ -88,7 +87,7 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         instance_id: Uuid,
-        pool_id: Option<Uuid>,
+        pool: Option<authz::IpPool>,
         creating_instance: bool,
     ) -> CreateResult<(ExternalIp, bool)> {
         // This is slightly hacky: we need to create an unbound ephemeral IP, and
@@ -97,16 +96,18 @@ impl DataStore {
         // - At most MAX external IPs per instance
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
-        let pool = match pool_id {
-            Some(id) => {
-                let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_id(id)
+        let pool = match pool {
+            Some(authz_pool) => {
+                let (.., pool) = LookupPath::new(opctx, &self)
+                    .ip_pool_id(authz_pool.id())
                     // any authenticated user can CreateChild on an IP pool. this is
                     // meant to represent allocating an IP
                     .fetch_for(authz::Action::CreateChild)
                     .await?;
 
                 // If this pool is not linked to the current silo, 404
+                // As name resolution happens one layer up, we need to use the *original*
+                // authz Pool.
                 if self.ip_pool_fetch_link(opctx, pool.id()).await.is_err() {
                     return Err(authz_pool.not_found());
                 }
@@ -210,32 +211,33 @@ impl DataStore {
         opctx: &OpContext,
         project_id: Uuid,
         params: params::FloatingIpCreate,
+        pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        // TODO: NameOrId resolution should happen a level higher, in the nexus function
-        let (.., authz_pool, pool) = match params.pool {
-            Some(NameOrId::Name(name)) => {
-                LookupPath::new(opctx, self)
-                    .ip_pool_name(&Name(name))
-                    .fetch_for(authz::Action::Read)
-                    .await?
+        // This implements the same pattern as in `allocate_instance_ephemeral_ip` to
+        // check that a chosen pool is valid from within the current silo.
+        let pool = match pool {
+            Some(authz_pool) => {
+                let (.., pool) = LookupPath::new(opctx, &self)
+                    .ip_pool_id(authz_pool.id())
+                    .fetch_for(authz::Action::CreateChild)
+                    .await?;
+
+                if self.ip_pool_fetch_link(opctx, pool.id()).await.is_err() {
+                    return Err(authz_pool.not_found());
+                }
+
+                pool
             }
-            Some(NameOrId::Id(id)) => {
-                LookupPath::new(opctx, self)
-                    .ip_pool_id(id)
-                    .fetch_for(authz::Action::Read)
-                    .await?
+            // If no name given, use the default logic
+            None => {
+                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
+                pool
             }
-            None => self.ip_pools_fetch_default(opctx).await?,
         };
 
         let pool_id = pool.id();
-
-        // If this pool is not linked to the current silo, 404
-        if self.ip_pool_fetch_link(opctx, pool_id).await.is_err() {
-            return Err(authz_pool.not_found());
-        }
 
         let data = if let Some(ip) = params.address {
             IncompleteExternalIp::for_floating_explicit(

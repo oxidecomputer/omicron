@@ -626,7 +626,7 @@ async fn sic_allocate_instance_external_ip(
     let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
         params::ExternalIpCreate::Ephemeral { pool } => {
-            let pool_id = if let Some(name_or_id) = pool {
+            let pool = if let Some(name_or_id) = pool {
                 let (.., authz_pool) = match name_or_id {
                     NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
                         .ip_pool_name(db::model::Name::ref_cast(name)),
@@ -638,7 +638,7 @@ async fn sic_allocate_instance_external_ip(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-                Some(authz_pool.id())
+                Some(authz_pool)
             } else {
                 None
             };
@@ -649,7 +649,7 @@ async fn sic_allocate_instance_external_ip(
                     &opctx,
                     ip_id,
                     instance_id,
-                    pool_id,
+                    pool,
                     true,
                 )
                 .await

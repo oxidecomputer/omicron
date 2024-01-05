@@ -863,10 +863,12 @@ impl RunQueryDsl<DbConnection> for NextExternalIp {}
 
 #[cfg(test)]
 mod tests {
+    use crate::authz;
     use crate::context::OpContext;
     use crate::db::datastore::DataStore;
     use crate::db::datastore::SERVICE_IP_POOL_NAME;
     use crate::db::identity::Resource;
+    use crate::db::lookup::LookupPath;
     use crate::db::model::IpKind;
     use crate::db::model::IpPool;
     use crate::db::model::IpPoolRange;
@@ -923,7 +925,7 @@ mod tests {
             name: &str,
             range: IpRange,
             is_default: bool,
-        ) -> IpPool {
+        ) -> authz::IpPool {
             let pool = IpPool::new(&IdentityMetadataCreateParams {
                 name: String::from(name).parse().unwrap(),
                 description: format!("ip pool {}", name),
@@ -948,7 +950,12 @@ mod tests {
 
             self.initialize_ip_pool(name, range).await;
 
-            pool
+            LookupPath::new(&self.opctx, &self.db_datastore)
+                .ip_pool_id(pool.id())
+                .lookup_for(authz::Action::Read)
+                .await
+                .unwrap()
+                .0
         }
 
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
@@ -1825,7 +1832,7 @@ mod tests {
                 &context.opctx,
                 id,
                 instance_id,
-                Some(p1.id()),
+                Some(p1),
                 true,
             )
             .await
@@ -1870,7 +1877,7 @@ mod tests {
                     &context.opctx,
                     Uuid::new_v4(),
                     instance_id,
-                    Some(p1.id()),
+                    Some(p1.clone()),
                     true,
                 )
                 .await
@@ -1892,7 +1899,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
-                Some(p1.id()),
+                Some(p1),
                 true,
             )
             .await

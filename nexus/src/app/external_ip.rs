@@ -20,6 +20,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use ref_cast::RefCast;
 
 impl super::Nexus {
     pub(crate) async fn instance_list_external_ips(
@@ -105,9 +106,27 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
+        let pool = match &params.pool {
+            Some(NameOrId::Name(name)) => Some(
+                LookupPath::new(opctx, &self.db_datastore)
+                    .ip_pool_name(nexus_db_model::Name::ref_cast(name))
+                    .lookup_for(authz::Action::Read)
+                    .await?
+                    .0,
+            ),
+            Some(NameOrId::Id(id)) => Some(
+                LookupPath::new(opctx, &self.db_datastore)
+                    .ip_pool_id(*id)
+                    .lookup_for(authz::Action::Read)
+                    .await?
+                    .0,
+            ),
+            None => None,
+        };
+
         Ok(self
             .db_datastore
-            .allocate_floating_ip(opctx, authz_project.id(), params)
+            .allocate_floating_ip(opctx, authz_project.id(), params, pool)
             .await?
             .try_into()
             .unwrap())

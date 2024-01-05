@@ -93,7 +93,7 @@ async fn siia_begin_attach_ip(
     match &params.create_params {
         // Allocate a new IP address from the target, possibly default, pool
         params::ExternalIpCreate::Ephemeral { pool } => {
-            let pool_id = if let Some(name_or_id) = pool {
+            let pool = if let Some(name_or_id) = pool {
                 let (.., authz_pool) = match name_or_id {
                     NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
                         .ip_pool_name(db::model::Name::ref_cast(name)),
@@ -105,7 +105,7 @@ async fn siia_begin_attach_ip(
                 .await
                 .map_err(ActionError::action_failed)?;
 
-                Some(authz_pool.id())
+                Some(authz_pool)
             } else {
                 None
             };
@@ -115,7 +115,7 @@ async fn siia_begin_attach_ip(
                     &opctx,
                     Uuid::new_v4(),
                     params.authz_instance.id(),
-                    pool_id,
+                    pool,
                     false,
                 )
                 .await
