@@ -59,7 +59,7 @@ impl From<SystemUpdate> for views::SystemUpdate {
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "update_status"))]
+    #[diesel(postgres_type(name = "update_status", schema = "public"))]
     pub struct UpdateStatusEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
@@ -81,7 +81,7 @@ impl From<UpdateStatus> for views::UpdateStatus {
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "updateable_component_type"))]
+    #[diesel(postgres_type(name = "updateable_component_type", schema = "public"))]
     pub struct UpdateableComponentTypeEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]

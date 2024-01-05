@@ -809,7 +809,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "List all Floating IPs",
+        "summary": "List all floating IPs",
         "operationId": "floating_ip_list",
         "parameters": [
           {
@@ -876,7 +876,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Create a Floating IP",
+        "summary": "Create a floating IP",
         "operationId": "floating_ip_create",
         "parameters": [
           {
@@ -968,7 +968,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Delete a Floating IP",
+        "summary": "Delete a floating IP",
         "operationId": "floating_ip_delete",
         "parameters": [
           {
@@ -2154,7 +2154,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "List all IP Pools that can be used by a given project.",
+        "summary": "List all IP pools that can be used by a given project",
         "operationId": "project_ip_pool_list",
         "parameters": [
           {
@@ -3971,7 +3971,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Set the sled's provision state.",
+        "summary": "Set the sled's provision state",
         "operationId": "sled_set_provision_state",
         "parameters": [
           {
@@ -4783,7 +4783,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Update an IP Pool",
+        "summary": "Update an IP pool",
         "operationId": "ip_pool_update",
         "parameters": [
           {
@@ -4829,7 +4829,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete an IP Pool",
+        "summary": "Delete an IP pool",
         "operationId": "ip_pool_delete",
         "parameters": [
           {

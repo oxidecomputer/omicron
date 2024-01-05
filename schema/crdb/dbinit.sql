@@ -2916,6 +2916,161 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_root_of_trust_page (
     PRIMARY KEY (inv_collection_id, hw_baseboard_id, which)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.sled_role AS ENUM (
+    -- this sled is directly attached to a Sidecar
+    'scrimlet',
+    -- everything else
+    'gimlet'
+);
+
+-- observations from and about sled agents
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- URL of the sled agent that reported this data
+    source TEXT NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- which system this sled agent reports it's running on
+    -- (foreign key into `hw_baseboard_id` table)
+    -- This is optional because dev/test systems support running on non-Oxide
+    -- hardware.
+    hw_baseboard_id UUID,
+
+    -- Many of the following properties are duplicated from the `sled` table,
+    -- which predates the current inventory system.
+    sled_agent_ip INET NOT NULL,
+    sled_agent_port INT4 NOT NULL,
+    sled_role omicron.public.sled_role NOT NULL,
+    usable_hardware_threads INT8
+        CHECK (usable_hardware_threads BETWEEN 0 AND 4294967295) NOT NULL,
+    usable_physical_ram INT8 NOT NULL,
+    reservoir_size INT8 CHECK (reservoir_size < usable_physical_ram) NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+    -- URL of the sled agent that reported this data
+    source TEXT NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- OmicronZonesConfig generation reporting these zones
+    generation INT8 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.zone_type AS ENUM (
+  'boundary_ntp',
+  'clickhouse',
+  'clickhouse_keeper',
+  'cockroach_db',
+  'crucible',
+  'crucible_pantry',
+  'external_dns',
+  'internal_dns',
+  'internal_ntp',
+  'nexus',
+  'oximeter'
+);
+
+-- observations from sled agents about Omicron-managed zones
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this zone
+    id UUID NOT NULL,
+    underlay_address INET NOT NULL,
+    zone_type omicron.public.zone_type NOT NULL,
+
+    -- SocketAddr of the "primary" service for this zone
+    -- (what this describes varies by zone type, but all zones have at least one
+    -- service in them)
+    primary_service_ip INET NOT NULL,
+    primary_service_port INT4
+	CHECK (primary_service_port BETWEEN 0 AND 65535)
+	NOT NULL,
+
+    -- The remaining properties may be NULL for different kinds of zones.  The
+    -- specific constraints are not enforced at the database layer, basically
+    -- because it's really complicated to do that and it's not obvious that it's
+    -- worthwhile.
+
+    -- Some zones have a second service.  Like the primary one, the meaning of
+    -- this is zone-type-dependent.
+    second_service_ip INET,
+    second_service_port INT4
+        CHECK (second_service_port IS NULL
+	    OR second_service_port BETWEEN 0 AND 65535),
+
+    -- Zones may have an associated dataset.  They're currently always on a U.2.
+    -- The only thing we need to identify it here is the name of the zpool that
+    -- it's on.
+    dataset_zpool_name TEXT,
+
+    -- Zones with external IPs have an associated NIC and sockaddr for listening
+    -- (first is a foreign key into `inv_omicron_zone_nic`)
+    nic_id UUID,
+
+    -- Properties for internal DNS servers
+    -- address attached to this zone from outside the sled's subnet
+    dns_gz_address INET,
+    dns_gz_address_index INT8,
+
+    -- Properties common to both kinds of NTP zones
+    ntp_ntp_servers TEXT[],
+    ntp_dns_servers INET[],
+    ntp_domain TEXT,
+
+    -- Properties specific to Nexus zones
+    nexus_external_tls BOOLEAN,
+    nexus_external_dns_servers INET ARRAY,
+
+    -- Source NAT configuration (currently used for boundary NTP only)
+    snat_ip INET,
+    snat_first_port INT4
+	CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
+    snat_last_port INT4
+	CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+
+    PRIMARY KEY (inv_collection_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
+    inv_collection_id UUID NOT NULL,
+    id UUID NOT NULL,
+    name TEXT NOT NULL,
+    ip INET NOT NULL,
+    mac INT8 NOT NULL,
+    subnet INET NOT NULL,
+    vni INT8 NOT NULL,
+    is_primary BOOLEAN NOT NULL,
+    slot INT2 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, id)
+);
+
 /*******************************************************************/
 
 /*
@@ -3096,7 +3251,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '21.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '22.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
