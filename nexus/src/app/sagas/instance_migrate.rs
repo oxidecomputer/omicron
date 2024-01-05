@@ -570,7 +570,7 @@ mod tests {
                 memory: ByteCount::from_gibibytes_u32(2),
                 hostname: String::from(INSTANCE_NAME),
                 user_data: b"#cloud-config".to_vec(),
-                public_keys: None,
+                public_keys: Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],

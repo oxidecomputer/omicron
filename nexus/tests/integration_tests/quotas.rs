@@ -80,7 +80,7 @@ impl ResourceAllocator {
                 hostname: "host".to_string(),
                 user_data: b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
-                public_keys: None,
+                public_keys:  Some(Vec::new()),
                 network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: Vec::<params::ExternalIpCreate>::new(),
                 disks: Vec::<params::InstanceDiskAttachment>::new(),

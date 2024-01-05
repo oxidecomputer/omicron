@@ -1740,7 +1740,7 @@ mod tests {
             memory: ByteCount::from_gibibytes_u32(4),
             hostname: "inst".to_string(),
             user_data: vec![],
-            public_keys: None,
+            public_keys: Some(Vec::new()),
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
