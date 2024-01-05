@@ -291,7 +291,7 @@ postgres-protocol = "0.6.6"
 predicates = "3.0.4"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.0"
-prettyplease = "0.2.15"
+prettyplease = "0.2.16"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
