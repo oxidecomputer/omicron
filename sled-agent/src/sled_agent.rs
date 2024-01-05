@@ -980,6 +980,11 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    /// Idempotently ensures that an instance's OPTE/port state includes the
+    /// specified external IP address.
+    ///
+    /// This method will return an error when trying to register an ephemeral IP which
+    /// does not match the current ephemeral IP.
     pub async fn instance_put_external_ip(
         &self,
         instance_id: Uuid,
@@ -992,6 +997,8 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    /// Idempotently ensures that an instance's OPTE/port state does not include the
+    /// specified external IP address in either its ephemeral or floating IP set.
     pub async fn instance_delete_external_ip(
         &self,
         instance_id: Uuid,
