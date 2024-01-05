@@ -76,6 +76,15 @@ pub(crate) struct SensorsArgs {
     /// end time, if using an input file
     #[clap(long, value_name = "time", requires = "input")]
     pub end: Option<u64>,
+
+    /// duration, if using an input file
+    #[clap(
+        long,
+        value_name = "seconds",
+        requires = "input",
+        conflicts_with = "end"
+    )]
+    pub duration: Option<u64>,
 }
 
 impl SensorsArgs {
@@ -615,7 +624,13 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
             sensors_by_sp,
             work_by_sp,
             start_time: args.start,
-            end_time: args.end,
+            end_time: match args.end {
+                Some(end) => Some(end),
+                None => match args.duration {
+                    Some(duration) => Some(time + duration),
+                    None => None,
+                },
+            },
         },
         SensorValues { values, time },
     ))

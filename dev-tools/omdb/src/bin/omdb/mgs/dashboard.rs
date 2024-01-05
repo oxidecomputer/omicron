@@ -5,7 +5,7 @@
 //! Code for the MGS dashboard subcommand
 
 use anyhow::{anyhow, bail, Result};
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Local, Offset, TimeZone};
 use clap::{CommandFactory, Parser};
 use crossterm::{
     event::{
@@ -488,6 +488,7 @@ struct Dashboard {
     interval: u32,
     outstanding: bool,
     status: String,
+    time: u64,
 }
 
 impl Dashboard {
@@ -567,6 +568,7 @@ impl Dashboard {
             last: Instant::now(),
             interval: 1000,
             status,
+            time: secs()?,
         })
     }
 
@@ -747,6 +749,8 @@ impl Dashboard {
             let graph = self.graphs.get_mut(graph).unwrap();
             graph.data(data.as_slice());
         }
+
+        self.time = values.time;
     }
 }
 
@@ -923,7 +927,12 @@ pub(crate) async fn cmd_mgs_dashboard(
     Ok(())
 }
 
-fn draw_graph<B: Backend>(f: &mut Frame<B>, parent: Rect, graph: &mut Graph) {
+fn draw_graph<B: Backend>(
+    f: &mut Frame<B>,
+    parent: Rect,
+    graph: &mut Graph,
+    now: u64,
+) {
     //
     // We want the right panel to be 31 characters wide (a left-justified 20
     // and a right justified 8 + margins), but we don't want it to consume
@@ -939,13 +948,32 @@ fn draw_graph<B: Backend>(f: &mut Frame<B>, parent: Rect, graph: &mut Graph) {
         )
         .split(parent);
 
+    let latest = now as i64 - graph.offs as i64;
+    let earliest = Local.timestamp(latest - graph.width as i64, 0);
+    let latest = Local.timestamp(latest, 0);
+    let fmt = "%Y-%m-%d %H:%M:%S";
+
+    let tz_offset = earliest.offset().fix().local_minus_utc();
+    let tz = if tz_offset != 0 {
+        let hours = tz_offset / 3600;
+        let minutes = (tz_offset % 3600) / 60;
+
+        if minutes != 0 {
+            format!("Z{:+}:{:02}", hours, minutes.abs())
+        } else {
+            format!("Z{:+}", hours)
+        }
+    } else {
+        "Z".to_string()
+    };
+
     let x_labels = vec![
         Span::styled(
-            format!("t-{}", graph.width + graph.offs),
+            format!("{}{}", earliest.format(fmt), tz),
             Style::default().add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            format!("t-{}", graph.offs + 1),
+            format!("{}{}", latest.format(fmt), tz),
             Style::default().add_modifier(Modifier::BOLD),
         ),
     ];
@@ -985,7 +1013,8 @@ fn draw_graph<B: Backend>(f: &mut Frame<B>, parent: Rect, graph: &mut Graph) {
                 .title(graph.attributes.x_axis_label())
                 .style(Style::default().fg(Color::Gray))
                 .labels(x_labels)
-                .bounds([0.0, graph.width as f64]),
+                .bounds([0.0, graph.width as f64])
+                .labels_alignment(Alignment::Right),
         )
         .y_axis(
             Axis::default()
@@ -1061,12 +1090,13 @@ fn draw_graphs<B: Backend>(
 
     for (i, k) in dashboard.kinds.iter().enumerate() {
         if let Some(graph) = dashboard.flipped.get_mut(k) {
-            draw_graph(f, screen[i], graph);
+            draw_graph(f, screen[i], graph, dashboard.time);
         } else {
             draw_graph(
                 f,
                 screen[i],
                 dashboard.graphs.get_mut(&(sp, *k)).unwrap(),
+                dashboard.time,
             );
         }
     }
