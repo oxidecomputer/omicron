@@ -62,6 +62,7 @@ members = [
     "test-utils",
     "tufaceous-lib",
     "tufaceous",
+    "update-common",
     "update-engine",
     "wicket-common",
     "wicket-dbg",
@@ -130,6 +131,7 @@ default-members = [
     "test-utils",
     "tufaceous-lib",
     "tufaceous",
+    "update-common",
     "update-engine",
     "wicket-common",
     "wicket-dbg",
@@ -145,8 +147,8 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.12"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
-async-trait = "0.1.74"
-atomicwrites = "0.4.2"
+async-trait = "0.1.77"
+atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.5"
@@ -181,7 +183,7 @@ ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
-derive-where = "1.2.6"
+derive-where = "1.2.7"
 diesel = { version = "2.1.4", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
@@ -196,7 +198,7 @@ flate2 = "1.0.28"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
-futures = "0.3.29"
+futures = "0.3.30"
 gateway-client = { path = "clients/gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = ["std"] }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9" }
@@ -208,7 +210,7 @@ heck = "0.4"
 hex = "0.4.3"
 hex-literal = "0.4.1"
 highway = "1.1.0"
-hkdf = "0.12.3"
+hkdf = "0.12.4"
 http = "0.2.11"
 httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
@@ -289,7 +291,7 @@ postgres-protocol = "0.6.6"
 predicates = "3.0.4"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.0"
-prettyplease = "0.2.15"
+prettyplease = "0.2.16"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -357,7 +359,7 @@ strum = { version = "0.25", features = [ "derive" ] }
 subprocess = "0.2.9"
 supports-color = "2.1.0"
 swrite = "0.1.0"
-libsw = { version = "3.3.0", features = ["tokio"] }
+libsw = { version = "3.3.1", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.14"
 tar = "0.4"
@@ -386,6 +388,7 @@ trybuild = "1.0.85"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 unicode-width = "0.1.11"
+update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 usdt = "0.3"
 uuid = { version = "1.6.1", features = ["serde", "v4"] }

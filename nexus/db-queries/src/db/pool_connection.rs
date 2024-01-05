@@ -59,6 +59,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "service_kind",
     "sled_provision_state",
     "sled_resource_kind",
+    "sled_role",
     "snapshot_state",
     "sp_type",
     "switch_interface_kind",
@@ -74,6 +75,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "vpc_firewall_rule_protocol",
     "vpc_firewall_rule_status",
     "vpc_router_kind",
+    "zone_type",
 ];
 const CUSTOM_TYPE_SCHEMA: &'static str = "public";
 
