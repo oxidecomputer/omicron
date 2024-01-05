@@ -573,8 +573,11 @@ async fn test_external_ip_live_attach_detach(
 
         assert_eq!(eip_list.len(), 2);
         assert!(eip_list.contains(&eph_resp));
-        assert!(eip_list.contains(&fip_resp));
-        assert_eq!(fip.ip, fip_resp.ip);
+        assert!(eip_list
+            .iter()
+            .any(|v| matches!(v, views::ExternalIp::Floating(..))
+                && v.ip() == fip_resp.ip()));
+        assert_eq!(fip.ip, fip_resp.ip());
 
         // Check for idempotency: repeat requests should return same values.
         let eph_resp_2 = external_ip_attach(
@@ -593,7 +596,8 @@ async fn test_external_ip_live_attach_detach(
         .await;
 
         assert_eq!(eph_resp, eph_resp_2);
-        assert_eq!(fip_resp, fip_resp_2);
+        assert_eq!(fip_resp.ip(), fip_resp_2.ip());
+        assert_eq!(fip_resp.kind(), fip_resp_2.kind());
 
         recorded_ephs.push(eph_resp);
     }
@@ -608,8 +612,7 @@ async fn test_external_ip_live_attach_detach(
             instance_name,
             &params::ExternalIpDetach::Ephemeral,
         )
-        .await
-        .unwrap();
+        .await;
         let fip_resp = external_ip_detach(
             client,
             instance_name,
@@ -617,8 +620,7 @@ async fn test_external_ip_live_attach_detach(
                 floating_ip: fip.identity.name.clone().into(),
             },
         )
-        .await
-        .unwrap();
+        .await;
 
         // Verify both are removed, and that their bodies match the known FIP/EIP combo.
         let eip_list =
@@ -626,7 +628,7 @@ async fn test_external_ip_live_attach_detach(
                 .await;
 
         assert_eq!(eip_list.len(), 0);
-        assert_eq!(fip.ip, fip_resp.ip);
+        assert_eq!(fip.ip, fip_resp.ip());
         assert_eq!(eph_ip, &eph_resp);
 
         // Check for idempotency: repeat requests should return same values for FIP,
@@ -639,7 +641,8 @@ async fn test_external_ip_live_attach_detach(
             },
         )
         .await;
-        assert_eq!(Some(fip_resp), fip_resp_2);
+        assert_eq!(fip_resp.ip(), fip_resp_2.ip());
+        assert_eq!(fip_resp.kind(), fip_resp_2.kind());
 
         let url = detach_instance_external_ip_url(instance_name, PROJECT_NAME);
         let error: HttpErrorResponseBody = NexusRequest::new(
@@ -846,8 +849,8 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
         },
     )
     .await;
-    assert_eq!(eph_resp.ip, other_pool_range.first_address());
-    assert_eq!(eph_resp.ip, other_pool_range.last_address());
+    assert_eq!(eph_resp.ip(), other_pool_range.first_address());
+    assert_eq!(eph_resp.ip(), other_pool_range.last_address());
 
     let url = attach_instance_external_ip_url(INSTANCE_NAMES[1], PROJECT_NAME);
     let error: HttpErrorResponseBody = NexusRequest::new(
@@ -957,7 +960,7 @@ async fn external_ip_detach(
     client: &ClientTestContext,
     instance_name: &str,
     eip: &params::ExternalIpDetach,
-) -> Option<views::ExternalIp> {
+) -> views::ExternalIp {
     let url = detach_instance_external_ip_url(instance_name, PROJECT_NAME);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)

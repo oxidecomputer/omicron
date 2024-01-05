@@ -10880,19 +10880,91 @@
         ]
       },
       "ExternalIp": {
-        "type": "object",
-        "properties": {
-          "ip": {
-            "type": "string",
-            "format": "ip"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "type": "string",
+                "format": "ip"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ephemeral"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "kind"
+            ]
           },
-          "kind": {
-            "$ref": "#/components/schemas/IpKind"
+          {
+            "description": "A Floating IP is a well-known IP address which can be attached and detached from instances.",
+            "type": "object",
+            "properties": {
+              "description": {
+                "description": "human-readable free-form text about a resource",
+                "type": "string"
+              },
+              "id": {
+                "description": "unique, immutable, system-controlled identifier for each resource",
+                "type": "string",
+                "format": "uuid"
+              },
+              "instance_id": {
+                "nullable": true,
+                "description": "The ID of the instance that this Floating IP is attached to, if it is presently in use.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "ip": {
+                "description": "The IP address held by this resource.",
+                "type": "string",
+                "format": "ip"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "floating"
+                ]
+              },
+              "name": {
+                "description": "unique, mutable, user-controlled identifier for each resource",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                ]
+              },
+              "project_id": {
+                "description": "The project this resource exists within.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "time_created": {
+                "description": "timestamp when this resource was created",
+                "type": "string",
+                "format": "date-time"
+              },
+              "time_modified": {
+                "description": "timestamp when this resource was last modified",
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "description",
+              "id",
+              "ip",
+              "kind",
+              "name",
+              "project_id",
+              "time_created",
+              "time_modified"
+            ]
           }
-        },
-        "required": [
-          "ip",
-          "kind"
         ]
       },
       "ExternalIpCreate": {
@@ -12371,14 +12443,6 @@
               "destroyed"
             ]
           }
-        ]
-      },
-      "IpKind": {
-        "description": "The kind of an external IP address for an instance",
-        "type": "string",
-        "enum": [
-          "ephemeral",
-          "floating"
         ]
       },
       "IpNet": {

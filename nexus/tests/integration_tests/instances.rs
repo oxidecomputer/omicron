@@ -3653,8 +3653,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     let ip = fetch_instance_ephemeral_ip(client, "default-pool-inst").await;
     assert!(
-        ip.ip >= default_pool_range.first_address()
-            && ip.ip <= default_pool_range.last_address(),
+        ip.ip() >= default_pool_range.first_address()
+            && ip.ip() <= default_pool_range.last_address(),
         "Expected ephemeral IP to come from default pool"
     );
 
@@ -3663,8 +3663,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         .await;
     let ip = fetch_instance_ephemeral_ip(client, "other-pool-inst").await;
     assert!(
-        ip.ip >= other_pool_range.first_address()
-            && ip.ip <= other_pool_range.last_address(),
+        ip.ip() >= other_pool_range.first_address()
+            && ip.ip() <= other_pool_range.last_address(),
         "Expected ephemeral IP to come from other pool"
     );
 
@@ -3697,8 +3697,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         .await;
     let ip = fetch_instance_ephemeral_ip(client, "silo-pool-inst").await;
     assert!(
-        ip.ip >= silo_pool_range.first_address()
-            && ip.ip <= silo_pool_range.last_address(),
+        ip.ip() >= silo_pool_range.first_address()
+            && ip.ip() <= silo_pool_range.last_address(),
         "Expected ephemeral IP to come from the silo default pool"
     );
 
@@ -3708,8 +3708,8 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     let ip = fetch_instance_ephemeral_ip(client, "other-pool-inst-2").await;
     assert!(
-        ip.ip >= other_pool_range.first_address()
-            && ip.ip <= other_pool_range.last_address(),
+        ip.ip() >= other_pool_range.first_address()
+            && ip.ip() <= other_pool_range.last_address(),
         "Expected ephemeral IP to come from the other pool"
     );
 }
@@ -3767,19 +3767,19 @@ async fn test_instance_attach_several_external_ips(
     eprintln!("{external_ips:?}");
     for (i, eip) in external_ips
         .iter()
-        .sorted_unstable_by(|a, b| a.ip.cmp(&b.ip))
+        .sorted_unstable_by(|a, b| a.ip().cmp(&b.ip()))
         .enumerate()
     {
         let last_octet = i + if i != external_ips.len() - 1 {
-            assert_eq!(eip.kind, IpKind::Floating);
+            assert_eq!(eip.kind(), IpKind::Floating);
             1
         } else {
             // SNAT will occupy 1.0.0.8 here, since it it alloc'd before
             // the ephemeral.
-            assert_eq!(eip.kind, IpKind::Ephemeral);
+            assert_eq!(eip.kind(), IpKind::Ephemeral);
             2
         };
-        assert_eq!(eip.ip, Ipv4Addr::new(10, 0, 0, last_octet as u8));
+        assert_eq!(eip.ip(), Ipv4Addr::new(10, 0, 0, last_octet as u8));
     }
 
     // Verify that all floating IPs are bound to their parent instance.
@@ -3892,7 +3892,7 @@ async fn fetch_instance_ephemeral_ip(
     fetch_instance_external_ips(client, instance_name, PROJECT_NAME)
         .await
         .into_iter()
-        .find(|v| v.kind == IpKind::Ephemeral)
+        .find(|v| v.kind() == IpKind::Ephemeral)
         .unwrap()
 }
 

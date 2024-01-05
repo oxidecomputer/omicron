@@ -313,16 +313,34 @@ pub struct IpPoolRange {
 
 // INSTANCE EXTERNAL IP ADDRESSES
 
-#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct ExternalIp {
-    pub ip: IpAddr,
-    pub kind: IpKind,
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExternalIp {
+    Ephemeral { ip: IpAddr },
+    Floating(FloatingIp),
+}
+
+impl ExternalIp {
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            Self::Ephemeral { ip } => *ip,
+            Self::Floating(float) => float.ip,
+        }
+    }
+
+    pub fn kind(&self) -> IpKind {
+        match self {
+            Self::Ephemeral { .. } => IpKind::Ephemeral,
+            Self::Floating(_) => IpKind::Floating,
+        }
+    }
 }
 
 /// A Floating IP is a well-known IP address which can be attached
 /// and detached from instances.
-#[derive(ObjectIdentity, Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct FloatingIp {
     #[serde(flatten)]
@@ -338,7 +356,7 @@ pub struct FloatingIp {
 
 impl From<FloatingIp> for ExternalIp {
     fn from(value: FloatingIp) -> Self {
-        ExternalIp { ip: value.ip, kind: IpKind::Floating }
+        ExternalIp::Floating(value)
     }
 }
 

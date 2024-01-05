@@ -441,8 +441,15 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
                 "Service IPs should not be exposed in the API",
             ));
         }
-        let kind = ip.kind.try_into()?;
-        Ok(views::ExternalIp { kind, ip: ip.ip.ip() })
+        match ip.kind {
+            IpKind::Floating => Ok(views::ExternalIp::Floating(ip.try_into()?)),
+            IpKind::Ephemeral => {
+                Ok(views::ExternalIp::Ephemeral { ip: ip.ip.ip() })
+            }
+            IpKind::SNat => Err(Error::internal_error(
+                "SNAT IP addresses should not be exposed in the API",
+            )),
+        }
     }
 }
 
