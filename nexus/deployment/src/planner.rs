@@ -6,6 +6,7 @@
 //!
 //! See crate-level documentation for details.
 
+use anyhow::anyhow;
 use internal_dns::DNS_ZONE;
 use ipnet::IpAdd;
 use nexus_types::deployment::Blueprint;
@@ -36,6 +37,8 @@ use uuid::Uuid;
 pub enum Error {
     #[error("ran out of available addresses for sled")]
     OutOfAddresses,
+    #[error("programming error in planner")]
+    Planner(#[from] anyhow::Error),
 }
 
 pub struct BlueprintBuilder<'a> {
@@ -48,6 +51,7 @@ pub struct BlueprintBuilder<'a> {
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
+    sleds: BTreeSet<Uuid>,
     omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
     zones_in_service: BTreeSet<Uuid>,
     creator: String,
@@ -72,7 +76,11 @@ impl<'a> BlueprintBuilder<'a> {
                 (*sled_id, zones)
             })
             .collect();
+        // XXX-dap I think this function needs to accept a list of sleds that
+        // are known to be part of the system, plus information like what their
+        // subnets are.  Then we could use that for "sleds".
         BlueprintBuilder {
+            sleds: sled_zpools.keys().copied().collect(),
             collection,
             omicron_zones,
             sled_zpools,
@@ -83,9 +91,37 @@ impl<'a> BlueprintBuilder<'a> {
         }
     }
 
-    pub fn build(self) -> Blueprint {
+    pub fn build(mut self) -> Blueprint {
+        // Collect the Omicron zones config for each in-service sled.
+        let omicron_zones = self
+            .sleds
+            .iter()
+            .map(|sled_id| {
+                // Start with self.omicron_zones, which contains entries for any
+                // sled whose zones config is changing in this blueprint.
+                let zones = self.omicron_zones
+                    .remove(sled_id)
+                    // If it's not there, use the config from the collection
+                    // we're working with.
+                    .or_else(|| {
+                        self.collection
+                            .omicron_zones
+                            .get(sled_id)
+                            .map(|z| z.zones.clone())
+                    })
+                    // If it's not there either, then this must be a new sled
+                    // and we haven't added any zones to it yet.  Use the
+                    // standard initial config.
+                    .unwrap_or_else(|| OmicronZonesConfig {
+                        generation: Generation::new(),
+                        zones: vec![],
+                    });
+                (*sled_id, zones)
+            })
+            .collect();
         Blueprint {
-            omicron_zones: self.omicron_zones,
+            sleds: self.sleds,
+            omicron_zones: omicron_zones,
             zones_in_service: self.zones_in_service,
             built_from_collection: self.collection.id,
             time_created: chrono::Utc::now(),
@@ -94,11 +130,160 @@ impl<'a> BlueprintBuilder<'a> {
         }
     }
 
-    pub fn ensure_sled(
+    pub fn sled_ensure(mut self, sled_id: Uuid) -> Self {
+        self.sleds.insert(sled_id);
+        self
+    }
+
+    fn sled_check(&self, sled_id: Uuid) -> Result<(), Error> {
+        if !self.sleds.contains(&sled_id) {
+            Err(Error::Planner(anyhow!(
+                "attempted to use sled that is not in service: {}",
+                sled_id
+            )))
+        } else {
+            Ok(())
+        }
+    }
+
+    // pub fn ensure_sled(
+    //     mut self,
+    //     sled_id: Uuid,
+    //     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    // ) -> Result<Self, Error> {
+    //     // Work around rust-lang/rust-clippy#11935 and related issues.
+    //     // Clippy doesn't grok that we can't use
+    //     // `entry(&sled_id).or_insert_with(closure)` because `closure` would
+    //     // borrow `self`, which we can't do because we already have an immutable
+    //     // borrow of `self` by calling `entry()`.  Using `match` on the result
+    //     // of `entry` has a similar problem.
+    //     #[allow(clippy::map_entry)]
+    //     if !self.sled_ip_allocators.contains_key(&sled_id) {
+    //         self.sled_ip_allocators
+    //             .insert(sled_id, self.sled_ip_allocator(sled_id, sled_subnet));
+    //     }
+
+    //     let mut new_zones = Vec::new();
+
+    //     // Every sled needs an NTP zone.  Currently, we assume the boundary NTP
+    //     // zones have already been provisioned elsewhere, so this will be an
+    //     // internal NTP zone.
+    //     let has_ntp = self
+    //         .omicron_zones
+    //         .get(&sled_id)
+    //         .map(|zones_config| {
+    //             zones_config.zones.iter().any(|z| {
+    //                 matches!(
+    //                     z.zone_type,
+    //                     OmicronZoneType::BoundaryNtp { .. }
+    //                         | OmicronZoneType::InternalNtp { .. }
+    //                 )
+    //             })
+    //         })
+    //         .unwrap_or(false);
+    //     if !has_ntp {
+    //         let sled_addr_allocator =
+    //             self.sled_ip_allocators.get_mut(&sled_id).unwrap();
+    //         let ip =
+    //             sled_addr_allocator.alloc().ok_or(Error::OutOfAddresses)?;
+    //         new_zones.push(self.new_ntp_zone(sled_subnet, ip));
+    //     }
+
+    //     // On every sled, for every zpool, there should be one Crucible zone.
+    //     if let Some(sled_zpools) = self.sled_zpools.get(&sled_id) {
+    //         for zpool_name in sled_zpools {
+    //             if !self
+    //                 .omicron_zones
+    //                 .get(&sled_id)
+    //                 .map(|zones_config| {
+    //                     zones_config.zones.iter().any(|z| {
+    //                         matches!(
+    //                             &z.zone_type,
+    //                             OmicronZoneType::Crucible { dataset, .. }
+    //                             if dataset.pool_name == *zpool_name
+    //                         )
+    //                     })
+    //                 })
+    //                 .unwrap_or(false)
+    //             {
+    //                 let sled_addr_allocator =
+    //                     self.sled_ip_allocators.get_mut(&sled_id).unwrap();
+    //                 let ip = sled_addr_allocator
+    //                     .alloc()
+    //                     .ok_or(Error::OutOfAddresses)?;
+    //                 new_zones
+    //                     .push(self.new_crucible_zone(ip, zpool_name.clone()));
+    //             }
+    //         }
+    //     }
+
+    //     // If we wound up adding any zones, update DNS as well as the
+    //     // corresponding sled's config.
+    //     if !new_zones.is_empty() {
+    //         for z in &new_zones {
+    //             assert!(
+    //                 !self.zones_in_service.contains(&z.id),
+    //                 "DNS updated more than once"
+    //             );
+    //             self.zones_in_service.insert(z.id);
+    //         }
+
+    //         let zones_config = self
+    //             .omicron_zones
+    //             .entry(sled_id)
+    //             .or_insert_with(|| OmicronZonesConfig {
+    //                 generation: Generation::new(),
+    //                 zones: vec![],
+    //             });
+
+    //         zones_config.generation = zones_config.generation.next();
+    //         zones_config.zones.extend(new_zones);
+    //     }
+
+    //     Ok(self)
+    // }
+
+    pub fn sled_add_zone(
         mut self,
         sled_id: Uuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        zone: OmicronZoneConfig,
     ) -> Result<Self, Error> {
+        self.sled_check(sled_id)?;
+
+        if !self.zones_in_service.insert(zone.id) {
+            return Err(Error::Planner(anyhow!(
+                "attempted to add zone that already exists: {}",
+                zone.id
+            )));
+        }
+
+        let sled_zones =
+            self.omicron_zones.entry(sled_id).or_insert_with(|| {
+                if let Some(old_sled_zones) =
+                    self.collection.omicron_zones.get(&sled_id)
+                {
+                    OmicronZonesConfig {
+                        generation: old_sled_zones.zones.generation.next(),
+                        zones: old_sled_zones.zones.zones.clone(),
+                    }
+                } else {
+                    OmicronZonesConfig {
+                        generation: Generation::new(),
+                        zones: vec![],
+                    }
+                }
+            });
+
+        sled_zones.zones.push(zone);
+        Ok(self)
+    }
+
+    // XXX-dap we should already have the prefixes somehow.
+    pub fn sled_alloc_ip(
+        &mut self,
+        sled_id: Uuid,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    ) -> Result<Ipv6Addr, Error> {
         // Work around rust-lang/rust-clippy#11935 and related issues.
         // Clippy doesn't grok that we can't use
         // `entry(&sled_id).or_insert_with(closure)` because `closure` would
@@ -111,87 +296,12 @@ impl<'a> BlueprintBuilder<'a> {
                 .insert(sled_id, self.sled_ip_allocator(sled_id, sled_subnet));
         }
 
-        let mut new_zones = Vec::new();
-
-        // Every sled needs an NTP zone.  Currently, we assume the boundary NTP
-        // zones have already been provisioned elsewhere, so this will be an
-        // internal NTP zone.
-        let has_ntp = self
-            .omicron_zones
-            .get(&sled_id)
-            .map(|zones_config| {
-                zones_config.zones.iter().any(|z| {
-                    matches!(
-                        z.zone_type,
-                        OmicronZoneType::BoundaryNtp { .. }
-                            | OmicronZoneType::InternalNtp { .. }
-                    )
-                })
-            })
-            .unwrap_or(false);
-        if !has_ntp {
-            let sled_addr_allocator =
-                self.sled_ip_allocators.get_mut(&sled_id).unwrap();
-            let ip =
-                sled_addr_allocator.alloc().ok_or(Error::OutOfAddresses)?;
-            new_zones.push(self.new_ntp_zone(sled_subnet, ip));
-        }
-
-        // On every sled, for every zpool, there should be one Crucible zone.
-        if let Some(sled_zpools) = self.sled_zpools.get(&sled_id) {
-            for zpool_name in sled_zpools {
-                if !self
-                    .omicron_zones
-                    .get(&sled_id)
-                    .map(|zones_config| {
-                        zones_config.zones.iter().any(|z| {
-                            matches!(
-                                &z.zone_type,
-                                OmicronZoneType::Crucible { dataset, .. }
-                                if dataset.pool_name == *zpool_name
-                            )
-                        })
-                    })
-                    .unwrap_or(false)
-                {
-                    let sled_addr_allocator =
-                        self.sled_ip_allocators.get_mut(&sled_id).unwrap();
-                    let ip = sled_addr_allocator
-                        .alloc()
-                        .ok_or(Error::OutOfAddresses)?;
-                    new_zones
-                        .push(self.new_crucible_zone(ip, zpool_name.clone()));
-                }
-            }
-        }
-
-        // If we wound up adding any zones, update DNS as well as the
-        // corresponding sled's config.
-        if !new_zones.is_empty() {
-            for z in &new_zones {
-                assert!(
-                    !self.zones_in_service.contains(&z.id),
-                    "DNS updated more than once"
-                );
-                self.zones_in_service.insert(z.id);
-            }
-
-            let zones_config = self
-                .omicron_zones
-                .entry(sled_id)
-                .or_insert_with(|| OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: vec![],
-                });
-
-            zones_config.generation = zones_config.generation.next();
-            zones_config.zones.extend(new_zones);
-        }
-
-        Ok(self)
+        let allocator = self.sled_ip_allocators.get_mut(&sled_id).unwrap();
+        // XXX-dap more error context
+        allocator.alloc().ok_or(Error::OutOfAddresses)
     }
 
-    fn new_ntp_zone(
+    pub fn new_ntp_zone(
         &self,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
         ip: Ipv6Addr,
@@ -249,7 +359,7 @@ impl<'a> BlueprintBuilder<'a> {
         }
     }
 
-    fn new_crucible_zone(
+    pub fn new_crucible_zone(
         &self,
         ip: Ipv6Addr,
         pool_name: ZpoolName,

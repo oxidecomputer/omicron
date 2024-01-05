@@ -121,6 +121,9 @@ pub struct Policy {
 // (like deleting old inventory collections or even just seeing what the full
 // state of the world is supposed to be when a blueprint has been executed).
 pub struct Blueprint {
+    /// set of sleds that we consider part of the control plane
+    pub sleds: BTreeSet<Uuid>,
+
     /// mapping: sled id -> zones deployed on each sled
     pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
 

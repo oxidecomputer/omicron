@@ -4226,6 +4226,7 @@ dependencies = [
 name = "nexus-deployment"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "internal-dns",
  "ipnet",
