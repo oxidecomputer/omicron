@@ -2475,6 +2475,7 @@ async fn cmd_db_inventory_collections_show(
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;
     inv_collection_print_devices(&collection, &long_string_formatter).await?;
+    inv_collection_print_sleds(&collection);
 
     if nerrors > 0 {
         eprintln!(
@@ -2704,6 +2705,58 @@ async fn inv_collection_print_devices(
     }
 
     Ok(())
+}
+
+fn inv_collection_print_sleds(collection: &Collection) {
+    println!("SLED AGENTS");
+    for sled in collection.sled_agents.values() {
+        println!(
+            "\nsled {} (role = {:?}, serial {})",
+            sled.sled_id,
+            sled.sled_role,
+            match &sled.baseboard_id {
+                Some(baseboard_id) => &baseboard_id.serial_number,
+                None => "unknown",
+            },
+        );
+        println!(
+            "    found at:    {} from {}",
+            sled.time_collected, sled.source
+        );
+        println!("    address:     {}", sled.sled_agent_address);
+        println!("    usable hw threads:   {}", sled.usable_hardware_threads);
+        println!(
+            "    usable memory (GiB): {}",
+            sled.usable_physical_ram.to_whole_gibibytes()
+        );
+        println!(
+            "    reservoir (GiB):     {}",
+            sled.reservoir_size.to_whole_gibibytes()
+        );
+
+        if let Some(zones) = collection.omicron_zones.get(&sled.sled_id) {
+            println!(
+                "    zones collected from {} at {}",
+                zones.source, zones.time_collected,
+            );
+            println!(
+                "    zones generation: {} (count: {})",
+                zones.zones.generation,
+                zones.zones.zones.len()
+            );
+
+            if zones.zones.zones.is_empty() {
+                continue;
+            }
+
+            println!("    ZONES FOUND");
+            for z in &zones.zones.zones {
+                println!("      zone {} (type {})", z.id, z.zone_type.label());
+            }
+        } else {
+            println!("  warning: no zone information found");
+        }
+    }
 }
 
 #[derive(Debug)]

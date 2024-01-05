@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Copy, Clone, Debug, QueryId)]
-    #[diesel(postgres_type(name = "producer_kind"))]
+    #[diesel(postgres_type(name = "producer_kind", schema = "public"))]
     pub struct ProducerKindEnum;
 
     #[derive(AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq)]

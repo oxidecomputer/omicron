@@ -1,7 +1,11 @@
--- initialise external ip state for detached IPs.
-set
-  local disallow_full_table_scans = off;
+CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
+    inv_collection_id UUID NOT NULL,
+    time_collected TIMESTAMPTZ NOT NULL,
+    source TEXT NOT NULL,
 
-UPDATE omicron.public.external_ip
-SET state = 'detached'
-WHERE parent_id IS NULL;
+    sled_id UUID NOT NULL,
+
+    generation INT8 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, sled_id)
+);

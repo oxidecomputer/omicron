@@ -1,4 +1,13 @@
-ALTER TABLE omicron.public.external_ip
-ADD CONSTRAINT IF NOT EXISTS detached_null_parent_id CHECK (
-    (state = 'detached') OR (parent_id IS NOT NULL)
+CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
+    inv_collection_id UUID NOT NULL,
+    id UUID NOT NULL,
+    name TEXT NOT NULL,
+    ip INET NOT NULL,
+    mac INT8 NOT NULL,
+    subnet INET NOT NULL,
+    vni INT8 NOT NULL,
+    is_primary BOOLEAN NOT NULL,
+    slot INT2 NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, id)
 );

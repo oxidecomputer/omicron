@@ -487,6 +487,30 @@
         }
       }
     },
+    "/inventory": {
+      "get": {
+        "summary": "Fetch basic information about this sled",
+        "operationId": "inventory",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inventory"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/metrics/collect/{producer_id}": {
       "get": {
         "summary": "Collect oximeter samples from the sled agent.",
@@ -5031,6 +5055,45 @@
           }
         }
       },
+      "Inventory": {
+        "description": "Identity and basic status information about this sled agent",
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "reservoir_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "sled_agent_address": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sled_role": {
+            "$ref": "#/components/schemas/SledRole"
+          },
+          "usable_hardware_threads": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "usable_physical_ram": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "baseboard",
+          "reservoir_size",
+          "sled_agent_address",
+          "sled_id",
+          "sled_role",
+          "usable_hardware_threads",
+          "usable_physical_ram"
+        ]
+      },
       "IpNet": {
         "oneOf": [
           {
@@ -6269,6 +6332,7 @@
         ]
       },
       "SledRole": {
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
           {
             "description": "The sled is a general compute sled.",

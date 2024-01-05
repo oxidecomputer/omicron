@@ -1,0 +1,206 @@
+{
+  "generation": 5,
+  "zones": [
+    {
+      "id": "b2629475-65b2-4e8a-9e70-d4e8c034d8ad",
+      "underlay_address": "fd00:1122:3344:102::e",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::e]:32345",
+        "dataset": {
+          "pool_name": "oxp_1cd1c449-b5e1-4e8b-bb2f-2e2bd5a8f301"
+        }
+      }
+    },
+    {
+      "id": "1aa5fd71-d766-4f20-b3c7-9cf4fe9e4f2e",
+      "underlay_address": "fd00:1122:3344:102::9",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::9]:32345",
+        "dataset": {
+          "pool_name": "oxp_6d799846-deac-4809-93bd-5dad30127938"
+        }
+      }
+    },
+    {
+      "id": "271ee61b-9e97-4e45-a407-0083f8bf15a7",
+      "underlay_address": "fd00:1122:3344:102::7",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::7]:32345",
+        "dataset": {
+          "pool_name": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a"
+        }
+      }
+    },
+    {
+      "id": "750b40ef-8e83-4c7a-be96-33964b2244f3",
+      "underlay_address": "fd00:1122:3344:102::a",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::a]:32345",
+        "dataset": {
+          "pool_name": "oxp_901a85dd-8214-407a-a358-ef4aebfa810d"
+        }
+      }
+    },
+    {
+      "id": "0322760d-a1e2-4911-8745-569f6bad8251",
+      "underlay_address": "fd00:1122:3344:102::4",
+      "zone_type": {
+        "type": "external_dns",
+        "dataset": {
+          "pool_name": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a"
+        },
+        "http_address": "[fd00:1122:3344:102::4]:5353",
+        "dns_address": "172.20.28.1:53",
+        "nic": {
+          "id": "8b99b41f-976d-4cb5-bad6-492cde39575a",
+          "kind": {
+            "type": "service",
+            "id": "0322760d-a1e2-4911-8745-569f6bad8251"
+          },
+          "name": "external-dns-0322760d-a1e2-4911-8745-569f6bad8251",
+          "ip": "172.30.1.5",
+          "mac": "A8:40:25:FF:F7:4A",
+          "subnet": "172.30.1.0/24",
+          "vni": 100,
+          "primary": true,
+          "slot": 0
+        }
+      }
+    },
+    {
+      "id": "f350b534-e9bb-4e47-a2ae-4029efe48e1a",
+      "underlay_address": "fd00:1122:3344:102::6",
+      "zone_type": {
+        "type": "crucible_pantry",
+        "address": "[fd00:1122:3344:102::6]:17000"
+      }
+    },
+    {
+      "id": "e9d7d6ba-59e3-44ff-9081-f43e61c9968a",
+      "underlay_address": "fd00:1122:3344:102::d",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::d]:32345",
+        "dataset": {
+          "pool_name": "oxp_51abdeb3-6673-4af3-aa91-7e8748e4dda2"
+        }
+      }
+    },
+    {
+      "id": "d02206f1-7567-4753-9221-6b2b70407925",
+      "underlay_address": "fd00:1122:3344:102::b",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::b]:32345",
+        "dataset": {
+          "pool_name": "oxp_0fa59017-d1e7-47c1-9ed6-b66851e544ee"
+        }
+      }
+    },
+    {
+      "id": "c489b9a3-33e5-487c-8a60-77853584dca1",
+      "underlay_address": "fd00:1122:3344:102::f",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::f]:32345",
+        "dataset": {
+          "pool_name": "oxp_17d7dbce-b430-4c71-a27e-a5e66d175347"
+        }
+      }
+    },
+    {
+      "id": "996f3011-5aaa-4732-a47d-e6514b1131d8",
+      "underlay_address": "fd00:1122:3344:102::c",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::c]:32345",
+        "dataset": {
+          "pool_name": "oxp_87714aed-4573-438c-8c9d-3ed64688bdc4"
+        }
+      }
+    },
+    {
+      "id": "cef138ff-87a4-4509-ba30-2395e01ac5f7",
+      "underlay_address": "fd00:1122:3344:102::5",
+      "zone_type": {
+        "type": "oximeter",
+        "address": "[fd00:1122:3344:102::5]:12223"
+      }
+    },
+    {
+      "id": "263584b3-2f53-4f87-a9c0-60a4c78af6c4",
+      "underlay_address": "fd00:1122:3344:102::8",
+      "zone_type": {
+        "type": "crucible",
+        "address": "[fd00:1122:3344:102::8]:32345",
+        "dataset": {
+          "pool_name": "oxp_2acbc210-8b83-490a-b7a7-e458d742c269"
+        }
+      }
+    },
+    {
+      "id": "2f336547-e4b0-422c-af54-deae20b4580c",
+      "underlay_address": "fd00:1122:3344:102::3",
+      "zone_type": {
+        "type": "cockroach_db",
+        "address": "[fd00:1122:3344:102::3]:32221",
+        "dataset": {
+          "pool_name": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a"
+        }
+      }
+    },
+    {
+      "id": "412bfd7b-4bf8-471d-ae4d-90bf0bdd05ff",
+      "underlay_address": "fd00:1122:3344:102::10",
+      "zone_type": {
+        "type": "boundary_ntp",
+        "address": "[fd00:1122:3344:102::10]:123",
+        "ntp_servers": [
+          "ntp.eng.oxide.computer"
+        ],
+        "dns_servers": [
+          "1.1.1.1",
+          "9.9.9.9"
+        ],
+        "domain": null,
+        "nic": {
+          "id": "6c2aa1c5-0e42-4b80-9b31-26d0e8599d0d",
+          "kind": {
+            "type": "service",
+            "id": "412bfd7b-4bf8-471d-ae4d-90bf0bdd05ff"
+          },
+          "name": "ntp-412bfd7b-4bf8-471d-ae4d-90bf0bdd05ff",
+          "ip": "172.30.3.5",
+          "mac": "A8:40:25:FF:F2:45",
+          "subnet": "172.30.3.0/24",
+          "vni": 100,
+          "primary": true,
+          "slot": 0
+        },
+        "snat_cfg": {
+          "ip": "172.20.28.5",
+          "first_port": 0,
+          "last_port": 16383
+        }
+      }
+    },
+    {
+      "id": "7de28140-8cdc-4478-9204-63763ecc10ff",
+      "underlay_address": "fd00:1122:3344:1::1",
+      "zone_type": {
+        "type": "internal_dns",
+        "dataset": {
+          "pool_name": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a"
+        },
+        "http_address": "[fd00:1122:3344:1::1]:5353",
+        "dns_address": "[fd00:1122:3344:1::1]:53",
+        "gz_address": "fd00:1122:3344:1::2",
+        "gz_address_index": 0
+      }
+    }
+  ]
+}

@@ -11,7 +11,7 @@ use std::io::Write;
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "instance_state"))]
+    #[diesel(postgres_type(name = "instance_state", schema = "public"))]
     pub struct InstanceStateEnum;
 
     #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]

@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "router_route_kind"))]
+    #[diesel(postgres_type(name = "router_route_kind", schema = "public"))]
     pub struct RouterRouteKindEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow)]

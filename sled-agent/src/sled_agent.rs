@@ -18,8 +18,9 @@ use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, OmicronZonesConfig,
-    SledRole, TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
+    ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
@@ -42,7 +43,7 @@ use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
-use omicron_common::api::external::Vni;
+use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
@@ -211,6 +212,35 @@ impl From<Error> for dropshot::HttpError {
             },
             e => HttpError::for_internal_error(e.to_string()),
         }
+    }
+}
+
+/// Error returned by `SledAgent::inventory()`
+#[derive(thiserror::Error, Debug)]
+pub enum InventoryError {
+    // This error should be impossible because ByteCount supports values from
+    // [0, i64::MAX] and we don't have anything with that many bytes in the
+    // system.
+    #[error(transparent)]
+    BadByteCount(#[from] ByteCountRangeError),
+}
+
+impl From<InventoryError> for omicron_common::api::external::Error {
+    fn from(inventory_error: InventoryError) -> Self {
+        match inventory_error {
+            e @ InventoryError::BadByteCount(..) => {
+                omicron_common::api::external::Error::internal_error(&format!(
+                    "{:#}",
+                    e
+                ))
+            }
+        }
+    }
+}
+
+impl From<InventoryError> for dropshot::HttpError {
+    fn from(error: InventoryError) -> Self {
+        Self::from(omicron_common::api::external::Error::from(error))
     }
 }
 
@@ -1079,6 +1109,37 @@ impl SledAgent {
 
     pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
         &self.inner.boot_disk_os_writer
+    }
+
+    /// Return basic information about ourselves: identity and status
+    ///
+    /// This is basically a GET version of the information we push to Nexus on
+    /// startup.
+    pub(crate) fn inventory(&self) -> Result<Inventory, InventoryError> {
+        let sled_id = self.inner.id;
+        let sled_agent_address = self.inner.sled_address();
+        let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let baseboard = self.inner.hardware.baseboard();
+        let usable_hardware_threads =
+            self.inner.hardware.online_processor_count();
+        let usable_physical_ram =
+            self.inner.hardware.usable_physical_ram_bytes();
+        let reservoir_size = self.inner.instances.reservoir_size();
+        let sled_role = if is_scrimlet {
+            crate::params::SledRole::Scrimlet
+        } else {
+            crate::params::SledRole::Gimlet
+        };
+
+        Ok(Inventory {
+            sled_id,
+            sled_agent_address,
+            sled_role,
+            baseboard,
+            usable_hardware_threads,
+            usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
+            reservoir_size,
+        })
     }
 }
 
