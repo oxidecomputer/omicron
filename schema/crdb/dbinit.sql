@@ -927,9 +927,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* user data for instance initialization systems (e.g. cloud-init) */
     user_data BYTES NOT NULL,
 
-    /* public keys for instance initialization systems (e.g. cloud-init) */
-    public_keys STRING[] NOT NULL,
-
     /* The state of the instance when it has no active VMM. */
     state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
@@ -948,7 +945,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     ncpus INT NOT NULL,
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL,
-    boot_on_fault BOOL NOT NULL DEFAULT false
+    boot_on_fault BOOL NOT NULL DEFAULT false,
+
+    /* public keys for instance initialization systems (e.g. cloud-init) */
+    public_keys STRING[] NOT NULL
 );
 
 -- Names for instances within a project should be unique
@@ -3099,7 +3099,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '21.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '22.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
