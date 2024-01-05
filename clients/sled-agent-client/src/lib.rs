@@ -25,6 +25,9 @@ progenitor::generate_api!(
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
     replace = {
+        ByteCount = omicron_common::api::external::ByteCount,
+        Generation = omicron_common::api::external::Generation,
+        Name = omicron_common::api::external::Name,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
@@ -80,7 +83,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             propolis_id: s.propolis_id,
             dst_propolis_id: s.dst_propolis_id,
             migration_id: s.migration_id,
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -114,18 +117,6 @@ impl From<omicron_common::api::external::InstanceCpuCount>
     }
 }
 
-impl From<omicron_common::api::external::ByteCount> for types::ByteCount {
-    fn from(s: omicron_common::api::external::ByteCount) -> Self {
-        Self(s.to_bytes())
-    }
-}
-
-impl From<omicron_common::api::external::Generation> for types::Generation {
-    fn from(s: omicron_common::api::external::Generation) -> Self {
-        Self(i64::from(&s) as u64)
-    }
-}
-
 impl From<types::InstanceRuntimeState>
     for omicron_common::api::internal::nexus::InstanceRuntimeState
 {
@@ -134,7 +125,7 @@ impl From<types::InstanceRuntimeState>
             propolis_id: s.propolis_id,
             dst_propolis_id: s.dst_propolis_id,
             migration_id: s.migration_id,
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -144,11 +135,7 @@ impl From<types::VmmRuntimeState>
     for omicron_common::api::internal::nexus::VmmRuntimeState
 {
     fn from(s: types::VmmRuntimeState) -> Self {
-        Self {
-            state: s.state.into(),
-            gen: s.gen.into(),
-            time_updated: s.time_updated,
-        }
+        Self { state: s.state.into(), gen: s.gen, time_updated: s.time_updated }
     }
 }
 
@@ -192,25 +179,13 @@ impl From<types::InstanceCpuCount>
     }
 }
 
-impl From<types::ByteCount> for omicron_common::api::external::ByteCount {
-    fn from(s: types::ByteCount) -> Self {
-        Self::try_from(s.0).unwrap_or_else(|e| panic!("{}: {}", s.0, e))
-    }
-}
-
-impl From<types::Generation> for omicron_common::api::external::Generation {
-    fn from(s: types::Generation) -> Self {
-        Self::try_from(s.0 as i64).unwrap()
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
     for types::DiskRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -242,7 +217,7 @@ impl From<types::DiskRuntimeState>
     fn from(s: types::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -265,19 +240,6 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
             Destroyed => Self::Destroyed,
             Faulted => Self::Faulted,
         }
-    }
-}
-
-impl From<&omicron_common::api::external::Name> for types::Name {
-    fn from(s: &omicron_common::api::external::Name) -> Self {
-        Self::try_from(<&str>::from(s))
-            .unwrap_or_else(|e| panic!("{}: {}", s, e))
-    }
-}
-
-impl From<types::Name> for omicron_common::api::external::Name {
-    fn from(s: types::Name) -> Self {
-        Self::try_from(s.as_str().to_owned()).unwrap()
     }
 }
 
@@ -541,7 +503,7 @@ impl From<omicron_common::api::internal::shared::NetworkInterface>
         Self {
             id: s.id,
             kind: s.kind.into(),
-            name: (&s.name).into(),
+            name: s.name,
             ip: s.ip,
             mac: s.mac.into(),
             subnet: s.subnet.into(),

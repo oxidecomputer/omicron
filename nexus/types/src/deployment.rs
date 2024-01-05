@@ -11,7 +11,6 @@
 //! nexus/deployment does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
-pub use crate::inventory::Generation;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;

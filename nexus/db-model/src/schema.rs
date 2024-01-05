@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(22, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(23, 0, 1);
 
 table! {
     disk (id) {
@@ -504,7 +504,14 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
-        silo_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    ip_pool_resource (ip_pool_id, resource_type, resource_id) {
+        ip_pool_id -> Uuid,
+        resource_type -> crate::IpPoolResourceTypeEnum,
+        resource_id -> Uuid,
         is_default -> Bool,
     }
 }
@@ -1426,8 +1433,9 @@ allow_tables_to_appear_in_same_query!(
 );
 joinable!(system_update_component_update -> component_update (component_update_id));
 
-allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
+allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
+joinable!(ip_pool_resource -> ip_pool (ip_pool_id));
 
 allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
 joinable!(inv_collection_error -> inv_collection (inv_collection_id));
@@ -1477,6 +1485,11 @@ allow_tables_to_appear_in_same_query!(
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
 allow_tables_to_appear_in_same_query!(external_ip, service);
+
+// used for query to check whether an IP pool association has any allocated IPs before deleting
+allow_tables_to_appear_in_same_query!(external_ip, instance);
+allow_tables_to_appear_in_same_query!(external_ip, project);
+allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
 
 allow_tables_to_appear_in_same_query!(
     switch_port,

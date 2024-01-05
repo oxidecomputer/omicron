@@ -18,12 +18,12 @@ use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -95,8 +95,8 @@ fn get_disk_detach_url(instance: &NameOrId) -> String {
     }
 }
 
-async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    populate_ip_pool(&client, "default", None).await;
+async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
@@ -107,7 +107,7 @@ async fn test_disk_not_found_before_creation(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // List disks.  There aren't any yet.
@@ -186,7 +186,7 @@ async fn test_disk_create_attach_detach_delete(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    let project_id = create_org_and_project(client).await;
+    let project_id = create_project_and_pool(client).await;
     let nexus = &cptestctx.server.apictx().nexus;
     let disks_url = get_disks_url();
 
@@ -315,7 +315,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -360,7 +360,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
 async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let nexus = &cptestctx.server.apictx().nexus;
 
     let disk_names = ["a", "b", "c", "d"];
@@ -467,7 +467,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -670,7 +670,7 @@ async fn test_disk_creation_region_requested_then_started(
 ) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always *start* as
@@ -689,7 +689,7 @@ async fn test_disk_region_creation_failure(
 ) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always fail.
@@ -745,7 +745,7 @@ async fn test_disk_invalid_block_size_rejected(
 ) {
     let client = &cptestctx.external_client;
     let _test = DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from_gibibytes_u32(3);
@@ -788,7 +788,7 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
 ) {
     let client = &cptestctx.external_client;
     let _test = DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from(3 * 1024 * 1024 * 1024 + 256);
@@ -829,7 +829,7 @@ async fn test_disk_reject_total_size_less_than_min_disk_size_bytes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disk_size = ByteCount::from(MIN_DISK_SIZE_BYTES / 2);
 
@@ -871,7 +871,7 @@ async fn test_disk_reject_total_size_greater_than_max_disk_size_bytes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disk_size =
         ByteCount::try_from(MAX_DISK_SIZE_BYTES + (1 << 30)).unwrap();
@@ -916,7 +916,7 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disk_size = ByteCount::from(1024 * 1024 * 1024 + 512);
 
@@ -971,7 +971,7 @@ async fn test_disk_backed_by_multiple_region_sets(
     test.add_zpool_with_dataset(cptestctx, 10).await;
     test.add_zpool_with_dataset(cptestctx, 10).await;
 
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Ask for a 20 gibibyte disk.
     let disk_size = ByteCount::from_gibibytes_u32(20);
@@ -1004,7 +1004,7 @@ async fn test_disk_backed_by_multiple_region_sets(
 async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
@@ -1044,7 +1044,7 @@ async fn test_disk_virtual_provisioning_collection(
 
     let _test = DiskTest::new(&cptestctx).await;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(client).await;
     let project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
     let project_id2 = create_project(client, PROJECT_NAME_2).await.identity.id;
 
@@ -1252,8 +1252,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
 
     let disk_test = DiskTest::new(&cptestctx).await;
 
-    populate_ip_pool(&client, "default", None).await;
-    let project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
+    let project_id1 = create_project_and_pool(client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -1393,7 +1392,6 @@ async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
 
     let _disk_test = DiskTest::new(&cptestctx).await;
 
-    populate_ip_pool(&client, "default", None).await;
     let _project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
 
     // Create a 1 GB disk
@@ -1519,7 +1517,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Total occupied size should start at 0
     for zpool in &test.zpools {
@@ -1688,7 +1686,7 @@ async fn test_multiple_disks_multiple_zpools(
     test.add_zpool_with_dataset(cptestctx, 10).await;
     test.add_zpool_with_dataset(cptestctx, 10).await;
 
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Ask for a 10 gibibyte disk, this should succeed
     let disk_size = ByteCount::from_gibibytes_u32(10);
@@ -1765,7 +1763,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let oximeter = &cptestctx.oximeter;
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    let project_id = create_org_and_project(client).await;
+    let project_id = create_project_and_pool(client).await;
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     oximeter.force_collect().await;
 
@@ -1838,7 +1836,7 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
 
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     create_instance_with_disk(client).await;
 
@@ -1900,7 +1898,7 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
 async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     let new_disk = params::DiskCreate {
@@ -1943,7 +1941,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Create a disk
     let disks_url = get_disks_url();

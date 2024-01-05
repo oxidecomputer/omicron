@@ -9,7 +9,6 @@
 use internal_dns::DNS_ZONE;
 use ipnet::IpAdd;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::Generation;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneType;
@@ -24,6 +23,7 @@ use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::DNS_REDUNDANCY;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::api::external::Generation;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
@@ -176,23 +176,15 @@ impl<'a> BlueprintBuilder<'a> {
                 self.zones_in_service.insert(z.id);
             }
 
-            let zones_config =
-                self.omicron_zones.entry(sled_id).or_insert_with(|| {
-                    let generation = Generation::from(
-                        omicron_common::api::external::Generation::new(),
-                    );
-                    OmicronZonesConfig { generation, zones: vec![] }
+            let zones_config = self
+                .omicron_zones
+                .entry(sled_id)
+                .or_insert_with(|| OmicronZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![],
                 });
 
-            // XXX-dap consider fixing up sled agent client to use
-            // omicron_common Generation directly
-            zones_config.generation = Generation::from(
-                omicron_common::api::external::Generation::from(
-                    zones_config.generation.clone(),
-                )
-                .next(),
-            );
-
+            zones_config.generation = zones_config.generation.next();
             zones_config.zones.extend(new_zones);
         }
 

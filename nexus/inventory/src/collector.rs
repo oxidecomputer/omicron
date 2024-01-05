@@ -374,6 +374,7 @@ mod test {
     use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
     use nexus_types::inventory::Collection;
+    use omicron_common::api::external::Generation;
     use omicron_sled_agent::sim;
     use std::fmt::Write;
     use std::net::Ipv6Addr;
@@ -540,7 +541,7 @@ mod test {
         let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
         client
             .omicron_zones_put(&sled_agent_client::types::OmicronZonesConfig {
-                generation: sled_agent_client::types::Generation::from(3),
+                generation: Generation::from(3),
                 zones: vec![sled_agent_client::types::OmicronZoneConfig {
                     id: zone_id,
                     underlay_address: *zone_address.ip(),
