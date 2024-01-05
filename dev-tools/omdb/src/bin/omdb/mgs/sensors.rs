@@ -25,7 +25,7 @@ pub(crate) struct SensorsArgs {
 
     /// restrict to specified sled(s)
     #[clap(long, use_value_delimiter = true)]
-    pub sleds: Vec<u32>,
+    pub sled: Vec<u32>,
 
     /// exclude sleds rather than include them
     #[clap(long, short)]
@@ -91,8 +91,8 @@ impl SensorsArgs {
     fn matches_sp(&self, sp: &SpIdentifier) -> bool {
         match sp.type_ {
             SpType::Sled => {
-                let matched = if self.sleds.len() > 0 {
-                    self.sleds.iter().find(|&&v| v == sp.slot).is_some()
+                let matched = if self.sled.len() > 0 {
+                    self.sled.iter().find(|&&v| v == sp.slot).is_some()
                 } else {
                     true
                 };
