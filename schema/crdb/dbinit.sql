@@ -927,6 +927,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     /* user data for instance initialization systems (e.g. cloud-init) */
     user_data BYTES NOT NULL,
 
+    /* public keys for instance initialization systems (e.g. cloud-init) */
+    public_keys STRING[] NOT NULL,
+
     /* The state of the instance when it has no active VMM. */
     state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
