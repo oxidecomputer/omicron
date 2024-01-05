@@ -11781,6 +11781,15 @@
               }
             ]
           },
+          "public_keys": {
+            "nullable": true,
+            "description": "List of public keys (identified by ID or name) to be associated with the instance.",
+            "default": null,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
           "start": {
             "description": "Should this instance be started upon creation; true by default.",
             "default": true,

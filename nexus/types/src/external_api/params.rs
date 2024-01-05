@@ -969,6 +969,10 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
+    /// List of public keys (identified by ID or name) to be associated with the instance.
+    #[serde(default)]
+    pub public_keys: Option<Vec<NameOrId>>,
+
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,

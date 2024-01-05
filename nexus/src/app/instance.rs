@@ -1119,7 +1119,10 @@ impl super::Nexus {
             .silo_user_id(actor.actor_id())
             .lookup_for(authz::Action::ListChildren)
             .await?;
-        let public_keys = self
+    
+        let checked_keys = db_instance.public_keys.clone().unwrap_or_default();
+        
+        let ssh_keys = self
             .db_datastore
             .ssh_keys_list(
                 opctx,
@@ -1132,9 +1135,18 @@ impl super::Nexus {
                 }),
             )
             .await?
-            .into_iter()
+            .into_iter();
+        
+        // Returning the intersection of a users public_keys and the 
+        // keys that were included in the instance create API request
+        let public_keys: Vec<String> = ssh_keys
+            .filter(|ssh_key| {
+                let id_str = ssh_key.id().to_string();
+                let name_str = ssh_key.name().to_string();
+                checked_keys.contains(&id_str) || checked_keys.contains(&name_str)
+            })
             .map(|ssh_key| ssh_key.public_key)
-            .collect::<Vec<String>>();
+            .collect();
 
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is

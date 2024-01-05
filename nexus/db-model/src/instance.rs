@@ -34,6 +34,8 @@ pub struct Instance {
     /// user data for instance initialization systems (e.g. cloud-init)
     pub user_data: Vec<u8>,
 
+    pub public_keys: Option<Vec<String>>,
+
     /// The number of vCPUs (i.e., virtual logical processors) to allocate for
     /// this instance.
     #[diesel(column_name = ncpus)]
@@ -77,6 +79,13 @@ impl Instance {
             identity,
             project_id,
             user_data: params.user_data.clone(),
+            // Comes in as a Name or ID for a consistent API but is stored
+            // as a Vec<String> in the database
+            public_keys: params.public_keys.clone().map(|vec| {
+                vec.into_iter()
+                    .map(|name_or_id| name_or_id.to_string())
+                    .collect()
+            }),
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.clone(),

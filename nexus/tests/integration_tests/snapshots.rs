@@ -123,6 +123,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
+            public_keys: None,
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
             disks: vec![params::InstanceDiskAttachment::Attach(
