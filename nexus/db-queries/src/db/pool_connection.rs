@@ -49,6 +49,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "instance_state",
     "ip_attach_state",
     "ip_kind",
+    "ip_pool_resource_type",
     "network_interface_kind",
     "physical_disk_kind",
     "producer_kind",

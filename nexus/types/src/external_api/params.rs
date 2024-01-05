@@ -836,17 +836,6 @@ impl std::fmt::Debug for CertificateCreate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-
-    /// If an IP pool is associated with a silo, instance IP allocations in that
-    /// silo can draw from that pool.
-    pub silo: Option<NameOrId>,
-
-    /// Whether the IP pool is considered a default pool for its scope (fleet
-    /// or silo). If a pool is marked default and is associated with a silo,
-    /// instances created in that silo will draw IPs from that pool unless
-    /// another pool is specified at instance create time.
-    #[serde(default)]
-    pub is_default: bool,
 }
 
 /// Parameters for updating an IP Pool
@@ -854,6 +843,31 @@ pub struct IpPoolCreate {
 pub struct IpPoolUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolSiloPath {
+    pub pool: NameOrId,
+    pub silo: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolSiloLink {
+    pub silo: NameOrId,
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolSiloUpdate {
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo, so when a pool is
+    /// made default, an existing default will remain linked but will no longer
+    /// be the default.
+    pub is_default: bool,
 }
 
 // Floating IPs

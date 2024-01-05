@@ -2266,7 +2266,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "List all IP pools that can be used by a given project",
+        "summary": "List all IP pools",
         "operationId": "project_ip_pool_list",
         "parameters": [
           {
@@ -2287,14 +2287,6 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -2324,9 +2316,7 @@
           }
         },
         "x-dropshot-pagination": {
-          "required": [
-            "project"
-          ]
+          "required": []
         }
       }
     },
@@ -2343,14 +2333,6 @@
             "name": "pool",
             "description": "Name or ID of the IP pool",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -5105,6 +5087,213 @@
           },
           "required": true
         },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/silos": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List an IP pool's linked silos",
+        "operationId": "ip_pool_silo_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSiloResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Make an IP pool available within a silo",
+        "operationId": "ip_pool_silo_link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolSiloLink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSilo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/silos/{silo}": {
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Make an IP pool default or not-default for a silo",
+        "description": "When a pool is made default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
+        "operationId": "ip_pool_silo_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolSiloUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSilo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Unlink an IP pool from a silo",
+        "description": "Will fail if there are any outstanding IPs allocated in the silo.",
+        "operationId": "ip_pool_silo_unlink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "resource updated"
@@ -12466,7 +12655,7 @@
         ]
       },
       "IpPool": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "A collection of IP ranges. If a pool is linked to a silo, IP addresses from the pool can be allocated within that silo",
         "type": "object",
         "properties": {
           "description": {
@@ -12478,9 +12667,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "is_default": {
-            "type": "boolean"
-          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -12488,11 +12674,6 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
-          },
-          "silo_id": {
-            "nullable": true,
-            "type": "string",
-            "format": "uuid"
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -12508,7 +12689,6 @@
         "required": [
           "description",
           "id",
-          "is_default",
           "name",
           "time_created",
           "time_modified"
@@ -12521,22 +12701,8 @@
           "description": {
             "type": "string"
           },
-          "is_default": {
-            "description": "Whether the IP pool is considered a default pool for its scope (fleet or silo). If a pool is marked default and is associated with a silo, instances created in that silo will draw IPs from that pool unless another pool is specified at instance create time.",
-            "default": false,
-            "type": "boolean"
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "silo": {
-            "nullable": true,
-            "description": "If an IP pool is associated with a silo, instance IP allocations in that silo can draw from that pool.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
           }
         },
         "required": [
@@ -12610,6 +12776,78 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "IpPoolSilo": {
+        "description": "A link between an IP pool and a silo that allows one to allocate IPs from the pool within the silo",
+        "type": "object",
+        "properties": {
+          "ip_pool_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "type": "boolean"
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "ip_pool_id",
+          "is_default",
+          "silo_id"
+        ]
+      },
+      "IpPoolSiloLink": {
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "type": "boolean"
+          },
+          "silo": {
+            "$ref": "#/components/schemas/NameOrId"
+          }
+        },
+        "required": [
+          "is_default",
+          "silo"
+        ]
+      },
+      "IpPoolSiloResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpPoolSilo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "IpPoolSiloUpdate": {
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo, so when a pool is made default, an existing default will remain linked but will no longer be the default.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_default"
         ]
       },
       "IpPoolUpdate": {
