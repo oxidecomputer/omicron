@@ -1951,7 +1951,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        ext_ip: &params::ExternalIpDelete,
+        ext_ip: &params::ExternalIpDetach,
     ) -> UpdateResult<Option<views::ExternalIp>> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;

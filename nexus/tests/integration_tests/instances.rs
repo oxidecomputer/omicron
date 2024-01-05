@@ -3734,7 +3734,7 @@ async fn test_instance_attach_several_external_ips(
 
     // Create several floating IPs for the instance, totalling 8 IPs.
     let mut external_ip_create =
-        vec![params::ExternalIpCreate::Ephemeral { pool_name: None }];
+        vec![params::ExternalIpCreate::Ephemeral { pool: None }];
     let mut fips = vec![];
     for i in 1..8 {
         let name = format!("fip-{i}");
@@ -3742,7 +3742,7 @@ async fn test_instance_attach_several_external_ips(
             create_floating_ip(&client, &name, PROJECT_NAME, None, None).await,
         );
         external_ip_create.push(params::ExternalIpCreate::Floating {
-            floating_ip_name: name.parse().unwrap(),
+            floating_ip: name.parse::<Name>().unwrap().into(),
         });
     }
 
@@ -3812,7 +3812,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
     populate_ip_pool(&client, "default", Some(default_pool_range)).await;
 
     let ephemeral_create = params::ExternalIpCreate::Ephemeral {
-        pool_name: Some("default".parse().unwrap()),
+        pool: Some("default".parse::<Name>().unwrap().into()),
     };
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &get_instances_url())
@@ -3860,7 +3860,7 @@ async fn create_instance_with_pool(
         &params::InstanceNetworkInterfaceAttachment::Default,
         vec![],
         vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: pool_name.map(|name| name.parse().unwrap()),
+            pool: pool_name.map(|name| name.parse::<Name>().unwrap().into()),
         }],
         true,
     )
@@ -3955,7 +3955,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some(Name::try_from(String::from("default")).unwrap()),
+            pool: Some("default".parse::<Name>().unwrap().into()),
         }],
         disks: vec![],
         start: true,

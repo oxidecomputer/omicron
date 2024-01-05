@@ -426,7 +426,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some(DEMO_IP_POOL_NAME.clone()),
+            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
         }],
         disks: vec![],
         start: true,
@@ -733,11 +733,11 @@ pub static DEMO_FLOAT_IP_CREATE: Lazy<params::FloatingIpCreate> =
 
 pub static DEMO_FLOAT_IP_ATTACH: Lazy<params::ExternalIpCreate> =
     Lazy::new(|| params::ExternalIpCreate::Floating {
-        floating_ip_name: DEMO_FLOAT_IP_NAME.clone(),
+        floating_ip: DEMO_FLOAT_IP_NAME.clone().into(),
     });
-pub static DEMO_FLOAT_IP_DETACH: Lazy<params::ExternalIpDelete> =
-    Lazy::new(|| params::ExternalIpDelete::Floating {
-        floating_ip_name: DEMO_FLOAT_IP_NAME.clone(),
+pub static DEMO_FLOAT_IP_DETACH: Lazy<params::ExternalIpDetach> =
+    Lazy::new(|| params::ExternalIpDetach::Floating {
+        floating_ip: DEMO_FLOAT_IP_NAME.clone().into(),
     });
 
 // Identity providers

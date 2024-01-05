@@ -939,19 +939,20 @@ pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
     /// automatically-assigned from the provided IP Pool, or all available pools
     /// if not specified.
-    Ephemeral { pool_name: Option<Name> },
+    Ephemeral { pool: Option<NameOrId> },
     /// An IP address providing both inbound and outbound access. The address is
-    /// an existing Floating IP object assigned to the current project.
+    /// an existing floating IP object assigned to the current project.
     ///
     /// The floating IP must not be in use by another instance or service.
-    Floating { floating_ip_name: Name },
+    Floating { floating_ip: NameOrId },
 }
 
+/// Parameters for detaching an external IP from an instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ExternalIpDelete {
+pub enum ExternalIpDetach {
     Ephemeral,
-    Floating { floating_ip_name: Name },
+    Floating { floating_ip: NameOrId },
 }
 
 /// Create-time parameters for an `Instance`

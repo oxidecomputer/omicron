@@ -21,7 +21,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::SwitchLocation;
+use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::warn;
@@ -623,16 +625,31 @@ async fn sic_allocate_instance_external_ip(
     // Runtime state should never be able to make 'complete_op' fallible.
     let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { ref pool_name } => {
-            let pool_name =
-                pool_name.as_ref().map(|name| db::model::Name(name.clone()));
+        params::ExternalIpCreate::Ephemeral { pool } => {
+            let pool_id = if let Some(name_or_id) = pool {
+                let (.., authz_pool) = match name_or_id {
+                    NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
+                        .ip_pool_name(db::model::Name::ref_cast(name)),
+                    NameOrId::Id(id) => {
+                        LookupPath::new(&opctx, datastore).ip_pool_id(*id)
+                    }
+                }
+                .lookup_for(authz::Action::CreateChild)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+                Some(authz_pool.id())
+            } else {
+                None
+            };
+
             let ip_id = repeat_saga_params.new_id;
             datastore
                 .allocate_instance_ephemeral_ip(
                     &opctx,
                     ip_id,
                     instance_id,
-                    pool_name,
+                    pool_id,
                     true,
                 )
                 .await
@@ -640,14 +657,18 @@ async fn sic_allocate_instance_external_ip(
                 .0
         }
         // Set the parent of an existing floating IP to the new instance's ID.
-        params::ExternalIpCreate::Floating { ref floating_ip_name } => {
-            let floating_ip_name = db::model::Name(floating_ip_name.clone());
-            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
-                .project_id(saga_params.project_id)
-                .floating_ip_name(&floating_ip_name)
-                .lookup_for(authz::Action::Modify)
-                .await
-                .map_err(ActionError::action_failed)?;
+        params::ExternalIpCreate::Floating { floating_ip } => {
+            let (.., authz_fip) = match floating_ip {
+                NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
+                    .project_id(saga_params.project_id)
+                    .floating_ip_name(db::model::Name::ref_cast(name)),
+                NameOrId::Id(id) => {
+                    LookupPath::new(&opctx, datastore).floating_ip_id(*id)
+                }
+            }
+            .lookup_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
 
             datastore
                 .floating_ip_begin_attach(&opctx, &authz_fip, instance_id, true)
@@ -1011,7 +1032,7 @@ pub mod test {
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                    pool_name: None,
+                    pool: None,
                 }],
                 disks: vec![params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {

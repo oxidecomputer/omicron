@@ -1912,7 +1912,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ExternalIpDelete"
+                "$ref": "#/components/schemas/ExternalIpDetach"
               }
             }
           },
@@ -10902,11 +10902,11 @@
             "description": "An IP address providing both inbound and outbound access. The address is automatically-assigned from the provided IP Pool, or all available pools if not specified.",
             "type": "object",
             "properties": {
-              "pool_name": {
+              "pool": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Name"
+                    "$ref": "#/components/schemas/NameOrId"
                   }
                 ]
               },
@@ -10922,11 +10922,11 @@
             ]
           },
           {
-            "description": "An IP address providing both inbound and outbound access. The address is an existing Floating IP object assigned to the current project.\n\nThe floating IP must not be in use by another instance or service.",
+            "description": "An IP address providing both inbound and outbound access. The address is an existing floating IP object assigned to the current project.\n\nThe floating IP must not be in use by another instance or service.",
             "type": "object",
             "properties": {
-              "floating_ip_name": {
-                "$ref": "#/components/schemas/Name"
+              "floating_ip": {
+                "$ref": "#/components/schemas/NameOrId"
               },
               "type": {
                 "type": "string",
@@ -10936,13 +10936,14 @@
               }
             },
             "required": [
-              "floating_ip_name",
+              "floating_ip",
               "type"
             ]
           }
         ]
       },
-      "ExternalIpDelete": {
+      "ExternalIpDetach": {
+        "description": "Parameters for detaching an external IP from an instance.",
         "oneOf": [
           {
             "type": "object",
@@ -10961,8 +10962,8 @@
           {
             "type": "object",
             "properties": {
-              "floating_ip_name": {
-                "$ref": "#/components/schemas/Name"
+              "floating_ip": {
+                "$ref": "#/components/schemas/NameOrId"
               },
               "type": {
                 "type": "string",
@@ -10972,7 +10973,7 @@
               }
             },
             "required": [
-              "floating_ip_name",
+              "floating_ip",
               "type"
             ]
           }

@@ -14,7 +14,8 @@ use crate::external_api::params;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
-use omicron_common::api::external::Error;
+use omicron_common::api::external::{Error, NameOrId};
+use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -89,17 +90,32 @@ async fn siia_begin_attach_ip(
         &params.serialized_authn,
     );
 
-    match params.create_params {
+    match &params.create_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { ref pool_name } => {
-            let pool_name =
-                pool_name.as_ref().map(|name| db::model::Name(name.clone()));
+        params::ExternalIpCreate::Ephemeral { pool } => {
+            let pool_id = if let Some(name_or_id) = pool {
+                let (.., authz_pool) = match name_or_id {
+                    NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
+                        .ip_pool_name(db::model::Name::ref_cast(name)),
+                    NameOrId::Id(id) => {
+                        LookupPath::new(&opctx, datastore).ip_pool_id(*id)
+                    }
+                }
+                .lookup_for(authz::Action::CreateChild)
+                .await
+                .map_err(ActionError::action_failed)?;
+
+                Some(authz_pool.id())
+            } else {
+                None
+            };
+
             datastore
                 .allocate_instance_ephemeral_ip(
                     &opctx,
                     Uuid::new_v4(),
                     params.authz_instance.id(),
-                    pool_name,
+                    pool_id,
                     false,
                 )
                 .await
@@ -110,14 +126,18 @@ async fn siia_begin_attach_ip(
                 })
         }
         // Set the parent of an existing floating IP to the new instance's ID.
-        params::ExternalIpCreate::Floating { ref floating_ip_name } => {
-            let floating_ip_name = db::model::Name(floating_ip_name.clone());
-            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
-                .project_id(params.project_id)
-                .floating_ip_name(&floating_ip_name)
-                .lookup_for(authz::Action::Modify)
-                .await
-                .map_err(ActionError::action_failed)?;
+        params::ExternalIpCreate::Floating { floating_ip } => {
+            let (.., authz_fip) = match floating_ip {
+                NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
+                    .project_id(params.project_id)
+                    .floating_ip_name(db::model::Name::ref_cast(name)),
+                NameOrId::Id(id) => {
+                    LookupPath::new(&opctx, datastore).floating_ip_id(*id)
+                }
+            }
+            .lookup_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
 
             datastore
                 .floating_ip_begin_attach(
@@ -281,13 +301,13 @@ pub(crate) mod test {
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
-    use nexus_db_model::{ExternalIp, IpKind, Name};
+    use nexus_db_model::{ExternalIp, IpKind};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::{
         create_floating_ip, create_instance, create_project, populate_ip_pool,
     };
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::SimpleIdentity;
+    use omicron_common::api::external::{Name, SimpleIdentity};
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -318,16 +338,16 @@ pub(crate) mod test {
     ) -> Params {
         let create_params = if use_floating {
             params::ExternalIpCreate::Floating {
-                floating_ip_name: FIP_NAME.parse().unwrap(),
+                floating_ip: FIP_NAME.parse::<Name>().unwrap().into(),
             }
         } else {
-            params::ExternalIpCreate::Ephemeral { pool_name: None }
+            params::ExternalIpCreate::Ephemeral { pool: None }
         };
 
         let (.., authz_project, authz_instance) =
             LookupPath::new(opctx, datastore)
-                .project_name(&Name(PROJECT_NAME.parse().unwrap()))
-                .instance_name(&Name(INSTANCE_NAME.parse().unwrap()))
+                .project_name(&db::model::Name(PROJECT_NAME.parse().unwrap()))
+                .instance_name(&db::model::Name(INSTANCE_NAME.parse().unwrap()))
                 .lookup_for(authz::Action::Modify)
                 .await
                 .unwrap();

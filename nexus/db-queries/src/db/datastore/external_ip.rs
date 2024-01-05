@@ -88,7 +88,7 @@ impl DataStore {
         opctx: &OpContext,
         ip_id: Uuid,
         instance_id: Uuid,
-        pool_name: Option<Name>,
+        pool_id: Option<Uuid>,
         creating_instance: bool,
     ) -> CreateResult<(ExternalIp, bool)> {
         // This is slightly hacky: we need to create an unbound ephemeral IP, and
@@ -97,10 +97,10 @@ impl DataStore {
         // - At most MAX external IPs per instance
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
-        let pool = match pool_name {
-            Some(name) => {
+        let pool = match pool_id {
+            Some(id) => {
                 let (.., authz_pool, pool) = LookupPath::new(opctx, &self)
-                    .ip_pool_name(&name)
+                    .ip_pool_id(id)
                     // any authenticated user can CreateChild on an IP pool. this is
                     // meant to represent allocating an IP
                     .fetch_for(authz::Action::CreateChild)

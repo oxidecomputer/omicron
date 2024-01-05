@@ -797,14 +797,14 @@ async fn test_ip_pool_list_usable_by_project(
     // should be able to access
     for pool_name in pool_names {
         let instance_name = format!("{}-{}", INSTANCE_NAME, pool_name);
-        let pool_name = Some(Name::try_from(pool_name).unwrap());
+        let pool = Some(Name::try_from(pool_name).unwrap().into());
         create_instance_with(
             client,
             PROJECT_NAME,
             &instance_name,
             &InstanceNetworkInterfaceAttachment::Default,
             Vec::<InstanceDiskAttachment>::new(),
-            vec![ExternalIpCreate::Ephemeral { pool_name }],
+            vec![ExternalIpCreate::Ephemeral { pool }],
             true,
         )
         .await;

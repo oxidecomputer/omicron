@@ -3775,7 +3775,7 @@ async fn instance_external_ip_detach(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::InstancePath>,
     query_params: Query<params::OptionalProjectSelector>,
-    ip_to_detach: TypedBody<params::ExternalIpDelete>,
+    ip_to_detach: TypedBody<params::ExternalIpDetach>,
 ) -> Result<HttpResponseAccepted<Option<views::ExternalIp>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {

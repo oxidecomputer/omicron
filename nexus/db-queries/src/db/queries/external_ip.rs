@@ -920,7 +920,7 @@ mod tests {
             name: &str,
             range: IpRange,
             is_default: bool,
-        ) {
+        ) -> IpPool {
             let silo_id = self.opctx.authn.silo_required().unwrap().id();
             let pool = IpPool::new(
                 &IdentityMetadataCreateParams {
@@ -938,13 +938,16 @@ mod tests {
                 .unwrap();
 
             use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
-            diesel::insert_into(ip_pool_dsl::ip_pool)
+            let ip_pool = diesel::insert_into(ip_pool_dsl::ip_pool)
                 .values(pool.clone())
-                .execute_async(&*conn)
+                .returning(IpPool::as_returning())
+                .get_result_async(&*conn)
                 .await
                 .expect("Failed to create IP Pool");
 
             self.initialize_ip_pool(name, range).await;
+
+            ip_pool
         }
 
         async fn initialize_ip_pool(&self, name: &str, range: IpRange) {
@@ -1808,13 +1811,13 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        context.create_ip_pool("p1", second_range, /*default*/ false).await;
+        let p1 =
+            context.create_ip_pool("p1", second_range, /*default*/ false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
         let instance_id = context.create_instance("test").await;
         let id = Uuid::new_v4();
-        let pool_name = Some(Name("p1".parse().unwrap()));
 
         let ip = context
             .db_datastore
@@ -1822,7 +1825,7 @@ mod tests {
                 &context.opctx,
                 id,
                 instance_id,
-                pool_name,
+                Some(p1.id()),
                 true,
             )
             .await
@@ -1853,10 +1856,11 @@ mod tests {
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range, /* default */ false).await;
+        let p1 = context
+            .create_ip_pool("p1", second_range, /* default */ false)
+            .await;
 
         // Allocate all available addresses in the second pool.
-        let pool_name = Some(Name("p1".parse().unwrap()));
         let first_octet = first_address.octets()[3];
         let last_octet = last_address.octets()[3];
         for octet in first_octet..=last_octet {
@@ -1868,7 +1872,7 @@ mod tests {
                     &context.opctx,
                     Uuid::new_v4(),
                     instance_id,
-                    pool_name.clone(),
+                    Some(p1.id()),
                     true,
                 )
                 .await
@@ -1890,7 +1894,7 @@ mod tests {
                 &context.opctx,
                 Uuid::new_v4(),
                 instance_id,
-                pool_name,
+                Some(p1.id()),
                 true,
             )
             .await

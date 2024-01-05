@@ -14,6 +14,8 @@ use crate::external_api::params;
 use nexus_db_model::IpAttachState;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
+use omicron_common::api::external::NameOrId;
+use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -50,7 +52,7 @@ declare_saga_actions! {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Params {
-    pub delete_params: params::ExternalIpDelete,
+    pub delete_params: params::ExternalIpDetach,
     pub authz_instance: authz::Instance,
     pub project_id: Uuid,
     /// Authentication context to use to fetch the instance's current state from
@@ -69,8 +71,8 @@ async fn siid_begin_detach_ip(
         &params.serialized_authn,
     );
 
-    match params.delete_params {
-        params::ExternalIpDelete::Ephemeral => {
+    match &params.delete_params {
+        params::ExternalIpDetach::Ephemeral => {
             let eip = datastore
                 .instance_lookup_ephemeral_ip(
                     &opctx,
@@ -99,14 +101,18 @@ async fn siid_begin_detach_ip(
                 })
             }
         }
-        params::ExternalIpDelete::Floating { ref floating_ip_name } => {
-            let floating_ip_name = db::model::Name(floating_ip_name.clone());
-            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
-                .project_id(params.project_id)
-                .floating_ip_name(&floating_ip_name)
-                .lookup_for(authz::Action::Modify)
-                .await
-                .map_err(ActionError::action_failed)?;
+        params::ExternalIpDetach::Floating { floating_ip } => {
+            let (.., authz_fip) = match floating_ip {
+                NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
+                    .project_id(params.project_id)
+                    .floating_ip_name(db::model::Name::ref_cast(name)),
+                NameOrId::Id(id) => {
+                    LookupPath::new(&opctx, datastore).floating_ip_id(*id)
+                }
+            }
+            .lookup_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
 
             datastore
                 .floating_ip_begin_detach(
@@ -273,11 +279,11 @@ pub(crate) mod test {
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
-    use nexus_db_model::{ExternalIp, IpKind, Name};
+    use nexus_db_model::{ExternalIp, IpKind};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_instance;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::SimpleIdentity;
+    use omicron_common::api::external::{Name, SimpleIdentity};
     use std::sync::Arc;
 
     type ControlPlaneTestContext =
@@ -293,17 +299,17 @@ pub(crate) mod test {
         use_floating: bool,
     ) -> Params {
         let delete_params = if use_floating {
-            params::ExternalIpDelete::Floating {
-                floating_ip_name: FIP_NAME.parse().unwrap(),
+            params::ExternalIpDetach::Floating {
+                floating_ip: FIP_NAME.parse::<Name>().unwrap().into(),
             }
         } else {
-            params::ExternalIpDelete::Ephemeral
+            params::ExternalIpDetach::Ephemeral
         };
 
         let (.., authz_project, authz_instance) =
             LookupPath::new(opctx, datastore)
-                .project_name(&Name(PROJECT_NAME.parse().unwrap()))
-                .instance_name(&Name(INSTANCE_NAME.parse().unwrap()))
+                .project_name(&db::model::Name(PROJECT_NAME.parse().unwrap()))
+                .instance_name(&db::model::Name(INSTANCE_NAME.parse().unwrap()))
                 .lookup_for(authz::Action::Modify)
                 .await
                 .unwrap();
@@ -319,8 +325,8 @@ pub(crate) mod test {
     async fn attach_instance_ips(nexus: &Arc<Nexus>, opctx: &OpContext) {
         let datastore = &nexus.db_datastore;
 
-        let proj_name = Name(PROJECT_NAME.parse().unwrap());
-        let inst_name = Name(INSTANCE_NAME.parse().unwrap());
+        let proj_name = db::model::Name(PROJECT_NAME.parse().unwrap());
+        let inst_name = db::model::Name(INSTANCE_NAME.parse().unwrap());
         let lookup = LookupPath::new(opctx, datastore)
             .project_name(&proj_name)
             .instance_name(&inst_name);

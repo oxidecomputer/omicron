@@ -240,7 +240,7 @@ mod test {
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool_name: None,
+                pool: None,
             }],
             disks: vec![params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
