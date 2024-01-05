@@ -1566,28 +1566,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.ip_pool (
     time_deleted TIMESTAMPTZ,
 
     /* The collection's child-resource generation number */
-    rcgen INT8 NOT NULL,
-
-    /*
-     * Association with a silo. silo_id is also used to mark an IP pool as
-     * "internal" by associating it with the oxide-internal silo. Null silo_id
-     * means the pool is can be used fleet-wide.
-     */
-    silo_id UUID,
-
-    /* Is this the default pool for its scope (fleet or silo) */
-    is_default BOOLEAN NOT NULL DEFAULT FALSE
+    rcgen INT8 NOT NULL
 );
-
-/*
- * Ensure there can only be one default pool for the fleet or a given silo.
- * Coalesce is needed because otherwise different nulls are considered to be
- * distinct from each other.
- */
-CREATE UNIQUE INDEX IF NOT EXISTS one_default_pool_per_scope ON omicron.public.ip_pool (
-    COALESCE(silo_id, '00000000-0000-0000-0000-000000000000'::uuid)
-) WHERE
-    is_default = true AND time_deleted IS NULL;
 
 /*
  * Index ensuring uniqueness of IP Pool names, globally.
@@ -1596,6 +1576,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_pool_by_name ON omicron.public.ip_pool 
     name
 ) WHERE
     time_deleted IS NULL;
+
+-- The order here is most-specific first, and it matters because we use this
+-- fact to select the most specific default in the case where there is both a
+-- silo default and a fleet default. If we were to add a project type, it should
+-- be added before silo.
+CREATE TYPE IF NOT EXISTS omicron.public.ip_pool_resource_type AS ENUM (
+    'silo'
+);
+
+-- join table associating IP pools with resources like fleet or silo
+CREATE TABLE IF NOT EXISTS omicron.public.ip_pool_resource (
+    ip_pool_id UUID NOT NULL,
+    resource_type omicron.public.ip_pool_resource_type NOT NULL,
+    resource_id UUID NOT NULL,
+    is_default BOOL NOT NULL,
+    -- TODO: timestamps for soft deletes?
+
+    -- resource_type is redundant because resource IDs are globally unique, but
+    -- logically it belongs here
+    PRIMARY KEY (ip_pool_id, resource_type, resource_id)
+);
+
+-- a given resource can only have one default ip pool
+CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.public.ip_pool_resource (
+    resource_id
+) where
+    is_default = true;
 
 /*
  * IP Pools are made up of a set of IP ranges, which are start/stop addresses.
@@ -3251,7 +3258,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '22.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '23.0.1', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
