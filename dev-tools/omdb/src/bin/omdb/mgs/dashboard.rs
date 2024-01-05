@@ -5,6 +5,7 @@
 //! Code for the MGS dashboard subcommand
 
 use anyhow::{anyhow, bail, Result};
+use chrono::NaiveDateTime;
 use clap::{CommandFactory, Parser};
 use crossterm::{
     event::{
@@ -589,27 +590,43 @@ impl Dashboard {
 
     fn up(&mut self) {
         let selected_kind = self.kinds[self.selected_kind];
+        let type_ = self.sps[self.selected_sp].type_;
 
         if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
             flipped.previous();
             return;
         }
 
-        for sp in &self.sps {
+        for sp in self.sps.iter().filter(|&s| s.type_ == type_) {
             self.graphs.get_mut(&(*sp, selected_kind)).unwrap().previous();
         }
     }
 
     fn down(&mut self) {
         let selected_kind = self.kinds[self.selected_kind];
+        let type_ = self.sps[self.selected_sp].type_;
 
         if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
             flipped.next();
             return;
         }
 
-        for sp in &self.sps {
+        for sp in self.sps.iter().filter(|&s| s.type_ == type_) {
             self.graphs.get_mut(&(*sp, selected_kind)).unwrap().next();
+        }
+    }
+
+    fn esc(&mut self) {
+        let selected_kind = self.kinds[self.selected_kind];
+        let type_ = self.sps[self.selected_sp].type_;
+
+        if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
+            flipped.unselect();
+            return;
+        }
+
+        for sp in self.sps.iter().filter(|&s| s.type_ == type_) {
+            self.graphs.get_mut(&(*sp, selected_kind)).unwrap().unselect();
         }
     }
 
@@ -648,21 +665,9 @@ impl Dashboard {
         }
     }
 
-    fn esc(&mut self) {
-        let selected_kind = self.kinds[self.selected_kind];
-
-        if let Some(flipped) = self.flipped.get_mut(&selected_kind) {
-            flipped.unselect();
-            return;
-        }
-
-        for sp in &self.sps {
-            self.graphs.get_mut(&(*sp, selected_kind)).unwrap().unselect();
-        }
-    }
-
     fn flip(&mut self) {
         let selected_kind = self.kinds[self.selected_kind];
+        let type_ = self.sps[self.selected_sp].type_;
 
         if let Some(_) = self.flipped.remove(&selected_kind) {
             return;
@@ -675,8 +680,7 @@ impl Dashboard {
         if let Some(ndx) = graph.selected() {
             let mut from = vec![];
 
-            for sp in &self.sps {
-                // XXX make sure types match
+            for sp in self.sps.iter().filter(|&s| s.type_ == type_) {
                 from.push((
                     self.graphs.get(&(*sp, selected_kind)).unwrap(),
                     sp_to_string(sp),

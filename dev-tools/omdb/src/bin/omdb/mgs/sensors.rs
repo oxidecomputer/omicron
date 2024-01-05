@@ -460,7 +460,29 @@ fn sp_info_csv<R: std::io::Read>(
                     if let Some(sp) = sp {
                         let value = match record[ndx + len].parse::<f32>() {
                             Ok(value) => Some(value),
-                            _ => None,
+                            _ => {
+                                //
+                                // We want to distinguish between the device
+                                // having an error ("X") and it being absent
+                                // ("-"); if it's absent, we don't want to add
+                                // it at all.
+                                //
+                                match &record[ndx + len] {
+                                    "X" => {}
+                                    "-" => continue,
+                                    _ => {
+                                        bail!(
+                                            "line {}: unrecognized value \
+                                            \"{}\" in field {}",
+                                            position.line(),
+                                            record[ndx + len].to_string(),
+                                            ndx + len
+                                        );
+                                    }
+                                }
+
+                                None
+                            }
                         };
 
                         by_sp.insert(sp, (sensor.clone(), value));
