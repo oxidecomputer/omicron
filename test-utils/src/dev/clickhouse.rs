@@ -192,7 +192,6 @@ impl ClickHouseInstance {
             return Err(ClickHouseError::InvalidKeeperId.into());
         }
         let data_dir = ClickHouseDataDir::new()?;
-        println!("Keeper {} data dir: {}", k_id, data_dir.root_path());
 
         let args = vec![
             "keeper".to_string(),
