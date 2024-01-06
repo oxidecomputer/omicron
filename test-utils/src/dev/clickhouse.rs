@@ -210,7 +210,7 @@ impl ClickHouseInstance {
             .env("CH_LISTEN_ADDR", "::")
             .env("CH_LISTEN_PORT", port.to_string())
             .env("CH_KEEPER_ID_CURRENT", k_id.to_string())
-            .env("CH_DATASTORE", data_dir.root_path())
+            .env("CH_DATASTORE", data_dir.datastore_path())
             .env("CH_LOG_STORAGE_PATH", data_dir.keeper_log_storage_path())
             .env(
                 "CH_SNAPSHOT_STORAGE_PATH",
