@@ -4234,6 +4234,7 @@ dependencies = [
  "nexus-types",
  "omicron-common",
  "omicron-workspace-hack",
+ "slog",
  "thiserror",
  "uuid",
 ]

@@ -130,4 +130,5 @@
 //! acceptable.  Maybe that's okay?  De-risking that will probably involve
 //! trying to write that.
 
+pub mod blueprint_builder;
 pub mod planner;

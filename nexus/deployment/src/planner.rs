@@ -2,482 +2,177 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Facilities related to generating Blueprints
+//! High-level facilities for generating Blueprints
 //!
 //! See crate-level documentation for details.
 
-use anyhow::anyhow;
-use internal_dns::DNS_ZONE;
-use ipnet::IpAdd;
+use crate::blueprint_builder::BlueprintBuilder;
+use crate::blueprint_builder::Error;
+use crate::blueprint_builder::SledInfo;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::OmicronZoneConfig;
-use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneType;
-use nexus_types::deployment::OmicronZonesConfig;
-use nexus_types::deployment::ZpoolName;
 use nexus_types::inventory::Collection;
-use omicron_common::address::get_sled_address;
-use omicron_common::address::get_switch_zone_address;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::ReservedRackSubnet;
-use omicron_common::address::AZ_PREFIX;
-use omicron_common::address::DNS_REDUNDANCY;
-use omicron_common::address::NTP_PORT;
-use omicron_common::address::SLED_PREFIX;
-use omicron_common::api::external::Generation;
+use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::net::IpAddr;
-use std::net::Ipv6Addr;
-use std::net::SocketAddrV6;
-use thiserror::Error;
 use uuid::Uuid;
 
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("ran out of available addresses for sled")]
-    OutOfAddresses,
-    #[error("programming error in planner")]
-    Planner(#[from] anyhow::Error),
-}
-
-pub struct BlueprintBuilder<'a> {
-    /// underlying collection on which this blueprint is based
+pub struct Planner<'a> {
+    log: Logger,
     collection: &'a Collection,
-
-    // These fields are used to allocate resources from sleds.
-    sled_zpools: BTreeMap<Uuid, BTreeSet<ZpoolName>>,
-    sled_ip_allocators: BTreeMap<Uuid, IpAllocator>,
-
-    // These fields will become part of the final blueprint.  See the
-    // corresponding fields in `Blueprint`.
-    sleds: BTreeSet<Uuid>,
-    omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-    zones_in_service: BTreeSet<Uuid>,
-    creator: String,
-    reason: String,
+    sleds: &'a BTreeMap<Uuid, SledInfo>,
+    blueprint: BlueprintBuilder<'a>,
 }
 
-impl<'a> BlueprintBuilder<'a> {
-    /// Construct a new `BlueprintBuilder` based on an inventory collection that
-    /// starts with no changes from the that state
+impl<'a> Planner<'a> {
     pub fn new_based_on(
+        log: Logger,
         collection: &'a Collection,
-        sled_zpools: BTreeMap<Uuid, BTreeSet<ZpoolName>>,
+        sleds: &'a BTreeMap<Uuid, SledInfo>,
         zones_in_service: BTreeSet<Uuid>,
         creator: &str,
         reason: &str,
-    ) -> BlueprintBuilder<'a> {
-        let omicron_zones = collection
-            .omicron_zones
-            .iter()
-            .map(|(sled_id, found)| {
-                let zones = found.zones.clone();
-                (*sled_id, zones)
-            })
-            .collect();
-        // XXX-dap I think this function needs to accept a list of sleds that
-        // are known to be part of the system, plus information like what their
-        // subnets are.  Then we could use that for "sleds".
-        BlueprintBuilder {
-            sleds: sled_zpools.keys().copied().collect(),
+    ) -> Planner<'a> {
+        let blueprint = BlueprintBuilder::new_based_on(
             collection,
-            omicron_zones,
-            sled_zpools,
+            sleds,
             zones_in_service,
-            sled_ip_allocators: BTreeMap::new(),
-            creator: creator.to_owned(),
-            reason: reason.to_owned(),
-        }
+            creator,
+            reason,
+        );
+        Planner { log, collection, sleds, blueprint }
     }
 
-    pub fn build(mut self) -> Blueprint {
-        // Collect the Omicron zones config for each in-service sled.
-        let omicron_zones = self
-            .sleds
-            .iter()
-            .map(|sled_id| {
-                // Start with self.omicron_zones, which contains entries for any
-                // sled whose zones config is changing in this blueprint.
-                let zones = self.omicron_zones
-                    .remove(sled_id)
-                    // If it's not there, use the config from the collection
-                    // we're working with.
-                    .or_else(|| {
-                        self.collection
-                            .omicron_zones
-                            .get(sled_id)
-                            .map(|z| z.zones.clone())
-                    })
-                    // If it's not there either, then this must be a new sled
-                    // and we haven't added any zones to it yet.  Use the
-                    // standard initial config.
-                    .unwrap_or_else(|| OmicronZonesConfig {
-                        generation: Generation::new(),
-                        zones: vec![],
-                    });
-                (*sled_id, zones)
-            })
-            .collect();
-        Blueprint {
-            sleds: self.sleds,
-            omicron_zones: omicron_zones,
-            zones_in_service: self.zones_in_service,
-            built_from_collection: self.collection.id,
-            time_created: chrono::Utc::now(),
-            creator: self.creator,
-            reason: self.reason,
-        }
+    pub fn plan(mut self) -> Result<Blueprint, Error> {
+        self.do_plan()?;
+        Ok(self.blueprint.build())
     }
 
-    pub fn sled_ensure(mut self, sled_id: Uuid) -> Self {
-        self.sleds.insert(sled_id);
-        self
-    }
+    fn do_plan(&mut self) -> Result<(), Error> {
+        // The only thing this planner currently knows how to do is add services
+        // to a sled that's missing them.  So let's see if we're in that case.
+        for (sled_id, sled_info) in self.sleds {
+            // XXX-dap per the comment below, it seems like this should be
+            // looking at the most recent blueprint, not the collection.
+            let Some(found_zones) = self.collection.omicron_zones.get(sled_id)
+            else {
+                // If we find no zones config at all, then we don't know what
+                // zones this sled agent is really running.  We should not
+                // assume anything -- neither that we need to provision more
+                // stuff nor that we don't.
+                warn!(
+                    &self.log,
+                    "found sled with no zones config in inventory \
+                    (earlier collection failure?)";
+                    "sled_id" => ?sled_id
+                );
+                continue;
+            };
 
-    fn sled_check(&self, sled_id: Uuid) -> Result<(), Error> {
-        if !self.sleds.contains(&sled_id) {
-            Err(Error::Planner(anyhow!(
-                "attempted to use sled that is not in service: {}",
-                sled_id
-            )))
-        } else {
-            Ok(())
-        }
-    }
-
-    // pub fn ensure_sled(
-    //     mut self,
-    //     sled_id: Uuid,
-    //     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-    // ) -> Result<Self, Error> {
-    //     // Work around rust-lang/rust-clippy#11935 and related issues.
-    //     // Clippy doesn't grok that we can't use
-    //     // `entry(&sled_id).or_insert_with(closure)` because `closure` would
-    //     // borrow `self`, which we can't do because we already have an immutable
-    //     // borrow of `self` by calling `entry()`.  Using `match` on the result
-    //     // of `entry` has a similar problem.
-    //     #[allow(clippy::map_entry)]
-    //     if !self.sled_ip_allocators.contains_key(&sled_id) {
-    //         self.sled_ip_allocators
-    //             .insert(sled_id, self.sled_ip_allocator(sled_id, sled_subnet));
-    //     }
-
-    //     let mut new_zones = Vec::new();
-
-    //     // Every sled needs an NTP zone.  Currently, we assume the boundary NTP
-    //     // zones have already been provisioned elsewhere, so this will be an
-    //     // internal NTP zone.
-    //     let has_ntp = self
-    //         .omicron_zones
-    //         .get(&sled_id)
-    //         .map(|zones_config| {
-    //             zones_config.zones.iter().any(|z| {
-    //                 matches!(
-    //                     z.zone_type,
-    //                     OmicronZoneType::BoundaryNtp { .. }
-    //                         | OmicronZoneType::InternalNtp { .. }
-    //                 )
-    //             })
-    //         })
-    //         .unwrap_or(false);
-    //     if !has_ntp {
-    //         let sled_addr_allocator =
-    //             self.sled_ip_allocators.get_mut(&sled_id).unwrap();
-    //         let ip =
-    //             sled_addr_allocator.alloc().ok_or(Error::OutOfAddresses)?;
-    //         new_zones.push(self.new_ntp_zone(sled_subnet, ip));
-    //     }
-
-    //     // On every sled, for every zpool, there should be one Crucible zone.
-    //     if let Some(sled_zpools) = self.sled_zpools.get(&sled_id) {
-    //         for zpool_name in sled_zpools {
-    //             if !self
-    //                 .omicron_zones
-    //                 .get(&sled_id)
-    //                 .map(|zones_config| {
-    //                     zones_config.zones.iter().any(|z| {
-    //                         matches!(
-    //                             &z.zone_type,
-    //                             OmicronZoneType::Crucible { dataset, .. }
-    //                             if dataset.pool_name == *zpool_name
-    //                         )
-    //                     })
-    //                 })
-    //                 .unwrap_or(false)
-    //             {
-    //                 let sled_addr_allocator =
-    //                     self.sled_ip_allocators.get_mut(&sled_id).unwrap();
-    //                 let ip = sled_addr_allocator
-    //                     .alloc()
-    //                     .ok_or(Error::OutOfAddresses)?;
-    //                 new_zones
-    //                     .push(self.new_crucible_zone(ip, zpool_name.clone()));
-    //             }
-    //         }
-    //     }
-
-    //     // If we wound up adding any zones, update DNS as well as the
-    //     // corresponding sled's config.
-    //     if !new_zones.is_empty() {
-    //         for z in &new_zones {
-    //             assert!(
-    //                 !self.zones_in_service.contains(&z.id),
-    //                 "DNS updated more than once"
-    //             );
-    //             self.zones_in_service.insert(z.id);
-    //         }
-
-    //         let zones_config = self
-    //             .omicron_zones
-    //             .entry(sled_id)
-    //             .or_insert_with(|| OmicronZonesConfig {
-    //                 generation: Generation::new(),
-    //                 zones: vec![],
-    //             });
-
-    //         zones_config.generation = zones_config.generation.next();
-    //         zones_config.zones.extend(new_zones);
-    //     }
-
-    //     Ok(self)
-    // }
-
-    pub fn sled_add_zone(
-        mut self,
-        sled_id: Uuid,
-        zone: OmicronZoneConfig,
-    ) -> Result<Self, Error> {
-        self.sled_check(sled_id)?;
-
-        if !self.zones_in_service.insert(zone.id) {
-            return Err(Error::Planner(anyhow!(
-                "attempted to add zone that already exists: {}",
-                zone.id
-            )));
-        }
-
-        let sled_zones =
-            self.omicron_zones.entry(sled_id).or_insert_with(|| {
-                if let Some(old_sled_zones) =
-                    self.collection.omicron_zones.get(&sled_id)
-                {
-                    OmicronZonesConfig {
-                        generation: old_sled_zones.zones.generation.next(),
-                        zones: old_sled_zones.zones.zones.clone(),
-                    }
-                } else {
-                    OmicronZonesConfig {
-                        generation: Generation::new(),
-                        zones: vec![],
-                    }
-                }
+            // Check for an NTP zone.  Every sled should have one.  If it's not
+            // there, all we can do is provision that one zone.  We have to wait
+            // for that to succeed and synchronize the clock before we can
+            // provision anything else.
+            let has_ntp = found_zones.zones.zones.iter().any(|z| {
+                matches!(
+                    z.zone_type,
+                    OmicronZoneType::BoundaryNtp { .. }
+                        | OmicronZoneType::InternalNtp { .. }
+                )
             });
+            if !has_ntp {
+                // XXX-dap consider whether this should be
+                // builder.sled_ensure_zone_internal_ntp() and it just does
+                // nothing if it finds one?  That would eliminate the risk that
+                // the builder is used improperly.  But that trades one silly
+                // failure mode for a different one: what if we have no zones
+                // config for this sled at all?  We already checked that and
+                // handled it above.  We don't want to fail here.  But we also
+                // wouldn't want a hypothetical
+                // `sled_ensure_zone_internal_ntp()` to succeed in that case.
+                info!(
+                    &self.log,
+                    "found sled missing NTP zone (will add one)";
+                    "sled_id" => ?sled_id
+                );
+                self.blueprint.sled_add_zone_internal_ntp(*sled_id)?;
+                // XXX-dap should we be willing to do make changes to multiple
+                // sleds at a time?  (If not, we should `break` here.)  Here's
+                // an example where if we did `break`, then two Nexuses that
+                // were iterating over the sleds in different orders might
+                // choose to work on two different sleds.
+                continue;
+            }
 
-        sled_zones.zones.push(zone);
-        Ok(self)
-    }
+            // We have an NTP zone.  If time is not synchronized on this sled,
+            // there's nothing more we can do right now.
+            // XXX-dap add the timesync status to the sled agent inventory
+            // In the meantime, we could make an API call to the sled agent to
+            // see if time is synchronized.
+            // XXX-dap could we safely assume that if we have any other zones,
+            // then we don't have to worry about timesync?  Related question:
+            // what would happen if the sled was sync'd, _did_ have a bunch of
+            // zones on it, then bounced, then we attempted to PUT even the same
+            // set of zones to it before time sync had finished?  would sled
+            // agent reject that request?  Or would it try to start some zones
+            // before timesync had happened?  It seems like it should reject
+            // that request.  And in that case, we _could_ safely assume here
+            // that time was synchronized if we had any other zones?
+            //
+            // And actually, if the sled agent rejects requests to ensure
+            // non-NTP zones before time sync has happened, can we just forget
+            // about this consideration altogether, knowing that our attempt to
+            // execute this blueprint will fail until timesync happens, at which
+            // point it will succeed?
+            // XXX-dap as I write this I wonder if there's another risk here: is
+            // it possible that we start with a sled agent at generation 4, then
+            // make a blueprint with generation 5, then start executing that
+            // blueprint, then somebody else makes a different blueprint with
+            // generation 5, and then we start executing _that_ blueprint?  but
+            // it's a different generation 5?  To avoid this, it seems like we
+            // need to consider two cases:
+            //
+            // (1) when there are no blueprints in the system, we need to
+            //     generate an initial one based on a complete inventory
+            //     collection.  That's pretty easy.
+            //
+            // (2) after that point, when generating a blueprint, the Omicron
+            //     zones config that goes into the new blueprint should start
+            //     not with what was in the last inventory, but what was in the
+            //     last blueprint
+            //
+            // This implies that a blueprint A is dependent on some "parent"
+            // blueprint, and A becomes invalid if some other blueprint B
+            // becomes the target before A does.
+            //
+            // Another consequence of this is that you can never go "back" to an
+            // earlier blueprint, since going back to an earlier state requires
+            // writing a _new_ generation of everything that's _equivalent_ to
+            // that earlier state.  And as long as that's the case, I wonder if
+            // there's a lot less point to the idea that you can just have
+            // blueprints floating around in the system because they'd be
+            // frequently invalidated.  Maybe that's still
+            // useful though but the key operation on them isn't "set the target
+            // to this blueprint" but "make a new blueprint equivalent to this
+            // one and then make that the target.
 
-    // XXX-dap we should already have the prefixes somehow.
-    pub fn sled_alloc_ip(
-        &mut self,
-        sled_id: Uuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-    ) -> Result<Ipv6Addr, Error> {
-        // Work around rust-lang/rust-clippy#11935 and related issues.
-        // Clippy doesn't grok that we can't use
-        // `entry(&sled_id).or_insert_with(closure)` because `closure` would
-        // borrow `self`, which we can't do because we already have an immutable
-        // borrow of `self` by calling `entry()`.  Using `match` on the result
-        // of `entry` has a similar problem.
-        #[allow(clippy::map_entry)]
-        if !self.sled_ip_allocators.contains_key(&sled_id) {
-            self.sled_ip_allocators
-                .insert(sled_id, self.sled_ip_allocator(sled_id, sled_subnet));
-        }
+            // XXX-dap Anyway, at this point, assume the clock is synchronized.
 
-        let allocator = self.sled_ip_allocators.get_mut(&sled_id).unwrap();
-        // XXX-dap more error context
-        allocator.alloc().ok_or(Error::OutOfAddresses)
-    }
-
-    pub fn new_ntp_zone(
-        &self,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-        ip: Ipv6Addr,
-    ) -> OmicronZoneConfig {
-        let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
-
-        // Construct the list of internal DNS servers.
-        //
-        // It'd be tempting to get this list from the other internal NTP
-        // servers but there may not be any of those.  We could also
-        // construct this list manually from the set of internal DNS servers
-        // actually deployed.  Instead, we take the same approach as RSS:
-        // these are at known, fixed addresses relative to the AZ subnet
-        // (which itself is a known-prefix parent subnet of the sled subnet).
-        // XXX-dap commonize with RSS?
-        let dns_servers: Vec<IpAddr> = {
-            let az_subnet =
-                Ipv6Subnet::<AZ_PREFIX>::new(sled_subnet.net().network());
-            let reserved_rack_subnet = ReservedRackSubnet::new(az_subnet);
-            let dns_subnets =
-                &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
-            dns_subnets
-                .iter()
-                .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().ip()))
-                .collect()
-        };
-
-        // The list of boundary NTP servers is not necessarily stored
-        // anywhere (unless there happens to be another internal NTP zone
-        // lying around).  Recompute it based on what boundary servers
-        // currently exist.
-        // XXX-dap is this right?  how would we keep this in sync if we
-        // wanted to put a new boundary service somewhere else?  Shouldn't
-        // we instead have a DNS name that resolves to all the boundary
-        // NTP servers?
-        let ntp_servers = self
-            .all_existing_zones()
-            .filter_map(|z| {
-                if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
-                    Some(format!("{}.host.{}", z.id, DNS_ZONE))
-                } else {
-                    None
+            // Every zpool on the sled should have a Crucible zone on it.
+            for zpool_name in &sled_info.zpools {
+                if !found_zones.zones.zones.iter().any(|z| {
+                    matches!(
+                        &z.zone_type,
+                        OmicronZoneType::Crucible { dataset, .. }
+                        if dataset.pool_name == *zpool_name
+                    )
+                }) {
+                    self.blueprint
+                        .sled_add_zone_crucible(*sled_id, zpool_name.clone())?;
                 }
-            })
-            .collect();
-        OmicronZoneConfig {
-            id: Uuid::new_v4(),
-            underlay_address: ip,
-            zone_type: OmicronZoneType::InternalNtp {
-                address: ntp_address.to_string(),
-                ntp_servers,
-                dns_servers,
-                domain: None,
-            },
-        }
-    }
-
-    pub fn new_crucible_zone(
-        &self,
-        ip: Ipv6Addr,
-        pool_name: ZpoolName,
-    ) -> OmicronZoneConfig {
-        let port = omicron_common::address::CRUCIBLE_PORT;
-        let address = SocketAddrV6::new(ip, port, 0, 0).to_string();
-        OmicronZoneConfig {
-            id: Uuid::new_v4(),
-            underlay_address: ip,
-            zone_type: OmicronZoneType::Crucible {
-                address,
-                dataset: OmicronZoneDataset { pool_name },
-            },
-        }
-    }
-
-    /// Returns an object for allocating IP addresses for the given sled
-    ///
-    /// This should not be used unless the caller has already checked
-    /// `self.sled_ip_allocators`.  We'd do that ourselves except that runs
-    /// afoul of the borrowing rules.
-    /// XXX-dap once I figure that out, revisit that ^
-    fn sled_ip_allocator(
-        &self,
-        sled_id: Uuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-    ) -> IpAllocator {
-        // XXX-dap this should be a constant in "addresses"
-        let control_plane_subnet: ipnetwork::Ipv6Network =
-            ipnetwork::Ipv6Network::new(
-                sled_subnet.net().network(),
-                SLED_PREFIX + 16,
-            )
-            .expect("control plane prefix was too large");
-
-        let mut allocator = IpAllocator::new(control_plane_subnet);
-
-        // XXX-dap consider replacing the sled address and switch zone
-        // address reservations here with a single reserved number of
-        // addresses.
-
-        // Record the sled's address itself as allocated.
-        allocator.reserve(*get_sled_address(sled_subnet).ip());
-
-        // Record the switch zone's address as allocated.  We do this
-        // regardless of whether a sled is currently attached to a switch.
-        allocator.reserve(get_switch_zone_address(sled_subnet));
-
-        // Record each of the sled's zones' underlay addresses as allocated.
-        if let Some(sled_zones) = self.omicron_zones.get(&sled_id) {
-            for z in &sled_zones.zones {
-                allocator.reserve(z.underlay_address);
             }
         }
 
-        allocator
-    }
-
-    /// Iterate over all the Omicron zones in the original collection from which
-    /// this blueprint was based
-    fn all_existing_zones(&self) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.collection
-            .omicron_zones
-            .values()
-            .flat_map(|z| z.zones.zones.iter())
-    }
-}
-
-/// Very simple allocator for picking addresses from a sled's subnet
-///
-/// The current implementation takes the max address seen so far and uses the
-/// next one.  This will never reuse old IPs.  That avoids a bunch of
-/// operational issues.  It does mean we will eventually run out of IPs.  But we
-/// do have a big space right now (2^16).
-// XXX-dap This will be general enough to use in RSS, but the one in RSS is not
-// general enough to use here.
-struct IpAllocator {
-    pub subnet: ipnetwork::Ipv6Network,
-    pub max_seen: Ipv6Addr,
-}
-
-impl IpAllocator {
-    pub fn new(subnet: ipnetwork::Ipv6Network) -> IpAllocator {
-        IpAllocator {
-            subnet,
-            max_seen: subnet
-                .iter()
-                .next()
-                .expect("expected at least one address in the subnet"),
-        }
-    }
-
-    pub fn reserve(&mut self, addr: Ipv6Addr) {
-        assert!(
-            self.subnet.contains(addr),
-            "attempted to reserve IP {} which is outside \
-            the current subnet {:?}",
-            addr,
-            self.subnet
-        );
-        if addr > self.max_seen {
-            self.max_seen = addr;
-        }
-    }
-
-    pub fn alloc(&mut self) -> Option<Ipv6Addr> {
-        let next = self.max_seen.saturating_add(1);
-        if next == self.max_seen {
-            // We ran out of the entire IPv6 address space.
-            return None;
-        }
-
-        if !self.subnet.contains(next) {
-            // We ran out of this subnet.
-            return None;
-        }
-
-        self.max_seen = next;
-        Some(next)
+        Ok(())
     }
 }
