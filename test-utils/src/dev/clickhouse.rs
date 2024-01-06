@@ -191,9 +191,8 @@ impl ClickHouseInstance {
         if ![1, 2, 3].contains(&k_id) {
             return Err(ClickHouseError::InvalidKeeperId.into());
         }
-        // Keepers do not allow a dot in the beginning of the directory, so we must
-        // use a prefix.
         let data_dir = ClickHouseDataDir::new()?;
+        println!("Keeper {} data dir: {}", k_id, data_dir.root_path());
 
         let args = vec![
             "keeper".to_string(),
@@ -206,14 +205,13 @@ impl ClickHouseInstance {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .current_dir(data_dir.cwd_path())
             .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
             .env("CH_LOG", data_dir.keeper_log_path())
             .env("CH_ERROR_LOG", data_dir.keeper_err_log_path())
             .env("CH_LISTEN_ADDR", "::")
             .env("CH_LISTEN_PORT", port.to_string())
             .env("CH_KEEPER_ID_CURRENT", k_id.to_string())
-            .env("CH_DATASTORE", data_dir.datastore_path())
+            .env("CH_DATASTORE", data_dir.root_path())
             .env("CH_LOG_STORAGE_PATH", data_dir.keeper_log_storage_path())
             .env(
                 "CH_SNAPSHOT_STORAGE_PATH",
@@ -302,17 +300,21 @@ impl ClickHouseDataDir {
         // use a prefix.
         let dir = Utf8TempDir::with_prefix("clickhouse-")
             .context("failed to create tempdir for ClickHouse data")?;
-        // Create directories for the datastore and cwd. We specify a custom
-        // cwd because clickhouse doesn't always respect the --path flag and
-        // stores, in particular, files in `preprocessed_configs/`.
-        let datastore_path = dir.path().join("datastore");
-        std::fs::create_dir(&datastore_path)
-            .context("failed to create datastore directory")?;
-        let cwd_path = dir.path().join("cwd");
-        std::fs::create_dir(&cwd_path)
-            .context("failed to create cwd directory")?;
 
-        Ok(Self { dir })
+        let ret = Self { dir };
+        // Create some of the directories. We specify a custom cwd because
+        // clickhouse doesn't always respect the --path flag and stores, in
+        // particular, files in `preprocessed_configs/`.
+        std::fs::create_dir(ret.datastore_path())
+            .context("failed to create datastore directory")?;
+        std::fs::create_dir(ret.cwd_path())
+            .context("failed to create cwd directory")?;
+        std::fs::create_dir(ret.keeper_log_storage_path())
+            .context("failed to create keeper log directory")?;
+        std::fs::create_dir(ret.keeper_snapshot_storage_path())
+            .context("failed to create keeper snapshot directory")?;
+
+        Ok(ret)
     }
 
     fn root_path(&self) -> &Utf8Path {
@@ -360,7 +362,14 @@ impl ClickHouseDataDir {
     }
 
     fn keeper_log_storage_path(&self) -> Utf8PathBuf {
-        self.dir.path().join("log/")
+        // ClickHouse keeper chokes on log paths having trailing slashes,
+        // producing messages like:
+        //
+        // <Error> Application: DB::Exception: Invalid changelog
+        // /tmp/clickhouse-lSv3IU/log/uuid
+        //
+        // So we don't include a trailing slash for this specific path.
+        self.dir.path().join("log")
     }
 
     fn keeper_snapshot_storage_path(&self) -> Utf8PathBuf {

@@ -290,8 +290,8 @@ petgraph = "0.6.4"
 postgres-protocol = "0.6.6"
 predicates = "3.0.4"
 pretty_assertions = "1.4.0"
-pretty-hex = "0.4.0"
-prettyplease = "0.2.15"
+pretty-hex = "0.4.1"
+prettyplease = "0.2.16"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -318,7 +318,7 @@ rustyline = "12.0.0"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.16"
 secrecy = "0.8.0"
-semver = { version = "1.0.20", features = ["std", "serde"] }
+semver = { version = "1.0.21", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
@@ -359,7 +359,7 @@ strum = { version = "0.25", features = [ "derive" ] }
 subprocess = "0.2.9"
 supports-color = "2.1.0"
 swrite = "0.1.0"
-libsw = { version = "3.3.0", features = ["tokio"] }
+libsw = { version = "3.3.1", features = ["tokio"] }
 syn = { version = "2.0" }
 tabled = "0.14"
 tar = "0.4"
