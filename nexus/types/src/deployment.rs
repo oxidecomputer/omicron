@@ -136,7 +136,7 @@ pub struct Blueprint {
     pub zones_in_service: BTreeSet<Uuid>,
 
     /// which blueprint this blueprint is based on
-    pub parent_blueprint: Option<Uuid>,
+    pub parent_blueprint_id: Option<Uuid>,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -153,5 +153,63 @@ impl Blueprint {
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
         self.omicron_zones.values().flat_map(|z| z.zones.iter())
+    }
+}
+
+// This is analogous to the db model type until we have that.
+#[derive(Debug, Clone)]
+pub struct BlueprintTarget {
+    pub target_id: Option<Uuid>,
+    pub enabled: bool,
+    pub time_set: chrono::DateTime<chrono::Utc>,
+}
+
+pub mod views {
+    use schemars::JsonSchema;
+    use serde::Serialize;
+    use uuid::Uuid;
+
+    // XXX-dap
+    #[derive(Serialize, JsonSchema)]
+    pub struct Blueprint {
+        pub id: Uuid,
+    }
+    impl From<super::Blueprint> for Blueprint {
+        fn from(value: super::Blueprint) -> Self {
+            todo!() // XXX-dap
+        }
+    }
+
+    /// Describes what blueprint, if any, the system is currently working toward
+    // XXX-dap should we just make this non-optional and produce an error (404?
+    // 400? 500?) if there's no target yet?
+    #[derive(Debug, Serialize, JsonSchema)]
+    pub struct BlueprintTarget {
+        pub target_id: Option<Uuid>,
+        pub enabled: bool,
+        pub set_at: chrono::DateTime<chrono::Utc>,
+    }
+
+    impl From<super::BlueprintTarget> for BlueprintTarget {
+        fn from(value: super::BlueprintTarget) -> Self {
+            BlueprintTarget {
+                target_id: value.target_id,
+                enabled: value.enabled,
+                set_at: value.time_set,
+            }
+        }
+    }
+}
+
+pub mod params {
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+    use uuid::Uuid;
+
+    /// Specifies what blueprint, if any, the system should be working toward
+    #[derive(Deserialize, JsonSchema)]
+    pub struct BlueprintTarget {
+        pub target_id: Uuid,
+        pub enabled: bool,
     }
 }

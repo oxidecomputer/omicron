@@ -14,7 +14,6 @@ use nexus_types::deployment::OmicronZoneType;
 use nexus_types::inventory::Collection;
 use slog::{info, Logger};
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use uuid::Uuid;
 
 pub struct Planner<'a> {
@@ -31,14 +30,12 @@ impl<'a> Planner<'a> {
         parent_blueprint: &'a Blueprint,
         collection: &'a Collection,
         sleds: &'a BTreeMap<Uuid, SledInfo>,
-        zones_in_service: BTreeSet<Uuid>,
         creator: &str,
         reason: &str,
     ) -> Planner<'a> {
         let blueprint = BlueprintBuilder::new_based_on(
             parent_blueprint,
             sleds,
-            zones_in_service,
             creator,
             reason,
         );

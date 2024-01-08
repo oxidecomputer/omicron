@@ -69,7 +69,6 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn build_initial_from_collection(
         collection: &'a Collection,
         sleds: &'a BTreeMap<Uuid, SledInfo>,
-        zones_in_service: BTreeSet<Uuid>,
         creator: &str,
         reason: &str,
     ) -> Result<Blueprint, Error> {
@@ -110,7 +109,7 @@ impl<'a> BlueprintBuilder<'a> {
             sleds: sleds.keys().copied().collect(),
             omicron_zones: omicron_zones,
             zones_in_service,
-            parent_blueprint: None,
+            parent_blueprint_id: None,
             time_created: chrono::Utc::now(),
             creator: creator.to_owned(),
             reason: reason.to_owned(),
@@ -122,7 +121,6 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn new_based_on(
         parent_blueprint: &'a Blueprint,
         sleds: &'a BTreeMap<Uuid, SledInfo>,
-        zones_in_service: BTreeSet<Uuid>,
         creator: &str,
         reason: &str,
     ) -> BlueprintBuilder<'a> {
@@ -131,7 +129,7 @@ impl<'a> BlueprintBuilder<'a> {
             sleds,
             sled_ip_allocators: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
-            zones_in_service,
+            zones_in_service: parent_blueprint.zones_in_service.clone(),
             creator: creator.to_owned(),
             reason: reason.to_owned(),
         }
@@ -171,7 +169,7 @@ impl<'a> BlueprintBuilder<'a> {
             sleds: self.sleds.keys().copied().collect(),
             omicron_zones: omicron_zones,
             zones_in_service: self.zones_in_service,
-            parent_blueprint: Some(self.parent_blueprint.id),
+            parent_blueprint_id: Some(self.parent_blueprint.id),
             time_created: chrono::Utc::now(),
             creator: self.creator,
             reason: self.reason,

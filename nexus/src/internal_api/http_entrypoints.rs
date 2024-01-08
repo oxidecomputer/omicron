@@ -25,6 +25,8 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
+use nexus_types::deployment::params as deployment_params;
+use nexus_types::deployment::views as deployment_views;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -42,7 +44,6 @@ use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -608,17 +609,6 @@ async fn ipv4_nat_changeset(
 // commit to any of this yet.  These properly belong in an RFD 399-style
 // "Service and Support API".  Absent that, we stick them here.
 
-// XXX-dap
-#[derive(Serialize, JsonSchema)]
-struct Blueprint {
-    id: Uuid,
-}
-impl From<nexus_types::deployment::Blueprint> for Blueprint {
-    fn from(value: nexus_types::deployment::Blueprint) -> Self {
-        todo!() // XXX-dap
-    }
-}
-
 /// Lists blueprints
 #[endpoint {
     method = GET,
@@ -627,7 +617,8 @@ impl From<nexus_types::deployment::Blueprint> for Blueprint {
 async fn blueprint_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Blueprint>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<deployment_views::Blueprint>>, HttpError>
+{
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -638,12 +629,12 @@ async fn blueprint_list(
             .blueprint_list(&opctx, &pagparams)
             .await?
             .into_iter()
-            .map(Blueprint::from)
+            .map(deployment_views::Blueprint::from)
             .collect();
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             blueprints,
-            &|_, blueprint: &Blueprint| blueprint.id,
+            &|_, blueprint: &deployment_views::Blueprint| blueprint.id,
         )?))
     };
 
@@ -658,14 +649,14 @@ async fn blueprint_list(
 async fn blueprint_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<nexus_types::external_api::params::BlueprintPath>,
-) -> Result<HttpResponseOk<Blueprint>, HttpError> {
+) -> Result<HttpResponseOk<deployment_views::Blueprint>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let blueprint = nexus.blueprint_view(&opctx, path.blueprint_id).await?;
-        Ok(HttpResponseOk(Blueprint::from(blueprint)))
+        Ok(HttpResponseOk(deployment_views::Blueprint::from(blueprint)))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -697,10 +688,6 @@ async fn blueprint_delete(
 
 // Managing the current target blueprint
 
-// XXX-dap
-#[derive(Serialize, JsonSchema)]
-struct BlueprintTarget {}
-
 /// Fetches the current target blueprint, if any
 #[endpoint {
     method = GET,
@@ -708,14 +695,16 @@ struct BlueprintTarget {}
 }]
 async fn blueprint_target_view(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
-    todo!();
+) -> Result<HttpResponseOk<deployment_views::BlueprintTarget>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let target = nexus.blueprint_target_view(&opctx).await?;
+        Ok(HttpResponseOk(deployment_views::BlueprintTarget::from(target)))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
-
-// XXX-dap
-// XXX-dap needs to make it possible to set it to NULL to turn things off
-#[derive(Deserialize, JsonSchema)]
-struct BlueprintTargetParam {}
 
 /// Make the specified blueprint the new target
 #[endpoint {
@@ -724,9 +713,17 @@ struct BlueprintTargetParam {}
 }]
 async fn blueprint_target_set(
     rqctx: RequestContext<Arc<ServerContext>>,
-    target: TypedBody<BlueprintTargetParam>,
-) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
-    todo!();
+    target: TypedBody<deployment_params::BlueprintTarget>,
+) -> Result<HttpResponseOk<deployment_views::BlueprintTarget>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let target = target.into_inner();
+        let result = nexus.blueprint_target_set(&opctx, target).await?;
+        Ok(HttpResponseOk(deployment_views::BlueprintTarget::from(result)))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Generating blueprints
@@ -738,21 +735,32 @@ async fn blueprint_target_set(
 }]
 async fn blueprint_create_current(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-    todo!();
+) -> Result<HttpResponseOk<deployment_views::Blueprint>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let result = nexus.blueprint_create_current(&opctx).await?;
+        Ok(HttpResponseOk(deployment_views::Blueprint::from(result)))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// XXX-dap
-#[derive(Deserialize, JsonSchema)]
-struct BlueprintParamAddSled {}
-
-/// Generates a new blueprint for adding a sled
+/// Generates a new blueprint for the current system, re-evaluating anything
+/// that's changed since the last one was generated
 #[endpoint {
     method = POST,
-    path = "/deployment/blueprints/add_sled",
+    path = "/deployment/blueprints/regenerate",
 }]
 async fn blueprint_create_add_sled(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<Blueprint>, HttpError> {
-    todo!();
+) -> Result<HttpResponseOk<deployment_views::Blueprint>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let result = nexus.blueprint_create_regenerate(&opctx).await?;
+        Ok(HttpResponseOk(deployment_views::Blueprint::from(result)))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
