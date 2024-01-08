@@ -274,6 +274,30 @@ fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     output
 }
 
+/// Answers the question: "Do these zones require time synchronization before
+/// they are initialized?"
+///
+/// This function is somewhat conservative - the set of services
+/// that can be launched before timesync has completed is intentionally kept
+/// small, since it would be easy to add a service that expects time to be
+/// reasonably synchronized.
+pub fn zones_require_timesync(requested_zones: &OmicronZonesConfig) -> bool {
+    requested_zones.zones.iter().any(|zone_config| {
+        match zone_config.zone_type {
+            // These zones can be initialized and started before time has been
+            // synchronized. For the NTP zones, this should be self-evident --
+            // we need the NTP zone to actually perform time synchronization!
+            //
+            // The DNS zone is a bit of an exception here, since the NTP zone
+            // itself may rely on DNS lookups as a dependency.
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::InternalDns { .. } => false,
+            _ => true,
+        }
+    })
+}
+
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
     /// Identifies the sled being configured
