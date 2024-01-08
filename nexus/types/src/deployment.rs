@@ -121,6 +121,9 @@ pub struct Policy {
 // (like deleting old inventory collections or even just seeing what the full
 // state of the world is supposed to be when a blueprint has been executed).
 pub struct Blueprint {
+    /// unique identifier for this blueprint
+    pub id: Uuid,
+
     /// set of sleds that we consider part of the control plane
     pub sleds: BTreeSet<Uuid>,
 
@@ -131,8 +134,9 @@ pub struct Blueprint {
     /// should appear in DNS)
     pub zones_in_service: BTreeSet<Uuid>,
 
-    /// which collection this was generated from (for debugging)
-    pub built_from_collection: Uuid,
+    /// which blueprint this blueprint is based on
+    pub parent_blueprint: Option<Uuid>,
+
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
     /// identity of the component that generated the blueprint (for debugging)
@@ -141,4 +145,12 @@ pub struct Blueprint {
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
     pub reason: String,
+}
+
+impl Blueprint {
+    pub fn all_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        self.omicron_zones.values().flat_map(|z| z.zones.iter())
+    }
 }

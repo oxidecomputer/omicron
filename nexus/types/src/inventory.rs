@@ -128,6 +128,13 @@ impl Collection {
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
+
+    /// Iterate over all the Omicron zones in the collection
+    pub fn all_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = &OmicronZoneConfig> {
+        self.omicron_zones.values().flat_map(|z| z.zones.zones.iter())
+    }
 }
 
 /// A unique baseboard id found during a collection

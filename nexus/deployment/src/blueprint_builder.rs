@@ -48,8 +48,8 @@ pub struct SledInfo {
 
 // XXX-dap TODO-doc
 pub struct BlueprintBuilder<'a> {
-    /// underlying collection on which this blueprint is based
-    collection: &'a Collection,
+    /// previous blueprint, on which this one will be based
+    parent_blueprint: &'a Blueprint,
 
     // These fields are used to allocate resources from sleds.
     sleds: &'a BTreeMap<Uuid, SledInfo>,
@@ -64,17 +64,70 @@ pub struct BlueprintBuilder<'a> {
 }
 
 impl<'a> BlueprintBuilder<'a> {
-    /// Construct a new `BlueprintBuilder` based on an inventory collection that
-    /// starts with no changes from the that state
-    pub fn new_based_on(
+    /// Directly construct a `Blueprint` from the contents of a particular
+    /// collection (representing no changes from the collection state)
+    pub fn build_initial_from_collection(
         collection: &'a Collection,
+        sleds: &'a BTreeMap<Uuid, SledInfo>,
+        zones_in_service: BTreeSet<Uuid>,
+        creator: &str,
+        reason: &str,
+    ) -> Result<Blueprint, Error> {
+        let omicron_zones = sleds
+            .keys()
+            .map(|sled_id| {
+                let zones = collection
+                    .omicron_zones
+                    .get(sled_id)
+                    .map(|z| z.zones.clone())
+                    .ok_or_else(|| {
+                        // We should not find a sled that's supposed to be
+                        // in-service but is not part of the inventory.  It's
+                        // not that that can't ever happen.  But the initial
+                        // blueprint is supposed to reflect the current state
+                        // and this is more likely an "add sled" case or a case
+                        // where there was an inventory collection error that we
+                        // want to deal with before proceeding.
+                        // XXX-dap re-evaluate this.  Are we sure this would
+                        // never happen in a real deployment?  Would it be bad
+                        // to just trust whatever's in the inventory?  I think
+                        // so because if the inventory was somehow incomplete
+                        // then we'd leave out a sled erroneously.
+                        Error::Planner(anyhow!(
+                            "building initial blueprint: sled {:?} is \
+                            supposed to be in service but has no zones \
+                            in inventory",
+                            sled_id
+                        ))
+                    })?;
+                Ok((*sled_id, zones))
+            })
+            .collect::<Result<_, Error>>()?;
+        let zones_in_service =
+            collection.all_omicron_zones().map(|z| z.id).collect();
+        Ok(Blueprint {
+            id: Uuid::new_v4(),
+            sleds: sleds.keys().copied().collect(),
+            omicron_zones: omicron_zones,
+            zones_in_service,
+            parent_blueprint: None,
+            time_created: chrono::Utc::now(),
+            creator: creator.to_owned(),
+            reason: reason.to_owned(),
+        })
+    }
+
+    /// Construct a new `BlueprintBuilder` based on a previous blueprint,
+    /// starting with no changes from that state
+    pub fn new_based_on(
+        parent_blueprint: &'a Blueprint,
         sleds: &'a BTreeMap<Uuid, SledInfo>,
         zones_in_service: BTreeSet<Uuid>,
         creator: &str,
         reason: &str,
     ) -> BlueprintBuilder<'a> {
         BlueprintBuilder {
-            collection,
+            parent_blueprint,
             sleds,
             sled_ip_allocators: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
@@ -95,13 +148,13 @@ impl<'a> BlueprintBuilder<'a> {
                 let zones = self
                     .omicron_zones
                     .remove(sled_id)
-                    // If it's not there, use the config from the collection
-                    // we're working with.
+                    // If it's not there, use the config from the parent
+                    // blueprint.
                     .or_else(|| {
-                        self.collection
+                        self.parent_blueprint
                             .omicron_zones
                             .get(sled_id)
-                            .map(|z| z.zones.clone())
+                            .cloned()
                     })
                     // If it's not there either, then this must be a new sled
                     // and we haven't added any zones to it yet.  Use the
@@ -114,26 +167,15 @@ impl<'a> BlueprintBuilder<'a> {
             })
             .collect();
         Blueprint {
+            id: Uuid::new_v4(),
             sleds: self.sleds.keys().copied().collect(),
             omicron_zones: omicron_zones,
             zones_in_service: self.zones_in_service,
-            built_from_collection: self.collection.id,
+            parent_blueprint: Some(self.parent_blueprint.id),
             time_created: chrono::Utc::now(),
             creator: self.creator,
             reason: self.reason,
         }
-    }
-
-    /// Iterate over all the Omicron zones in the original collection from which
-    /// this blueprint was based
-    // XXX-dap move to collection
-    pub fn all_existing_zones(
-        &self,
-    ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.collection
-            .omicron_zones
-            .values()
-            .flat_map(|z| z.zones.zones.iter())
     }
 
     pub fn sled_add_zone_internal_ntp(
@@ -175,7 +217,8 @@ impl<'a> BlueprintBuilder<'a> {
         // we instead have a DNS name that resolves to all the boundary
         // NTP servers?
         let ntp_servers = self
-            .all_existing_zones()
+            .parent_blueprint
+            .all_omicron_zones()
             .filter_map(|z| {
                 if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
                     Some(format!("{}.host.{}", z.id, DNS_ZONE))
@@ -246,11 +289,11 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_zones =
             self.omicron_zones.entry(sled_id).or_insert_with(|| {
                 if let Some(old_sled_zones) =
-                    self.collection.omicron_zones.get(&sled_id)
+                    self.parent_blueprint.omicron_zones.get(&sled_id)
                 {
                     OmicronZonesConfig {
-                        generation: old_sled_zones.zones.generation.next(),
-                        zones: old_sled_zones.zones.zones.clone(),
+                        generation: old_sled_zones.generation.next(),
+                        zones: old_sled_zones.zones.clone(),
                     }
                 } else {
                     OmicronZonesConfig {
