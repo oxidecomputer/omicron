@@ -29,6 +29,7 @@ use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::internal_api::views::BackgroundTask;
+use nexus_types::internal_api::views::inventory;
 use nexus_types::internal_api::views::Saga;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
@@ -68,6 +69,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(saga_list)?;
         api.register(saga_view)?;
+
+        api.register(inv_omicron_zone_list)?;
 
         api.register(ipv4_nat_changeset)?;
 
@@ -489,6 +492,32 @@ async fn saga_view(
         let path = path_params.into_inner();
         let saga = nexus.saga_get(&opctx, path.saga_id).await?;
         Ok(HttpResponseOk(saga))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List Omicron Zones known to Nexus
+#[endpoint {
+    method = GET,
+    path = "/inventory/omicron-zone",
+}]
+async fn inv_omicron_zone_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<inventory::OmicronZone>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let zone_stream = nexus.inventory_omicron_zone_list(&opctx, &pagparams).await?;
+        let view_list = to_list(zone_stream).await;
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            view_list,
+            &|_, zone: &inventory::OmicronZone| zone.id,
+        )?))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

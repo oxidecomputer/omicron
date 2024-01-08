@@ -5,6 +5,8 @@
 //! Well-known DNS names and related types for internal DNS (see RFD 248)
 
 use omicron_common::api::internal::shared::SwitchLocation;
+use std::str::{FromStr, Split};
+use thiserror::Error;
 use uuid::Uuid;
 
 /// Name for the control plane DNS zone
@@ -13,6 +15,23 @@ pub const DNS_ZONE: &str = "control-plane.oxide.internal";
 /// Name for the delegated external DNS zone that's used in testing and
 /// development
 pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ParseServiceNameError {
+    #[error("Failed to parse UUID")]
+    InvalidUuid(#[from] uuid::Error),
+    #[error("DNS name missing expected components")]
+    MissingComponent,
+    #[error("Missing expected '_' in prefix")]
+    MissingUnderscorePrefix,
+    #[error("Unknown service type: {0}")]
+    UnknownServiceType(String),
+    #[error("Unexpected component (expected {expected}, found {found})")]
+    UnexpectedComponent {
+        expected: String,
+        found: String,
+    }
+}
 
 /// Names of services within the control plane
 #[derive(Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
@@ -39,7 +58,7 @@ pub enum ServiceName {
 }
 
 impl ServiceName {
-    fn service_kind(&self) -> &'static str {
+    pub fn service_kind(&self) -> &'static str {
         match self {
             ServiceName::Clickhouse => "clickhouse",
             ServiceName::ClickhouseKeeper => "clickhouse-keeper",
@@ -97,8 +116,124 @@ impl ServiceName {
         }
     }
 
+    /// Parses the [ServiceName] from the DNS name (ignoring the zone).
+    ///
+    /// This should be identical to the output of [Self::dns_name].
+    pub fn from_dns_name(s: &str) -> Result<Self, ParseServiceNameError> {
+        let mut parts = s.split('.');
+        let first = parts.next()
+            .ok_or_else(|| ParseServiceNameError::MissingComponent)?
+            .strip_prefix('_')
+            .ok_or_else(|| ParseServiceNameError::MissingUnderscorePrefix)?;
+
+        // A helper to consume a whole component of the path
+        let parse_exact = |parts: &mut Split<char>, expected: &str| {
+            let part = parts.next().ok_or_else(|| ParseServiceNameError::MissingComponent)?;
+            if part != expected {
+                return Err(ParseServiceNameError::UnexpectedComponent {
+                    expected: expected.to_string(),
+                    found: part.to_string(),
+                });
+            }
+            Ok(())
+        };
+
+        // A helper to consume a whole component of the path as a UUID
+        let parse_uuid = |parts: &mut Split<char>| -> Result<Uuid, ParseServiceNameError> {
+            let part = parts.next().ok_or_else(|| ParseServiceNameError::MissingComponent)?;
+            Ok(Uuid::from_str(part)?)
+        };
+
+        let name = match first {
+            "clickhouse" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Clickhouse
+            },
+            "clickhouse-keeper" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::ClickhouseKeeper
+            },
+            "cockroach" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Cockroach
+            },
+            "external-dns" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::ExternalDns
+            },
+            "nameservice" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::InternalDns
+            },
+            "nexus" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Nexus
+            },
+            "oximeter" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Oximeter
+            },
+            "mgs" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::ManagementGatewayService
+            },
+            "wicketd" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Wicketd
+            },
+            "dendrite" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Dendrite
+            },
+            "tfport" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Tfport
+            },
+            "crucible-pantry" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::CruciblePantry
+            },
+            "boundary-ntp" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::BoundaryNtp
+            },
+            "internal-ntp" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::InternalNtp
+            },
+            "maghemite" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Maghemite
+            },
+            "mgd" => {
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Mgd
+            },
+            "sledagent" => {
+                parse_exact(&mut parts, "_tcp")?;
+                let id = parse_uuid(&mut parts)?;
+                Self::SledAgent(id)
+            },
+            "crucible" => {
+                parse_exact(&mut parts, "_tcp")?;
+                let id = parse_uuid(&mut parts)?;
+                Self::Crucible(id)
+            },
+            other => {
+                let switch_location = SwitchLocation::from_str(other)
+                    .map_err(|_| ParseServiceNameError::UnknownServiceType(other.to_string()))?;
+                parse_exact(&mut parts, "_scrimlet")?;
+                parse_exact(&mut parts, "_tcp")?;
+                Self::Scrimlet(switch_location)
+            }
+        };
+        Ok(name)
+    }
+
     /// Returns the full DNS name of this service
     pub fn srv_name(&self) -> String {
         format!("{}.{DNS_ZONE}", self.dns_name())
     }
 }
+
+// TODO: Tests!

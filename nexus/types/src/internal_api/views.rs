@@ -148,6 +148,19 @@ impl From<steno::SagaStateView> for SagaState {
     }
 }
 
+/// Provides a view of inventory through the internal API.
+///
+/// This is primarily exposed as a utility to omdb.
+pub mod inventory {
+    use super::*;
+
+    /// Omicron Zones
+    #[derive(Clone, Debug, Serialize, JsonSchema)]
+    pub struct OmicronZone {
+        pub id: Uuid,
+    }
+}
+
 /// Background tasks
 ///
 /// These are currently only intended for observability by developers.  We will

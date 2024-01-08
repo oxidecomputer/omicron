@@ -4862,6 +4862,7 @@ dependencies = [
  "clap 4.4.3",
  "crucible-agent-client",
  "diesel",
+ "dns-service-client",
  "dropshot",
  "expectorate",
  "futures",

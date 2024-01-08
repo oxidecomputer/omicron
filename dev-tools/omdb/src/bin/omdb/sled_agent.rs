@@ -54,6 +54,25 @@ impl SledAgentArgs {
     ) -> Result<(), anyhow::Error> {
         // This is a little goofy. The sled URL is required, but can come
         // from the environment, in which case it won't be on the command line.
+        let sled_agent_urls = if let Some(sled_agent_url) = &self.sled_agent_url {
+            vec![sled_agent_url]
+        } else {
+            eprintln!("note: Sled URL not specified. Will use URLS from DNS.");
+            todo!();
+            /*
+            let addrs = omdb
+                .dns_lookup_all(
+                    log.clone(),
+                    internal_dns::ServiceName::SledAgent(()),
+                )
+                .await?;
+            let addr = addrs.into_iter().next().expect(
+                "expected at least one Nexus address from \
+                successful DNS lookup",
+            );
+            format!("http://{}", addr)
+            */
+        };
         let Some(sled_agent_url) = &self.sled_agent_url else {
             bail!(
                 "sled URL must be specified with --sled-agent-url or \

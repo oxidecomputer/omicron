@@ -44,6 +44,7 @@ mod db;
 mod mgs;
 mod nexus;
 mod oximeter;
+mod services;
 mod sled_agent;
 
 #[tokio::main]
@@ -58,6 +59,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     match &args.command {
         OmdbCommands::Db(db) => db.run_cmd(&args, &log).await,
+        OmdbCommands::Services(services) => services.run_cmd(&args, &log).await,
         OmdbCommands::Mgs(mgs) => mgs.run_cmd(&args, &log).await,
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
         OmdbCommands::Oximeter(oximeter) => oximeter.run_cmd(&log).await,
@@ -157,6 +159,8 @@ impl Omdb {
 enum OmdbCommands {
     /// Query the control plane database (CockroachDB)
     Db(db::DbArgs),
+    /// Query for control plane service information
+    Services(services::ServiceArgs),
     /// Debug a specific Management Gateway Service instance
     Mgs(mgs::MgsArgs),
     /// Debug a specific Nexus instance
