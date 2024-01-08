@@ -324,7 +324,7 @@ impl DeserializedManifest {
     pub fn from_str(input: &str) -> Result<Self> {
         let de = toml::Deserializer::new(input);
         serde_path_to_error::deserialize(de)
-            .with_context(|| format!("error deserializing manifest"))
+            .context("error deserializing manifest")
     }
 
     /// Returns the fake manifest.
