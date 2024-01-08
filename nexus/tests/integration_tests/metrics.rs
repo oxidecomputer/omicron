@@ -9,8 +9,8 @@ use http::{Method, StatusCode};
 use nexus_db_queries::db::fixed_data::silo::SILO_ID;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_disk, create_instance, create_project, objects_list_page_authz,
-    populate_ip_pool, DiskTest,
+    create_default_ip_pool, create_disk, create_instance, create_project,
+    objects_list_page_authz, DiskTest,
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
@@ -168,7 +168,7 @@ async fn test_metrics(
     let client = &cptestctx.external_client;
 
     cptestctx.server.register_as_producer().await; // needed for oximeter metrics to work
-    populate_ip_pool(&client, "default", None).await; // needed for instance create to work
+    create_default_ip_pool(&client).await; // needed for instance create to work
     DiskTest::new(cptestctx).await; // needed for disk create to work
 
     // silo metrics start out zero

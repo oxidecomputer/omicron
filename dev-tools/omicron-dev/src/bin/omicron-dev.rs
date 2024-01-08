@@ -302,7 +302,7 @@ async fn start_single_node(port: u16) -> Result<(), anyhow::Error> {
     );
     println!(
         "omicron-dev: using {} for ClickHouse data storage",
-        db_instance.data_path().display()
+        db_instance.data_path()
     );
 
     // Wait for the DB to exit itself (an error), or for SIGINT
@@ -381,39 +381,39 @@ async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
     );
     println!(
         "omicron-dev: using {} and {} for ClickHouse data storage",
-        cluster.replica_1.data_path().display(),
-        cluster.replica_2.data_path().display()
+        cluster.replica_1.data_path(),
+        cluster.replica_2.data_path()
     );
 
     // Wait for the replicas and keepers to exit themselves (an error), or for SIGINT
     tokio::select! {
         _ = cluster.replica_1.wait_for_shutdown() => {
             cluster.replica_1.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.replica_1.data_path().display())
+                format!("clean up {} after shutdown", cluster.replica_1.data_path())
             )?;
             bail!("omicron-dev: ClickHouse replica 1 shutdown unexpectedly");
         }
         _ = cluster.replica_2.wait_for_shutdown() => {
             cluster.replica_2.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.replica_2.data_path().display())
+                format!("clean up {} after shutdown", cluster.replica_2.data_path())
             )?;
             bail!("omicron-dev: ClickHouse replica 2 shutdown unexpectedly");
         }
         _ = cluster.keeper_1.wait_for_shutdown() => {
             cluster.keeper_1.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.keeper_1.data_path().display())
+                format!("clean up {} after shutdown", cluster.keeper_1.data_path())
             )?;
             bail!("omicron-dev: ClickHouse keeper 1 shutdown unexpectedly");
         }
         _ = cluster.keeper_2.wait_for_shutdown() => {
             cluster.keeper_2.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.keeper_2.data_path().display())
+                format!("clean up {} after shutdown", cluster.keeper_2.data_path())
             )?;
             bail!("omicron-dev: ClickHouse keeper 2 shutdown unexpectedly");
         }
         _ = cluster.keeper_3.wait_for_shutdown() => {
             cluster.keeper_3.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.keeper_3.data_path().display())
+                format!("clean up {} after shutdown", cluster.keeper_3.data_path())
             )?;
             bail!("omicron-dev: ClickHouse keeper 3 shutdown unexpectedly");
         }
@@ -436,7 +436,7 @@ async fn start_replicated_cluster() -> Result<(), anyhow::Error> {
                 instance
                 .wait_for_shutdown()
                 .await
-                .context(format!("clean up {} after SIGINT shutdown", instance.data_path().display()))?;
+                .context(format!("clean up {} after SIGINT shutdown", instance.data_path()))?;
             };
         }
     }
