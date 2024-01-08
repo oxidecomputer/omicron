@@ -1286,7 +1286,6 @@ mod test {
     // Test sled-specific IPv6 address allocation
     #[tokio::test]
     async fn test_sled_ipv6_address_allocation() {
-        use omicron_common::address::RSS_RESERVED_ADDRESSES as STATIC_IPV6_ADDRESS_OFFSET;
         use std::net::Ipv6Addr;
 
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
@@ -1322,41 +1321,14 @@ mod test {
         datastore.sled_upsert(sled2).await.unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
-        let expected_ip = Ipv6Addr::new(
-            0xfd00,
-            0x1de,
-            0,
-            0,
-            0,
-            0,
-            0,
-            2 + STATIC_IPV6_ADDRESS_OFFSET,
-        );
+        let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
-        let expected_ip = Ipv6Addr::new(
-            0xfd00,
-            0x1de,
-            0,
-            0,
-            0,
-            0,
-            0,
-            3 + STATIC_IPV6_ADDRESS_OFFSET,
-        );
+        let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 1);
         assert_eq!(ip, expected_ip);
 
         let ip = datastore.next_ipv6_address(&opctx, sled2_id).await.unwrap();
-        let expected_ip = Ipv6Addr::new(
-            0xfd00,
-            0x1df,
-            0,
-            0,
-            0,
-            0,
-            0,
-            2 + STATIC_IPV6_ADDRESS_OFFSET,
-        );
+        let expected_ip = Ipv6Addr::new(0xfd00, 0x1df, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
 
         let _ = db.cleanup().await;

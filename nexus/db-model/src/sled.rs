@@ -183,7 +183,10 @@ impl SledUpdate {
     pub fn into_insertable(self) -> Sled {
         let last_used_address = {
             let mut segments = self.ip().segments();
-            segments[7] += omicron_common::address::RSS_RESERVED_ADDRESSES;
+            // We allocate the entire last segment to control plane services
+            // segments
+            segments[7] =
+                omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
             ipv6::Ipv6Addr::from(Ipv6Addr::from(segments))
         };
         Sled {
