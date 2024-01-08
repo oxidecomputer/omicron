@@ -120,6 +120,7 @@ pub struct Policy {
 // to what inventory it was generated against?  That makes other things trickier
 // (like deleting old inventory collections or even just seeing what the full
 // state of the world is supposed to be when a blueprint has been executed).
+#[derive(Debug, Clone)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,

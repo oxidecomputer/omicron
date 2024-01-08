@@ -42,6 +42,7 @@ use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -73,6 +74,14 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(bgtask_list)?;
         api.register(bgtask_view)?;
+
+        api.register(blueprint_list)?;
+        api.register(blueprint_view)?;
+        api.register(blueprint_delete)?;
+        api.register(blueprint_target_view)?;
+        api.register(blueprint_target_set)?;
+        api.register(blueprint_create_current)?;
+        api.register(blueprint_create_add_sled)?;
 
         Ok(())
     }
@@ -590,4 +599,160 @@ async fn ipv4_nat_changeset(
         Ok(HttpResponseOk(changeset))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// APIs for managing blueprints
+//
+// These are not (yet) intended for use by any other programs.  Eventually, we
+// will want this functionality part of the public API.  But we don't want to
+// commit to any of this yet.  These properly belong in an RFD 399-style
+// "Service and Support API".  Absent that, we stick them here.
+
+// XXX-dap
+#[derive(Serialize, JsonSchema)]
+struct Blueprint {
+    id: Uuid,
+}
+impl From<nexus_types::deployment::Blueprint> for Blueprint {
+    fn from(value: nexus_types::deployment::Blueprint) -> Self {
+        todo!() // XXX-dap
+    }
+}
+
+/// Lists blueprints
+#[endpoint {
+    method = GET,
+    path = "/deployment/blueprints/all",
+}]
+async fn blueprint_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Blueprint>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let blueprints = nexus
+            .blueprint_list(&opctx, &pagparams)
+            .await?
+            .into_iter()
+            .map(Blueprint::from)
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            blueprints,
+            &|_, blueprint: &Blueprint| blueprint.id,
+        )?))
+    };
+
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetches one blueprint
+#[endpoint {
+    method = GET,
+    path = "/deployment/blueprints/all/{blueprint_id}",
+}]
+async fn blueprint_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let blueprint = nexus.blueprint_view(&opctx, path.blueprint_id).await?;
+        Ok(HttpResponseOk(Blueprint::from(blueprint)))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Deletes one blueprint
+#[endpoint {
+    method = DELETE,
+    path = "/deployment/blueprints/all/{blueprint_id}",
+}]
+async fn blueprint_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        nexus.blueprint_delete(&opctx, path.blueprint_id).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// XXX-dap TODO
+// diff blueprint against latest inventory
+// diff blueprint against another blueprint
+// upload blueprint
+
+// Managing the current target blueprint
+
+// XXX-dap
+#[derive(Serialize, JsonSchema)]
+struct BlueprintTarget {}
+
+/// Fetches the current target blueprint, if any
+#[endpoint {
+    method = GET,
+    path = "/deployment/blueprints/target",
+}]
+async fn blueprint_target_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
+    todo!();
+}
+
+// XXX-dap
+// XXX-dap needs to make it possible to set it to NULL to turn things off
+#[derive(Deserialize, JsonSchema)]
+struct BlueprintTargetParam {}
+
+/// Make the specified blueprint the new target
+#[endpoint {
+    method = POST,
+    path = "/deployment/blueprints/target",
+}]
+async fn blueprint_target_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    target: TypedBody<BlueprintTargetParam>,
+) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
+    todo!();
+}
+
+// Generating blueprints
+
+/// Generates a new blueprint matching the latest inventory collection
+#[endpoint {
+    method = POST,
+    path = "/deployment/blueprints/current",
+}]
+async fn blueprint_create_current(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
+    todo!();
+}
+
+// XXX-dap
+#[derive(Deserialize, JsonSchema)]
+struct BlueprintParamAddSled {}
+
+/// Generates a new blueprint for adding a sled
+#[endpoint {
+    method = POST,
+    path = "/deployment/blueprints/add_sled",
+}]
+async fn blueprint_create_add_sled(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
+    todo!();
 }
