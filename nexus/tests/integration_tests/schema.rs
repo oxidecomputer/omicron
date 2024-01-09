@@ -303,15 +303,15 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
     }
 }
 
+// It's a little redunant to include the column name alongside each value,
+// but it results in a prettier diff.
 #[derive(PartialEq, Debug)]
-struct NamedSqlValue {
-    // It's a little redunant to include the column name alongside each value,
-    // but it results in a prettier diff.
+struct ColumnValue {
     column: String,
     value: Option<AnySqlType>,
 }
 
-impl NamedSqlValue {
+impl ColumnValue {
     fn new<V: Into<AnySqlType>>(column: &str, value: V) -> Self {
         Self { column: String::from(column), value: Some(value.into()) }
     }
@@ -325,7 +325,7 @@ impl NamedSqlValue {
 // A generic representation of a row of SQL data
 #[derive(PartialEq, Debug)]
 struct Row {
-    values: Vec<NamedSqlValue>,
+    values: Vec<ColumnValue>,
 }
 
 impl Row {
@@ -351,7 +351,7 @@ fn process_rows(rows: &Vec<tokio_postgres::Row>) -> Vec<Row> {
         let mut row_result = Row::new();
         for i in 0..row.len() {
             let column_name = row.columns()[i].name();
-            row_result.values.push(NamedSqlValue {
+            row_result.values.push(ColumnValue {
                 column: column_name.to_string(),
                 value: row.get(i),
             });
@@ -939,7 +939,7 @@ const POOL1: Uuid = Uuid::from_u128(0x11116001_5c3d_4647_83b0_8f3515da7be1);
 const POOL2: Uuid = Uuid::from_u128(0x22226001_5c3d_4647_83b0_8f3515da7be1);
 const POOL3: Uuid = Uuid::from_u128(0x33336001_5c3d_4647_83b0_8f3515da7be1);
 
-fn before_23_0_0<'a>(client: &'a Client) -> BoxFuture<'a, ()> {
+fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async move {
         // Create two silos
         client.batch_execute(&format!("INSERT INTO silo
@@ -959,7 +959,7 @@ fn before_23_0_0<'a>(client: &'a Client) -> BoxFuture<'a, ()> {
     })
 }
 
-fn after_23_0_0<'a>(client: &'a Client) -> BoxFuture<'a, ()> {
+fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
         // Confirm that the ip_pool_resource objects have been created
         // by the migration.
@@ -971,6 +971,8 @@ fn after_23_0_0<'a>(client: &'a Client) -> BoxFuture<'a, ()> {
 
         assert_eq!(ip_pool_resources.len(), 4);
 
+        let type_silo = SqlEnum::from(("ip_pool_resource_type", "silo"));
+
         // pool1, which referenced silo1 in the "ip_pool" table, has a newly
         // created resource.
         //
@@ -978,55 +980,43 @@ fn after_23_0_0<'a>(client: &'a Client) -> BoxFuture<'a, ()> {
         assert_eq!(
             ip_pool_resources[0].values,
             vec![
-                NamedSqlValue::new("ip_pool_id", POOL1),
-                NamedSqlValue::new(
-                    "resource_type",
-                    AnySqlType::Enum(("ip_pool_resource_type", "silo").into()),
-                ),
-                NamedSqlValue::new("resource_id", SILO1,),
-                NamedSqlValue::new("is_default", true,),
+                ColumnValue::new("ip_pool_id", POOL1),
+                ColumnValue::new("resource_type", type_silo.clone()),
+                ColumnValue::new("resource_id", SILO1),
+                ColumnValue::new("is_default", true),
             ],
         );
         assert_eq!(
             ip_pool_resources[1].values,
             vec![
-                NamedSqlValue::new("ip_pool_id", POOL2,),
-                NamedSqlValue::new(
-                    "resource_type",
-                    AnySqlType::Enum(("ip_pool_resource_type", "silo").into()),
-                ),
-                NamedSqlValue::new("resource_id", SILO2,),
-                NamedSqlValue::new("is_default", false,),
+                ColumnValue::new("ip_pool_id", POOL2),
+                ColumnValue::new("resource_type", type_silo.clone()),
+                ColumnValue::new("resource_id", SILO2),
+                ColumnValue::new("is_default", false),
             ],
         );
 
-        // pool3, which did not have a corresponding silo, is associated with
-        // both silos.
+        // pool3 did not previously have a corresponding silo, so now it's associated
+        // with both silos as a new resource in each.
         //
-        // It is only made the default pool for silo2, but not silo1 (TODO:
-        // Why?).
+        // Additionally, silo1 already had a default pool (pool1), but silo2 did
+        // not have one. As a result, pool3 becomes the new default pool for silo2.
         assert_eq!(
             ip_pool_resources[2].values,
             vec![
-                NamedSqlValue::new("ip_pool_id", POOL3,),
-                NamedSqlValue::new(
-                    "resource_type",
-                    AnySqlType::Enum(("ip_pool_resource_type", "silo").into()),
-                ),
-                NamedSqlValue::new("resource_id", SILO1,),
-                NamedSqlValue::new("is_default", false,),
+                ColumnValue::new("ip_pool_id", POOL3),
+                ColumnValue::new("resource_type", type_silo.clone()),
+                ColumnValue::new("resource_id", SILO1),
+                ColumnValue::new("is_default", false),
             ],
         );
         assert_eq!(
             ip_pool_resources[3].values,
             vec![
-                NamedSqlValue::new("ip_pool_id", POOL3,),
-                NamedSqlValue::new(
-                    "resource_type",
-                    AnySqlType::Enum(("ip_pool_resource_type", "silo").into()),
-                ),
-                NamedSqlValue::new("resource_id", SILO2,),
-                NamedSqlValue::new("is_default", true,),
+                ColumnValue::new("ip_pool_id", POOL3),
+                ColumnValue::new("resource_type", type_silo.clone()),
+                ColumnValue::new("resource_id", SILO2),
+                ColumnValue::new("is_default", true),
             ],
         );
     })
@@ -1083,7 +1073,7 @@ async fn validate_data_migration() {
     for version in &all_versions {
         // If this check has preconditions (or setup), run them.
         let checks = all_checks.get(version);
-        if let Some(before) = checks.map(|check| check.before).flatten() {
+        if let Some(before) = checks.and_then(|check| check.before) {
             before(&client).await;
         }
 
