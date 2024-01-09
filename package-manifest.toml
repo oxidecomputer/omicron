@@ -622,7 +622,6 @@ source.rust.binary_names = ["zone-networking"]
 source.rust.release = true
 source.paths = [
     { from = "smf/zone-network-setup/manifest.xml", to = "/var/svc/manifest/site/zone-network-setup/manifest.xml" },
-    { from = "smf/zone-network-setup/method_script.sh", to = "/opt/oxide/lib/svc/manifest/zone-network-setup.sh" },
 ]
 output.type = "zone"
 output.intermediate_only = true
