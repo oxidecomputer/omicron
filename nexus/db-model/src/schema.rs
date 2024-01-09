@@ -359,7 +359,6 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
-        ssh_keys -> Nullable<Array<Text>>,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
@@ -710,6 +709,13 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         silo_user_id -> Uuid,
         public_key -> Text,
+    }
+}
+
+table! {
+    instance_ssk_key (instance_id, ssh_key_id) {
+        instance_id -> Uuid,
+        ssh_key_id -> Uuid,
     }
 }
 
