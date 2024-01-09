@@ -20,10 +20,8 @@ use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
-use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::shared::UninitializedSled;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -41,7 +39,6 @@ use once_cell::sync::Lazy;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
-use uuid::Uuid;
 
 pub static HARDWARE_RACK_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/racks/{}", RACK_UUID));
@@ -69,15 +66,10 @@ pub static HARDWARE_SLED_DISK_URL: Lazy<String> = Lazy::new(|| {
 pub static SLED_INSTANCES_URL: Lazy<String> = Lazy::new(|| {
     format!("/v1/system/hardware/sleds/{}/instances", SLED_AGENT_UUID)
 });
-pub static DEMO_UNINITIALIZED_SLED: Lazy<UninitializedSled> =
-    Lazy::new(|| UninitializedSled {
-        baseboard: Baseboard {
-            serial: "demo-serial".to_string(),
-            part: "demo-part".to_string(),
-            revision: 6,
-        },
-        rack_id: Uuid::new_v4(),
-        cubby: 1,
+pub static DEMO_UNINITIALIZED_SLED: Lazy<params::UninitializedSledId> =
+    Lazy::new(|| params::UninitializedSledId {
+        serial: "demo-serial".to_string(),
+        part: "demo-part".to_string(),
     });
 
 // Global policy
@@ -607,7 +599,7 @@ pub static DEMO_IMAGE_CREATE: Lazy<params::ImageCreate> =
 
 // IP Pools
 pub static DEMO_IP_POOLS_PROJ_URL: Lazy<String> =
-    Lazy::new(|| format!("/v1/ip-pools?project={}", *DEMO_PROJECT_NAME));
+    Lazy::new(|| "/v1/ip-pools".to_string());
 pub const DEMO_IP_POOLS_URL: &'static str = "/v1/system/ip-pools";
 pub static DEMO_IP_POOL_NAME: Lazy<Name> =
     Lazy::new(|| "default".parse().unwrap());
@@ -617,8 +609,6 @@ pub static DEMO_IP_POOL_CREATE: Lazy<params::IpPoolCreate> =
             name: DEMO_IP_POOL_NAME.clone(),
             description: String::from("an IP pool"),
         },
-        silo: None,
-        is_default: true,
     });
 pub static DEMO_IP_POOL_PROJ_URL: Lazy<String> = Lazy::new(|| {
     format!(
@@ -635,6 +625,19 @@ pub static DEMO_IP_POOL_UPDATE: Lazy<params::IpPoolUpdate> =
             description: Some(String::from("a new IP pool")),
         },
     });
+pub static DEMO_IP_POOL_SILOS_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/silos", *DEMO_IP_POOL_URL));
+pub static DEMO_IP_POOL_SILOS_BODY: Lazy<params::IpPoolSiloLink> =
+    Lazy::new(|| params::IpPoolSiloLink {
+        silo: NameOrId::Id(DEFAULT_SILO.identity().id),
+        is_default: true, // necessary for demo instance create to go through
+    });
+
+pub static DEMO_IP_POOL_SILO_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/silos/{}", *DEMO_IP_POOL_URL, *DEMO_SILO_NAME));
+pub static DEMO_IP_POOL_SILO_UPDATE_BODY: Lazy<params::IpPoolSiloUpdate> =
+    Lazy::new(|| params::IpPoolSiloUpdate { is_default: false });
+
 pub static DEMO_IP_POOL_RANGE: Lazy<IpRange> = Lazy::new(|| {
     IpRange::V4(
         Ipv4Range::new(
@@ -985,6 +988,26 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::ReadOnly,
             allowed_methods: vec![
                 AllowedMethod::Get
+            ],
+        },
+
+        // IP pool silos endpoint
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_SILOS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Post(serde_json::to_value(&*DEMO_IP_POOL_SILOS_BODY).unwrap()),
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_SILO_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Delete,
+                AllowedMethod::Put(serde_json::to_value(&*DEMO_IP_POOL_SILO_UPDATE_BODY).unwrap()),
             ],
         },
 

@@ -12,6 +12,7 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use dropshot::Method;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params;
 use nexus_types::external_api::params::PhysicalDiskKind;
@@ -26,6 +27,7 @@ use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
+use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use nexus_types::internal_api::params::Baseboard;
 use omicron_common::api::external::ByteCount;
@@ -55,6 +57,41 @@ where
         .unwrap()
 }
 
+pub async fn object_get<OutputType>(
+    client: &ClientTestContext,
+    path: &str,
+) -> OutputType
+where
+    OutputType: serde::de::DeserializeOwned,
+{
+    NexusRequest::object_get(client, path)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"GET\" request to {path}: {e}")
+        })
+        .parsed_body()
+        .unwrap()
+}
+
+pub async fn object_get_error(
+    client: &ClientTestContext,
+    path: &str,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, path)
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
+}
+
 pub async fn object_create<InputType, OutputType>(
     client: &ClientTestContext,
     path: &str,
@@ -68,11 +105,34 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| {
-            panic!("failed to make \"create\" request to {path}")
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"POST\" request to {path}: {e}")
         })
         .parsed_body()
         .unwrap()
+}
+
+/// Make a POST, assert status code, return error response body
+pub async fn object_create_error<InputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+    status: StatusCode,
+) -> HttpErrorResponseBody
+where
+    InputType: serde::Serialize,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, path)
+            .body(Some(&input))
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
 }
 
 pub async fn object_put<InputType, OutputType>(
@@ -88,9 +148,33 @@ where
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| panic!("failed to make \"PUT\" request to {path}"))
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"PUT\" request to {path}: {e}")
+        })
         .parsed_body()
         .unwrap()
+}
+
+pub async fn object_put_error<InputType>(
+    client: &ClientTestContext,
+    path: &str,
+    input: &InputType,
+    status: StatusCode,
+) -> HttpErrorResponseBody
+where
+    InputType: serde::Serialize,
+{
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::PUT, path)
+            .body(Some(&input))
+            .expect_status(Some(status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
 }
 
 pub async fn object_delete(client: &ClientTestContext, path: &str) {
@@ -98,31 +182,26 @@ pub async fn object_delete(client: &ClientTestContext, path: &str) {
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap_or_else(|_| {
-            panic!("failed to make \"delete\" request to {path}")
+        .unwrap_or_else(|e| {
+            panic!("failed to make \"DELETE\" request to {path}: {e}")
         });
 }
 
-pub async fn populate_ip_pool(
+pub async fn object_delete_error(
     client: &ClientTestContext,
-    pool_name: &str,
-    ip_range: Option<IpRange>,
-) -> IpPoolRange {
-    let ip_range = ip_range.unwrap_or_else(|| {
-        use std::net::Ipv4Addr;
-        IpRange::try_from((
-            Ipv4Addr::new(10, 0, 0, 0),
-            Ipv4Addr::new(10, 0, 255, 255),
-        ))
-        .unwrap()
-    });
-    let range = object_create(
-        client,
-        format!("/v1/system/ip-pools/{}/ranges/add", pool_name).as_str(),
-        &ip_range,
+    path: &str,
+    status: StatusCode,
+) -> HttpErrorResponseBody {
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, path)
+            .expect_status(Some(status)),
     )
-    .await;
-    range
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<HttpErrorResponseBody>()
+    .unwrap()
 }
 
 /// Create an IP pool with a single range for testing.
@@ -134,7 +213,6 @@ pub async fn create_ip_pool(
     client: &ClientTestContext,
     pool_name: &str,
     ip_range: Option<IpRange>,
-    silo: Option<Uuid>,
 ) -> (IpPool, IpPoolRange) {
     let pool = object_create(
         client,
@@ -144,13 +222,45 @@ pub async fn create_ip_pool(
                 name: pool_name.parse().unwrap(),
                 description: String::from("an ip pool"),
             },
-            silo: silo.map(|id| NameOrId::Id(id)),
-            is_default: false,
         },
     )
     .await;
-    let range = populate_ip_pool(client, pool_name, ip_range).await;
+
+    let ip_range = ip_range.unwrap_or_else(|| {
+        use std::net::Ipv4Addr;
+        IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 0),
+            Ipv4Addr::new(10, 0, 255, 255),
+        ))
+        .unwrap()
+    });
+    let url = format!("/v1/system/ip-pools/{}/ranges/add", pool_name);
+    let range = object_create(client, &url, &ip_range).await;
     (pool, range)
+}
+
+pub async fn link_ip_pool(
+    client: &ClientTestContext,
+    pool_name: &str,
+    silo_id: &Uuid,
+    is_default: bool,
+) {
+    let link =
+        params::IpPoolSiloLink { silo: NameOrId::Id(*silo_id), is_default };
+    let url = format!("/v1/system/ip-pools/{pool_name}/silos");
+    object_create::<params::IpPoolSiloLink, views::IpPoolSilo>(
+        client, &url, &link,
+    )
+    .await;
+}
+
+/// What you want for any test that is not testing IP logic specifically
+pub async fn create_default_ip_pool(
+    client: &ClientTestContext,
+) -> views::IpPool {
+    let (pool, ..) = create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+    pool
 }
 
 pub async fn create_floating_ip(

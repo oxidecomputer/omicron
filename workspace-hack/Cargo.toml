@@ -41,13 +41,13 @@ either = { version = "1.9.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.0.28" }
-futures = { version = "0.3.29" }
-futures-channel = { version = "0.3.29", features = ["sink"] }
-futures-core = { version = "0.3.29" }
-futures-io = { version = "0.3.29", default-features = false, features = ["std"] }
-futures-sink = { version = "0.3.29" }
-futures-task = { version = "0.3.29", default-features = false, features = ["std"] }
-futures-util = { version = "0.3.29", features = ["channel", "io", "sink"] }
+futures = { version = "0.3.30" }
+futures-channel = { version = "0.3.30", features = ["sink"] }
+futures-core = { version = "0.3.30" }
+futures-io = { version = "0.3.30", default-features = false, features = ["std"] }
+futures-sink = { version = "0.3.30" }
+futures-task = { version = "0.3.30", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.30", features = ["channel", "io", "sink"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
@@ -77,7 +77,7 @@ petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.0.4" }
-proc-macro2 = { version = "1.0.69" }
+proc-macro2 = { version = "1.0.74" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.2" }
@@ -85,9 +85,9 @@ regex-automata = { version = "0.4.3", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.7", features = ["std"] }
-schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
-semver = { version = "1.0.20", features = ["serde"] }
-serde = { version = "1.0.193", features = ["alloc", "derive", "rc"] }
+schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
+semver = { version = "1.0.21", features = ["serde"] }
+serde = { version = "1.0.194", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.108", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
@@ -97,9 +97,9 @@ spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.32", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.46", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.27", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1.35.0", features = ["full", "test-util"] }
+tokio = { version = "1.35.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.14", features = ["net"] }
 tokio-util = { version = "0.7.10", features = ["codec", "io-util"] }
@@ -144,13 +144,13 @@ either = { version = "1.9.0" }
 elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std"] }
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.0.28" }
-futures = { version = "0.3.29" }
-futures-channel = { version = "0.3.29", features = ["sink"] }
-futures-core = { version = "0.3.29" }
-futures-io = { version = "0.3.29", default-features = false, features = ["std"] }
-futures-sink = { version = "0.3.29" }
-futures-task = { version = "0.3.29", default-features = false, features = ["std"] }
-futures-util = { version = "0.3.29", features = ["channel", "io", "sink"] }
+futures = { version = "0.3.30" }
+futures-channel = { version = "0.3.30", features = ["sink"] }
+futures-core = { version = "0.3.30" }
+futures-io = { version = "0.3.30", default-features = false, features = ["std"] }
+futures-sink = { version = "0.3.30" }
+futures-task = { version = "0.3.30", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.30", features = ["channel", "io", "sink"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
@@ -180,7 +180,7 @@ petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.0.4" }
-proc-macro2 = { version = "1.0.69" }
+proc-macro2 = { version = "1.0.74" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.2" }
@@ -188,9 +188,9 @@ regex-automata = { version = "0.4.3", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.7", features = ["std"] }
-schemars = { version = "0.8.13", features = ["bytes", "chrono", "uuid1"] }
-semver = { version = "1.0.20", features = ["serde"] }
-serde = { version = "1.0.193", features = ["alloc", "derive", "rc"] }
+schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
+semver = { version = "1.0.21", features = ["serde"] }
+serde = { version = "1.0.194", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.108", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
@@ -200,10 +200,10 @@ spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.32", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.46", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.27", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.13", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1.35.0", features = ["full", "test-util"] }
+tokio = { version = "1.35.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.14", features = ["net"] }
 tokio-util = { version = "0.7.10", features = ["codec", "io-util"] }

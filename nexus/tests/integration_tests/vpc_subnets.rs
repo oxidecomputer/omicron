@@ -14,7 +14,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::resource_helpers::{
-    create_instance, create_project, create_vpc, populate_ip_pool,
+    create_default_ip_pool, create_instance, create_project, create_vpc,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{params, views::VpcSubnet};
@@ -37,8 +37,8 @@ async fn test_delete_vpc_subnet_with_interfaces_fails(
     // Create a project that we'll use for testing.
     let project_name = "springfield-squidport";
     let instance_name = "inst";
+    create_default_ip_pool(client).await;
     let _ = create_project(&client, project_name).await;
-    populate_ip_pool(client, "default", None).await;
 
     let subnets_url =
         format!("/v1/vpc-subnets?project={}&vpc=default", project_name);

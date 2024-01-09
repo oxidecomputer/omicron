@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "address_lot_kind"))]
+    #[diesel(postgres_type(name = "address_lot_kind", schema = "public"))]
     pub struct AddressLotKindEnum;
 
     #[derive(

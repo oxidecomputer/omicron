@@ -10,7 +10,7 @@ use strum::EnumIter;
 
 impl_enum_type!(
     #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "service_kind"))]
+    #[diesel(postgres_type(name = "service_kind", schema = "public"))]
     pub struct ServiceKindEnum;
 
     #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, EnumIter)]

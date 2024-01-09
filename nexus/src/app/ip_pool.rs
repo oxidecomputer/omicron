@@ -7,14 +7,14 @@
 use crate::external_api::params;
 use crate::external_api::shared::IpRange;
 use ipnetwork::IpNetwork;
-use nexus_db_model::IpPool;
 use nexus_db_queries::authz;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::Name;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -26,9 +26,22 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+use uuid::Uuid;
 
-fn is_internal(pool: &IpPool) -> bool {
-    pool.silo_id == Some(*INTERNAL_SILO_ID)
+/// Helper to make it easier to 404 on attempts to manipulate internal pools
+fn not_found_from_lookup(pool_lookup: &lookup::IpPool<'_>) -> Error {
+    match pool_lookup {
+        lookup::IpPool::Name(_, name) => {
+            Error::not_found_by_name(ResourceType::IpPool, &name)
+        }
+        lookup::IpPool::OwnedName(_, name) => {
+            Error::not_found_by_name(ResourceType::IpPool, &name)
+        }
+        lookup::IpPool::PrimaryKey(_, id) => {
+            Error::not_found_by_id(ResourceType::IpPool, &id)
+        }
+        lookup::IpPool::Error(_, error) => error.to_owned(),
+    }
 }
 
 impl super::Nexus {
@@ -56,22 +69,110 @@ impl super::Nexus {
         opctx: &OpContext,
         pool_params: &params::IpPoolCreate,
     ) -> CreateResult<db::model::IpPool> {
-        let silo_id = match pool_params.clone().silo {
-            Some(silo) => {
-                let (.., authz_silo) = self
-                    .silo_lookup(&opctx, silo)?
-                    .lookup_for(authz::Action::Read)
-                    .await?;
-                Some(authz_silo.id())
-            }
-            _ => None,
-        };
-        let pool = db::model::IpPool::new(
-            &pool_params.identity,
-            silo_id,
-            pool_params.is_default,
-        );
+        let pool = db::model::IpPool::new(&pool_params.identity);
         self.db_datastore.ip_pool_create(opctx, pool).await
+    }
+
+    /// List IP pools in current silo
+    pub(crate) async fn silo_ip_pools_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<db::model::IpPool> {
+        self.db_datastore.silo_ip_pools_list(opctx, pagparams).await
+    }
+
+    // Look up pool by name or ID, but only return it if it's linked to the
+    // current silo
+    pub async fn silo_ip_pool_fetch<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        pool: &'a NameOrId,
+    ) -> LookupResult<db::model::IpPool> {
+        let (authz_pool, pool) =
+            self.ip_pool_lookup(opctx, pool)?.fetch().await?;
+
+        // 404 if no link is found in the current silo
+        let link = self.db_datastore.ip_pool_fetch_link(opctx, pool.id()).await;
+        if link.is_err() {
+            return Err(authz_pool.not_found());
+        }
+
+        Ok(pool)
+    }
+
+    pub(crate) async fn ip_pool_silo_list(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<db::model::IpPoolResource> {
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::ListChildren).await?;
+        self.db_datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
+    }
+
+    pub(crate) async fn ip_pool_link_silo(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        silo_link: &params::IpPoolSiloLink,
+    ) -> CreateResult<db::model::IpPoolResource> {
+        let (authz_pool,) =
+            pool_lookup.lookup_for(authz::Action::Modify).await?;
+        let (authz_silo,) = self
+            .silo_lookup(&opctx, silo_link.silo.clone())?
+            .lookup_for(authz::Action::Modify)
+            .await?;
+        self.db_datastore
+            .ip_pool_link_silo(
+                opctx,
+                db::model::IpPoolResource {
+                    ip_pool_id: authz_pool.id(),
+                    resource_type: db::model::IpPoolResourceType::Silo,
+                    resource_id: authz_silo.id(),
+                    is_default: silo_link.is_default,
+                },
+            )
+            .await
+    }
+
+    pub(crate) async fn ip_pool_unlink_silo(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        silo_lookup: &lookup::Silo<'_>,
+    ) -> DeleteResult {
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Modify).await?;
+
+        self.db_datastore
+            .ip_pool_unlink_silo(opctx, &authz_pool, &authz_silo)
+            .await
+    }
+
+    pub(crate) async fn ip_pool_silo_update(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+        silo_lookup: &lookup::Silo<'_>,
+        update: &params::IpPoolSiloUpdate,
+    ) -> CreateResult<db::model::IpPoolResource> {
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Modify).await?;
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Modify).await?;
+
+        self.db_datastore
+            .ip_pool_set_default(
+                opctx,
+                &authz_pool,
+                &authz_silo,
+                update.is_default,
+            )
+            .await
     }
 
     pub(crate) async fn ip_pools_list(
@@ -89,6 +190,13 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Delete).await?;
+
+        let is_internal =
+            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
+        if is_internal {
+            return Err(not_found_from_lookup(pool_lookup));
+        }
+
         self.db_datastore.ip_pool_delete(opctx, &authz_pool, &db_pool).await
     }
 
@@ -100,6 +208,13 @@ impl super::Nexus {
     ) -> UpdateResult<db::model::IpPool> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let is_internal =
+            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
+        if is_internal {
+            return Err(not_found_from_lookup(pool_lookup));
+        }
+
         self.db_datastore
             .ip_pool_update(opctx, &authz_pool, updates.clone().into())
             .await
@@ -111,13 +226,13 @@ impl super::Nexus {
         pool_lookup: &lookup::IpPool<'_>,
         pagparams: &DataPageParams<'_, IpNetwork>,
     ) -> ListResultVec<db::model::IpPoolRange> {
-        let (.., authz_pool, db_pool) =
-            pool_lookup.fetch_for(authz::Action::ListChildren).await?;
-        if is_internal(&db_pool) {
-            return Err(Error::not_found_by_name(
-                ResourceType::IpPool,
-                &db_pool.identity.name,
-            ));
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::ListChildren).await?;
+
+        let is_internal =
+            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
+        if is_internal {
+            return Err(not_found_from_lookup(pool_lookup));
         }
 
         self.db_datastore
@@ -131,13 +246,13 @@ impl super::Nexus {
         pool_lookup: &lookup::IpPool<'_>,
         range: &IpRange,
     ) -> UpdateResult<db::model::IpPoolRange> {
-        let (.., authz_pool, db_pool) =
+        let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
-        if is_internal(&db_pool) {
-            return Err(Error::not_found_by_name(
-                ResourceType::IpPool,
-                &db_pool.identity.name,
-            ));
+
+        let is_internal =
+            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
+        if is_internal {
+            return Err(not_found_from_lookup(pool_lookup));
         }
         self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
@@ -148,14 +263,16 @@ impl super::Nexus {
         pool_lookup: &lookup::IpPool<'_>,
         range: &IpRange,
     ) -> DeleteResult {
-        let (.., authz_pool, db_pool) =
+        let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
-        if is_internal(&db_pool) {
-            return Err(Error::not_found_by_name(
-                ResourceType::IpPool,
-                &db_pool.identity.name,
-            ));
+
+        let is_internal =
+            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
+
+        if is_internal {
+            return Err(not_found_from_lookup(pool_lookup));
         }
+
         self.db_datastore.ip_pool_delete_range(opctx, &authz_pool, range).await
     }
 

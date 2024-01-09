@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "block_size"))]
+    #[diesel(postgres_type(name = "block_size", schema = "public"))]
     pub struct BlockSizeEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]

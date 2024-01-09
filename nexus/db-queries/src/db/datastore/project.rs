@@ -347,34 +347,4 @@ impl DataStore {
                 )
             })
     }
-
-    /// List IP Pools accessible to a project
-    pub async fn project_ip_pools_list(
-        &self,
-        opctx: &OpContext,
-        authz_project: &authz::Project,
-        pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
-        use db::schema::ip_pool::dsl;
-        opctx.authorize(authz::Action::ListChildren, authz_project).await?;
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(dsl::ip_pool, dsl::id, pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                dsl::ip_pool,
-                dsl::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        // TODO(2148, 2056): filter only pools accessible by the given
-        // project, once specific projects for pools are implemented
-        // != excludes nulls so we explicitly include them
-        .filter(dsl::silo_id.ne(*INTERNAL_SILO_ID).or(dsl::silo_id.is_null()))
-        .filter(dsl::time_deleted.is_null())
-        .select(db::model::IpPool::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
 }
