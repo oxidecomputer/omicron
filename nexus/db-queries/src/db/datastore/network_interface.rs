@@ -76,7 +76,7 @@ impl From<NicInfo> for sled_client_types::NetworkInterface {
         sled_client_types::NetworkInterface {
             id: nic.id,
             kind,
-            name: sled_client_types::Name::from(&nic.name.0),
+            name: nic.name.into(),
             ip: nic.ip.ip(),
             mac: sled_client_types::MacAddr::from(nic.mac.0),
             subnet: sled_client_types::IpNet::from(ip_subnet),

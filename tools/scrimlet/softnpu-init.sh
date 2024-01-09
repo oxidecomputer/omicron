@@ -31,7 +31,7 @@ fi
 # Add an extrac space at the end of the search pattern passed to `grep`, so that
 # we can be sure we're matching the exact $GATEWAY_IP, and not something that
 # shares the same string prefix.
-GATEWAY_MAC=${GATEWAY_MAC:=$(arp -a | grep "$GATEWAY_IP " | awk -F ' ' '{print $NF}')}
+GATEWAY_MAC=${GATEWAY_MAC:=$(arp -an | grep "$GATEWAY_IP " | awk -F ' ' '{print $NF}')}
 
 # Check that the MAC appears to be exactly one MAC address.
 COUNT=$(grep -c -E '^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$' <(echo "$GATEWAY_MAC"))

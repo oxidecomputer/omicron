@@ -10,8 +10,8 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::{
-    create_disk, create_project, create_vpc, object_create, populate_ip_pool,
-    project_get, projects_list, DiskTest,
+    create_default_ip_pool, create_disk, create_project, create_vpc,
+    object_create, project_get, projects_list, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -134,7 +134,7 @@ async fn test_project_deletion_with_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";

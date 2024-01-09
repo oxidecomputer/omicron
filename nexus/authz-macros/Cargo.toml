@@ -15,3 +15,6 @@ serde.workspace = true
 serde_tokenstream.workspace = true
 syn.workspace = true
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+prettyplease.workspace = true

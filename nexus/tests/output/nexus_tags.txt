@@ -117,13 +117,13 @@ snapshot_view                            GET      /v1/snapshots/{snapshot}
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
-add_sled_to_initialized_rack             POST     /v1/system/hardware/sleds
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
 physical_disk_list                       GET      /v1/system/hardware/disks
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
+sled_add                                 POST     /v1/system/hardware/sleds
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
 sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
@@ -149,6 +149,10 @@ ip_pool_service_range_add                POST     /v1/system/ip-pools-service/ra
 ip_pool_service_range_list               GET      /v1/system/ip-pools-service/ranges
 ip_pool_service_range_remove             POST     /v1/system/ip-pools-service/ranges/remove
 ip_pool_service_view                     GET      /v1/system/ip-pools-service
+ip_pool_silo_link                        POST     /v1/system/ip-pools/{pool}/silos
+ip_pool_silo_list                        GET      /v1/system/ip-pools/{pool}/silos
+ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/silos/{silo}
+ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks

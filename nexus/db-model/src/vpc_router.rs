@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_router_kind"))]
+    #[diesel(postgres_type(name = "vpc_router_kind", schema = "public"))]
     pub struct VpcRouterKindEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]

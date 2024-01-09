@@ -17,9 +17,9 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -48,7 +48,8 @@ fn get_disk_url(name: &str) -> String {
     format!("/v1/disks/{}?project={}", name, PROJECT_NAME)
 }
 
-async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
+async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
@@ -57,8 +58,7 @@ async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
 async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Define a global image
@@ -163,8 +163,7 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
 async fn test_snapshot_without_instance(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Define a global image
@@ -263,8 +262,7 @@ async fn test_delete_snapshot(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    let project_id = create_org_and_project(client).await;
+    let project_id = create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Create a blank disk
@@ -423,7 +421,7 @@ async fn test_reject_creating_disk_from_snapshot(
     let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
-    let project_id = create_org_and_project(&client).await;
+    let project_id = create_project_and_pool(&client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -576,7 +574,7 @@ async fn test_reject_creating_disk_from_illegal_snapshot(
     let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
-    let project_id = create_org_and_project(&client).await;
+    let project_id = create_project_and_pool(&client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -672,7 +670,7 @@ async fn test_reject_creating_disk_from_other_project_snapshot(
     let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
-    let project_id = create_org_and_project(&client).await;
+    let project_id = create_project_and_pool(&client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -752,8 +750,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
     // Test that snapshots cannot be created if there is no space for the blocks
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Create a disk at just over half the capacity of what DiskTest allocates
@@ -806,8 +803,7 @@ async fn test_cannot_snapshot_if_no_space(cptestctx: &ControlPlaneTestContext) {
 async fn test_snapshot_unwind(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let disk_test = DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Define a global image
@@ -906,7 +902,7 @@ async fn test_create_snapshot_record_idempotent(
     let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
-    let project_id = create_org_and_project(&client).await;
+    let project_id = create_project_and_pool(&client).await;
     let disk_id = Uuid::new_v4();
 
     let snapshot = db::model::Snapshot {
@@ -1094,8 +1090,7 @@ async fn test_multiple_deletes_not_sent(cptestctx: &ControlPlaneTestContext) {
     let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
     DiskTest::new(&cptestctx).await;
-    populate_ip_pool(&client, "default", None).await;
-    let _project_id = create_org_and_project(client).await;
+    let _project_id = create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Create a blank disk

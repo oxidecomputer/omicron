@@ -809,7 +809,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "List all Floating IPs",
+        "summary": "List all floating IPs",
         "operationId": "floating_ip_list",
         "parameters": [
           {
@@ -876,7 +876,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Create a Floating IP",
+        "summary": "Create a floating IP",
         "operationId": "floating_ip_create",
         "parameters": [
           {
@@ -968,7 +968,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Delete a Floating IP",
+        "summary": "Delete a floating IP",
         "operationId": "floating_ip_delete",
         "parameters": [
           {
@@ -2154,7 +2154,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "List all IP Pools that can be used by a given project.",
+        "summary": "List all IP pools",
         "operationId": "project_ip_pool_list",
         "parameters": [
           {
@@ -2175,14 +2175,6 @@
             "schema": {
               "nullable": true,
               "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
             }
           },
           {
@@ -2212,9 +2204,7 @@
           }
         },
         "x-dropshot-pagination": {
-          "required": [
-            "project"
-          ]
+          "required": []
         }
       }
     },
@@ -2231,14 +2221,6 @@
             "name": "pool",
             "description": "Name or ID of the IP pool",
             "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
             }
@@ -3765,12 +3747,12 @@
           "system/hardware"
         ],
         "summary": "Add a sled to an initialized rack",
-        "operationId": "add_sled_to_initialized_rack",
+        "operationId": "sled_add",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UninitializedSled"
+                "$ref": "#/components/schemas/UninitializedSledId"
               }
             }
           },
@@ -3971,7 +3953,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Set the sled's provision state.",
+        "summary": "Set the sled's provision state",
         "operationId": "sled_set_provision_state",
         "parameters": [
           {
@@ -4783,7 +4765,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Update an IP Pool",
+        "summary": "Update an IP pool",
         "operationId": "ip_pool_update",
         "parameters": [
           {
@@ -4829,7 +4811,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete an IP Pool",
+        "summary": "Delete an IP pool",
         "operationId": "ip_pool_delete",
         "parameters": [
           {
@@ -4993,6 +4975,213 @@
           },
           "required": true
         },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/silos": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List an IP pool's linked silos",
+        "operationId": "ip_pool_silo_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSiloResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Make an IP pool available within a silo",
+        "operationId": "ip_pool_silo_link",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolSiloLink"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSilo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/ip-pools/{pool}/silos/{silo}": {
+      "put": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Make an IP pool default or not-default for a silo",
+        "description": "When a pool is made default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
+        "operationId": "ip_pool_silo_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpPoolSiloUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolSilo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Unlink an IP pool from a silo",
+        "description": "Will fail if there are any outstanding IPs allocated in the silo.",
+        "operationId": "ip_pool_silo_unlink",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "resource updated"
@@ -12262,7 +12451,7 @@
         ]
       },
       "IpPool": {
-        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "description": "A collection of IP ranges. If a pool is linked to a silo, IP addresses from the pool can be allocated within that silo",
         "type": "object",
         "properties": {
           "description": {
@@ -12274,9 +12463,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "is_default": {
-            "type": "boolean"
-          },
           "name": {
             "description": "unique, mutable, user-controlled identifier for each resource",
             "allOf": [
@@ -12284,11 +12470,6 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
-          },
-          "silo_id": {
-            "nullable": true,
-            "type": "string",
-            "format": "uuid"
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -12304,7 +12485,6 @@
         "required": [
           "description",
           "id",
-          "is_default",
           "name",
           "time_created",
           "time_modified"
@@ -12317,22 +12497,8 @@
           "description": {
             "type": "string"
           },
-          "is_default": {
-            "description": "Whether the IP pool is considered a default pool for its scope (fleet or silo). If a pool is marked default and is associated with a silo, instances created in that silo will draw IPs from that pool unless another pool is specified at instance create time.",
-            "default": false,
-            "type": "boolean"
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
-          },
-          "silo": {
-            "nullable": true,
-            "description": "If an IP pool is associated with a silo, instance IP allocations in that silo can draw from that pool.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
           }
         },
         "required": [
@@ -12406,6 +12572,78 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "IpPoolSilo": {
+        "description": "A link between an IP pool and a silo that allows one to allocate IPs from the pool within the silo",
+        "type": "object",
+        "properties": {
+          "ip_pool_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "type": "boolean"
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "ip_pool_id",
+          "is_default",
+          "silo_id"
+        ]
+      },
+      "IpPoolSiloLink": {
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "type": "boolean"
+          },
+          "silo": {
+            "$ref": "#/components/schemas/NameOrId"
+          }
+        },
+        "required": [
+          "is_default",
+          "silo"
+        ]
+      },
+      "IpPoolSiloResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpPoolSilo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "IpPoolSiloUpdate": {
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo, so when a pool is made default, an existing default will remain linked but will no longer be the default.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "is_default"
         ]
       },
       "IpPoolUpdate": {
@@ -12505,7 +12743,7 @@
         "minLength": 1,
         "maxLength": 11
       },
-      "LinkConfig": {
+      "LinkConfigCreate": {
         "description": "Switch link configuration.",
         "type": "object",
         "properties": {
@@ -12525,7 +12763,7 @@
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/LldpServiceConfig"
+                "$ref": "#/components/schemas/LldpServiceConfigCreate"
               }
             ]
           },
@@ -12647,6 +12885,31 @@
         ]
       },
       "LldpServiceConfig": {
+        "description": "A link layer discovery protocol (LLDP) service configuration.",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "description": "Whether or not the LLDP service is enabled.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The id of this LLDP service instance.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "lldp_config_id": {
+            "nullable": true,
+            "description": "The link-layer discovery protocol configuration for this service.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "enabled",
+          "id"
+        ]
+      },
+      "LldpServiceConfigCreate": {
         "description": "The LLDP configuration associated with a port. LLDP may be either enabled or disabled, if enabled, an LLDP configuration must be provided by name or id.",
         "type": "object",
         "properties": {
@@ -14260,6 +14523,45 @@
         ]
       },
       "SwitchInterfaceConfig": {
+        "description": "A switch port interface configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique identifier for this switch interface.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface_name": {
+            "description": "The name of this switch interface.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The switch interface kind.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchInterfaceKind2"
+              }
+            ]
+          },
+          "port_settings_id": {
+            "description": "The port settings object this switch interface configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "v6_enabled": {
+            "description": "Whether or not IPv6 is enabled on this interface.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "interface_name",
+          "kind",
+          "port_settings_id",
+          "v6_enabled"
+        ]
+      },
+      "SwitchInterfaceConfigCreate": {
         "description": "A layer-3 switch interface configuration. When IPv6 is enabled, a link local address will be created for the interface.",
         "type": "object",
         "properties": {
@@ -14334,6 +14636,32 @@
             },
             "required": [
               "type"
+            ]
+          }
+        ]
+      },
+      "SwitchInterfaceKind2": {
+        "description": "Describes the kind of an switch interface.",
+        "oneOf": [
+          {
+            "description": "Primary interfaces are associated with physical links. There is exactly one primary interface per physical link.",
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          {
+            "description": "VLAN interfaces allow physical interfaces to be multiplexed onto multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet tag.",
+            "type": "string",
+            "enum": [
+              "vlan"
+            ]
+          },
+          {
+            "description": "Loopback interfaces are anchors for IP addresses that are not specific to any particular port.",
+            "type": "string",
+            "enum": [
+              "loopback"
             ]
           }
         ]
@@ -14476,6 +14804,29 @@
         ]
       },
       "SwitchPortConfig": {
+        "description": "A physical port configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "geometry": {
+            "description": "The physical link geometry of the port.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortGeometry2"
+              }
+            ]
+          },
+          "port_settings_id": {
+            "description": "The id of the port settings object this configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "geometry",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortConfigCreate": {
         "description": "Physical switch port configuration.",
         "type": "object",
         "properties": {
@@ -14493,6 +14844,32 @@
         ]
       },
       "SwitchPortGeometry": {
+        "description": "The link geometry associated with a switch port.",
+        "oneOf": [
+          {
+            "description": "The port contains a single QSFP28 link with four lanes.",
+            "type": "string",
+            "enum": [
+              "qsfp28x1"
+            ]
+          },
+          {
+            "description": "The port contains two QSFP28 links each with two lanes.",
+            "type": "string",
+            "enum": [
+              "qsfp28x2"
+            ]
+          },
+          {
+            "description": "The port contains four SFP28 links each with one lane.",
+            "type": "string",
+            "enum": [
+              "sfp28x4"
+            ]
+          }
+        ]
+      },
+      "SwitchPortGeometry2": {
         "description": "The link geometry associated with a switch port.",
         "oneOf": [
           {
@@ -14686,21 +15063,21 @@
             "description": "Interfaces indexed by link name.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/SwitchInterfaceConfig"
+              "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
             }
           },
           "links": {
             "description": "Links indexed by phy name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
             "type": "object",
             "additionalProperties": {
-              "$ref": "#/components/schemas/LinkConfig"
+              "$ref": "#/components/schemas/LinkConfigCreate"
             }
           },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
           "port_config": {
-            "$ref": "#/components/schemas/SwitchPortConfig"
+            "$ref": "#/components/schemas/SwitchPortConfigCreate"
           },
           "routes": {
             "description": "Routes indexed by interface name.",
@@ -14916,6 +15293,22 @@
           "baseboard",
           "cubby",
           "rack_id"
+        ]
+      },
+      "UninitializedSledId": {
+        "description": "The unique hardware ID for a sled",
+        "type": "object",
+        "properties": {
+          "part": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "part",
+          "serial"
         ]
       },
       "UninitializedSledResultsPage": {

@@ -6,16 +6,17 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
+use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::SiloRole;
-use nexus_types::external_api::views::SiloQuotas;
+use nexus_types::external_api::views::{Silo, SiloQuotas};
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceCpuCount;
@@ -169,7 +170,7 @@ async fn setup_silo_with_quota(
     silo_name: &str,
     quotas: params::SiloQuotasCreate,
 ) -> ResourceAllocator {
-    let silo = object_create(
+    let silo: Silo = object_create(
         client,
         "/v1/system/silos",
         &params::SiloCreate {
@@ -187,7 +188,10 @@ async fn setup_silo_with_quota(
     )
     .await;
 
-    populate_ip_pool(&client, "default", None).await;
+    // create default pool and link to this silo. can't use
+    // create_default_ip_pool because that links to the default silo
+    create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &silo.identity.id, true).await;
 
     // Create a silo user
     let user = create_local_user(

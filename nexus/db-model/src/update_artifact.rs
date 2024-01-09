@@ -14,7 +14,7 @@ use std::io::Write;
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "update_artifact_kind"))]
+    #[diesel(postgres_type(name = "update_artifact_kind", schema = "public"))]
     pub struct KnownArtifactKindEnum;
 
     #[derive(Clone, Copy, Debug, Display, AsExpression, FromSqlRow, PartialEq, Eq, Serialize, Deserialize)]

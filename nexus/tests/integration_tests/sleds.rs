@@ -7,12 +7,12 @@
 use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use nexus_test_interface::NexusServer;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_physical_disk;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::delete_physical_disk;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
@@ -144,7 +144,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
         .is_empty());
 
     // Create an IP pool and project that we'll use for testing.
-    populate_ip_pool(&external_client, "default", None).await;
+    create_default_ip_pool(&external_client).await;
     let project = create_project(&external_client, "test-project").await;
     let instance =
         create_instance(&external_client, "test-project", "test-instance")

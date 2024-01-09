@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "snapshot_state"))]
+    #[diesel(postgres_type(name = "snapshot_state", schema = "public"))]
     pub struct SnapshotStateEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
