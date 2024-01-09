@@ -950,7 +950,7 @@ pub mod test {
                 memory: ByteCount::from_gibibytes_u32(4),
                 hostname: String::from("inst"),
                 user_data: vec![],
-                public_keys: Some(Vec::new()),
+                ssh_keys: Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {

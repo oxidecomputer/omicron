@@ -1120,7 +1120,7 @@ impl super::Nexus {
             .lookup_for(authz::Action::ListChildren)
             .await?;
 
-        let checked_keys = db_instance.public_keys.clone().unwrap_or_default();
+        let checked_keys = db_instance.ssh_keys.clone().unwrap_or_default();
 
         let ssh_keys = self
             .db_datastore
@@ -1137,9 +1137,9 @@ impl super::Nexus {
             .await?
             .into_iter();
 
-        // Returning the intersection of a users public_keys and the
+        // Returning the intersection of a users ssh_keys and the
         // keys that were included in the instance create API request
-        let public_keys: Vec<String> = ssh_keys
+        let ssh_keys: Vec<String> = ssh_keys
             .filter(|ssh_key| {
                 let id_str = ssh_key.id().to_string();
                 let name_str = ssh_key.name().to_string();
@@ -1174,7 +1174,7 @@ impl super::Nexus {
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
-                db_instance.generate_cidata(&public_keys)?,
+                db_instance.generate_cidata(&ssh_keys)?,
             )),
         };
 

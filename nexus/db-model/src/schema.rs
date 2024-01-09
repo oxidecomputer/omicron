@@ -359,7 +359,7 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         user_data -> Binary,
-        public_keys -> Nullable<Array<Text>>,
+        ssh_keys -> Nullable<Array<Text>>,
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,

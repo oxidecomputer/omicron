@@ -156,7 +156,7 @@ async fn test_project_deletion_with_instance(
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: String::from("the_host"),
             user_data: b"none".to_vec(),
-            public_keys: Some(Vec::new()),
+            ssh_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],

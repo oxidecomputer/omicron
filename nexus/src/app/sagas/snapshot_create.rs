@@ -1944,7 +1944,7 @@ mod test {
                 user_data:
                     b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                         .to_vec(),
-                public_keys:  Some(Vec::new()),
+                ssh_keys:  Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 disks: disks_to_attach,

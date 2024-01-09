@@ -948,7 +948,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     boot_on_fault BOOL NOT NULL DEFAULT false,
 
     /* public keys for instance initialization systems (e.g. cloud-init) */
-    public_keys STRING[] NOT NULL
+    ssh_keys STRING[] NOT NULL
 );
 
 -- Names for instances within a project should be unique
