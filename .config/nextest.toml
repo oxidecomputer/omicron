@@ -30,7 +30,7 @@ command = 'cargo run -p crdb-seed --profile test'
 clickhouse-cluster = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary_id(oximeter-db::replicated)'
+filter = 'package(oximeter-db) and test(replicated)'
 test-group = 'clickhouse-cluster'
 
 [[profile.ci.overrides]]
