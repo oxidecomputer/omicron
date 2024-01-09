@@ -827,6 +827,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_ssh_key_by_silo_user ON omicron.public.
 ) WHERE
     time_deleted IS NULL;
 
+/**
+ * Represents the SSH keys copied to an instance at create time by cloud-init.
+ * Entries are added here when an instance is created (with configured SSH keys)
+ * and removed when the instance is destroyed.
+ *
+ * TODO: Should this have time created / time deleted
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.instance_ssh_key (
+    instance_id UUID NOT NULL,
+    ssh_key_id UUID NOT NULL,
+    PRIMARY KEY (instance_id, ssh_key_id)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
     silo_id UUID PRIMARY KEY,
     time_created TIMESTAMPTZ NOT NULL,
@@ -946,9 +959,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL,
     boot_on_fault BOOL NOT NULL DEFAULT false,
-
-    /* public keys for instance initialization systems (e.g. cloud-init) */
-    ssh_keys STRING[] NOT NULL
 );
 
 -- Names for instances within a project should be unique
