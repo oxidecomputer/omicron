@@ -925,6 +925,8 @@ async fn dbinit_equals_sum_of_all_up() {
 type BeforeFn = for<'a> fn(client: &'a Client) -> BoxFuture<'a, ()>;
 type AfterFn = for<'a> fn(client: &'a Client) -> BoxFuture<'a, ()>;
 
+// Describes the operations which we might take before and after
+// migrations to check that they worked.
 struct DataMigrationFns {
     before: Option<BeforeFn>,
     after: AfterFn,
@@ -1026,9 +1028,24 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
 //
+// Each "check" is implemented as a pair of {before, after} migration function
+// pointers, called precisely around the migration under test.
+fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
+    let mut map = BTreeMap::new();
+
+    map.insert(
+        SemverVersion(semver::Version::parse("23.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_23_0_0), after: after_23_0_0 },
+    );
+
+    map
+}
+
+// Performs all schema changes and runs version-specific assertions.
+//
 // HOW TO ADD A MIGRATION CHECK:
-// - Add a new "map.insert" line below, with the semver of the version you'd
-// like to inspect before / after.
+// - Add a new "map.insert" line to "get_migration_checks", with the semver of
+// the version you'd like to inspect before / after.
 // - Define your "before" (optional) and "after" (required) functions. These
 // act on a connection to CockroachDB, and can observe and mutate arbitrary
 // state.
@@ -1044,18 +1061,6 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
 // continues to change (maybe a table you're trying to check gets a new column
 // in a later version), your code should continue operating on the OLD version,
 // and as such, should avoid needing any updates.
-fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
-    let mut map = BTreeMap::new();
-
-    map.insert(
-        SemverVersion(semver::Version::parse("23.0.0").unwrap()),
-        DataMigrationFns { before: Some(before_23_0_0), after: after_23_0_0 },
-    );
-
-    map
-}
-
-// Performs all schema changes and runs version-specific assertions.
 #[tokio::test]
 async fn validate_data_migration() {
     let config = load_test_config();
