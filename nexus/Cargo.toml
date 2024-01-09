@@ -30,6 +30,7 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+illumos-utils.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true

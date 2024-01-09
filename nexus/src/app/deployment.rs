@@ -5,13 +5,18 @@
 //! Configuration of the deployment system
 
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::blueprint_builder::SledInfo;
 use nexus_deployment::planner::Planner;
 use nexus_types::deployment::params;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::ZpoolName;
+use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -21,6 +26,9 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::num::NonZeroU32;
+use std::str::FromStr;
 use uuid::Uuid;
 
 // XXX-dap temporary in-memory store of blueprints, for testing.  This will move
@@ -157,7 +165,72 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<PlanningContext, Error> {
-        todo!(); // XXX-dap this is where we fetch collection, sleds, etc.
+        let limit = NonZeroU32::new(1000).unwrap(); // XXX-dap
+        let creator = self.id.to_string();
+        let datastore = self.datastore();
+        let collection = datastore
+            .inventory_get_latest_collection(opctx, limit)
+            .await?
+            .ok_or_else(|| {
+                Error::unavail("no recent inventory collection available")
+            })?;
+
+        // XXX-dap working here
+        let sled_rows = {
+            let mut all_sleds = Vec::new();
+            let mut paginator = Paginator::new(limit);
+            while let Some(p) = paginator.next() {
+                let batch =
+                    datastore.sled_list(opctx, &p.current_pagparams()).await?;
+                paginator =
+                    p.found_batch(&batch, &|s: &nexus_db_model::Sled| s.id());
+                all_sleds.extend(batch);
+            }
+            all_sleds
+        };
+
+        let mut zpools_by_sled_id = {
+            let mut zpools = BTreeMap::new();
+            let mut paginator = Paginator::new(limit);
+            while let Some(p) = paginator.next() {
+                let batch = datastore
+                    .zpool_list_all_external(opctx, &p.current_pagparams())
+                    .await?;
+                paginator =
+                    p.found_batch(&batch, &|z: &nexus_db_model::Zpool| z.id());
+                for z in batch {
+                    let sled_zpool_names =
+                        zpools.entry(z.sled_id).or_insert_with(BTreeSet::new);
+                    // XXX-dap this seems like slightly gross knowledge.  But
+                    // as far as I can tell: sled agent accepts zpool *names*
+                    // with the list of zones, but it only provides zpool *ids*
+                    // when publishing information about its zpools.  This is
+                    // the same logic that RSS currently uses.
+                    let zpool_name =
+                        illumos_utils::zpool::ZpoolName::new_external(z.id())
+                            .to_string();
+                    // XXX-dap unwrap
+                    sled_zpool_names
+                        .insert(ZpoolName::from_str(&zpool_name).unwrap());
+                }
+            }
+            zpools
+        };
+
+        let sleds = sled_rows
+            .into_iter()
+            .map(|sled_row| {
+                let sled_id = sled_row.id();
+                let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_row.ip());
+                let zpools = zpools_by_sled_id
+                    .remove(&sled_id)
+                    .unwrap_or_else(BTreeSet::new);
+                let sled_info = SledInfo { subnet, zpools };
+                (sled_id, sled_info)
+            })
+            .collect();
+
+        Ok(PlanningContext { collection, creator, sleds })
     }
 
     async fn blueprint_add(

@@ -4796,6 +4796,7 @@ dependencies = [
  "hubtools",
  "hyper",
  "hyper-rustls",
+ "illumos-utils",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
