@@ -173,10 +173,20 @@ pub mod views {
     #[derive(Serialize, JsonSchema)]
     pub struct Blueprint {
         pub id: Uuid,
+        pub parent_blueprint_id: Option<Uuid>,
+        pub time_created: chrono::DateTime<chrono::Utc>,
+        pub creator: String,
+        pub reason: String,
     }
     impl From<super::Blueprint> for Blueprint {
-        fn from(value: super::Blueprint) -> Self {
-            todo!() // XXX-dap
+        fn from(generic: super::Blueprint) -> Self {
+            Blueprint {
+                id: generic.id,
+                parent_blueprint_id: generic.parent_blueprint_id,
+                time_created: generic.time_created,
+                creator: generic.creator,
+                reason: generic.reason,
+            }
         }
     }
 
@@ -208,7 +218,7 @@ pub mod params {
 
     /// Specifies what blueprint, if any, the system should be working toward
     #[derive(Deserialize, JsonSchema)]
-    pub struct BlueprintTarget {
+    pub struct BlueprintTargetSet {
         pub target_id: Uuid,
         pub enabled: bool,
     }

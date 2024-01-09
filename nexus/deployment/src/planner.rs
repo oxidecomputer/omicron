@@ -11,7 +11,6 @@ use crate::blueprint_builder::Error;
 use crate::blueprint_builder::SledInfo;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
-use nexus_types::inventory::Collection;
 use slog::{info, Logger};
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -19,7 +18,6 @@ use uuid::Uuid;
 pub struct Planner<'a> {
     log: Logger,
     parent_blueprint: &'a Blueprint,
-    collection: &'a Collection,
     sleds: &'a BTreeMap<Uuid, SledInfo>,
     blueprint: BlueprintBuilder<'a>,
 }
@@ -28,7 +26,6 @@ impl<'a> Planner<'a> {
     pub fn new_based_on(
         log: Logger,
         parent_blueprint: &'a Blueprint,
-        collection: &'a Collection,
         sleds: &'a BTreeMap<Uuid, SledInfo>,
         creator: &str,
         reason: &str,
@@ -39,7 +36,7 @@ impl<'a> Planner<'a> {
             creator,
             reason,
         );
-        Planner { log, parent_blueprint, collection, sleds, blueprint }
+        Planner { log, parent_blueprint, sleds, blueprint }
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {

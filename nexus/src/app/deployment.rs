@@ -55,18 +55,20 @@ impl super::Nexus {
     pub async fn blueprint_list(
         &self,
         _opctx: &OpContext,
-        _pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Blueprint> {
         // XXX-dap authz check
-        // Since this is just temporary until we have a database impl, ignore
-        // pagination.
         Ok(self
             .blueprints
             .lock()
             .unwrap()
             .all_blueprints
             .values()
-            .cloned()
+            .filter_map(|f| match pagparams.marker {
+                None => Some(f.clone()),
+                Some(marker) if f.id > *marker => Some(f.clone()),
+                _ => None,
+            })
             .collect())
     }
 
@@ -126,7 +128,7 @@ impl super::Nexus {
     pub async fn blueprint_target_set(
         &self,
         _opctx: &OpContext,
-        params: params::BlueprintTarget,
+        params: params::BlueprintTargetSet,
     ) -> Result<BlueprintTarget, Error> {
         // XXX-dap authz check
         let new_target_id = params.target_id;
@@ -175,7 +177,6 @@ impl super::Nexus {
                 Error::unavail("no recent inventory collection available")
             })?;
 
-        // XXX-dap working here
         let sled_rows = {
             let mut all_sleds = Vec::new();
             let mut paginator = Paginator::new(limit);
@@ -235,7 +236,7 @@ impl super::Nexus {
 
     async fn blueprint_add(
         &self,
-        opctx: &OpContext,
+        _opctx: &OpContext,
         blueprint: Blueprint,
     ) -> Result<(), Error> {
         // XXX-dap authz check
@@ -277,7 +278,7 @@ impl super::Nexus {
             let blueprints = self.blueprints.lock().unwrap();
             let Some(target_id) = blueprints.target.target_id else {
                 return Err(Error::conflict(&format!(
-                    "cannot add sled before initial blueprint is created"
+                    "cannot regenerate blueprint without existing target"
                 )));
             };
             blueprints
@@ -290,7 +291,6 @@ impl super::Nexus {
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &parent_blueprint,
-            &planning_context.collection,
             &planning_context.sleds,
             &planning_context.creator,
             // XXX-dap this "reason" was intended for the case where we know why

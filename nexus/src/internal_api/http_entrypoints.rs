@@ -82,7 +82,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_target_view)?;
         api.register(blueprint_target_set)?;
         api.register(blueprint_create_current)?;
-        api.register(blueprint_create_add_sled)?;
+        api.register(blueprint_regenerate)?;
 
         Ok(())
     }
@@ -713,7 +713,7 @@ async fn blueprint_target_view(
 }]
 async fn blueprint_target_set(
     rqctx: RequestContext<Arc<ServerContext>>,
-    target: TypedBody<deployment_params::BlueprintTarget>,
+    target: TypedBody<deployment_params::BlueprintTargetSet>,
 ) -> Result<HttpResponseOk<deployment_views::BlueprintTarget>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -752,7 +752,7 @@ async fn blueprint_create_current(
     method = POST,
     path = "/deployment/blueprints/regenerate",
 }]
-async fn blueprint_create_add_sled(
+async fn blueprint_regenerate(
     rqctx: RequestContext<Arc<ServerContext>>,
 ) -> Result<HttpResponseOk<deployment_views::Blueprint>, HttpError> {
     let apictx = rqctx.context();

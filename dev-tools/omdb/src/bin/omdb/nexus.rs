@@ -11,6 +11,7 @@ use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
+use futures::TryStreamExt;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
@@ -36,6 +37,8 @@ pub struct NexusArgs {
 enum NexusCommands {
     /// print information about background tasks
     BackgroundTasks(BackgroundTasksArgs),
+    /// print information about blueprints
+    Blueprints(BlueprintsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -52,6 +55,34 @@ enum BackgroundTasksCommands {
     List,
     /// Print human-readable summary of the status of each background task
     Show,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintsArgs {
+    #[command(subcommand)]
+    command: BlueprintsCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum BlueprintsCommands {
+    /// List all blueprints
+    List,
+    /// Show a blueprint
+    Show(BlueprintIdArgs),
+    /// Delete a blueprint
+    Delete(BlueprintIdArgs),
+    /// Set the current target blueprint
+    SetTarget(BlueprintIdArgs),
+    /// Generate an initial blueprint from the current state
+    GenerateCurrent,
+    /// Generate a new blueprint
+    Regenerate,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintIdArgs {
+    /// id of a blueprint
+    blueprint_id: Uuid,
 }
 
 impl NexusArgs {
@@ -93,6 +124,25 @@ impl NexusArgs {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Show,
             }) => cmd_nexus_background_tasks_show(&client).await,
+
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command: BlueprintsCommands::List,
+            }) => cmd_nexus_blueprints_list(&client).await,
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command: BlueprintsCommands::Show(args),
+            }) => cmd_nexus_blueprints_show(&client, args).await,
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command: BlueprintsCommands::Delete(args),
+            }) => cmd_nexus_blueprints_delete(&client, args).await,
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command: BlueprintsCommands::SetTarget(args),
+            }) => cmd_nexus_blueprints_set_target(&client, args).await,
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command: BlueprintsCommands::Regenerate,
+            }) => cmd_nexus_blueprints_regenerate(&client).await,
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command: BlueprintsCommands::GenerateCurrent,
+            }) => cmd_nexus_blueprints_generate_current(&client).await,
         }
     }
 }
@@ -628,4 +678,147 @@ fn reason_code(reason: ActivationReason) -> char {
         ActivationReason::Dependency => 'D',
         ActivationReason::Timeout => 'T',
     }
+}
+
+async fn cmd_nexus_blueprints_list(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct BlueprintRow {
+        #[tabled(rename = "T")]
+        is_target: &'static str,
+        id: String,
+        parent: String,
+        reason: String,
+        time_created: String,
+    }
+
+    let target_id = client
+        .blueprint_target_view()
+        .await
+        .context("fetching current target blueprint")?
+        .into_inner()
+        .target_id;
+    let rows: Vec<BlueprintRow> = client
+        .blueprint_list_stream(None, None)
+        .try_collect::<Vec<_>>()
+        .await
+        .context("listing blueprints")?
+        .into_iter()
+        .map(|blueprint| {
+            let is_target = match target_id {
+                Some(target_id) if target_id == blueprint.id => "*",
+                _ => "",
+            };
+
+            BlueprintRow {
+                is_target,
+                id: blueprint.id.to_string(),
+                parent: blueprint
+                    .parent_blueprint_id
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| String::from("<none>")),
+                reason: blueprint.reason,
+                time_created: humantime::format_rfc3339_millis(
+                    blueprint.time_created.into(),
+                )
+                .to_string(),
+            }
+        })
+        .collect();
+
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+    Ok(())
+}
+
+async fn cmd_nexus_blueprints_show(
+    client: &nexus_client::Client,
+    args: &BlueprintIdArgs,
+) -> Result<(), anyhow::Error> {
+    let blueprint = client
+        .blueprint_view(&args.blueprint_id)
+        .await
+        .with_context(|| format!("fetching blueprint {}", args.blueprint_id))?;
+    println!("blueprint  {}", blueprint.id);
+    println!(
+        "parent:    {}",
+        blueprint
+            .parent_blueprint_id
+            .map(|u| u.to_string())
+            .unwrap_or_else(|| String::from("<none>"))
+    );
+    println!(
+        "created by {}{}",
+        blueprint.creator,
+        if blueprint.creator.parse::<Uuid>().is_ok() {
+            " (likely a Nexus instance)"
+        } else {
+            ""
+        }
+    );
+    println!(
+        "created at {}",
+        humantime::format_rfc3339_millis(blueprint.time_created.into(),)
+    );
+    println!("created for: {}", blueprint.reason,);
+
+    Ok(())
+}
+
+async fn cmd_nexus_blueprints_delete(
+    client: &nexus_client::Client,
+    args: &BlueprintIdArgs,
+) -> Result<(), anyhow::Error> {
+    let _ = client
+        .blueprint_delete(&args.blueprint_id)
+        .await
+        .with_context(|| format!("deleting blueprint {}", args.blueprint_id))?;
+    println!("blueprint {} deleted", args.blueprint_id);
+    Ok(())
+}
+
+// XXX-dap add "diff" command?
+
+async fn cmd_nexus_blueprints_set_target(
+    client: &nexus_client::Client,
+    args: &BlueprintIdArgs,
+) -> Result<(), anyhow::Error> {
+    client
+        .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
+            target_id: args.blueprint_id,
+            // XXX-dap ideally keep existing value
+            enabled: true,
+        })
+        .await
+        .with_context(|| {
+            format!("setting target to blueprint {}", args.blueprint_id)
+        })?;
+    eprintln!("set target blueprint to {}", args.blueprint_id);
+    Ok(())
+}
+
+async fn cmd_nexus_blueprints_generate_current(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let blueprint = client
+        .blueprint_create_current()
+        .await
+        .context("creating blueprint from current state")?;
+    eprintln!("created blueprint {} from current state", blueprint.id);
+    Ok(())
+}
+
+async fn cmd_nexus_blueprints_regenerate(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let blueprint =
+        client.blueprint_regenerate().await.context("generating blueprint")?;
+    eprintln!("generated new blueprint {}", blueprint.id);
+    Ok(())
 }
