@@ -96,9 +96,9 @@ impl super::Nexus {
         // but for now, connections to sled agents are constructed
         // on an "as requested" basis.
         //
-        // Franky, returning an "Arc" here without a connection pool is a little
-        // silly; it's not actually used if each client connection exists as a
-        // one-shot.
+        // Frankly, returning an "Arc" here without a connection pool is a
+        // little silly; it's not actually used if each client connection exists
+        // as a one-shot.
         let (.., sled) =
             self.sled_lookup(&self.opctx_alloc, id)?.fetch().await?;
 

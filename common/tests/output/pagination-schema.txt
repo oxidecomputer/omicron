@@ -139,7 +139,7 @@ schema for pagination parameters: page selector, scan by name only
       "type": "string",
       "maxLength": 63,
       "minLength": 1,
-      "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$"
+      "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$"
     },
     "NameSortMode": {
       "description": "Supported set of sort modes for scanning by name only\n\nCurrently, we only support scanning in ascending order.",
@@ -228,7 +228,7 @@ schema for pagination parameters: page selector, scan by name or id
       "type": "string",
       "maxLength": 63,
       "minLength": 1,
-      "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$"
+      "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$"
     },
     "NameOrId": {
       "oneOf": [

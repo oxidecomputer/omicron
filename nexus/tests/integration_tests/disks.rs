@@ -18,12 +18,12 @@ use nexus_test_utils::http_testing::Collection;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -95,8 +95,8 @@ fn get_disk_detach_url(instance: &NameOrId) -> String {
     }
 }
 
-async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    populate_ip_pool(&client, "default", None).await;
+async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
@@ -107,7 +107,7 @@ async fn test_disk_not_found_before_creation(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // List disks.  There aren't any yet.
@@ -186,7 +186,7 @@ async fn test_disk_create_attach_detach_delete(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    let project_id = create_org_and_project(client).await;
+    let project_id = create_project_and_pool(client).await;
     let nexus = &cptestctx.server.apictx().nexus;
     let disks_url = get_disks_url();
 
@@ -315,7 +315,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -360,7 +360,7 @@ async fn test_disk_create_disk_that_already_exists_fails(
 async fn test_disk_slot_assignment(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let nexus = &cptestctx.server.apictx().nexus;
 
     let disk_names = ["a", "b", "c", "d"];
@@ -467,7 +467,7 @@ async fn test_disk_move_between_instances(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     let disks_url = get_disks_url();
 
     // Create a disk.
@@ -670,7 +670,7 @@ async fn test_disk_creation_region_requested_then_started(
 ) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always *start* as
@@ -689,7 +689,7 @@ async fn test_disk_region_creation_failure(
 ) {
     let client = &cptestctx.external_client;
     let test = DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Before we create a disk, set the response from the Crucible Agent:
     // no matter what regions get requested, they'll always fail.
@@ -745,7 +745,7 @@ async fn test_disk_invalid_block_size_rejected(
 ) {
     let client = &cptestctx.external_client;
     let _test = DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from_gibibytes_u32(3);
@@ -788,7 +788,7 @@ async fn test_disk_reject_total_size_not_divisible_by_block_size(
 ) {
     let client = &cptestctx.external_client;
     let _test = DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Attempt to allocate the disk, observe a server error.
     let disk_size = ByteCount::from(3 * 1024 * 1024 * 1024 + 256);
@@ -829,7 +829,7 @@ async fn test_disk_reject_total_size_less_than_min_disk_size_bytes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disk_size = ByteCount::from(MIN_DISK_SIZE_BYTES / 2);
 
@@ -871,7 +871,7 @@ async fn test_disk_reject_total_size_greater_than_max_disk_size_bytes(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disk_size =
         ByteCount::try_from(MAX_DISK_SIZE_BYTES + (1 << 30)).unwrap();
@@ -916,7 +916,7 @@ async fn test_disk_reject_total_size_not_divisible_by_min_disk_size(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     let disk_size = ByteCount::from(1024 * 1024 * 1024 + 512);
 
@@ -971,7 +971,7 @@ async fn test_disk_backed_by_multiple_region_sets(
     test.add_zpool_with_dataset(cptestctx, 10).await;
     test.add_zpool_with_dataset(cptestctx, 10).await;
 
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Ask for a 20 gibibyte disk.
     let disk_size = ByteCount::from_gibibytes_u32(20);
@@ -1004,7 +1004,7 @@ async fn test_disk_backed_by_multiple_region_sets(
 async fn test_disk_too_big(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
@@ -1044,7 +1044,7 @@ async fn test_disk_virtual_provisioning_collection(
 
     let _test = DiskTest::new(&cptestctx).await;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(client).await;
     let project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
     let project_id2 = create_project(client, PROJECT_NAME_2).await.identity.id;
 
@@ -1245,15 +1245,14 @@ async fn test_disk_virtual_provisioning_collection(
 async fn test_disk_virtual_provisioning_collection_failed_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
-    // Confirm that there's a panic deleting a project if a disk deletion fails
+    // Confirm that there's no panic deleting a project if a disk deletion fails
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.apictx().nexus;
     let datastore = nexus.datastore();
 
     let disk_test = DiskTest::new(&cptestctx).await;
 
-    populate_ip_pool(&client, "default", None).await;
-    let project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
+    let project_id1 = create_project_and_pool(client).await;
 
     let opctx =
         OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
@@ -1271,6 +1270,7 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         },
         size: disk_size,
     };
+
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &disks_url)
             .body(Some(&disk_one))
@@ -1280,6 +1280,11 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     .execute()
     .await
     .expect("unexpected failure creating 1 GiB disk");
+
+    // Get the disk
+    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
 
     // Assert correct virtual provisioning collection numbers
     let virtual_provisioning_collection = datastore
@@ -1302,8 +1307,6 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         .await;
 
     // Delete the disk - expect this to fail
-    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
-
     NexusRequest::new(
         RequestBuilder::new(client, Method::DELETE, &disk_url)
             .expect_status(Some(StatusCode::INTERNAL_SERVER_ERROR)),
@@ -1323,7 +1326,12 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
         disk_size
     );
 
-    // And the disk is now faulted
+    // And the disk is now faulted. The name will have changed due to the
+    // "undelete and fault" function.
+    let disk_url = format!(
+        "/v1/disks/deleted-{}?project={}",
+        disk.identity.id, PROJECT_NAME
+    );
     let disk = disk_get(&client, &disk_url).await;
     assert_eq!(disk.state, DiskState::Faulted);
 
@@ -1373,6 +1381,129 @@ async fn test_disk_virtual_provisioning_collection_failed_delete(
     .expect("unexpected failure deleting project");
 }
 
+#[nexus_test]
+async fn test_phantom_disk_rename(cptestctx: &ControlPlaneTestContext) {
+    // Confirm that phantom disks are renamed when they are un-deleted and
+    // faulted
+
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+
+    let _disk_test = DiskTest::new(&cptestctx).await;
+
+    let _project_id1 = create_project(client, PROJECT_NAME).await.identity.id;
+
+    // Create a 1 GB disk
+    let disk_size = ByteCount::from_gibibytes_u32(1);
+    let disks_url = get_disks_url();
+    let disk_one = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk-one".parse().unwrap(),
+            description: String::from("sells rainsticks"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: disk_size,
+    };
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+
+    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
+
+    // Confirm it's there
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    let original_disk_id = disk.identity.id;
+
+    // Now, request disk delete
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting 1 GiB disk");
+
+    // It's gone!
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::GET, &disk_url)
+            .expect_status(Some(StatusCode::NOT_FOUND)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected success finding 1 GiB disk");
+
+    // Create a new disk with the same name
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk_one))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure creating 1 GiB disk");
+
+    // Confirm it's there
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    // Confirm it's not the same disk
+    let new_disk_id = disk.identity.id;
+    assert_ne!(original_disk_id, new_disk_id);
+
+    // Un-delete the original and set it to faulted
+    datastore
+        .project_undelete_disk_set_faulted_no_auth(&original_disk_id)
+        .await
+        .unwrap();
+
+    // The original disk is now faulted
+    let disk_url = format!(
+        "/v1/disks/deleted-{}?project={}",
+        original_disk_id, PROJECT_NAME
+    );
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Faulted);
+
+    // Make sure original can still be deleted
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting 1 GiB disk");
+
+    // Make sure new can be deleted too
+    let disk_url = format!("/v1/disks/{}?project={}", "disk-one", PROJECT_NAME);
+    let disk = disk_get(&client, &disk_url).await;
+    assert_eq!(disk.state, DiskState::Detached);
+
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::DELETE, &disk_url)
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("unexpected failure deleting 1 GiB disk");
+}
+
 // Test disk size accounting
 #[nexus_test]
 async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
@@ -1386,7 +1517,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
     // Assert default is still 10 GiB
     assert_eq!(10, DiskTest::DEFAULT_ZPOOL_SIZE_GIB);
 
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Total occupied size should start at 0
     for zpool in &test.zpools {
@@ -1555,7 +1686,7 @@ async fn test_multiple_disks_multiple_zpools(
     test.add_zpool_with_dataset(cptestctx, 10).await;
     test.add_zpool_with_dataset(cptestctx, 10).await;
 
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Ask for a 10 gibibyte disk, this should succeed
     let disk_size = ByteCount::from_gibibytes_u32(10);
@@ -1632,7 +1763,7 @@ async fn test_disk_metrics(cptestctx: &ControlPlaneTestContext) {
     let oximeter = &cptestctx.oximeter;
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    let project_id = create_org_and_project(client).await;
+    let project_id = create_project_and_pool(client).await;
     let disk = create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     oximeter.force_collect().await;
 
@@ -1705,7 +1836,7 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
 
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     create_disk(&client, PROJECT_NAME, DISK_NAME).await;
     create_instance_with_disk(client).await;
 
@@ -1767,7 +1898,7 @@ async fn test_disk_metrics_paginated(cptestctx: &ControlPlaneTestContext) {
 async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     let new_disk = params::DiskCreate {
@@ -1810,7 +1941,7 @@ async fn test_project_delete_disk_no_auth_idempotent(
 ) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Create a disk
     let disks_url = get_disks_url();

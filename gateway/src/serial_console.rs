@@ -5,6 +5,7 @@
 // Copyright 2022 Oxide Computer Company
 
 use crate::error::SpCommsError;
+use crate::SpIdentifier;
 use dropshot::WebsocketChannelResult;
 use dropshot::WebsocketConnection;
 use futures::stream::SplitSink;
@@ -19,6 +20,7 @@ use slog::error;
 use slog::info;
 use slog::warn;
 use slog::Logger;
+use slog_error_chain::SlogInlineError;
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::ops::DerefMut;
@@ -34,7 +36,7 @@ use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::WebSocketStream;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, SlogInlineError)]
 enum SerialTaskError {
     #[error(transparent)]
     SpCommsError(#[from] SpCommsError),
@@ -43,6 +45,7 @@ enum SerialTaskError {
 }
 
 pub(crate) async fn run(
+    sp: SpIdentifier,
     console: AttachedSerialConsole,
     conn: WebsocketConnection,
     log: Logger,
@@ -80,7 +83,7 @@ pub(crate) async fn run(
     let (console_tx, mut console_rx) = console.split();
     let console_tx = DetachOnDrop::new(console_tx);
     let mut ws_recv_handle =
-        tokio::spawn(ws_recv_task(ws_stream, console_tx, log.clone()));
+        tokio::spawn(ws_recv_task(sp, ws_stream, console_tx, log.clone()));
 
     loop {
         tokio::select! {
@@ -112,7 +115,9 @@ pub(crate) async fn run(
                             Ok(()) => (),
                             Err(TrySendError::Full(data)) => {
                                 warn!(
-                                    log, "channel full; discarding serial console data from SP";
+                                    log,
+                                    "channel full; discarding serial \
+                                     console data from SP";
                                     "length" => data.len(),
                                 );
                             }
@@ -160,6 +165,7 @@ async fn ws_sink_task(
 }
 
 async fn ws_recv_task(
+    sp: SpIdentifier,
     mut ws_stream: SplitStream<WebSocketStream<Upgraded>>,
     mut console_tx: DetachOnDrop,
     log: Logger,
@@ -175,7 +181,7 @@ async fn ws_recv_task(
                         console_tx
                             .write(data)
                             .await
-                            .map_err(SpCommsError::from)?;
+                            .map_err(|err| SpCommsError::SpCommunicationFailed { sp, err })?;
                         keepalive.reset();
                     }
                     Some(Ok(Message::Close(_))) | None => {
@@ -194,7 +200,7 @@ async fn ws_recv_task(
             }
 
             _= keepalive.tick() => {
-                console_tx.keepalive().await.map_err(SpCommsError::from)?;
+                console_tx.keepalive().await.map_err(|err| SpCommsError::SpCommunicationFailed { sp, err })?;
             }
         }
     }

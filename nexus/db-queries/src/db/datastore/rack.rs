@@ -753,36 +753,37 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        let internal_pool = db::model::IpPool::new(
-            &IdentityMetadataCreateParams {
+        let internal_pool =
+            db::model::IpPool::new(&IdentityMetadataCreateParams {
                 name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
-            },
-            Some(*INTERNAL_SILO_ID),
-            true, // default for internal silo
-        );
+            });
 
-        self.ip_pool_create(opctx, internal_pool).await.map(|_| ()).or_else(
-            |e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
-                _ => Err(e),
-            },
-        )?;
+        let internal_pool_id = internal_pool.id();
 
-        let default_pool = db::model::IpPool::new(
-            &IdentityMetadataCreateParams {
-                name: "default".parse::<Name>().unwrap(),
-                description: String::from("default IP pool"),
-            },
-            None, // no silo ID, fleet scoped
-            true, // default for fleet
-        );
-        self.ip_pool_create(opctx, default_pool).await.map(|_| ()).or_else(
-            |e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
+        let internal_created = self
+            .ip_pool_create(opctx, internal_pool)
+            .await
+            .map(|_| true)
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(false),
                 _ => Err(e),
-            },
-        )?;
+            })?;
+
+        // make default for the internal silo. only need to do this if
+        // the create went through, i.e., if it wasn't already there
+        if internal_created {
+            self.ip_pool_link_silo(
+                opctx,
+                db::model::IpPoolResource {
+                    ip_pool_id: internal_pool_id,
+                    resource_type: db::model::IpPoolResourceType::Silo,
+                    resource_id: *INTERNAL_SILO_ID,
+                    is_default: true,
+                },
+            )
+            .await?;
+        }
 
         Ok(())
     }
@@ -912,6 +913,8 @@ mod test {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),
                     },
+                    // Set a default quota of a half rack's worth of resources
+                    quotas: external_params::SiloQuotasCreate::arbitrarily_high_default(),
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
@@ -1327,7 +1330,7 @@ mod test {
         // been allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        assert_eq!(svc_pool.silo_id, Some(*INTERNAL_SILO_ID));
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1529,7 +1532,7 @@ mod test {
         // allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        assert_eq!(svc_pool.silo_id, Some(*INTERNAL_SILO_ID));
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);

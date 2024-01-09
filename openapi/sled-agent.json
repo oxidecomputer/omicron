@@ -415,6 +415,30 @@
         }
       }
     },
+    "/inventory": {
+      "get": {
+        "summary": "Fetch basic information about this sled",
+        "operationId": "inventory",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inventory"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/metrics/collect/{producer_id}": {
       "get": {
         "summary": "Collect oximeter samples from the sled agent.",
@@ -576,7 +600,7 @@
     "/sleds": {
       "put": {
         "summary": "Add a sled to a rack that was already initialized via RSS",
-        "operationId": "add_sled_to_initialized_rack",
+        "operationId": "sled_add",
         "requestBody": {
           "content": {
             "application/json": {
@@ -4916,6 +4940,45 @@
           }
         }
       },
+      "Inventory": {
+        "description": "Identity and basic status information about this sled agent",
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "reservoir_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "sled_agent_address": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sled_role": {
+            "$ref": "#/components/schemas/SledRole"
+          },
+          "usable_hardware_threads": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "usable_physical_ram": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "baseboard",
+          "reservoir_size",
+          "sled_agent_address",
+          "sled_id",
+          "sled_role",
+          "usable_hardware_threads",
+          "usable_physical_ram"
+        ]
+      },
       "IpNet": {
         "oneOf": [
           {
@@ -5209,6 +5272,20 @@
               "content",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_timeseries_name"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
         ]
       },
@@ -5232,7 +5309,7 @@
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
         "type": "string",
-        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
       },
@@ -6140,6 +6217,7 @@
         ]
       },
       "SledRole": {
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
           {
             "description": "The sled is a general compute sled.",

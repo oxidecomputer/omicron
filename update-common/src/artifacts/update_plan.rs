@@ -8,12 +8,12 @@
 //! apply to which components; the ordering and application of the plan lives
 //! elsewhere.
 
-use super::error::RepositoryError;
-use super::extracted_artifacts::ExtractedArtifacts;
-use super::extracted_artifacts::HashingNamedUtf8TempFile;
 use super::ArtifactIdData;
 use super::Board;
 use super::ExtractedArtifactDataHandle;
+use super::ExtractedArtifacts;
+use super::HashingNamedUtf8TempFile;
+use crate::errors::RepositoryError;
 use bytes::Bytes;
 use futures::Stream;
 use futures::StreamExt;
@@ -34,21 +34,20 @@ use std::io;
 use tufaceous_lib::HostPhaseImages;
 use tufaceous_lib::RotArchives;
 
-/// The update plan currently in effect.
-///
-/// Exposed for testing.
+/// Artifacts with their hashes and sources, as obtained from an uploaded
+/// repository.
 #[derive(Debug, Clone)]
 pub struct UpdatePlan {
-    pub(crate) system_version: SemverVersion,
-    pub(crate) gimlet_sp: BTreeMap<Board, ArtifactIdData>,
-    pub(crate) gimlet_rot_a: Vec<ArtifactIdData>,
-    pub(crate) gimlet_rot_b: Vec<ArtifactIdData>,
-    pub(crate) psc_sp: BTreeMap<Board, ArtifactIdData>,
-    pub(crate) psc_rot_a: Vec<ArtifactIdData>,
-    pub(crate) psc_rot_b: Vec<ArtifactIdData>,
-    pub(crate) sidecar_sp: BTreeMap<Board, ArtifactIdData>,
-    pub(crate) sidecar_rot_a: Vec<ArtifactIdData>,
-    pub(crate) sidecar_rot_b: Vec<ArtifactIdData>,
+    pub system_version: SemverVersion,
+    pub gimlet_sp: BTreeMap<Board, ArtifactIdData>,
+    pub gimlet_rot_a: Vec<ArtifactIdData>,
+    pub gimlet_rot_b: Vec<ArtifactIdData>,
+    pub psc_sp: BTreeMap<Board, ArtifactIdData>,
+    pub psc_rot_a: Vec<ArtifactIdData>,
+    pub psc_rot_b: Vec<ArtifactIdData>,
+    pub sidecar_sp: BTreeMap<Board, ArtifactIdData>,
+    pub sidecar_rot_a: Vec<ArtifactIdData>,
+    pub sidecar_rot_b: Vec<ArtifactIdData>,
 
     // Note: The Trampoline image is broken into phase1/phase2 as part of our
     // update plan (because they go to different destinations), but the two
@@ -58,21 +57,17 @@ pub struct UpdatePlan {
     // The same would apply to the host phase1/phase2, but we don't actually
     // need the `host_phase_2` data as part of this plan (we serve it from the
     // artifact server instead).
-    pub(crate) host_phase_1: ArtifactIdData,
-    pub(crate) trampoline_phase_1: ArtifactIdData,
-    pub(crate) trampoline_phase_2: ArtifactIdData,
+    pub host_phase_1: ArtifactIdData,
+    pub trampoline_phase_1: ArtifactIdData,
+    pub trampoline_phase_2: ArtifactIdData,
 
     // We need to send installinator the hash of the host_phase_2 data it should
     // fetch from us; we compute it while generating the plan.
-    //
-    // This is exposed for testing.
     pub host_phase_2_hash: ArtifactHash,
 
     // We also need to send installinator the hash of the control_plane image it
     // should fetch from us. This is already present in the TUF repository, but
     // we record it here for use by the update process.
-    //
-    // This is exposed for testing.
     pub control_plane_hash: ArtifactHash,
 }
 
@@ -81,7 +76,7 @@ pub struct UpdatePlan {
 /// [`UpdatePlanBuilder::build()`] will (fallibly) convert from the builder to
 /// the final plan.
 #[derive(Debug)]
-pub(super) struct UpdatePlanBuilder<'a> {
+pub struct UpdatePlanBuilder<'a> {
     // fields that mirror `UpdatePlan`
     system_version: SemverVersion,
     gimlet_sp: BTreeMap<Board, ArtifactIdData>,
@@ -118,7 +113,7 @@ pub(super) struct UpdatePlanBuilder<'a> {
 }
 
 impl<'a> UpdatePlanBuilder<'a> {
-    pub(super) fn new(
+    pub fn new(
         system_version: SemverVersion,
         log: &'a Logger,
     ) -> Result<Self, RepositoryError> {
@@ -145,7 +140,7 @@ impl<'a> UpdatePlanBuilder<'a> {
         })
     }
 
-    pub(super) async fn add_artifact(
+    pub async fn add_artifact(
         &mut self,
         artifact_id: ArtifactId,
         artifact_hash: ArtifactHash,
@@ -665,7 +660,7 @@ impl<'a> UpdatePlanBuilder<'a> {
         Ok((image1, image2))
     }
 
-    pub(super) fn build(self) -> Result<UpdatePlan, RepositoryError> {
+    pub fn build(self) -> Result<UpdatePlan, RepositoryError> {
         // Ensure our multi-board-supporting kinds have at least one board
         // present.
         for (kind, no_artifacts) in [

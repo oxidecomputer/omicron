@@ -78,7 +78,7 @@ fn rss_config() -> Result<SetupServiceConfig> {
     let content =
         std::fs::read_to_string(&path).unwrap_or(RSS_CONFIG_STR.to_string());
     toml::from_str(&content)
-        .with_context(|| format!("parsing config-rss as TOML"))
+        .with_context(|| "parsing config-rss as TOML".to_string())
 }
 
 fn nexus_external_dns_name(config: &SetupServiceConfig) -> String {
@@ -286,6 +286,10 @@ impl ClientParams {
             .timeout(Duration::from_secs(60))
             .build()?;
         Ok(Client::new_with_client(&base_url, reqwest_client))
+    }
+
+    pub fn silo_name(&self) -> String {
+        self.rss_config.recovery_silo.silo_name.to_string()
     }
 }
 

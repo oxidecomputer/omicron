@@ -12,7 +12,6 @@ use crate::FieldSource;
 use crate::Metric;
 use crate::Target;
 use crate::TimeseriesKey;
-use crate::TimeseriesName;
 use crate::TimeseriesSchema;
 use bytes::Bytes;
 use chrono::DateTime;
@@ -118,7 +117,7 @@ impl From<DbFieldList> for BTreeSet<FieldSchema> {
             .zip(list.sources)
             .map(|((name, ty), source)| FieldSchema {
                 name,
-                ty: ty.into(),
+                field_type: ty.into(),
                 source: source.into(),
             })
             .collect()
@@ -131,8 +130,8 @@ impl From<BTreeSet<FieldSchema>> for DbFieldList {
         let mut types = Vec::with_capacity(list.len());
         let mut sources = Vec::with_capacity(list.len());
         for field in list.into_iter() {
-            names.push(field.name);
-            types.push(field.ty.into());
+            names.push(field.name.to_string());
+            types.push(field.field_type.into());
             sources.push(field.source.into());
         }
         DbFieldList { names, types, sources }
@@ -1233,70 +1232,6 @@ pub(crate) fn unroll_measurement_row_impl(
     }
 }
 
-/// Return the schema for a `Sample`.
-pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
-    // The fields are iterated through whatever order the `Target` or `Metric`
-    // impl chooses. We'll store in a set ordered by field name, to ignore the
-    // declaration order.
-    let created = Utc::now();
-    let field_schema = sample
-        .target_fields()
-        .map(|field| FieldSchema {
-            name: field.name.clone(),
-            ty: field.value.field_type(),
-            source: FieldSource::Target,
-        })
-        .chain(sample.metric_fields().map(|field| FieldSchema {
-            name: field.name.clone(),
-            ty: field.value.field_type(),
-            source: FieldSource::Metric,
-        }))
-        .collect();
-    TimeseriesSchema {
-        timeseries_name: TimeseriesName::try_from(
-            sample.timeseries_name.as_str(),
-        )
-        .expect("Failed to parse timeseries name"),
-        field_schema,
-        datum_type: sample.measurement.datum_type(),
-        created,
-    }
-}
-
-/// Return the schema for a `Target` and `Metric`
-pub(crate) fn schema_for_parts<T, M>(target: &T, metric: &M) -> TimeseriesSchema
-where
-    T: traits::Target,
-    M: traits::Metric,
-{
-    let make_field_schema = |name: &str,
-                             value: FieldValue,
-                             source: FieldSource| {
-        FieldSchema { name: name.to_string(), ty: value.field_type(), source }
-    };
-    let target_field_schema =
-        target.field_names().iter().zip(target.field_values());
-    let metric_field_schema =
-        metric.field_names().iter().zip(metric.field_values());
-    let field_schema = target_field_schema
-        .map(|(name, value)| {
-            make_field_schema(name, value, FieldSource::Target)
-        })
-        .chain(metric_field_schema.map(|(name, value)| {
-            make_field_schema(name, value, FieldSource::Metric)
-        }))
-        .collect();
-    TimeseriesSchema {
-        timeseries_name: TimeseriesName::try_from(oximeter::timeseries_name(
-            target, metric,
-        ))
-        .expect("Failed to parse timeseries name"),
-        field_schema,
-        datum_type: metric.datum_type(),
-        created: Utc::now(),
-    }
-}
-
 // A scalar timestamped sample from a gauge timeseries, as extracted from a query to the database.
 #[derive(Debug, Clone, Deserialize)]
 struct DbTimeseriesScalarGaugeSample<T> {
@@ -1669,11 +1604,10 @@ pub(crate) fn parse_field_select_row(
         "Expected pairs of (field_name, field_value) from the field query"
     );
     let (target_name, metric_name) = schema.component_names();
-    let mut n_fields = 0;
     let mut target_fields = Vec::new();
     let mut metric_fields = Vec::new();
     let mut actual_fields = row.fields.values();
-    while n_fields < schema.field_schema.len() {
+    for _ in 0..schema.field_schema.len() {
         // Extract the field name from the row and find a matching expected field.
         let actual_field_name = actual_fields
             .next()
@@ -1682,7 +1616,7 @@ pub(crate) fn parse_field_select_row(
             .as_str()
             .expect("Expected a string field name")
             .to_string();
-        let expected_field = schema.field_schema(&name).expect(
+        let expected_field = schema.schema_for_field(&name).expect(
             "Found field with name that is not part of the timeseries schema",
         );
 
@@ -1690,7 +1624,7 @@ pub(crate) fn parse_field_select_row(
         let actual_field_value = actual_fields
             .next()
             .expect("Missing a field value from a field select query");
-        let value = match expected_field.ty {
+        let value = match expected_field.field_type {
             FieldType::Bool => {
                 FieldValue::Bool(bool::from(DbBool::from(
                     actual_field_value
@@ -1797,7 +1731,6 @@ pub(crate) fn parse_field_select_row(
             FieldSource::Target => target_fields.push(field),
             FieldSource::Metric => metric_fields.push(field),
         }
-        n_fields += 1;
     }
     (
         row.timeseries_key,
@@ -1874,12 +1807,12 @@ mod tests {
         let list: BTreeSet<_> = [
             FieldSchema {
                 name: String::from("field0"),
-                ty: FieldType::I64,
+                field_type: FieldType::I64,
                 source: FieldSource::Target,
             },
             FieldSchema {
                 name: String::from("field1"),
-                ty: FieldType::IpAddr,
+                field_type: FieldType::IpAddr,
                 source: FieldSource::Metric,
             },
         ]

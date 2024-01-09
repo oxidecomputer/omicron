@@ -36,12 +36,20 @@ use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
+use nexus_db_model::InvOmicronZone;
+use nexus_db_model::InvOmicronZoneNic;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
+use nexus_db_model::InvSledAgent;
+use nexus_db_model::InvSledOmicronZones;
 use nexus_db_model::RotPageWhichEnum;
+use nexus_db_model::SledRole;
+use nexus_db_model::SledRoleEnum;
 use nexus_db_model::SpType;
 use nexus_db_model::SpTypeEnum;
+use nexus_db_model::SqlU16;
+use nexus_db_model::SqlU32;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_types::inventory::BaseboardId;
@@ -108,6 +116,55 @@ impl DataStore {
                 ))
             })
             .collect::<Result<Vec<_>, Error>>()?;
+        // Partition the sled agents into those with an associated baseboard id
+        // and those without one.  We handle these pretty differently.
+        let (sled_agents_baseboards, sled_agents_no_baseboards): (
+            Vec<_>,
+            Vec<_>,
+        ) = collection
+            .sled_agents
+            .values()
+            .partition(|sled_agent| sled_agent.baseboard_id.is_some());
+        let sled_agents_no_baseboards = sled_agents_no_baseboards
+            .into_iter()
+            .map(|sled_agent| {
+                assert!(sled_agent.baseboard_id.is_none());
+                InvSledAgent::new_without_baseboard(collection_id, sled_agent)
+                    .map_err(|e| Error::internal_error(&e.to_string()))
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+
+        let sled_omicron_zones = collection
+            .omicron_zones
+            .values()
+            .map(|found| InvSledOmicronZones::new(collection_id, found))
+            .collect::<Vec<_>>();
+        let omicron_zones = collection
+            .omicron_zones
+            .values()
+            .flat_map(|found| {
+                found.zones.zones.iter().map(|found_zone| {
+                    InvOmicronZone::new(
+                        collection_id,
+                        found.sled_id,
+                        found_zone,
+                    )
+                    .map_err(|e| Error::internal_error(&e.to_string()))
+                })
+            })
+            .collect::<Result<Vec<_>, Error>>()?;
+        let omicron_zone_nics = collection
+            .omicron_zones
+            .values()
+            .flat_map(|found| {
+                found.zones.zones.iter().filter_map(|found_zone| {
+                    InvOmicronZoneNic::new(collection_id, found_zone)
+                        .with_context(|| format!("zone {:?}", found_zone.id))
+                        .map_err(|e| Error::internal_error(&format!("{:#}", e)))
+                        .transpose()
+                })
+            })
+            .collect::<Result<Vec<InvOmicronZoneNic>, _>>()?;
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -573,6 +630,137 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for the sled agents that we found.  In practice, we'd
+            // expect these to all have baseboards (if using Oxide hardware) or
+            // none have baseboards (if not).
+            {
+                use db::schema::hw_baseboard_id::dsl as baseboard_dsl;
+                use db::schema::inv_sled_agent::dsl as sa_dsl;
+
+                // For sleds with a real baseboard id, we have to use the
+                // `INSERT INTO ... SELECT` pattern that we used for other types
+                // of rows above to pull in the baseboard id's uuid.
+                for sled_agent in &sled_agents_baseboards {
+                    let baseboard_id = sled_agent.baseboard_id.as_ref().expect(
+                        "already selected only sled agents with baseboards",
+                    );
+                    let selection = db::schema::hw_baseboard_id::table
+                        .select((
+                            collection_id.into_sql::<diesel::sql_types::Uuid>(),
+                            sled_agent
+                                .time_collected
+                                .into_sql::<diesel::sql_types::Timestamptz>(),
+                            sled_agent
+                                .source
+                                .clone()
+                                .into_sql::<diesel::sql_types::Text>(),
+                            sled_agent
+                                .sled_id
+                                .into_sql::<diesel::sql_types::Uuid>(),
+                            baseboard_dsl::id.nullable(),
+                            nexus_db_model::ipv6::Ipv6Addr::from(
+                                sled_agent.sled_agent_address.ip(),
+                            )
+                            .into_sql::<diesel::sql_types::Inet>(),
+                            SqlU16(sled_agent.sled_agent_address.port())
+                                .into_sql::<diesel::sql_types::Int4>(),
+                            SledRole::from(sled_agent.sled_role)
+                                .into_sql::<SledRoleEnum>(),
+                            SqlU32(sled_agent.usable_hardware_threads)
+                                .into_sql::<diesel::sql_types::Int8>(),
+                            nexus_db_model::ByteCount::from(
+                                sled_agent.usable_physical_ram,
+                            )
+                            .into_sql::<diesel::sql_types::Int8>(),
+                            nexus_db_model::ByteCount::from(
+                                sled_agent.reservoir_size,
+                            )
+                            .into_sql::<diesel::sql_types::Int8>(),
+                        ))
+                        .filter(
+                            baseboard_dsl::part_number
+                                .eq(baseboard_id.part_number.clone()),
+                        )
+                        .filter(
+                            baseboard_dsl::serial_number
+                                .eq(baseboard_id.serial_number.clone()),
+                        );
+
+                    let _ =
+                        diesel::insert_into(db::schema::inv_sled_agent::table)
+                            .values(selection)
+                            .into_columns((
+                                sa_dsl::inv_collection_id,
+                                sa_dsl::time_collected,
+                                sa_dsl::source,
+                                sa_dsl::sled_id,
+                                sa_dsl::hw_baseboard_id,
+                                sa_dsl::sled_agent_ip,
+                                sa_dsl::sled_agent_port,
+                                sa_dsl::sled_role,
+                                sa_dsl::usable_hardware_threads,
+                                sa_dsl::usable_physical_ram,
+                                sa_dsl::reservoir_size,
+                            ))
+                            .execute_async(&conn)
+                            .await?;
+
+                    // See the comment in the earlier block (where we use
+                    // `inv_service_processor::all_columns()`).  The same
+                    // applies here.
+                    let (
+                        _inv_collection_id,
+                        _time_collected,
+                        _source,
+                        _sled_id,
+                        _hw_baseboard_id,
+                        _sled_agent_ip,
+                        _sled_agent_port,
+                        _sled_role,
+                        _usable_hardware_threads,
+                        _usable_physical_ram,
+                        _reservoir_size,
+                    ) = sa_dsl::inv_sled_agent::all_columns();
+                }
+
+                // For sleds with no baseboard information, we can't use
+                // the same INSERT INTO ... SELECT pattern because we
+                // won't find anything in the hw_baseboard_id table.  It
+                // sucks that these are bifurcated code paths, but on
+                // the plus side, this is a much simpler INSERT, and we
+                // can insert all of them in one statement.
+                let _ = diesel::insert_into(db::schema::inv_sled_agent::table)
+                    .values(sled_agents_no_baseboards)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            // Insert all the Omicron zones that we found.
+            {
+                use db::schema::inv_sled_omicron_zones::dsl as sled_zones;
+                let _ = diesel::insert_into(sled_zones::inv_sled_omicron_zones)
+                    .values(sled_omicron_zones)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            {
+                use db::schema::inv_omicron_zone::dsl as omicron_zone;
+                let _ = diesel::insert_into(omicron_zone::inv_omicron_zone)
+                    .values(omicron_zones)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
+            {
+                use db::schema::inv_omicron_zone_nic::dsl as omicron_zone_nic;
+                let _ =
+                    diesel::insert_into(omicron_zone_nic::inv_omicron_zone_nic)
+                        .values(omicron_zone_nics)
+                        .execute_async(&conn)
+                        .await?;
+            }
+
             // Finally, insert the list of errors.
             {
                 use db::schema::inv_collection_error::dsl as errors_dsl;
@@ -825,7 +1013,18 @@ impl DataStore {
         // start removing it and we'd also need to make sure we didn't leak a
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
-        let (ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors) = conn
+        let (
+            ncollections,
+            nsps,
+            nrots,
+            ncabooses,
+            nrot_pages,
+            nsled_agents,
+            nsled_agent_zones,
+            nzones,
+            nnics,
+            nerrors,
+        ) = conn
             .transaction_async(|conn| async move {
                 // Remove the record describing the collection itself.
                 let ncollections = {
@@ -881,6 +1080,48 @@ impl DataStore {
                     .await?
                 };
 
+                // Remove rows for sled agents found.
+                let nsled_agents = {
+                    use db::schema::inv_sled_agent::dsl;
+                    diesel::delete(
+                        dsl::inv_sled_agent
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                // Remove rows associated with Omicron zones
+                let nsled_agent_zones = {
+                    use db::schema::inv_sled_omicron_zones::dsl;
+                    diesel::delete(
+                        dsl::inv_sled_omicron_zones
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                let nzones = {
+                    use db::schema::inv_omicron_zone::dsl;
+                    diesel::delete(
+                        dsl::inv_omicron_zone
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                let nnics = {
+                    use db::schema::inv_omicron_zone_nic::dsl;
+                    diesel::delete(
+                        dsl::inv_omicron_zone_nic
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows for errors encountered.
                 let nerrors = {
                     use db::schema::inv_collection_error::dsl;
@@ -892,7 +1133,18 @@ impl DataStore {
                     .await?
                 };
 
-                Ok((ncollections, nsps, nrots, ncabooses, nrot_pages, nerrors))
+                Ok((
+                    ncollections,
+                    nsps,
+                    nrots,
+                    ncabooses,
+                    nrot_pages,
+                    nsled_agents,
+                    nsled_agent_zones,
+                    nzones,
+                    nnics,
+                    nerrors,
+                ))
             })
             .await
             .map_err(|error| match error {
@@ -909,6 +1161,10 @@ impl DataStore {
             "nrots" => nrots,
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
+            "nsled_agents" => nsled_agents,
+            "nsled_agent_zones" => nsled_agent_zones,
+            "nzones" => nzones,
+            "nnics" => nnics,
             "nerrors" => nerrors,
         );
 
@@ -919,7 +1175,7 @@ impl DataStore {
     pub async fn find_hw_baseboard_id(
         &self,
         opctx: &OpContext,
-        baseboard_id: BaseboardId,
+        baseboard_id: &BaseboardId,
     ) -> Result<Uuid, Error> {
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1085,9 +1341,27 @@ impl DataStore {
         };
         limit_reached = limit_reached || rots.len() == usize_limit;
 
-        // Collect the unique baseboard ids referenced by SPs and RoTs.
-        let baseboard_id_ids: BTreeSet<_> =
-            sps.keys().chain(rots.keys()).cloned().collect();
+        let sled_agent_rows: Vec<_> = {
+            use db::schema::inv_sled_agent::dsl;
+            dsl::inv_sled_agent
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvSledAgent::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
+        // Agents.
+        let baseboard_id_ids: BTreeSet<_> = sps
+            .keys()
+            .chain(rots.keys())
+            .cloned()
+            .chain(sled_agent_rows.iter().filter_map(|s| s.hw_baseboard_id))
+            .collect();
         // Fetch the corresponding baseboard records.
         let baseboards_by_id: BTreeMap<_, _> = {
             use db::schema::hw_baseboard_id::dsl;
@@ -1136,6 +1410,49 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let sled_agents: BTreeMap<_, _> =
+            sled_agent_rows
+                .into_iter()
+                .map(|s: InvSledAgent| {
+                    let sled_id = s.sled_id;
+                    let baseboard_id = s
+                        .hw_baseboard_id
+                        .map(|id| {
+                            baseboards_by_id.get(&id).cloned().ok_or_else(
+                                || {
+                                    Error::internal_error(
+                                "missing baseboard that we should have fetched",
+                            )
+                                },
+                            )
+                        })
+                        .transpose()?;
+                    let sled_agent = nexus_types::inventory::SledAgent {
+                        time_collected: s.time_collected,
+                        source: s.source,
+                        sled_id,
+                        baseboard_id,
+                        sled_agent_address: std::net::SocketAddrV6::new(
+                            std::net::Ipv6Addr::from(s.sled_agent_ip),
+                            u16::from(s.sled_agent_port),
+                            0,
+                            0,
+                        ),
+                        sled_role: nexus_types::inventory::SledRole::from(
+                            s.sled_role,
+                        ),
+                        usable_hardware_threads: u32::from(
+                            s.usable_hardware_threads,
+                        ),
+                        usable_physical_ram: s.usable_physical_ram.into(),
+                        reservoir_size: s.reservoir_size.into(),
+                    };
+                    Ok((sled_id, sled_agent))
+                })
+                .collect::<Result<
+                    BTreeMap<Uuid, nexus_types::inventory::SledAgent>,
+                    Error,
+                >>()?;
 
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
@@ -1237,7 +1554,7 @@ impl DataStore {
             .iter()
             .map(|inv_rot_page| inv_rot_page.sw_root_of_trust_page_id)
             .collect();
-        // Fetch the corresponing records.
+        // Fetch the corresponding records.
         let rot_pages_by_id: BTreeMap<_, _> = {
             use db::schema::sw_root_of_trust_page::dsl;
             dsl::sw_root_of_trust_page
@@ -1299,6 +1616,117 @@ impl DataStore {
             );
         }
 
+        // Now read the Omicron zones.
+        //
+        // In the first pass, we'll load the "inv_sled_omicron_zones" records.
+        // There's one of these per sled.  It does not contain the actual list
+        // of zones -- basically just collection metadata and the generation
+        // number.  We'll assemble these directly into the data structure we're
+        // trying to build, which maps sled ids to objects describing the zones
+        // found on each sled.
+        let mut omicron_zones: BTreeMap<_, _> = {
+            use db::schema::inv_sled_omicron_zones::dsl;
+            dsl::inv_sled_omicron_zones
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvSledOmicronZones::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sled_zones_config| {
+                    (
+                        sled_zones_config.sled_id,
+                        sled_zones_config.into_uninit_zones_found(),
+                    )
+                })
+                .collect()
+        };
+        limit_reached = limit_reached || omicron_zones.len() == usize_limit;
+
+        // Assemble a mutable map of all the NICs found, by NIC id.  As we
+        // match these up with the corresponding zone below, we'll remove items
+        // from this set.  That way we can tell if the same NIC was used twice
+        // or not used at all.
+        let mut omicron_zone_nics: BTreeMap<_, _> = {
+            use db::schema::inv_omicron_zone_nic::dsl;
+            dsl::inv_omicron_zone_nic
+                .filter(dsl::inv_collection_id.eq(id))
+                .limit(sql_limit)
+                .select(InvOmicronZoneNic::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|found_zone_nic| (found_zone_nic.id, found_zone_nic))
+                .collect()
+        };
+        limit_reached = limit_reached || omicron_zone_nics.len() == usize_limit;
+
+        // Now load the actual list of zones from all sleds.
+        let omicron_zones_list = {
+            use db::schema::inv_omicron_zone::dsl;
+            dsl::inv_omicron_zone
+                .filter(dsl::inv_collection_id.eq(id))
+                // It's not strictly necessary to order these by id.  Doing so
+                // ensures a consistent representation for `Collection`, which
+                // makes testing easier.  It's already indexed to do this, too.
+                .order_by(dsl::id)
+                .limit(sql_limit)
+                .select(InvOmicronZone::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+        limit_reached =
+            limit_reached || omicron_zones_list.len() == usize_limit;
+        for z in omicron_zones_list {
+            let nic_row = z
+                .nic_id
+                .map(|id| {
+                    // This error means that we found a row in inv_omicron_zone
+                    // that references a NIC by id but there's no corresponding
+                    // row in inv_omicron_zone_nic with that id.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    omicron_zone_nics.remove(&id).ok_or_else(|| {
+                        Error::internal_error(&format!(
+                            "zone {:?}: expected to find NIC {:?}, but didn't",
+                            z.id, z.nic_id
+                        ))
+                    })
+                })
+                .transpose()?;
+            let map = omicron_zones.get_mut(&z.sled_id).ok_or_else(|| {
+                // This error means that we found a row in inv_omicron_zone with
+                // no associated record in inv_sled_omicron_zones.  This should
+                // be impossible and reflects either a bug or database
+                // corruption.
+                Error::internal_error(&format!(
+                    "zone {:?}: unknown sled: {:?}",
+                    z.id, z.sled_id
+                ))
+            })?;
+            let zone_id = z.id;
+            let zone = z
+                .into_omicron_zone_config(nic_row)
+                .with_context(|| {
+                    format!("zone {:?}: parse from database", zone_id)
+                })
+                .map_err(|e| {
+                    Error::internal_error(&format!("{:#}", e.to_string()))
+                })?;
+            map.zones.zones.push(zone);
+        }
+
+        bail_unless!(
+            omicron_zone_nics.is_empty(),
+            "found extra Omicron zone NICs: {:?}",
+            omicron_zone_nics.keys()
+        );
+
         Ok((
             Collection {
                 id,
@@ -1313,6 +1741,8 @@ impl DataStore {
                 rots,
                 cabooses_found,
                 rot_pages_found,
+                sled_agents,
+                omicron_zones,
             },
             limit_reached,
         ))
@@ -1442,7 +1872,7 @@ mod test {
             part_number: "some-part".into(),
         };
         let err = datastore
-            .find_hw_baseboard_id(&opctx, baseboard_id)
+            .find_hw_baseboard_id(&opctx, &baseboard_id)
             .await
             .unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound { .. }));
@@ -1476,7 +1906,7 @@ mod test {
         assert_eq!(collection1, collection_read);
 
         // There ought to be no baseboards, cabooses, or RoT pages in the
-        // databases from that collection.
+        // database from that collection.
         assert_eq!(collection1.baseboards.len(), 0);
         assert_eq!(collection1.cabooses.len(), 0);
         assert_eq!(collection1.rot_pages.len(), 0);
@@ -1815,6 +2245,39 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(0, count);
+            let count =
+                schema::inv_root_of_trust_page::dsl::inv_root_of_trust_page
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_sled_agent::dsl::inv_sled_agent
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+            let count =
+                schema::inv_sled_omicron_zones::dsl::inv_sled_omicron_zones
+                    .select(diesel::dsl::count_star())
+                    .first_async::<i64>(&conn)
+                    .await
+                    .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_omicron_zone::dsl::inv_omicron_zone
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_omicron_zone_nic::dsl::inv_omicron_zone_nic
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+
             Ok::<(), anyhow::Error>(())
         })
         .await

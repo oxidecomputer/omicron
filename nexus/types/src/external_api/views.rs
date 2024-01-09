@@ -13,7 +13,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName, SemverVersion,
+    ObjectIdentity, RoleName, SemverVersion, SimpleIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,64 @@ pub struct Silo {
     /// unless there's a corresponding entry in this map.
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
+}
+
+/// A collection of resource counts used to describe capacity and utilization
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize, JsonSchema)]
+pub struct VirtualResourceCounts {
+    /// Number of virtual CPUs
+    pub cpus: i64,
+    /// Amount of memory in bytes
+    pub memory: ByteCount,
+    /// Amount of disk storage in bytes
+    pub storage: ByteCount,
+}
+
+/// A collection of resource counts used to set the virtual capacity of a silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotas {
+    pub silo_id: Uuid,
+    #[serde(flatten)]
+    pub limits: VirtualResourceCounts,
+}
+
+// For the eyes of end users
+/// View of the current silo's resource utilization and capacity
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Utilization {
+    /// Accounts for resources allocated to running instances or storage allocated via disks or snapshots
+    /// Note that CPU and memory resources associated with a stopped instances are not counted here
+    /// whereas associated disks will still be counted
+    pub provisioned: VirtualResourceCounts,
+    /// The total amount of resources that can be provisioned in this silo
+    /// Actions that would exceed this limit will fail
+    pub capacity: VirtualResourceCounts,
+}
+
+// For the eyes of an operator
+/// View of a silo's resource utilization and capacity
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloUtilization {
+    pub silo_id: Uuid,
+    pub silo_name: Name,
+    /// Accounts for resources allocated by in silos like CPU or memory for running instances and storage for disks and snapshots
+    /// Note that CPU and memory resources associated with a stopped instances are not counted here
+    pub provisioned: VirtualResourceCounts,
+    /// Accounts for the total amount of resources reserved for silos via their quotas
+    pub allocated: VirtualResourceCounts,
+}
+
+// We want to be able to paginate SiloUtilization by NameOrId
+// but we can't derive ObjectIdentity because this isn't a typical asset.
+// Instead we implement this new simple identity trait which is used under the
+// hood by the pagination code.
+impl SimpleIdentity for SiloUtilization {
+    fn id(&self) -> Uuid {
+        self.silo_id
+    }
+    fn name(&self) -> &Name {
+        &self.silo_name
+    }
 }
 
 // IDENTITY PROVIDER
@@ -237,11 +295,23 @@ pub struct VpcRouter {
 
 // IP POOLS
 
+/// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
+/// the pool can be allocated within that silo
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub silo_id: Option<Uuid>,
+}
+
+/// A link between an IP pool and a silo that allows one to allocate IPs from
+/// the pool within the silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct IpPoolSilo {
+    pub ip_pool_id: Uuid,
+    pub silo_id: Uuid,
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
     pub is_default: bool,
 }
 

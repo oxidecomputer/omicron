@@ -8,6 +8,13 @@
 
 use omicron_common::api::external::SemverVersion;
 
+/// The version of the database schema this particular version of Nexus was
+/// built against.
+///
+/// This should be updated whenever the schema is changed. For more details,
+/// refer to: schema/crdb/README.adoc
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(23, 0, 1);
+
 table! {
     disk (id) {
         id -> Uuid,
@@ -410,6 +417,30 @@ table! {
 }
 
 table! {
+    silo_quotas(silo_id) {
+        silo_id -> Uuid,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        cpus -> Int8,
+        memory_bytes -> Int8,
+        storage_bytes -> Int8,
+    }
+}
+
+table! {
+    silo_utilization(silo_id) {
+        silo_id -> Uuid,
+        silo_name -> Text,
+        cpus_provisioned -> Int8,
+        memory_provisioned -> Int8,
+        storage_provisioned -> Int8,
+        cpus_allocated -> Int8,
+        memory_allocated -> Int8,
+        storage_allocated -> Int8,
+    }
+}
+
+table! {
     network_interface (id) {
         id -> Uuid,
         name -> Text,
@@ -473,7 +504,14 @@ table! {
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         rcgen -> Int8,
-        silo_id -> Nullable<Uuid>,
+    }
+}
+
+table! {
+    ip_pool_resource (ip_pool_id, resource_type, resource_id) {
+        ip_pool_id -> Uuid,
+        resource_type -> crate::IpPoolResourceTypeEnum,
+        resource_id -> Uuid,
         is_default -> Bool,
     }
 }
@@ -1301,6 +1339,77 @@ table! {
 }
 
 table! {
+    inv_sled_agent (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+        sled_id -> Uuid,
+
+        hw_baseboard_id -> Nullable<Uuid>,
+
+        sled_agent_ip -> Inet,
+        sled_agent_port -> Int4,
+        sled_role -> crate::SledRoleEnum,
+        usable_hardware_threads -> Int8,
+        usable_physical_ram -> Int8,
+        reservoir_size -> Int8,
+    }
+}
+
+table! {
+    inv_sled_omicron_zones (inv_collection_id, sled_id) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        source -> Text,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    inv_omicron_zone (inv_collection_id, id) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Uuid,
+        underlay_address -> Inet,
+        zone_type -> crate::ZoneTypeEnum,
+
+        primary_service_ip -> Inet,
+        primary_service_port -> Int4,
+        second_service_ip -> Nullable<Inet>,
+        second_service_port -> Nullable<Int4>,
+        dataset_zpool_name -> Nullable<Text>,
+        nic_id -> Nullable<Uuid>,
+        dns_gz_address -> Nullable<Inet>,
+        dns_gz_address_index -> Nullable<Int8>,
+        ntp_ntp_servers -> Nullable<Array<Text>>,
+        ntp_dns_servers -> Nullable<Array<Inet>>,
+        ntp_domain -> Nullable<Text>,
+        nexus_external_tls -> Nullable<Bool>,
+        nexus_external_dns_servers -> Nullable<Array<Inet>>,
+        snat_ip -> Nullable<Inet>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
+    }
+}
+
+table! {
+    inv_omicron_zone_nic (inv_collection_id, id) {
+        inv_collection_id -> Uuid,
+        id -> Uuid,
+        name -> Text,
+        ip -> Inet,
+        mac -> Int8,
+        subnet -> Inet,
+        vni -> Int8,
+        is_primary -> Bool,
+        slot -> Int2,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
@@ -1317,13 +1426,6 @@ table! {
     }
 }
 
-/// The version of the database schema this particular version of Nexus was
-/// built against.
-///
-/// This should be updated whenever the schema is changed. For more details,
-/// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(19, 0, 0);
-
 allow_tables_to_appear_in_same_query!(
     system_update,
     component_update,
@@ -1331,8 +1433,9 @@ allow_tables_to_appear_in_same_query!(
 );
 joinable!(system_update_component_update -> component_update (component_update_id));
 
-allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool);
+allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
+joinable!(ip_pool_resource -> ip_pool (ip_pool_id));
 
 allow_tables_to_appear_in_same_query!(inv_collection, inv_collection_error);
 joinable!(inv_collection_error -> inv_collection (inv_collection_id));
@@ -1342,6 +1445,7 @@ allow_tables_to_appear_in_same_query!(
     sw_root_of_trust_page,
     inv_root_of_trust_page
 );
+allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
     dataset,
@@ -1381,6 +1485,11 @@ allow_tables_to_appear_in_same_query!(
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
 allow_tables_to_appear_in_same_query!(external_ip, service);
+
+// used for query to check whether an IP pool association has any allocated IPs before deleting
+allow_tables_to_appear_in_same_query!(external_ip, instance);
+allow_tables_to_appear_in_same_query!(external_ip, project);
+allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
 
 allow_tables_to_appear_in_same_query!(
     switch_port,

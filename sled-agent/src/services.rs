@@ -1260,11 +1260,14 @@ impl ServiceManager {
     // Check the services intended to run in the zone to determine whether any
     // additional privileges need to be enabled for the zone.
     fn privs_needed(zone_args: &ZoneArgs<'_>) -> Vec<String> {
-        let mut needed = Vec::new();
+        let mut needed = vec![
+            "default".to_string(),
+            "dtrace_user".to_string(),
+            "dtrace_proc".to_string(),
+        ];
         for svc_details in zone_args.sled_local_services() {
             match svc_details {
                 SwitchService::Tfport { .. } => {
-                    needed.push("default".to_string());
                     needed.push("sys_dl_config".to_string());
                 }
                 _ => (),
@@ -1275,7 +1278,6 @@ impl ServiceManager {
             match omicron_zone_type {
                 OmicronZoneType::BoundaryNtp { .. }
                 | OmicronZoneType::InternalNtp { .. } => {
-                    needed.push("default".to_string());
                     needed.push("sys_time".to_string());
                     needed.push("proc_priocntl".to_string());
                 }
@@ -1371,8 +1373,8 @@ impl ServiceManager {
             .add_property_group(dns_config_builder)
             // We do need to enable the default instance of the
             // dns/install service.  It's enough to just mention it
-            // here, as the ServiceInstanceBuilder always enables the
-            // instance being added.
+            // here, as the ServiceInstanceBuilder enables the
+            // instance being added by default.
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
@@ -1492,6 +1494,8 @@ impl ServiceManager {
         //
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
+        let disabled_ssh_service = ServiceBuilder::new("network/ssh")
+            .add_instance(ServiceInstanceBuilder::new("default").disable());
         match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -1530,6 +1534,7 @@ impl ServiceManager {
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
                     .add_service(clickhouse_service)
                     .add_service(dns_service);
                 profile
@@ -1578,6 +1583,7 @@ impl ServiceManager {
                         );
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
                     .add_service(clickhouse_keeper_service)
                     .add_service(dns_service);
                 profile
@@ -1634,6 +1640,7 @@ impl ServiceManager {
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
                     .add_service(cockroachdb_service)
                     .add_service(dns_service);
                 profile
@@ -1677,12 +1684,15 @@ impl ServiceManager {
                     .add_property("uuid", "astring", uuid)
                     .add_property("store", "astring", "/data");
 
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/agent").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
+                    .add_service(
+                        ServiceBuilder::new("oxide/crucible/agent")
+                            .add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(config),
+                            ),
+                    );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1716,12 +1726,15 @@ impl ServiceManager {
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port);
 
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/pantry").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(disabled_ssh_service)
+                    .add_service(
+                        ServiceBuilder::new("oxide/crucible/pantry")
+                            .add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(config),
+                            ),
+                    );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await

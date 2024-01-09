@@ -47,6 +47,23 @@ macro_rules! id_path_param {
     };
 }
 
+/// The unique hardware ID for a sled
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct UninitializedSledId {
+    pub serial: String,
+    pub part: String,
+}
+
 path_param!(ProjectPath, project, "project");
 path_param!(InstancePath, instance, "instance");
 path_param!(NetworkInterfacePath, interface, "network interface");
@@ -288,6 +305,12 @@ pub struct SiloCreate {
     /// endpoints.  These should be valid for the Silo's DNS name(s).
     pub tls_certificates: Vec<CertificateCreate>,
 
+    /// Limits the amount of provisionable CPU, memory, and storage in the Silo.
+    /// CPU and memory are only consumed by running instances, while storage is
+    /// consumed by any disk or snapshot. A value of 0 means that resource is
+    /// *not* provisionable.
+    pub quotas: SiloQuotasCreate,
+
     /// Mapping of which Fleet roles are conferred by each Silo role
     ///
     /// The default is that no Fleet roles are conferred by any Silo roles
@@ -295,6 +318,62 @@ pub struct SiloCreate {
     #[serde(default)]
     pub mapped_fleet_roles:
         BTreeMap<shared::SiloRole, BTreeSet<shared::FleetRole>>,
+}
+
+/// The amount of provisionable resources for a Silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotasCreate {
+    /// The amount of virtual CPUs available for running instances in the Silo
+    pub cpus: i64,
+    /// The amount of RAM (in bytes) available for running instances in the Silo
+    pub memory: ByteCount,
+    /// The amount of storage (in bytes) available for disks or snapshots
+    pub storage: ByteCount,
+}
+
+impl SiloQuotasCreate {
+    /// All quotas set to 0
+    pub fn empty() -> Self {
+        Self {
+            cpus: 0,
+            memory: ByteCount::from(0),
+            storage: ByteCount::from(0),
+        }
+    }
+
+    /// An arbitrarily high but identifiable default for quotas
+    /// that can be used for creating a Silo for testing
+    ///
+    /// The only silo that customers will see that this should be set on is the default
+    /// silo. Ultimately the default silo should only be initialized with an empty quota,
+    /// but as tests currently relying on it having a quota, we need to set something.
+    pub fn arbitrarily_high_default() -> Self {
+        Self {
+            cpus: 9999999999,
+            memory: ByteCount::try_from(999999999999999999_u64).unwrap(),
+            storage: ByteCount::try_from(999999999999999999_u64).unwrap(),
+        }
+    }
+}
+
+// This conversion is mostly just useful for tests such that we can reuse
+// empty() and arbitrarily_high_default() when testing utilization
+impl From<SiloQuotasCreate> for super::views::VirtualResourceCounts {
+    fn from(quota: SiloQuotasCreate) -> Self {
+        Self { cpus: quota.cpus, memory: quota.memory, storage: quota.storage }
+    }
+}
+
+/// Updateable properties of a Silo's resource limits.
+/// If a value is omitted it will not be updated.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloQuotasUpdate {
+    /// The amount of virtual CPUs available for running instances in the Silo
+    pub cpus: Option<i64>,
+    /// The amount of RAM (in bytes) available for running instances in the Silo
+    pub memory: Option<ByteCount>,
+    /// The amount of storage (in bytes) available for disks or snapshots
+    pub storage: Option<ByteCount>,
 }
 
 /// Create-time parameters for a `User`
@@ -757,17 +836,6 @@ impl std::fmt::Debug for CertificateCreate {
 pub struct IpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-
-    /// If an IP pool is associated with a silo, instance IP allocations in that
-    /// silo can draw from that pool.
-    pub silo: Option<NameOrId>,
-
-    /// Whether the IP pool is considered a default pool for its scope (fleet
-    /// or silo). If a pool is marked default and is associated with a silo,
-    /// instances created in that silo will draw IPs from that pool unless
-    /// another pool is specified at instance create time.
-    #[serde(default)]
-    pub is_default: bool,
 }
 
 /// Parameters for updating an IP Pool
@@ -775,6 +843,31 @@ pub struct IpPoolCreate {
 pub struct IpPoolUpdate {
     #[serde(flatten)]
     pub identity: IdentityMetadataUpdateParams,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolSiloPath {
+    pub pool: NameOrId,
+    pub silo: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolSiloLink {
+    pub silo: NameOrId,
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
+    pub is_default: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolSiloUpdate {
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo, so when a pool is
+    /// made default, an existing default will remain linked but will no longer
+    /// be the default.
+    pub is_default: bool,
 }
 
 // Floating IPs
@@ -1308,14 +1401,14 @@ pub struct SwtichPortSettingsGroupCreate {
 pub struct SwitchPortSettingsCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub port_config: SwitchPortConfig,
+    pub port_config: SwitchPortConfigCreate,
     pub groups: Vec<NameOrId>,
     /// Links indexed by phy name. On ports that are not broken out, this is
     /// always phy0. On a 2x breakout the options are phy0 and phy1, on 4x
     /// phy0-phy3, etc.
-    pub links: HashMap<String, LinkConfig>,
+    pub links: HashMap<String, LinkConfigCreate>,
     /// Interfaces indexed by link name.
-    pub interfaces: HashMap<String, SwitchInterfaceConfig>,
+    pub interfaces: HashMap<String, SwitchInterfaceConfigCreate>,
     /// Routes indexed by interface name.
     pub routes: HashMap<String, RouteConfig>,
     /// BGP peers indexed by interface name.
@@ -1328,7 +1421,7 @@ impl SwitchPortSettingsCreate {
     pub fn new(identity: IdentityMetadataCreateParams) -> Self {
         Self {
             identity,
-            port_config: SwitchPortConfig {
+            port_config: SwitchPortConfigCreate {
                 geometry: SwitchPortGeometry::Qsfp28x1,
             },
             groups: Vec::new(),
@@ -1344,7 +1437,7 @@ impl SwitchPortSettingsCreate {
 /// Physical switch port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct SwitchPortConfig {
+pub struct SwitchPortConfigCreate {
     /// Link geometry for the switch port.
     pub geometry: SwitchPortGeometry,
 }
@@ -1447,12 +1540,12 @@ impl From<omicron_common::api::internal::shared::PortSpeed> for LinkSpeed {
 
 /// Switch link configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LinkConfig {
+pub struct LinkConfigCreate {
     /// Maximum transmission unit for the link.
     pub mtu: u16,
 
     /// The link-layer discovery protocol (LLDP) configuration for the link.
-    pub lldp: LldpServiceConfig,
+    pub lldp: LldpServiceConfigCreate,
 
     /// The forward error correction mode of the link.
     pub fec: LinkFec,
@@ -1467,7 +1560,7 @@ pub struct LinkConfig {
 /// The LLDP configuration associated with a port. LLDP may be either enabled or
 /// disabled, if enabled, an LLDP configuration must be provided by name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LldpServiceConfig {
+pub struct LldpServiceConfigCreate {
     /// Whether or not LLDP is enabled.
     pub enabled: bool,
 
@@ -1479,7 +1572,7 @@ pub struct LldpServiceConfig {
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
 /// address will be created for the interface.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SwitchInterfaceConfig {
+pub struct SwitchInterfaceConfigCreate {
     /// Whether or not IPv6 is enabled.
     pub v6_enabled: bool,
 

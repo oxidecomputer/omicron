@@ -4,11 +4,12 @@ use end_to_end_tests::helpers::{generate_name, get_system_ip_pool};
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
-    DiskCreate, DiskSource, IpRange, Ipv4Range,
+    DiskCreate, DiskSource, IpPoolCreate, IpPoolSiloLink, IpRange, Ipv4Range,
+    NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
     ClientDisksExt, ClientHiddenExt, ClientProjectsExt,
-    ClientSystemNetworkingExt,
+    ClientSystemNetworkingExt, ClientSystemSilosExt,
 };
 use serde::{de::DeserializeOwned, Deserialize};
 use std::time::Duration;
@@ -38,10 +39,41 @@ async fn main() -> Result<()> {
 
     // ===== CREATE IP POOL ===== //
     eprintln!("creating IP pool... {:?} - {:?}", first, last);
+    let pool_name = "default";
+    client
+        .ip_pool_create()
+        .body(IpPoolCreate {
+            name: pool_name.parse().unwrap(),
+            description: "Default IP pool".to_string(),
+        })
+        .send()
+        .await?;
+    client
+        .ip_pool_silo_link()
+        .pool(pool_name)
+        .body(IpPoolSiloLink {
+            silo: NameOrId::Name(params.silo_name().parse().unwrap()),
+            is_default: true,
+        })
+        .send()
+        .await?;
     client
         .ip_pool_range_add()
-        .pool("default")
+        .pool(pool_name)
         .body(IpRange::V4(Ipv4Range { first, last }))
+        .send()
+        .await?;
+
+    // ===== SET UP QUOTAS ===== //
+    eprintln!("setting up quotas...");
+    client
+        .silo_quotas_update()
+        .silo("recovery")
+        .body(SiloQuotasUpdate {
+            cpus: Some(16),
+            memory: Some(ByteCount(1024 * 1024 * 1024 * 10)),
+            storage: Some(ByteCount(1024 * 1024 * 1024 * 1024)),
+        })
         .send()
         .await?;
 
