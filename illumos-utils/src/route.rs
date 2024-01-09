@@ -5,7 +5,7 @@
 //! Utilities for manipulating the routing tables.
 
 use crate::zone::ROUTE;
-use crate::{execute, ExecutionError, PFEXEC};
+use crate::{inner, execute, ExecutionError, PFEXEC, output_to_exec_error};
 use std::net::Ipv6Addr;
 
 /// Wraps commands for interacting with routing tables.
@@ -21,26 +21,34 @@ impl Route {
         let mut cmd = std::process::Command::new(PFEXEC);
         let cmd = cmd.args(&[
             ROUTE,
+            "-n",
             "get",
             "-inet6",
             destination,
             "-inet6",
             &gateway.to_string(),
         ]);
-        match execute(cmd) {
-            Err(_) => {
-                let mut cmd = std::process::Command::new(PFEXEC);
-                let cmd = cmd.args(&[
-                    ROUTE,
-                    "add",
-                    "-inet6",
-                    destination,
-                    "-inet6",
-                    &gateway.to_string(),
-                ]);
-                execute(cmd)?;
-            }
-            Ok(_) => (),
+
+        let out = cmd.output().map_err(|err| {
+            ExecutionError::ExecutionStart { command: inner::to_string(cmd), err }
+        })?;
+        match out.status.code() {
+            Some(0) => (),
+            // If the entry is not found in the table, the exit status of the command is be 3 (ESRCH)
+            // When that is the case, we'll add the route.
+            Some(3) => {
+                            let mut cmd = std::process::Command::new(PFEXEC);
+                            let cmd = cmd.args(&[
+                                ROUTE,
+                                "add",
+                                "-inet6",
+                                destination,
+                                "-inet6",
+                                &gateway.to_string(),
+                            ]);
+                            execute(cmd)?;
+                        }
+            Some(_) | None => return Err(output_to_exec_error(cmd, &out)),
         };
         Ok(())
     }

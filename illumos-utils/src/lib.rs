@@ -72,7 +72,7 @@ pub enum ExecutionError {
 mod inner {
     use super::*;
 
-    fn to_string(command: &mut std::process::Command) -> String {
+    pub fn to_string(command: &mut std::process::Command) -> String {
         command
             .get_args()
             .map(|s| s.to_string_lossy().into())
