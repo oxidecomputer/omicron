@@ -36,7 +36,8 @@ impl Route {
             })?;
         match out.status.code() {
             Some(0) => (),
-            // If the entry is not found in the table, the exit status of the command is be 3 (ESRCH)
+            // If the entry is not found in the table, 
+            // the exit status of the command will be 3 (ESRCH).
             // When that is the case, we'll add the route.
             Some(3) => {
                 let mut cmd = std::process::Command::new(PFEXEC);
