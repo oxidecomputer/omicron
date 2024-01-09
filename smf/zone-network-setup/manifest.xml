@@ -18,7 +18,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='/opt/oxide/lib/svc/manifest/zone-network-setup.sh'
+    exec='/opt/oxide/zone-network-setup/bin/zone-networking -d %{config/datalink} -s %{config/static_addr} -g %{config/gateway}'
     timeout_seconds='0' />
   
   <property_group name='startd' type='framework'>
@@ -28,7 +28,7 @@
   <property_group name='config' type='application'>
     <propval name='datalink' type='astring' value='unknown' />
     <propval name='gateway' type='astring' value='unknown' />
-    <propval name='listen_addr' type='astring' value='unknown' />
+    <propval name='static_addr' type='astring' value='unknown' />
   </property_group>
 
   <stability value='Unstable' />

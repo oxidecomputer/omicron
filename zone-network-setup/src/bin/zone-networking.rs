@@ -60,7 +60,7 @@ async fn do_run() -> Result<(), CmdError> {
         )
         .arg(
             arg!(
-                -l --listen_addr <Ipv6Addr> "listen_addr"
+                -s --static_addr <Ipv6Addr> "static_addr"
             )
             .required(true)
             .value_parser(parse_ipv6),
@@ -68,7 +68,7 @@ async fn do_run() -> Result<(), CmdError> {
         .get_matches();
 
     let datalink: &String = matches.get_one("datalink").unwrap();
-    let listen_addr: &Ipv6Addr = matches.get_one("listen_addr").unwrap();
+    let static_addr: &Ipv6Addr = matches.get_one("static_addr").unwrap();
     let gateway: &Ipv6Addr = matches.get_one("gateway").unwrap();
 
     // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is addressed
@@ -80,8 +80,8 @@ async fn do_run() -> Result<(), CmdError> {
     Ipadm::set_interface_mtu(&datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "listen address" => ?listen_addr);
-    Ipadm::create_static_and_autoconfigured_addrs(&datalink, listen_addr)
+    info!(&log, "Ensuring static and auto-configured addresses are set on the IP interface"; "data link" => ?datalink, "static address" => ?static_addr);
+    Ipadm::create_static_and_autoconfigured_addrs(&datalink, static_addr)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);

@@ -1378,10 +1378,10 @@ impl ServiceManager {
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
-    async fn zone_network_setup_install(
+    fn zone_network_setup_install(
         info: &SledAgentInfo,
         zone: &InstalledZone,
-        listen_addr: &String,
+        static_addr: &String,
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
         let gateway = &info.underlay_address.to_string();
@@ -1390,7 +1390,7 @@ impl ServiceManager {
         config_builder = config_builder
             .add_property("datalink", "astring", datalink)
             .add_property("gateway", "astring", gateway)
-            .add_property("listen_addr", "astring", listen_addr);
+            .add_property("static_addr", "astring", static_addr);
 
         Ok(ServiceBuilder::new("oxide/zone-network-setup")
             .add_property_group(config_builder)
@@ -1517,8 +1517,7 @@ impl ServiceManager {
                     info,
                     &installed_zone,
                     listen_addr,
-                )
-                .await?;
+                )?;
 
                 let dns_service = Self::dns_install(info).await?;
 
@@ -1566,8 +1565,7 @@ impl ServiceManager {
                     info,
                     &installed_zone,
                     listen_addr,
-                )
-                .await?;
+                )?;
 
                 let dns_service = Self::dns_install(info).await?;
 
@@ -1622,8 +1620,7 @@ impl ServiceManager {
                     info,
                     &installed_zone,
                     listen_addr,
-                )
-                .await?;
+                )?;
 
                 let dns_service = Self::dns_install(info).await?;
 
