@@ -4265,6 +4265,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dropshot",
+ "futures",
  "gateway-messages",
  "gateway-test-utils",
  "headers",
@@ -4286,6 +4287,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "slog",
+ "tokio",
  "trust-dns-resolver",
  "uuid",
 ]
