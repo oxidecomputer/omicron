@@ -160,11 +160,13 @@ async fn siia_begin_attach_ip_undo(
     let log = sagactx.user_data().log();
     warn!(log, "siia_begin_attach_ip_undo: Reverting detached->attaching");
     let params = sagactx.saga_params::<Params>()?;
+    let new_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if !instance_ip_move_state(
         &sagactx,
         &params.serialized_authn,
         IpAttachState::Attaching,
         IpAttachState::Detached,
+        &new_ip,
     )
     .await?
     {
@@ -189,10 +191,14 @@ async fn siia_get_instance_state(
 
 async fn siia_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
+    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     instance_ip_add_nat(
         &sagactx,
         &params.serialized_authn,
         &params.authz_instance,
+        sled_id,
+        target_ip,
     )
     .await
 }
@@ -202,10 +208,14 @@ async fn siia_nat_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
+    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if let Err(e) = instance_ip_remove_nat(
         &sagactx,
         &params.serialized_authn,
         &params.authz_instance,
+        sled_id,
+        target_ip,
     )
     .await
     {
@@ -219,7 +229,10 @@ async fn siia_update_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    instance_ip_add_opte(&sagactx, &params.authz_instance).await
+    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    instance_ip_add_opte(&sagactx, &params.authz_instance, sled_id, target_ip)
+        .await
 }
 
 async fn siia_update_opte_undo(
@@ -227,8 +240,15 @@ async fn siia_update_opte_undo(
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
     let params = sagactx.saga_params::<Params>()?;
-    if let Err(e) =
-        instance_ip_remove_opte(&sagactx, &params.authz_instance).await
+    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
+    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    if let Err(e) = instance_ip_remove_opte(
+        &sagactx,
+        &params.authz_instance,
+        sled_id,
+        target_ip,
+    )
+    .await
     {
         error!(log, "siia_update_opte_undo: failed to notify sled-agent: {e}");
     }
@@ -247,6 +267,7 @@ async fn siia_complete_attach(
         &params.serialized_authn,
         IpAttachState::Attaching,
         IpAttachState::Attached,
+        &target_ip,
     )
     .await?
     {

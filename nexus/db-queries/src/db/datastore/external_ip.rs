@@ -460,7 +460,9 @@ impl DataStore {
                     // a UniqueViolation.
                     IpAttachState::Attaching | IpAttachState::Detaching
                         => return Err(Error::unavail(&format!(
-                        "tried to attach {kind} IP mid-attach/detach"
+                        "tried to attach {kind} IP mid-attach/detach: \
+                         attach will be safe to retry once operation on \
+                         same IP resource completes"
                     ))),
 
                     IpAttachState::Detached => {},
@@ -469,7 +471,8 @@ impl DataStore {
                 Err(match &collection.runtime_state.nexus_state {
                     state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state)
                         => Error::unavail(&format!(
-                        "tried to attach {kind} IP while instance was changing state"
+                        "tried to attach {kind} IP while instance was changing state: \
+                         attach will be safe to retry once start/stop/migrate completes"
                     )),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         if attached_count >= MAX_EXTERNAL_IPS_PLUS_SNAT as i64 {
@@ -577,14 +580,17 @@ impl DataStore {
                     // User can reattempt depending on how the current saga unfolds.
                     IpAttachState::Attaching
                         | IpAttachState::Detaching => return Err(Error::unavail(&format!(
-                        "tried to detach {kind} IP mid-attach/detach"
+                        "tried to detach {kind} IP mid-attach/detach: \
+                         attach will be safe to retry once operation on \
+                         same IP resource completes"
                     ))),
                     IpAttachState::Attached => {},
                 }
 
                 match collection.runtime_state.nexus_state {
                     state if SAFE_TRANSIENT_INSTANCE_STATES.contains(&state) => Error::unavail(&format!(
-                        "tried to detach {kind} IP while instance was changing state"
+                        "tried to attach {kind} IP while instance was changing state: \
+                         attach will be safe to retry once start/stop/migrate completes"
                     )),
                     state if SAFE_TO_ATTACH_INSTANCE_STATES.contains(&state) => {
                         Error::internal_error(&format!("failed to detach {kind} IP"))

@@ -168,18 +168,17 @@ pub async fn instance_ip_move_state(
     serialized_authn: &authn::saga::Serialized,
     from: IpAttachState,
     to: IpAttachState,
+    new_ip: &ModifyStateForExternalIp,
 ) -> Result<bool, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
-    let new_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
-
     if !new_ip.do_saga {
         return Ok(true);
     }
-    let Some(new_ip) = new_ip.external_ip else {
+    let Some(new_ip) = new_ip.external_ip.as_ref() else {
         return Err(ActionError::action_failed(Error::internal_error(
             "tried to `do_saga` without valid external IP",
         )));
@@ -266,6 +265,8 @@ pub async fn instance_ip_add_nat(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
+    sled_uuid: Option<Uuid>,
+    target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
@@ -273,12 +274,10 @@ pub async fn instance_ip_add_nat(
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
     // No physical sled? Don't push NAT.
-    let Some(sled_uuid) = sagactx.lookup::<Option<Uuid>>("instance_state")?
-    else {
+    let Some(sled_uuid) = sled_uuid else {
         return Ok(());
     };
 
-    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if !target_ip.do_saga {
         return Ok(());
     }
@@ -314,17 +313,18 @@ pub async fn instance_ip_remove_nat(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
+    sled_uuid: Option<Uuid>,
+    target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
     let opctx =
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
     // No physical sled? Don't push NAT.
-    let Some(_) = sagactx.lookup::<Option<Uuid>>("instance_state")? else {
+    if sled_uuid.is_none() {
         return Ok(());
     };
 
-    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if !target_ip.do_saga {
         return Ok(());
     }
@@ -346,16 +346,16 @@ pub async fn instance_ip_remove_nat(
 pub async fn instance_ip_add_opte(
     sagactx: &NexusActionContext,
     authz_instance: &authz::Instance,
+    sled_uuid: Option<Uuid>,
+    target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     // No physical sled? Don't inform OPTE.
-    let Some(sled_uuid) = sagactx.lookup::<Option<Uuid>>("instance_state")?
-    else {
+    let Some(sled_uuid) = sled_uuid else {
         return Ok(());
     };
 
-    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if !target_ip.do_saga {
         return Ok(());
     }
@@ -396,16 +396,16 @@ pub async fn instance_ip_add_opte(
 pub async fn instance_ip_remove_opte(
     sagactx: &NexusActionContext,
     authz_instance: &authz::Instance,
+    sled_uuid: Option<Uuid>,
+    target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     // No physical sled? Don't inform OPTE.
-    let Some(sled_uuid) = sagactx.lookup::<Option<Uuid>>("instance_state")?
-    else {
+    let Some(sled_uuid) = sled_uuid else {
         return Ok(());
     };
 
-    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     if !target_ip.do_saga {
         return Ok(());
     }
