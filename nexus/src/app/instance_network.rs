@@ -378,6 +378,18 @@ impl super::Nexus {
         let boundary_switches =
             self.boundary_switches(&self.opctx_alloc).await?;
 
+        for external_ip in ips_of_interest {
+            // For each external ip, add a nat entry to the database
+            self.ensure_nat_entry(
+                external_ip,
+                sled_address,
+                &network_interface,
+                mac_address,
+                opctx,
+            )
+            .await?;
+        }
+
         for switch in &boundary_switches {
             debug!(&self.log, "notifying dendrite of updates";
                        "instance_id" => %authz_instance.id(),
@@ -388,18 +400,6 @@ impl super::Nexus {
                     "unable to find dendrite client for {switch}"
                 ))
             })?;
-
-            for external_ip in ips_of_interest {
-                // For each external ip, add a nat entry to the database
-                self.ensure_nat_entry(
-                    external_ip,
-                    sled_address,
-                    &network_interface,
-                    mac_address,
-                    opctx,
-                )
-                .await?;
-            }
 
             // Notify dendrite that there are changes for it to reconcile.
             // In the event of a failure to notify dendrite, we'll log an error
