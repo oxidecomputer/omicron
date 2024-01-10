@@ -140,9 +140,6 @@ pub enum Error {
     #[error("Failed to deserialize early network config: {0}")]
     EarlyNetworkDeserialize(serde_json::Error),
 
-    #[error("Time not yet synchronized")]
-    TimeNotSynchronized,
-
     #[error("Zone bundle error: {0}")]
     ZoneBundle(#[from] BundleError),
 
@@ -212,10 +209,6 @@ impl From<Error> for dropshot::HttpError {
                 }
                 _ => HttpError::for_internal_error(err.to_string()),
             },
-            Error::TimeNotSynchronized => HttpError::for_unavail(
-                Some(String::from("TimeNotSynchronized")),
-                String::from("Time synchronization is not complete"),
-            ),
             e => HttpError::for_internal_error(e.to_string()),
         }
     }
@@ -859,17 +852,6 @@ impl SledAgent {
         &self,
         requested_zones: OmicronZonesConfig,
     ) -> Result<(), Error> {
-        // If the requested set of zones need time synchronization,
-        // check that it has occurred.
-        if crate::services::zones_require_timesync(&requested_zones) {
-            match self.inner.services.timesync_get().await {
-                // Time is synchronized
-                Ok(TimeSync { sync: true, .. }) => {}
-                // Time is not synchronized, or we can't check
-                _ => return Err(Error::TimeNotSynchronized),
-            }
-        }
-
         // TODO:
         // - If these are the set of filesystems, we should also consider
         // removing the ones which are not listed here.
