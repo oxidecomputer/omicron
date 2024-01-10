@@ -7,7 +7,7 @@ set -o xtrace
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.64'
+NEXTEST_VERSION='0.9.67'
 
 cargo --version
 rustc --version

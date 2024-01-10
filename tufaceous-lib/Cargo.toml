@@ -10,7 +10,6 @@ anyhow = { workspace = true, features = ["backtrace"] }
 async-trait.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
-bytesize = { workspace = true, features = ["serde"] }
 camino.workspace = true
 camino-tempfile.workspace = true
 chrono.workspace = true
@@ -22,6 +21,7 @@ hex.workspace = true
 hubtools.workspace = true
 itertools.workspace = true
 omicron-common.workspace = true
+parse-size.workspace = true
 rand.workspace = true
 ring = { workspace = true, features = ["std"] }
 serde.workspace = true
