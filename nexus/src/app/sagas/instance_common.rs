@@ -261,6 +261,11 @@ pub async fn instance_ip_get_instance_state(
     Ok(sled_id)
 }
 
+/// Adds a NAT entry to DPD, routing packets bound for `target_ip` to a
+/// target sled.
+///
+/// This call is a no-op if `sled_uuid` is `None` or the saga is explicitly
+/// set to be inactive in event of double attach/detach (`!target_ip.do_saga`).
 pub async fn instance_ip_add_nat(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
@@ -309,6 +314,10 @@ pub async fn instance_ip_add_nat(
     Ok(())
 }
 
+/// Remove a single NAT entry from DPD, dropping packets bound for `target_ip`.
+///
+/// This call is a no-op if `sled_uuid` is `None` or the saga is explicitly
+/// set to be inactive in event of double attach/detach (`!target_ip.do_saga`).
 pub async fn instance_ip_remove_nat(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
@@ -343,6 +352,11 @@ pub async fn instance_ip_remove_nat(
     Ok(())
 }
 
+/// Inform OPTE that it should start sending/receiving traffic on a given IP
+/// address.
+///
+/// This call is a no-op if `sled_uuid` is `None` or the saga is explicitly
+/// set to be inactive in event of double attach/detach (`!target_ip.do_saga`).
 pub async fn instance_ip_add_opte(
     sagactx: &NexusActionContext,
     authz_instance: &authz::Instance,
@@ -393,6 +407,11 @@ pub async fn instance_ip_add_opte(
     Ok(())
 }
 
+/// Inform OPTE that it should cease sending/receiving traffic on a given IP
+/// address.
+///
+/// This call is a no-op if `sled_uuid` is `None` or the saga is explicitly
+/// set to be inactive in event of double attach/detach (`!target_ip.do_saga`).
 pub async fn instance_ip_remove_opte(
     sagactx: &NexusActionContext,
     authz_instance: &authz::Instance,
