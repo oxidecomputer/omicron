@@ -262,6 +262,12 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub user_name: Option<UserId>,
 }
 
+type StepInitFn<'a, N> = Box<
+    dyn for<'b> FnOnce(
+        &'b mut ControlPlaneTestContextBuilder<'a, N>,
+    ) -> BoxFuture<'b, ()>,
+>;
+
 impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub fn new(
         test_name: &'a str,
@@ -301,10 +307,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
     pub async fn init_with_steps(
         &mut self,
-        steps: Vec<(
-            &str,
-            Box<dyn for<'b> FnOnce(&'b mut Self) -> BoxFuture<'b, ()>>,
-        )>,
+        steps: Vec<(&str, StepInitFn<'a, N>)>,
         timeout: Duration,
     ) {
         let log = self.logctx.log.new(o!("component" => "init_with_steps"));
