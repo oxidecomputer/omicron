@@ -4,14 +4,16 @@
 
 //! Low-level facility for generating Blueprints
 
+use crate::ip_allocator::IpAllocator;
 use anyhow::anyhow;
 use internal_dns::DNS_ZONE;
-use ipnet::IpAdd;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::OmicronZonesConfig;
+use nexus_types::deployment::Policy;
+use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::inventory::Collection;
 use omicron_common::address::get_sled_address;
@@ -31,7 +33,7 @@ use std::net::SocketAddrV6;
 use thiserror::Error;
 use uuid::Uuid;
 
-// XXX-dap TODO-doc
+/// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("ran out of available addresses for sled")]
@@ -40,19 +42,27 @@ pub enum Error {
     Planner(#[from] anyhow::Error),
 }
 
-// XXX-dap TODO-doc
-pub struct SledInfo {
-    pub zpools: BTreeSet<ZpoolName>,
-    pub subnet: Ipv6Subnet<SLED_PREFIX>,
-}
-
-// XXX-dap TODO-doc
+/// Helper for assembling a blueprint
+///
+/// There are two basic ways to assemble a new blueprint:
+///
+/// 1. Build one directly from a collection.  Such blueprints have no parent
+///    blueprint.  They are not customizable.  Use
+///    [`BlueprintBuilder::build_initial_from_collection`] for this.  This would
+///    generally only be used once in the lifetime of a rack, to assemble the
+///    first blueprint.
+///
+/// 2. Build one _from_ another blueprint, called the "parent", making changes
+///    as desired.  Use [`BlueprintBuilder::new_based_on`] for this.  Once the
+///    new blueprint is created, there is no dependency on the parent one.
+///    However, the new blueprint can only be made the system's target if its
+///    parent is the current target.
 pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
     // These fields are used to allocate resources from sleds.
-    sleds: &'a BTreeMap<Uuid, SledInfo>,
+    policy: &'a Policy,
     sled_ip_allocators: BTreeMap<Uuid, IpAllocator>,
 
     // These fields will become part of the final blueprint.  See the
@@ -60,7 +70,7 @@ pub struct BlueprintBuilder<'a> {
     omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
     zones_in_service: BTreeSet<Uuid>,
     creator: String,
-    reason: String,
+    comments: Vec<String>,
 }
 
 impl<'a> BlueprintBuilder<'a> {
@@ -68,12 +78,12 @@ impl<'a> BlueprintBuilder<'a> {
     /// collection (representing no changes from the collection state)
     pub fn build_initial_from_collection(
         collection: &'a Collection,
-        sleds: &'a BTreeMap<Uuid, SledInfo>,
+        policy: &'a Policy,
         creator: &str,
-        reason: &str,
     ) -> Result<Blueprint, Error> {
+        let sleds: BTreeSet<_> = policy.sleds.keys().copied().collect();
         let omicron_zones = sleds
-            .keys()
+            .iter()
             .map(|sled_id| {
                 let zones = collection
                     .omicron_zones
@@ -106,13 +116,13 @@ impl<'a> BlueprintBuilder<'a> {
             collection.all_omicron_zones().map(|z| z.id).collect();
         Ok(Blueprint {
             id: Uuid::new_v4(),
-            sleds: sleds.keys().copied().collect(),
+            sleds_in_cluster: sleds,
             omicron_zones: omicron_zones,
             zones_in_service,
             parent_blueprint_id: None,
             time_created: chrono::Utc::now(),
             creator: creator.to_owned(),
-            reason: reason.to_owned(),
+            comment: format!("from collection {}", collection.id),
         })
     }
 
@@ -120,26 +130,26 @@ impl<'a> BlueprintBuilder<'a> {
     /// starting with no changes from that state
     pub fn new_based_on(
         parent_blueprint: &'a Blueprint,
-        sleds: &'a BTreeMap<Uuid, SledInfo>,
+        policy: &'a Policy,
         creator: &str,
-        reason: &str,
     ) -> BlueprintBuilder<'a> {
         BlueprintBuilder {
             parent_blueprint,
-            sleds,
+            policy,
             sled_ip_allocators: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
             zones_in_service: parent_blueprint.zones_in_service.clone(),
             creator: creator.to_owned(),
-            reason: reason.to_owned(),
+            comments: Vec::new(),
         }
     }
 
+    /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for each in-service sled.
-        let omicron_zones = self
-            .sleds
-            .keys()
+        let sleds: BTreeSet<_> = self.policy.sleds.keys().copied().collect();
+        let omicron_zones = sleds
+            .iter()
             .map(|sled_id| {
                 // Start with self.omicron_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
@@ -166,21 +176,29 @@ impl<'a> BlueprintBuilder<'a> {
             .collect();
         Blueprint {
             id: Uuid::new_v4(),
-            sleds: self.sleds.keys().copied().collect(),
+            sleds_in_cluster: sleds,
             omicron_zones: omicron_zones,
             zones_in_service: self.zones_in_service,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             time_created: chrono::Utc::now(),
             creator: self.creator,
-            reason: self.reason,
+            comment: self.comments.join(", "),
         }
+    }
+
+    /// Sets the blueprints "comment"
+    ///
+    /// This is a short human-readable string summarizing the changes reflected
+    /// in the blueprint.  This is only intended for debugging.
+    pub fn comment(&mut self, comment: &str) {
+        self.comments.push(comment.to_owned());
     }
 
     pub fn sled_add_zone_internal_ntp(
         &mut self,
         sled_id: Uuid,
     ) -> Result<(), Error> {
-        let sled_info = self.sled_info(sled_id)?;
+        let sled_info = self.sled_resources(sled_id)?;
         let sled_subnet = sled_info.subnet;
         let ip = self.sled_alloc_ip(sled_id)?;
         let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
@@ -242,7 +260,7 @@ impl<'a> BlueprintBuilder<'a> {
         pool_name: ZpoolName,
     ) -> Result<(), Error> {
         // XXX-dap check that there's not already a crucible zone on this pool
-        let sled_info = self.sled_info(sled_id)?;
+        let sled_info = self.sled_resources(sled_id)?;
         if !sled_info.zpools.contains(&pool_name) {
             return Err(Error::Planner(anyhow!(
                 "adding crucible zone for sled {:?}: \
@@ -271,7 +289,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: Uuid,
         zone: OmicronZoneConfig,
     ) -> Result<(), Error> {
-        let _ = self.sled_info(sled_id)?;
+        let _ = self.sled_resources(sled_id)?;
 
         if !self.zones_in_service.insert(zone.id) {
             return Err(Error::Planner(anyhow!(
@@ -301,8 +319,10 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(())
     }
 
+    /// Returns a newly-allocated underlay address suitable for use by Omicron
+    /// zones
     fn sled_alloc_ip(&mut self, sled_id: Uuid) -> Result<Ipv6Addr, Error> {
-        let sled_info = self.sled_info(sled_id)?;
+        let sled_info = self.sled_resources(sled_id)?;
 
         // Work around rust-lang/rust-clippy#11935 and related issues.
         // Clippy doesn't grok that we can't use
@@ -349,67 +369,12 @@ impl<'a> BlueprintBuilder<'a> {
         allocator.alloc().ok_or(Error::OutOfAddresses)
     }
 
-    fn sled_info(&self, sled_id: Uuid) -> Result<&SledInfo, Error> {
-        self.sleds.get(&sled_id).ok_or_else(|| {
+    fn sled_resources(&self, sled_id: Uuid) -> Result<&SledResources, Error> {
+        self.policy.sleds.get(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "attempted to use sled that is not in service: {}",
                 sled_id
             ))
         })
-    }
-}
-
-/// Very simple allocator for picking addresses from a sled's subnet
-///
-/// The current implementation takes the max address seen so far and uses the
-/// next one.  This will never reuse old IPs.  That avoids a bunch of
-/// operational issues.  It does mean we will eventually run out of IPs.  But we
-/// do have a big space right now (2^16).
-// XXX-dap This will be general enough to use in RSS, but the one in RSS is not
-// general enough to use here.
-// XXX-dap move to a separate module
-struct IpAllocator {
-    pub subnet: ipnetwork::Ipv6Network,
-    pub max_seen: Ipv6Addr,
-}
-
-impl IpAllocator {
-    pub fn new(subnet: ipnetwork::Ipv6Network) -> IpAllocator {
-        IpAllocator {
-            subnet,
-            max_seen: subnet
-                .iter()
-                .next()
-                .expect("expected at least one address in the subnet"),
-        }
-    }
-
-    pub fn reserve(&mut self, addr: Ipv6Addr) {
-        assert!(
-            self.subnet.contains(addr),
-            "attempted to reserve IP {} which is outside \
-            the current subnet {:?}",
-            addr,
-            self.subnet
-        );
-        if addr > self.max_seen {
-            self.max_seen = addr;
-        }
-    }
-
-    pub fn alloc(&mut self) -> Option<Ipv6Addr> {
-        let next = self.max_seen.saturating_add(1);
-        if next == self.max_seen {
-            // We ran out of the entire IPv6 address space.
-            return None;
-        }
-
-        if !self.subnet.contains(next) {
-            // We ran out of this subnet.
-            return None;
-        }
-
-        self.max_seen = next;
-        Some(next)
     }
 }

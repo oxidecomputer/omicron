@@ -4347,6 +4347,7 @@ dependencies = [
  "sled-agent-client",
  "steno",
  "strum",
+ "thiserror",
  "uuid",
 ]
 

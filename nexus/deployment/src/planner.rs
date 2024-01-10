@@ -8,17 +8,15 @@
 
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Error;
-use crate::blueprint_builder::SledInfo;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::Policy;
 use slog::{info, Logger};
-use std::collections::BTreeMap;
-use uuid::Uuid;
 
 pub struct Planner<'a> {
     log: Logger,
     parent_blueprint: &'a Blueprint,
-    sleds: &'a BTreeMap<Uuid, SledInfo>,
+    policy: &'a Policy,
     blueprint: BlueprintBuilder<'a>,
 }
 
@@ -26,17 +24,12 @@ impl<'a> Planner<'a> {
     pub fn new_based_on(
         log: Logger,
         parent_blueprint: &'a Blueprint,
-        sleds: &'a BTreeMap<Uuid, SledInfo>,
+        policy: &'a Policy,
         creator: &str,
-        reason: &str,
     ) -> Planner<'a> {
-        let blueprint = BlueprintBuilder::new_based_on(
-            parent_blueprint,
-            sleds,
-            creator,
-            reason,
-        );
-        Planner { log, parent_blueprint, sleds, blueprint }
+        let blueprint =
+            BlueprintBuilder::new_based_on(parent_blueprint, policy, creator);
+        Planner { log, parent_blueprint, policy, blueprint }
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
@@ -47,7 +40,7 @@ impl<'a> Planner<'a> {
     fn do_plan(&mut self) -> Result<(), Error> {
         // The only thing this planner currently knows how to do is add services
         // to a sled that's missing them.  So let's see if we're in that case.
-        for (sled_id, sled_info) in self.sleds {
+        for (sled_id, sled_info) in &self.policy.sleds {
             let sled_zones = self.parent_blueprint.omicron_zones.get(sled_id);
 
             // Check for an NTP zone.  Every sled should have one.  If it's not
@@ -75,6 +68,8 @@ impl<'a> Planner<'a> {
                     "found sled missing NTP zone (will add one)";
                     "sled_id" => ?sled_id
                 );
+                self.blueprint
+                    .comment(&format!("sled {}: add NTP zone", sled_id));
                 self.blueprint.sled_add_zone_internal_ntp(*sled_id)?;
 
                 // Don't make any other changes to this sled.  However, this
@@ -84,6 +79,7 @@ impl<'a> Planner<'a> {
             }
 
             // Every zpool on the sled should have a Crucible zone on it.
+            let mut ncrucibles_added = 0;
             for zpool_name in &sled_info.zpools {
                 let has_crucible_on_this_pool = sled_zones
                     .map(|found_zones| {
@@ -97,9 +93,26 @@ impl<'a> Planner<'a> {
                     })
                     .unwrap_or(false);
                 if !has_crucible_on_this_pool {
+                    info!(
+                        &self.log,
+                        "found sled zpool missing Crucible zone (will add one)";
+                        "sled_id" => ?sled_id,
+                        "zpool_name" => ?zpool_name,
+                    );
+                    ncrucibles_added += 1;
                     self.blueprint
                         .sled_add_zone_crucible(*sled_id, zpool_name.clone())?;
                 }
+            }
+
+            if ncrucibles_added > 0 {
+                // Don't make any other changes to this sled.  However, this
+                // change is compatible with any other changes to other sleds,
+                // so we can "continue" here rather than "break".
+                // (Yes, it's currently the last thing in the loop, but being
+                // explicit here means we won't forget to do this when more code
+                // is added below.)
+                self.blueprint.comment(&format!("sled {}: add zones", sled_id));
             }
         }
 

@@ -121,4 +121,5 @@
 //! - rolling upgrade of host OS
 
 pub mod blueprint_builder;
+mod ip_allocator;
 pub mod planner;

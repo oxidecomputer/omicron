@@ -10,11 +10,12 @@ use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
-use nexus_deployment::blueprint_builder::SledInfo;
 use nexus_deployment::planner::Planner;
 use nexus_types::deployment::params;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::Policy;
+use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
@@ -35,8 +36,22 @@ use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
 
-// XXX-dap temporary in-memory store of blueprints, for testing.  This will move
-// to the database.
+/// "limit" used in SQL queries that paginate through all sleds, zpools, etc.
+// unsafe: `new_unchecked` is only unsound if the argument is 0.
+const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
+
+/// "limit" used in SQL queries that fetch inventory data.  Unlike the batch
+/// size above, this is a limit on the *total* number of records returned.  If
+/// it's too small, the whole operation will fail.  See
+/// oxidecomputer/omicron#4629.
+// unsafe: `new_unchecked` is only unsound if the argument is 0.
+const SQL_LIMIT_INVENTORY: NonZeroU32 =
+    unsafe { NonZeroU32::new_unchecked(1000) };
+
+/// Temporary in-memory store of blueprints
+///
+/// Blueprints eventually need to be stored in the database.  That will obviate
+/// the need for this structure.
 pub struct Blueprints {
     all_blueprints: BTreeMap<Uuid, Blueprint>,
     target: BlueprintTarget,
@@ -81,7 +96,6 @@ impl super::Nexus {
         opctx: &OpContext,
         blueprint_id: Uuid,
     ) -> LookupResult<Blueprint> {
-        // XXX-dap replace with an authz resource + lookup resource etc.
         let blueprint = authz::Blueprint::new(
             authz::FLEET,
             blueprint_id,
@@ -166,7 +180,9 @@ impl super::Nexus {
                 enabled,
                 time_set: chrono::Utc::now(),
             };
-            // XXX-dap this is the point where we'd poke a background task
+
+            // When we add a background task executing the target blueprint,
+            // this is the point where we'd signal it to update its target.
             Ok(blueprints.target.clone())
         } else {
             Err(Error::not_found_by_id(ResourceType::Blueprint, &new_target_id))
@@ -177,11 +193,10 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<PlanningContext, Error> {
-        let limit = NonZeroU32::new(1000).unwrap(); // XXX-dap
         let creator = self.id.to_string();
         let datastore = self.datastore();
         let collection = datastore
-            .inventory_get_latest_collection(opctx, limit)
+            .inventory_get_latest_collection(opctx, SQL_LIMIT_INVENTORY)
             .await?
             .ok_or_else(|| {
                 Error::unavail("no recent inventory collection available")
@@ -189,7 +204,7 @@ impl super::Nexus {
 
         let sled_rows = {
             let mut all_sleds = Vec::new();
-            let mut paginator = Paginator::new(limit);
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
                 let batch =
                     datastore.sled_list(opctx, &p.current_pagparams()).await?;
@@ -202,7 +217,7 @@ impl super::Nexus {
 
         let mut zpools_by_sled_id = {
             let mut zpools = BTreeMap::new();
-            let mut paginator = Paginator::new(limit);
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
                 let batch = datastore
                     .zpool_list_all_external(opctx, &p.current_pagparams())
@@ -212,17 +227,21 @@ impl super::Nexus {
                 for z in batch {
                     let sled_zpool_names =
                         zpools.entry(z.sled_id).or_insert_with(BTreeSet::new);
-                    // XXX-dap this seems like slightly gross knowledge.  But
-                    // as far as I can tell: sled agent accepts zpool *names*
-                    // with the list of zones, but it only provides zpool *ids*
-                    // when publishing information about its zpools.  This is
-                    // the same logic that RSS currently uses.
-                    let zpool_name =
+                    // It's unfortunate that Nexus knows how Sled Agent
+                    // constructs zpool names, but there's not currently an
+                    // alternative.
+                    let zpool_name_generated =
                         illumos_utils::zpool::ZpoolName::new_external(z.id())
                             .to_string();
-                    // XXX-dap unwrap
-                    sled_zpool_names
-                        .insert(ZpoolName::from_str(&zpool_name).unwrap());
+                    let zpool_name = ZpoolName::from_str(&zpool_name_generated)
+                        .map_err(|e| {
+                            Error::internal_error(&format!(
+                                "unexpectedly failed to parse generated \
+                                zpool name: {}: {}",
+                                zpool_name_generated, e
+                            ))
+                        })?;
+                    sled_zpool_names.insert(zpool_name);
                 }
             }
             zpools
@@ -236,12 +255,12 @@ impl super::Nexus {
                 let zpools = zpools_by_sled_id
                     .remove(&sled_id)
                     .unwrap_or_else(BTreeSet::new);
-                let sled_info = SledInfo { subnet, zpools };
+                let sled_info = SledResources { subnet, zpools };
                 (sled_id, sled_info)
             })
             .collect();
 
-        Ok(PlanningContext { collection, creator, sleds })
+        Ok(PlanningContext { collection, creator, policy: Policy { sleds } })
     }
 
     async fn blueprint_add(
@@ -266,9 +285,8 @@ impl super::Nexus {
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &planning_context.collection,
-            &planning_context.sleds,
+            &planning_context.policy,
             &planning_context.creator,
-            "initial blueprint",
         )
         .map_err(|error| {
             Error::internal_error(&format!(
@@ -303,11 +321,8 @@ impl super::Nexus {
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &parent_blueprint,
-            &planning_context.sleds,
+            &planning_context.policy,
             &planning_context.creator,
-            // XXX-dap this "reason" was intended for the case where we know why
-            // we're doing this.  Right now such a case doesn't exist.
-            "on-demand regenerate",
         );
         let blueprint = planner.plan().map_err(|error| {
             Error::internal_error(&format!(
@@ -323,6 +338,6 @@ impl super::Nexus {
 
 struct PlanningContext {
     collection: Collection,
-    sleds: BTreeMap<Uuid, SledInfo>,
+    policy: Policy,
     creator: String,
 }

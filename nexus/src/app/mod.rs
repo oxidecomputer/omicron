@@ -182,7 +182,7 @@ pub struct Nexus {
     default_region_allocation_strategy: RegionAllocationStrategy,
 
     /// information about blueprints (deployment configurations)
-    // XXX-dap this will go away once these are in the database
+    // This will go away once these are stored in the database.
     blueprints: std::sync::Mutex<deployment::Blueprints>,
 }
 

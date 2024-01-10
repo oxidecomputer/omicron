@@ -36,6 +36,7 @@ use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::SledInstanceState;
@@ -696,7 +697,10 @@ async fn blueprint_target_view(
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
         let target = nexus.blueprint_target_view(&opctx).await?;
-        Ok(HttpResponseOk(deployment_views::BlueprintTarget::from(target)))
+        Ok(HttpResponseOk(
+            deployment_views::BlueprintTarget::try_from(target)
+                .map_err(|e| Error::conflict(e.to_string()))?,
+        ))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -716,7 +720,10 @@ async fn blueprint_target_set(
         let nexus = &apictx.nexus;
         let target = target.into_inner();
         let result = nexus.blueprint_target_set(&opctx, target).await?;
-        Ok(HttpResponseOk(deployment_views::BlueprintTarget::from(result)))
+        Ok(HttpResponseOk(
+            deployment_views::BlueprintTarget::try_from(result)
+                .map_err(|e| Error::conflict(e.to_string()))?,
+        ))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

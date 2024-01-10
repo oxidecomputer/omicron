@@ -16,6 +16,8 @@ pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::ZpoolName;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::SLED_PREFIX;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -36,24 +38,29 @@ use uuid::Uuid;
 /// The current policy is pretty limited.  It's aimed primarily at supporting
 /// the add/remove sled use case.
 pub struct Policy {
-    /// set of sleds that are supposed to be part of the system
-    // XXX-dap If we want this mechanism to be used for the process of creating
-    // a "sled" for a baseboard, then we might need this to be set of something
-    // else -- baseboard ids?  But how would that work for cases that don't have
-    // baseboard ids? (testing, PCs)
-    pub sleds: BTreeSet<Uuid>,
-    // XXX-dap zpools might need to be here, along with whatever else RSS uses
-    // while it's allocating zones.  (zpools could be part of inventory if we
-    // think of it as "stuff that's out there and has no associated policy".
-    // But if we might want to have controls on them (e.g., "don't use this
-    // zpool"), then at least some part of it needs to be here.  And right now
-    // they exist in the database (I think?) so it seems reasonable to assemble
-    // them into the policy.)
+    /// set of sleds that are supposed to be part of the control plane, along
+    /// with information about resources available to the planner
+    pub sleds: BTreeMap<Uuid, SledResources>,
+}
+
+/// Describes the resources available on each sled for the planner
+pub struct SledResources {
+    /// zpools on this sled
+    ///
+    /// (used to allocate storage for control plane zones with persistent
+    /// storage)
+    pub zpools: BTreeSet<ZpoolName>,
+
+    /// the IPv6 subnet of this sled on the underlay network
+    ///
+    /// (implicitly specifies the whole range of addresses that the planner can
+    /// use for control plane components)
+    pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
 /// Describes a complete set of software and configuration for the system
 ///
-/// Blueprints are a fundamental part of how the system updates itself.  Each
+/// Blueprints are a fundamental part of how the system modifies itself.  Each
 /// blueprint completely describes all of the software and configuration
 /// that the control plane manages.  See the nexus/deployment crate-level
 /// documentation for details.
@@ -96,7 +103,7 @@ pub struct Blueprint {
     pub id: Uuid,
 
     /// set of sleds that we consider part of the control plane
-    pub sleds: BTreeSet<Uuid>,
+    pub sleds_in_cluster: BTreeSet<Uuid>,
 
     /// mapping: sled id -> zones deployed on each sled
     pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
@@ -115,7 +122,7 @@ pub struct Blueprint {
     pub creator: String,
     /// human-readable string describing why this blueprint was created
     /// (for debugging)
-    pub reason: String,
+    pub comment: String,
 }
 
 impl Blueprint {
@@ -126,6 +133,7 @@ impl Blueprint {
     }
 }
 
+/// Describes which blueprint the system is currently trying to make real
 // This is analogous to the db model type until we have that.
 #[derive(Debug, Clone)]
 pub struct BlueprintTarget {
@@ -139,9 +147,11 @@ pub mod views {
     use schemars::JsonSchema;
     use serde::Serialize;
     use std::collections::{BTreeMap, BTreeSet};
+    use thiserror::Error;
     use uuid::Uuid;
 
-    // XXX-dap
+    /// Describes all automatically-managed software and configuration in the
+    /// rack
     #[derive(Serialize, JsonSchema)]
     pub struct Blueprint {
         pub id: Uuid,
@@ -150,7 +160,7 @@ pub mod views {
         pub creator: String,
         pub reason: String,
 
-        pub sleds: BTreeSet<Uuid>,
+        pub sleds_in_cluster: BTreeSet<Uuid>,
         pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
         pub zones_in_service: BTreeSet<Uuid>,
     }
@@ -161,8 +171,8 @@ pub mod views {
                 parent_blueprint_id: generic.parent_blueprint_id,
                 time_created: generic.time_created,
                 creator: generic.creator,
-                reason: generic.reason,
-                sleds: generic.sleds,
+                reason: generic.comment,
+                sleds_in_cluster: generic.sleds_in_cluster,
                 omicron_zones: generic.omicron_zones,
                 zones_in_service: generic.zones_in_service,
             }
@@ -170,22 +180,33 @@ pub mod views {
     }
 
     /// Describes what blueprint, if any, the system is currently working toward
-    // XXX-dap should we just make this non-optional and produce an error (404?
-    // 400? 500?) if there's no target yet?
     #[derive(Debug, Serialize, JsonSchema)]
     pub struct BlueprintTarget {
-        pub target_id: Option<Uuid>,
+        /// id of the blueprint that the system is trying to make real
+        pub target_id: Uuid,
+        /// policy: should the system actively work towards this blueprint
+        ///
+        /// This should generally be left enabled.
         pub enabled: bool,
+        /// when this blueprint was made the target
         pub set_at: chrono::DateTime<chrono::Utc>,
     }
 
-    impl From<super::BlueprintTarget> for BlueprintTarget {
-        fn from(value: super::BlueprintTarget) -> Self {
-            BlueprintTarget {
-                target_id: value.target_id,
+    #[derive(Debug, Error)]
+    #[error("no target blueprint has been configured")]
+    pub struct NoTargetBlueprint;
+
+    impl TryFrom<super::BlueprintTarget> for BlueprintTarget {
+        type Error = NoTargetBlueprint;
+
+        fn try_from(
+            value: super::BlueprintTarget,
+        ) -> Result<Self, NoTargetBlueprint> {
+            Ok(BlueprintTarget {
+                target_id: value.target_id.ok_or(NoTargetBlueprint)?,
                 enabled: value.enabled,
                 set_at: value.time_set,
-            }
+            })
         }
     }
 }
