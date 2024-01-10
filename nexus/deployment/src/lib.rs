@@ -119,16 +119,6 @@
 //! - add sled
 //! - remove sled
 //! - rolling upgrade of host OS
-//!
-//! XXX-dap-deep: something that seems tricky here is: let's say we're trying to
-//! update five Nexus instances from version V1 to version V2.  We generate a
-//! blueprint with one instance at V2 and 4 at V1, say.  Now, is that blueprint
-//! "acceptable" given the current parameters or do we need to generate a new
-//! blueprint?  We want the answer to be "yes it's acceptable and don't generate
-//! a new blueprint".  But it depends on the current state, too.  Once the
-//! current state _attains_ that blueprint, then the blueprint is no longer
-//! acceptable.  Maybe that's okay?  De-risking that will probably involve
-//! trying to write that.
 
 pub mod blueprint_builder;
 pub mod planner;

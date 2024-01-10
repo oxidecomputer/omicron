@@ -51,6 +51,7 @@ impl types::OmicronZoneType {
     /// Human-readable label describing what kind of zone this is
     ///
     /// This is just use for testing and reporting.
+    /// Note that this function is identical to its analog in nexus-client.
     pub fn label(&self) -> impl std::fmt::Display {
         match self {
             types::OmicronZoneType::BoundaryNtp { .. } => "boundary_ntp",

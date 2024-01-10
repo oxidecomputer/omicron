@@ -69,50 +69,13 @@ impl DataStore {
         })
     }
 
-    // XXX-dap
-    //     /// Lists zpools in the system
-    //     pub async fn zpool_list(
-    //         &self,
-    //         opctx: &OpContext,
-    //         pagparams: &DataPageParams<'_, Uuid>,
-    //     ) -> ListResultVec<Zpool> {
-    //         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-    //         use db::schema::zpool::dsl;
-    //         paginated(dsl::zpool, dsl::id, pagparams)
-    //             .select(Zpool::as_select())
-    //             .load_async(&*self.pool_connection_authorized(opctx).await?)
-    //             .await
-    //             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    //     }
-
-    /// Paginates through all zpools on U.2 disks in sleds
-    // XXX-dap maybe belongs in a "deployment" module instead
+    /// Paginates through all zpools on U.2 disks in all sleds
     pub async fn zpool_list_all_external(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Zpool> {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        // // XXX-dap saving the below in case I want to go back to it but it's a
-        // // little denormalized so we'll do this in two queries instead, which is
-        // // also simpler.
-        // // To find the zpools on U.2 devices in sleds, we need to join the
-        // // "sled", "zpool", and "physical_disk" tables.  The SQL looks like
-        // // this:
-        // //
-        // // SELECT
-        // //     sled.id, sled.ip, zpool.id
-        // // FROM
-        // //     sled,
-        // //     zpool,
-        // //     physical_disk
-        // // WHERE
-        // //      sled.id = zpool.sled_id
-        // //  AND zpool.physical_disk_id = physical_disk.id
-        // //  AND physical_disk.variant = 'u2'
-        // //
-        // // ORDER BY zpool.id
 
         use db::schema::physical_disk::dsl as dsl_physical_disk;
         use db::schema::zpool::dsl as dsl_zpool;

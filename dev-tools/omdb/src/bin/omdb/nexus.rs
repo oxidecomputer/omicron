@@ -766,7 +766,17 @@ async fn cmd_nexus_blueprints_show(
         "created at {}",
         humantime::format_rfc3339_millis(blueprint.time_created.into(),)
     );
-    println!("created for: {}", blueprint.reason,);
+    println!("created for: {}", blueprint.reason);
+    println!("zones:\n");
+    for (sled_id, sled_zones) in &blueprint.omicron_zones {
+        println!(
+            "  sled {}: Omicron zones at generation {}",
+            sled_id, sled_zones.generation
+        );
+        for z in &sled_zones.zones {
+            println!("    {} {}", z.id, z.zone_type.label());
+        }
+    }
 
     Ok(())
 }
@@ -783,7 +793,8 @@ async fn cmd_nexus_blueprints_delete(
     Ok(())
 }
 
-// XXX-dap add "diff" command?
+// XXX-dap diff blueprint against latest inventory
+// XXX-dap diff blueprint against another blueprint
 
 async fn cmd_nexus_blueprints_set_target(
     client: &nexus_client::Client,

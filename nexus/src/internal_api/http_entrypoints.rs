@@ -681,11 +681,6 @@ async fn blueprint_delete(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-// XXX-dap TODO
-// diff blueprint against latest inventory
-// diff blueprint against another blueprint
-// upload blueprint
-
 // Managing the current target blueprint
 
 /// Fetches the current target blueprint, if any

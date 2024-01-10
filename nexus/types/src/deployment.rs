@@ -60,7 +60,7 @@ pub struct Policy {
 ///
 /// Blueprints are different from policy.  Policy describes the things that an
 /// operator would generally want to control.  The blueprint describes the
-/// details of impleenting that policy that an operator shouldn't have to deal
+/// details of implementing that policy that an operator shouldn't have to deal
 /// with.  For example, the operator might write policy that says "I want
 /// 5 external DNS zones".  The system could then generate a blueprint that
 /// _has_ 5 external DNS zones on 5 specific sleds.  The blueprint includes all
@@ -90,36 +90,6 @@ pub struct Policy {
 /// zones deployed on each host and some supporting configuration (e.g., DNS).
 /// This is aimed at supporting add/remove sleds.  The plan is to grow this to
 /// include more of the system as we support more use cases.
-// XXX-dap Consider whether this should be an enum like in #4732.  My going-in
-// assumption was that this would be a _complete_ state of the world.  This came
-// from the determination that it needs to _not_ be an incremental description
-// of a change.  (Why not incremental?  Because the state of the world can
-// change while we're trying to execute a blueprint.  If the blueprint itself is
-// defined in terms of how it differs from the state of the world (e.g., "add
-// one Nexus zone"), then its _meaning_ changes as the underlying state changes.
-// That's not what we want.)  Having decided that blueprints must not be
-// incremental, I concluded that they must describe the _whole_ state -- i.e.,
-// each blueprint should describe all zones, all DNS names, all sleds
-// in-service, and any other configuration managed by this system.
-// A consequence of this is that some _sequences_ of blueprints are not valid.
-// For example: it would be problematic to have a blueprint that (relative to
-// the current state) moves all CockroachDB nodes from one set of sleds to
-// another set of sleds because executing that could take down the CockroachDB
-// cluster or even remove all the data, even though both the initial and final
-// states are valid.
-//
-// If we instead view this as an enum of possible _changes_, we could make some
-// of these invalid transitions unrepresentable.  For example, if this were an
-// enum where one variant described a change to deployed zones and another
-// described a change to DNS, then it would be impossible to try to change both
-// at once.  That's probably good.  But it wouldn't address the example above,
-// since this invalid change could be represented in the enum version, too.
-//
-// With the enum option, we're implicitly saying that the rest of the system is
-// held constant -- but relative to what?  Should the blueprint have a reference
-// to what inventory it was generated against?  That makes other things trickier
-// (like deleting old inventory collections or even just seeing what the full
-// state of the world is supposed to be when a blueprint has been executed).
 #[derive(Debug, Clone)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
@@ -165,8 +135,10 @@ pub struct BlueprintTarget {
 }
 
 pub mod views {
+    use super::OmicronZonesConfig;
     use schemars::JsonSchema;
     use serde::Serialize;
+    use std::collections::{BTreeMap, BTreeSet};
     use uuid::Uuid;
 
     // XXX-dap
@@ -177,6 +149,10 @@ pub mod views {
         pub time_created: chrono::DateTime<chrono::Utc>,
         pub creator: String,
         pub reason: String,
+
+        pub sleds: BTreeSet<Uuid>,
+        pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+        pub zones_in_service: BTreeSet<Uuid>,
     }
     impl From<super::Blueprint> for Blueprint {
         fn from(generic: super::Blueprint) -> Self {
@@ -186,6 +162,9 @@ pub mod views {
                 time_created: generic.time_created,
                 creator: generic.creator,
                 reason: generic.reason,
+                sleds: generic.sleds,
+                omicron_zones: generic.omicron_zones,
+                zones_in_service: generic.zones_in_service,
             }
         }
     }
