@@ -36,8 +36,8 @@ use uuid::Uuid;
 /// Errors encountered while assembling blueprints
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("ran out of available addresses for sled")]
-    OutOfAddresses,
+    #[error("sled {sled_id}: ran out of available addresses for sled")]
+    OutOfAddresses { sled_id: Uuid },
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
 }
@@ -365,8 +365,7 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         let allocator = self.sled_ip_allocators.get_mut(&sled_id).unwrap();
-        // XXX-dap more error context
-        allocator.alloc().ok_or(Error::OutOfAddresses)
+        allocator.alloc().ok_or_else(|| Error::OutOfAddresses { sled_id })
     }
 
     fn sled_resources(&self, sled_id: Uuid) -> Result<&SledResources, Error> {

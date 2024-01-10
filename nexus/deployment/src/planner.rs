@@ -43,6 +43,8 @@ impl<'a> Planner<'a> {
         for (sled_id, sled_info) in &self.policy.sleds {
             let sled_zones = self.parent_blueprint.omicron_zones.get(sled_id);
 
+            // XXX-dap we should make sure there's internal DNS available first
+
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
