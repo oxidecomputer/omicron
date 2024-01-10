@@ -172,9 +172,9 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fab27994d0bd12725c17d6b478a9bfc2673ad6f4" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "fab27994d0bd12725c17d6b478a9bfc2673ad6f4" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "fab27994d0bd12725c17d6b478a9bfc2673ad6f4" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
 display-error-chain = "0.2.0"
@@ -295,9 +295,9 @@ prettyplease = "0.2.16"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "f1571ce141421cff3d3328f43e7722f5df96fdda" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "f1571ce141421cff3d3328f43e7722f5df96fdda" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "f1571ce141421cff3d3328f43e7722f5df96fdda" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -563,9 +563,9 @@ opt-level = 3
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch.crates-io]
 #steno = { path = "../steno" }
-#[patch."https://github.com/oxidecomputer/propolis"]
-#propolis-client = { path = "../propolis/lib/propolis-client" }
-#propolis-mock-server = { path = "../propolis/bin/mock-server" }
+[patch."https://github.com/oxidecomputer/propolis"]
+propolis-client = { path = "../propolis/lib/propolis-client" }
+propolis-mock-server = { path = "../propolis/bin/mock-server" }
 #[patch."https://github.com/oxidecomputer/crucible"]
 #crucible-agent-client = { path = "../crucible/agent-client" }
 #crucible-pantry-client = { path = "../crucible/pantry-client" }
