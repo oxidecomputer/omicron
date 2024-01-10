@@ -55,7 +55,7 @@ export RUSTFLAGS="-D warnings"
 # takes precedence. This path contains oxide specific libraries such as
 # libipcc.
 if [[ $target_os == "illumos" ]]; then
-	RUSTFLAGS="-D warnings,-R/usr/platform/oxide/lib/amd64"
+	RUSTFLAGS="-D warnings -C link-arg=-R/usr/platform/oxide/lib/amd64"
 fi
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
