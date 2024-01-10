@@ -4,6 +4,9 @@
 
 //! Configuration of the deployment system
 
+use nexus_db_queries::authz;
+use nexus_db_queries::authz::Action;
+use nexus_db_queries::authz::ApiResource;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
@@ -23,6 +26,7 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -54,10 +58,10 @@ impl Blueprints {
 impl super::Nexus {
     pub async fn blueprint_list(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Blueprint> {
-        // XXX-dap authz check
+        opctx.authorize(Action::ListChildren, &authz::BLUEPRINT_CONFIG).await?;
         Ok(self
             .blueprints
             .lock()
@@ -74,31 +78,40 @@ impl super::Nexus {
 
     pub async fn blueprint_view(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         blueprint_id: Uuid,
     ) -> LookupResult<Blueprint> {
         // XXX-dap replace with an authz resource + lookup resource etc.
+        let blueprint = authz::Blueprint::new(
+            authz::FLEET,
+            blueprint_id,
+            LookupType::ById(blueprint_id),
+        );
+        opctx.authorize(Action::Read, &blueprint).await?;
         self.blueprints
             .lock()
             .unwrap()
             .all_blueprints
             .get(&blueprint_id)
             .cloned()
-            .ok_or_else(|| {
-                Error::not_found_by_id(ResourceType::Blueprint, &blueprint_id)
-            })
+            .ok_or_else(|| blueprint.not_found())
     }
 
     pub async fn blueprint_delete(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         blueprint_id: Uuid,
     ) -> DeleteResult {
-        // XXX-dap authz check
+        let blueprint = authz::Blueprint::new(
+            authz::FLEET,
+            blueprint_id,
+            LookupType::ById(blueprint_id),
+        );
+        opctx.authorize(Action::Delete, &blueprint).await?;
+
         let mut blueprints = self.blueprints.lock().unwrap();
         if let Some(target_id) = blueprints.target.target_id {
             if target_id == blueprint_id {
-                // XXX-dap
                 return Err(Error::conflict(format!(
                     "blueprint {} is the current target and cannot be deleted",
                     blueprint_id
@@ -107,10 +120,7 @@ impl super::Nexus {
         }
 
         if blueprints.all_blueprints.remove(&blueprint_id).is_none() {
-            return Err(Error::not_found_by_id(
-                ResourceType::Blueprint,
-                &blueprint_id,
-            ));
+            return Err(blueprint.not_found());
         }
 
         Ok(())
@@ -118,19 +128,19 @@ impl super::Nexus {
 
     pub async fn blueprint_target_view(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
     ) -> Result<BlueprintTarget, Error> {
-        // XXX-dap authz check
+        opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let blueprints = self.blueprints.lock().unwrap();
         Ok(blueprints.target.clone())
     }
 
     pub async fn blueprint_target_set(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         params: params::BlueprintTargetSet,
     ) -> Result<BlueprintTarget, Error> {
-        // XXX-dap authz check
+        opctx.authorize(Action::Modify, &authz::BLUEPRINT_CONFIG).await?;
         let new_target_id = params.target_id;
         let enabled = params.enabled;
         let mut blueprints = self.blueprints.lock().unwrap();
@@ -236,10 +246,10 @@ impl super::Nexus {
 
     async fn blueprint_add(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         blueprint: Blueprint,
     ) -> Result<(), Error> {
-        // XXX-dap authz check
+        opctx.authorize(Action::Modify, &authz::BLUEPRINT_CONFIG).await?;
         let mut blueprints = self.blueprints.lock().unwrap();
         assert!(blueprints
             .all_blueprints
@@ -252,6 +262,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
+        opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &planning_context.collection,
@@ -274,6 +285,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
+        opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let parent_blueprint = {
             let blueprints = self.blueprints.lock().unwrap();
             let Some(target_id) = blueprints.target.target_id else {

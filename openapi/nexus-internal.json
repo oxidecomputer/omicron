@@ -2092,6 +2092,14 @@
           "reason": {
             "type": "string"
           },
+          "sleds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          },
           "time_created": {
             "type": "string",
             "format": "date-time"
@@ -2110,6 +2118,7 @@
           "id",
           "omicron_zones",
           "reason",
+          "sleds",
           "time_created",
           "zones_in_service"
         ]
