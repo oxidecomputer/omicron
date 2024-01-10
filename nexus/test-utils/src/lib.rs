@@ -991,6 +991,8 @@ async fn setup_with_config_impl<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
 ) -> ControlPlaneTestContext<N> {
+    const STEP_TIMEOUT: Duration = Duration::from_secs(60);
+
     builder
         .init_with_steps(
             vec![
@@ -1081,7 +1083,7 @@ async fn setup_with_config_impl<N: NexusServer>(
                     Box::new(|builder| builder.start_producer_server().boxed()),
                 ),
             ],
-            Duration::from_secs(60),
+            STEP_TIMEOUT,
         )
         .await;
 
