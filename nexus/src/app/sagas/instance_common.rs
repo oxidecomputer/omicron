@@ -352,7 +352,7 @@ pub async fn instance_ip_remove_nat(
     Ok(())
 }
 
-/// Inform the OPTE port for a running instance that it should start 
+/// Inform the OPTE port for a running instance that it should start
 /// sending/receiving traffic on a given IP address.
 ///
 /// This call is a no-op if `sled_uuid` is `None` or the saga is explicitly
@@ -407,7 +407,7 @@ pub async fn instance_ip_add_opte(
     Ok(())
 }
 
-/// Inform the OPTE port for a running instance that it should cease 
+/// Inform the OPTE port for a running instance that it should cease
 /// sending/receiving traffic on a given IP address.
 ///
 /// This call is a no-op if `sled_uuid` is `None` or the saga is explicitly
