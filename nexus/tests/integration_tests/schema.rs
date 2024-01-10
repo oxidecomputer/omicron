@@ -1069,8 +1069,7 @@ fn before_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
 
 fn after_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
-        // Confirm that the ip_pool_resource objects have been created
-        // by the migration.
+        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
         let rows = client
             .query("SELECT last_used_address FROM sled ORDER BY id", &[])
             .await
