@@ -210,10 +210,6 @@ impl<'a> BlueprintBuilder<'a> {
         // anywhere (unless there happens to be another internal NTP zone
         // lying around).  Recompute it based on what boundary servers
         // currently exist.
-        // XXX-dap is this right?  how would we keep this in sync if we
-        // wanted to put a new boundary service somewhere else?  Shouldn't
-        // we instead have a DNS name that resolves to all the boundary
-        // NTP servers?
         let ntp_servers = self
             .parent_blueprint
             .all_omicron_zones()
