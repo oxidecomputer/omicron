@@ -10310,6 +10310,7 @@ dependencies = [
  "omicron-workspace-hack",
  "slog",
  "tokio",
+ "zone",
 ]
 
 [[package]]

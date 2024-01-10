@@ -11,7 +11,10 @@ use illumos_utils::route::Route;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::info;
+use std::fs;
 use std::net::Ipv6Addr;
+
+pub const HOSTS_FILE: &str = "/etc/inet/hosts";
 
 fn parse_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
     if s == "unknown" {
@@ -67,11 +70,14 @@ async fn do_run() -> Result<(), CmdError> {
         )
         .get_matches();
 
+    let zonename =
+        zone::current().await.expect("Could not determine local zone name");
     let datalink: &String = matches.get_one("datalink").unwrap();
     let static_addr: &Ipv6Addr = matches.get_one("static_addr").unwrap();
     let gateway: &Ipv6Addr = matches.get_one("gateway").unwrap();
 
-    // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is addressed
+    // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is
+    // addressed
     info!(&log, "Ensuring a temporary IP interface is created"; "data link" => ?datalink);
     Ipadm::set_temp_interface_for_datalink(&datalink)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
@@ -87,6 +93,19 @@ async fn do_run() -> Result<(), CmdError> {
     info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
     Route::ensure_default_route_with_gateway(gateway)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+
+    info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
+    fs::write(
+        HOSTS_FILE,
+        format!(
+            r#"
+::1 localhost loghost
+127.0.0.1 localhost loghost
+{static_addr} {zonename}.local {zonename}
+"#
+        ),
+    )
+    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }
