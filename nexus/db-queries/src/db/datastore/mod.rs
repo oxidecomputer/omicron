@@ -275,8 +275,8 @@ impl DataStore {
         self.pool_connection_unauthorized().await
     }
 
-    /// Return the next available IPv6 address for an Oxide service running on
-    /// the provided sled.
+    /// Return the next available IPv6 address for a propolis instance running
+    /// on the provided sled.
     pub async fn next_ipv6_address(
         &self,
         opctx: &OpContext,

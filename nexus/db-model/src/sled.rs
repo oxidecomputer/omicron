@@ -57,7 +57,7 @@ pub struct Sled {
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
 
-    /// The last IP address provided to an Oxide service on this sled
+    /// The last IP address provided to a propolis instance on this sled
     pub last_used_address: ipv6::Ipv6Addr,
 
     provision_state: SledProvisionState,
