@@ -1131,7 +1131,7 @@ impl InvOmicronZoneNic {
                         ),
                     ),
                     subnet: IpNetwork::from(nic.subnet.clone()),
-                    vni: SqlU32::from(nic.vni.0),
+                    vni: SqlU32::from(u32::from(nic.vni)),
                     is_primary: nic.primary,
                     slot: SqlU8::from(nic.slot),
                 }))
@@ -1154,7 +1154,9 @@ impl InvOmicronZoneNic {
             name: self.name.into(),
             primary: self.is_primary,
             slot: *self.slot,
-            vni: nexus_types::inventory::Vni::from(*self.vni),
+            // XXX-dap unwrap
+            vni: omicron_common::api::external::Vni::try_from(*self.vni)
+                .unwrap(),
             subnet: self.subnet.into(),
         }
     }

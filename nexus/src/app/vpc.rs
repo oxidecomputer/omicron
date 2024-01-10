@@ -28,7 +28,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::Vni;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::internal::nexus::HostIdentifier;
 use sled_agent_client::types::NetworkInterface;
@@ -480,7 +479,7 @@ impl super::Nexus {
             let mut nics = HashSet::new();
             let mut targets = Vec::with_capacity(rule.targets.len());
             let mut push_target_nic = |nic: &NetworkInterface| {
-                if nics.insert((*nic.vni, (*nic.mac).clone())) {
+                if nics.insert((nic.vni, (*nic.mac).clone())) {
                     targets.push(nic.clone());
                 }
             };
@@ -589,10 +588,8 @@ impl super::Nexus {
                                     .unwrap_or(&no_interfaces)
                                 {
                                     host_addrs.push(
-                                        HostIdentifier::Vpc(Vni::try_from(
-                                            *interface.vni,
-                                        )?)
-                                        .into(),
+                                        HostIdentifier::Vpc(interface.vni)
+                                            .into(),
                                     )
                                 }
                             }

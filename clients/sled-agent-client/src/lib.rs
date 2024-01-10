@@ -27,12 +27,15 @@ progenitor::generate_api!(
     replace = {
         ByteCount = omicron_common::api::external::ByteCount,
         Generation = omicron_common::api::external::Generation,
+        MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+        SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
+        Vni = omicron_common::api::external::Vni,
     }
 );
 
@@ -240,31 +243,6 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
             Destroyed => Self::Destroyed,
             Faulted => Self::Faulted,
         }
-    }
-}
-
-impl From<omicron_common::api::external::Vni> for types::Vni {
-    fn from(v: omicron_common::api::external::Vni) -> Self {
-        Self(u32::from(v))
-    }
-}
-
-impl From<types::Vni> for omicron_common::api::external::Vni {
-    fn from(s: types::Vni) -> Self {
-        Self::try_from(s.0).unwrap()
-    }
-}
-
-impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
-    fn from(s: omicron_common::api::external::MacAddr) -> Self {
-        Self::try_from(s.0.to_string())
-            .unwrap_or_else(|e| panic!("{}: {}", s.0, e))
-    }
-}
-
-impl From<types::MacAddr> for omicron_common::api::external::MacAddr {
-    fn from(s: types::MacAddr) -> Self {
-        s.parse().unwrap()
     }
 }
 
@@ -511,14 +489,6 @@ impl From<omicron_common::api::internal::shared::NetworkInterface>
             primary: s.primary,
             slot: s.slot,
         }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::SourceNatConfig>
-    for types::SourceNatConfig
-{
-    fn from(s: omicron_common::api::internal::shared::SourceNatConfig) -> Self {
-        Self { ip: s.ip, first_port: s.first_port, last_port: s.last_port }
     }
 }
 
