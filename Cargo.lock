@@ -6282,6 +6282,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1e25649e8c2ac274bd04adfe0513dd14a482058c#1e25649e8c2ac274bd04adfe0513dd14a482058c"
 dependencies = [
  "async-trait",
  "base64",
@@ -6302,6 +6303,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1e25649e8c2ac274bd04adfe0513dd14a482058c#1e25649e8c2ac274bd04adfe0513dd14a482058c"
 dependencies = [
  "anyhow",
  "atty",
@@ -6331,6 +6333,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1e25649e8c2ac274bd04adfe0513dd14a482058c#1e25649e8c2ac274bd04adfe0513dd14a482058c"
 dependencies = [
  "schemars",
  "serde",
