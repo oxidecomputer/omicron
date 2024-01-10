@@ -2808,6 +2808,26 @@ impl ServiceManager {
             old_zones_set.difference(&requested_zones_set);
         let zones_to_be_added = requested_zones_set.difference(&old_zones_set);
 
+        // For each new zone request, ensure that we've sufficiently
+        // synchronized time.
+        //
+        // NOTE: This imposes a constraint, during initial setup, cold boot,
+        // etc, that NTP and the internal DNS system it depends on MUST be
+        // initialized prior to other zones.
+        let time_is_synchronized =
+            match self.timesync_get_locked(&existing_zones).await {
+                // Time is synchronized
+                Ok(TimeSync { sync: true, .. }) => true,
+                // Time is not synchronized, or we can't check
+                _ => false,
+            };
+        for zone in zones_to_be_added.clone() {
+            if zone_requires_timesync(&zone.zone_type) && !time_is_synchronized
+            {
+                return Err(Error::TimeNotSynchronized);
+            }
+        }
+
         // Destroy zones that should not be running
         for zone in zones_to_be_removed {
             let expected_zone_name = zone.zone_name();
@@ -2837,16 +2857,6 @@ impl ServiceManager {
                 warn!(log, "Expected to remove zone, but could not find it");
             }
         }
-
-        // Check time synchronization; we'll need to check this bool for each of
-        // the new zone types.
-        let time_is_synchronized =
-            match self.timesync_get_locked(&existing_zones).await {
-                // Time is synchronized
-                Ok(TimeSync { sync: true, .. }) => true,
-                // Time is not synchronized, or we can't check
-                _ => false,
-            };
 
         // Create zones that should be running
         let all_u2_roots = self
@@ -2886,17 +2896,6 @@ impl ServiceManager {
                         }
                     }
                 }
-            }
-
-            // For each new zone request, ensure that we've sufficiently
-            // synchronized time.
-            //
-            // NOTE: This imposes a constraint, during initial setup, cold boot,
-            // etc, that NTP and the internal DNS system it depends on MUST be
-            // initialized prior to other zones.
-            if zone_requires_timesync(&zone.zone_type) && !time_is_synchronized
-            {
-                return Err(Error::TimeNotSynchronized);
             }
 
             // For each new zone request, we pick an arbitrary U.2 to store
