@@ -12,6 +12,7 @@ use super::external_endpoints;
 use super::inventory_collection;
 use super::nat_cleanup;
 use super::phantom_disks;
+use crate::app::sagas::SagaRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -21,6 +22,7 @@ use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 /// Describes ongoing background tasks and provides interfaces for working with
@@ -67,6 +69,7 @@ impl BackgroundTasks {
         dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
+        _saga_request: Sender<SagaRequest>,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
