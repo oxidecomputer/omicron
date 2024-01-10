@@ -942,7 +942,7 @@ impl InvOmicronZone {
         let nic = match (self.nic_id, nic_row) {
             (Some(expected_id), Some(nic_row)) => {
                 ensure!(expected_id == nic_row.id, "caller provided wrong NIC");
-                Ok(nic_row.into_network_interface_for_zone(self.id))
+                Ok(nic_row.into_network_interface_for_zone(self.id)?)
             }
             (None, None) => Err(anyhow!(
                 "expected zone to have an associated NIC, but it doesn't"
@@ -1143,8 +1143,8 @@ impl InvOmicronZoneNic {
     pub fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> nexus_types::inventory::NetworkInterface {
-        nexus_types::inventory::NetworkInterface {
+    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+        Ok(nexus_types::inventory::NetworkInterface {
             id: self.id,
             ip: self.ip.ip(),
             kind: nexus_types::inventory::NetworkInterfaceKind::Service(
@@ -1154,10 +1154,9 @@ impl InvOmicronZoneNic {
             name: self.name.into(),
             primary: self.is_primary,
             slot: *self.slot,
-            // XXX-dap unwrap
             vni: omicron_common::api::external::Vni::try_from(*self.vni)
-                .unwrap(),
+                .context("parsing VNI")?,
             subnet: self.subnet.into(),
-        }
+        })
     }
 }
