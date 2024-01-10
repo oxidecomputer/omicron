@@ -16,10 +16,7 @@ use crate::db::identity::Asset;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
-use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use async_bb8_diesel::AsyncSimpleConnection;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
@@ -79,21 +76,18 @@ impl DataStore {
 
         use db::schema::physical_disk::dsl as dsl_physical_disk;
         use db::schema::zpool::dsl as dsl_zpool;
-        // XXX-dap shouldn't need to disable full scan?
-        let conn = self.pool_connection_authorized(opctx).await?;
-        conn.transaction_async(|conn| async move {
-            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL).await?;
-            paginated(dsl_zpool::zpool, dsl_zpool::id, pagparams)
-                .inner_join(db::schema::physical_disk::table.on(
+        paginated(dsl_zpool::zpool, dsl_zpool::id, pagparams)
+            .filter(dsl_zpool::time_deleted.is_null())
+            .inner_join(
+                db::schema::physical_disk::table.on(
                     dsl_zpool::physical_disk_id.eq(dsl_physical_disk::id).and(
                         dsl_physical_disk::variant.eq(PhysicalDiskKind::U2),
                     ),
-                ))
-                .select(Zpool::as_select())
-                .load_async(&conn)
-                .await
-        })
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+                ),
+            )
+            .select(Zpool::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
