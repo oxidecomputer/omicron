@@ -2,7 +2,7 @@
 #:
 #: name = "helios / CI tools"
 #: variety = "basic"
-#: target = "helios-2.0-20231220"
+#: target = "helios-2.0"
 #: rust_toolchain = "1.72.1"
 #: output_rules = [
 #:	"=/work/end-to-end-tests/*.gz",
