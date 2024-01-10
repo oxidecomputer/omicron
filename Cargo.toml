@@ -188,7 +188,7 @@ diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch
 dns-server = { path = "dns-server" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "rustls-0.22", features = [ "usdt-probes" ] }
 either = "1.9.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
@@ -215,7 +215,7 @@ httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "0.14"
-hyper-rustls = "0.24.2"
+hyper-rustls = "0.25.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
 indexmap = "2.1.0"
@@ -313,7 +313,7 @@ ring = "0.17.7"
 rpassword = "7.3.1"
 rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
-rustls = "0.21.9"
+rustls = "0.22.1"
 rustyline = "12.0.0"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.16"

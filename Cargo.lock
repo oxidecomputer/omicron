@@ -1148,7 +1148,7 @@ name = "crdb-seed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "slog",
@@ -1834,9 +1834,9 @@ dependencies = [
  "chrono",
  "clap 4.4.3",
  "dns-service-client",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
- "http",
+ "http 0.2.11",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
@@ -1868,7 +1868,7 @@ name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "http",
+ "http 0.2.11",
  "omicron-workspace-hack",
  "progenitor",
  "reqwest",
@@ -1906,7 +1906,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
- "http",
+ "http 0.2.11",
  "ipnetwork",
  "omicron-workspace-hack",
  "omicron-zone-package",
@@ -1928,7 +1928,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff87a0175a6c8ce4462cfe7486edd7000f01be6e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#89c2fddb7bf914336ad87ad77f7269b61e1c64e9"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1937,11 +1937,11 @@ dependencies = [
  "camino",
  "chrono",
  "debug-ignore",
- "dropshot_endpoint",
+ "dropshot_endpoint 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "form_urlencoded",
  "futures",
  "hostname",
- "http",
+ "http 0.2.11",
  "hyper",
  "indexmap 2.1.0",
  "multer",
@@ -1949,8 +1949,8 @@ dependencies = [
  "paste",
  "percent-encoding",
  "proc-macro2",
- "rustls",
- "rustls-pemfile",
+ "rustls 0.21.9",
+ "rustls-pemfile 2.0.0",
  "schemars",
  "serde",
  "serde_json",
@@ -1963,7 +1963,53 @@ dependencies = [
  "slog-json",
  "slog-term",
  "tokio",
- "tokio-rustls",
+ "tokio-rustls 0.24.1",
+ "toml 0.8.8",
+ "usdt",
+ "uuid",
+ "version_check",
+ "waitgroup",
+]
+
+[[package]]
+name = "dropshot"
+version = "0.9.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22#b4e30b6cbe41af8c3245fcdbbdf245fdbf8be44f"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "base64",
+ "bytes",
+ "camino",
+ "chrono",
+ "debug-ignore",
+ "dropshot_endpoint 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "form_urlencoded",
+ "futures",
+ "hostname",
+ "http 0.2.11",
+ "hyper",
+ "indexmap 2.1.0",
+ "multer",
+ "openapiv3",
+ "paste",
+ "percent-encoding",
+ "proc-macro2",
+ "rustls 0.22.2",
+ "rustls-pemfile 2.0.0",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sha1",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-json",
+ "slog-term",
+ "tokio",
+ "tokio-rustls 0.25.0",
  "toml 0.8.8",
  "usdt",
  "uuid",
@@ -1974,7 +2020,19 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff87a0175a6c8ce4462cfe7486edd7000f01be6e"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#89c2fddb7bf914336ad87ad77f7269b61e1c64e9"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream 0.2.0",
+ "syn 2.0.46",
+]
+
+[[package]]
+name = "dropshot_endpoint"
+version = "0.9.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22#b4e30b6cbe41af8c3245fcdbbdf245fdbf8be44f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2112,7 +2170,7 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
- "http",
+ "http 0.2.11",
  "hyper",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -2604,7 +2662,7 @@ name = "gateway-test-utils"
 version = "0.1.0"
 dependencies = [
  "camino",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "gateway-messages",
  "omicron-gateway",
  "omicron-test-utils",
@@ -2749,7 +2807,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http",
+ "http 0.2.11",
  "indexmap 1.9.3",
  "slab",
  "tokio",
@@ -2802,7 +2860,7 @@ dependencies = [
  "base64",
  "bytes",
  "headers-core",
- "http",
+ "http 0.2.11",
  "httpdate",
  "mime",
  "sha1",
@@ -2814,7 +2872,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
 dependencies = [
- "http",
+ "http 0.2.11",
 ]
 
 [[package]]
@@ -2931,13 +2989,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "http"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b32afd38673a8016f7c9ae69e5af41a58f81b1d31689040f2f1959594ce194ea"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "http-body"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
 dependencies = [
  "bytes",
- "http",
+ "http 0.2.11",
  "pin-project-lite",
 ]
 
@@ -2970,7 +3039,7 @@ dependencies = [
  "crossbeam-channel",
  "form_urlencoded",
  "futures",
- "http",
+ "http 0.2.11",
  "hyper",
  "log",
  "once_cell",
@@ -3057,7 +3126,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "httparse",
  "httpdate",
@@ -3077,13 +3146,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
- "http",
+ "http 0.2.11",
  "hyper",
  "log",
- "rustls",
- "rustls-native-certs",
+ "rustls 0.21.9",
+ "rustls-native-certs 0.6.3",
  "tokio",
- "tokio-rustls",
+ "tokio-rustls 0.24.1",
+]
+
+[[package]]
+name = "hyper-rustls"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "399c78f9338483cb7e630c8474b07268983c6bd5acee012e4211f9f7bb21b070"
+dependencies = [
+ "futures-util",
+ "http 0.2.11",
+ "hyper",
+ "log",
+ "rustls 0.22.2",
+ "rustls-native-certs 0.7.0",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls 0.25.0",
 ]
 
 [[package]]
@@ -3093,7 +3179,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "318ca89e4827e7fe4ddd2824f52337239796ae8ecc761a663324407dc3d8d7e7"
 dependencies = [
  "futures-util",
- "http",
+ "http 0.2.11",
  "http-range",
  "httpdate",
  "hyper",
@@ -3302,7 +3388,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
- "http",
+ "http 0.2.11",
  "illumos-utils",
  "installinator-artifact-client",
  "installinator-common",
@@ -3357,7 +3443,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "hyper",
  "installinator-common",
@@ -3412,7 +3498,7 @@ dependencies = [
  "chrono",
  "dns-server",
  "dns-service-client",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "futures",
  "hyper",
@@ -3438,7 +3524,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "internal-dns",
  "omicron-common",
  "omicron-workspace-hack",
@@ -3999,14 +4085,14 @@ dependencies = [
 
 [[package]]
 name = "multer"
-version = "2.1.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01acbdc23469fd8fe07ab135923371d5f5a422fbf9c522158677c8eb15bc51c2"
+checksum = "a15d522be0a9c3e46fd2632e272d178f56387bdb5c9fbb3a36c649062e9b5219"
 dependencies = [
  "bytes",
  "encoding_rs",
  "futures-util",
- "http",
+ "http 1.0.0",
  "httparse",
  "log",
  "memchr",
@@ -4145,14 +4231,14 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "futures",
  "gateway-client",
  "headers",
- "http",
+ "http 0.2.11",
  "hyper",
- "hyper-rustls",
+ "hyper-rustls 0.25.0",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
@@ -4182,7 +4268,7 @@ dependencies = [
  "rcgen",
  "ref-cast",
  "regex",
- "rustls",
+ "rustls 0.22.2",
  "samael",
  "serde",
  "serde_json",
@@ -4264,12 +4350,12 @@ dependencies = [
  "crucible-agent-client",
  "dns-server",
  "dns-service-client",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "futures",
  "gateway-messages",
  "gateway-test-utils",
  "headers",
- "http",
+ "http 0.2.11",
  "hyper",
  "internal-dns",
  "nexus-db-queries",
@@ -4614,11 +4700,11 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "futures",
  "hex",
- "http",
+ "http 0.2.11",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -4669,7 +4755,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "futures",
  "gateway-messages",
@@ -4702,14 +4788,14 @@ dependencies = [
  "base64",
  "camino",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "futures",
  "gateway-messages",
  "gateway-sp-comms",
  "gateway-test-utils",
  "hex",
- "http",
+ "http 0.2.11",
  "hyper",
  "illumos-utils",
  "ipcc-key-value",
@@ -4758,7 +4844,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "fatfs",
  "futures",
@@ -4767,11 +4853,11 @@ dependencies = [
  "gateway-test-utils",
  "headers",
  "hex",
- "http",
+ "http 0.2.11",
  "httptest",
  "hubtools",
  "hyper",
- "hyper-rustls",
+ "hyper-rustls 0.25.0",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
@@ -4817,7 +4903,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring 0.17.7",
- "rustls",
+ "rustls 0.22.2",
  "samael",
  "schemars",
  "semver 1.0.21",
@@ -4855,7 +4941,7 @@ dependencies = [
  "clap 4.4.3",
  "crucible-agent-client",
  "diesel",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "futures",
  "gateway-client",
@@ -4971,7 +5057,8 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "flate2",
  "futures",
@@ -4979,7 +5066,7 @@ dependencies = [
  "glob",
  "guppy",
  "hex",
- "http",
+ "http 0.2.11",
  "hyper",
  "hyper-staticfile",
  "illumos-utils",
@@ -5046,12 +5133,12 @@ dependencies = [
  "atomicwrites",
  "camino",
  "camino-tempfile",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "filetime",
  "headers",
  "hex",
- "http",
+ "http 0.2.11",
  "libc",
  "omicron-common",
  "omicron-workspace-hack",
@@ -5060,7 +5147,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring 0.17.7",
- "rustls",
+ "rustls 0.22.2",
  "slog",
  "subprocess",
  "tar",
@@ -5118,7 +5205,7 @@ dependencies = [
  "hex",
  "hmac",
  "hyper",
- "hyper-rustls",
+ "hyper-rustls 0.24.2",
  "indexmap 2.1.0",
  "inout",
  "ipnetwork",
@@ -5384,7 +5471,7 @@ dependencies = [
  "base64",
  "chrono",
  "futures",
- "http",
+ "http 0.2.11",
  "hyper",
  "omicron-workspace-hack",
  "progenitor",
@@ -5456,7 +5543,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "futures",
  "hyper",
@@ -5499,7 +5586,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "expectorate",
  "futures",
  "highway",
@@ -5537,9 +5624,9 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "chrono",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "futures",
- "http",
+ "http 0.2.11",
  "kstat-rs",
  "omicron-workspace-hack",
  "oximeter",
@@ -5569,7 +5656,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "nexus-client",
  "omicron-common",
  "omicron-workspace-hack",
@@ -6247,7 +6334,7 @@ source = "git+https://github.com/oxidecomputer/progenitor?branch=main#9339b57628
 dependencies = [
  "getopts",
  "heck 0.4.1",
- "http",
+ "http 0.2.11",
  "indexmap 2.1.0",
  "openapiv3",
  "proc-macro2",
@@ -6309,7 +6396,7 @@ dependencies = [
  "atty",
  "base64",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "hyper",
  "progenitor",
@@ -6745,10 +6832,10 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "hyper",
- "hyper-rustls",
+ "hyper-rustls 0.24.2",
  "hyper-tls",
  "ipnet",
  "js-sys",
@@ -6758,15 +6845,15 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls",
- "rustls-pemfile",
+ "rustls 0.21.9",
+ "rustls-pemfile 1.0.3",
  "serde",
  "serde_json",
  "serde_urlencoded",
  "system-configuration",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls",
+ "tokio-rustls 0.24.1",
  "tokio-util",
  "tower-service",
  "url",
@@ -7086,8 +7173,22 @@ checksum = "629648aced5775d558af50b2b4c7b02983a04b312126d45eeead26e7caa498b9"
 dependencies = [
  "log",
  "ring 0.17.7",
- "rustls-webpki",
+ "rustls-webpki 0.101.7",
  "sct",
+]
+
+[[package]]
+name = "rustls"
+version = "0.22.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e87c9956bd9807afa1f77e0f7594af32566e830e088a5576d27c5b6f30f49d41"
+dependencies = [
+ "log",
+ "ring 0.17.7",
+ "rustls-pki-types",
+ "rustls-webpki 0.102.1",
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -7097,7 +7198,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile",
+ "rustls-pemfile 1.0.3",
+ "schannel",
+ "security-framework",
+]
+
+[[package]]
+name = "rustls-native-certs"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f1fb85efa936c42c6d5fc28d2629bb51e4b2f4b8a5211e297d599cc5a093792"
+dependencies = [
+ "openssl-probe",
+ "rustls-pemfile 2.0.0",
+ "rustls-pki-types",
  "schannel",
  "security-framework",
 ]
@@ -7112,12 +7226,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls-pemfile"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35e4980fa29e4c4b212ffb3db068a564cbf560e51d3944b7c88bd8bf5bec64f4"
+dependencies = [
+ "base64",
+ "rustls-pki-types",
+]
+
+[[package]]
+name = "rustls-pki-types"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e9d979b3ce68192e42760c7810125eb6cf2ea10efae545a156063e61f314e2a"
+
+[[package]]
 name = "rustls-webpki"
 version = "0.101.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
 dependencies = [
  "ring 0.17.7",
+ "untrusted 0.9.0",
+]
+
+[[package]]
+name = "rustls-webpki"
+version = "0.102.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef4ca26037c909dedb327b48c3327d0ba91d3dd3c4e05dad328f210ffb68e95b"
+dependencies = [
+ "ring 0.17.7",
+ "rustls-pki-types",
  "untrusted 0.9.0",
 ]
 
@@ -7374,9 +7515,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.194"
+version = "1.0.195"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b114498256798c94a0689e1a15fec6005dee8ac1f41de56404b67afc2a4b773"
+checksum = "63261df402c67811e9ac6def069e4786148c4563f4b50fd4bf30aa370d626b02"
 dependencies = [
  "serde_derive",
 ]
@@ -7412,9 +7553,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.194"
+version = "1.0.195"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3385e45322e8f9931410f01b3031ec534c3947d0e94c18049af4d9f9907d4e0"
+checksum = "46fe8f8603d81ba86327b23a2e9cdf49e1255fb94a4c5f297f6ee0547178ea2c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7812,9 +7953,9 @@ dependencies = [
 
 [[package]]
 name = "slog-bunyan"
-version = "2.4.0"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "440fd32d0423c31e4f98d76c0b62ebdb847f905aa07357197e9b41ac620af97d"
+checksum = "dcaaf6e68789d3f0411f1e72bc443214ef252a1038b6e344836e50442541f190"
 dependencies = [
  "hostname",
  "slog",
@@ -8025,7 +8166,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap 4.4.3",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "futures",
  "gateway-messages",
  "hex",
@@ -8793,7 +8934,18 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls",
+ "rustls 0.21.9",
+ "tokio",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
+dependencies = [
+ "rustls 0.22.2",
+ "rustls-pki-types",
  "tokio",
 ]
 
@@ -9184,7 +9336,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "data-encoding",
- "http",
+ "http 0.2.11",
  "httparse",
  "log",
  "rand 0.8.5",
@@ -9358,7 +9510,7 @@ dependencies = [
  "clap 4.4.3",
  "debug-ignore",
  "display-error-chain",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "futures",
  "hex",
  "hubtools",
@@ -9828,7 +9980,7 @@ dependencies = [
  "debug-ignore",
  "display-error-chain",
  "dpd-client",
- "dropshot",
+ "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
  "either",
  "expectorate",
  "flate2",
@@ -9839,7 +9991,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "hex",
- "http",
+ "http 0.2.11",
  "hubtools",
  "hyper",
  "illumos-utils",
