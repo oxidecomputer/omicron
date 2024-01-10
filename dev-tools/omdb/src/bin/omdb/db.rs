@@ -142,7 +142,7 @@ pub struct DbArgs {
 
 #[derive(Debug, Args)]
 pub struct DbFetchOptions {
-    /// The maximum number of rows a DB query should be allowed to try to fetch.
+    /// limit to apply to queries that fetch rows
     #[clap(
         long = "fetch-limit",
         default_value_t = NonZeroU32::new(500).unwrap(),
@@ -150,8 +150,8 @@ pub struct DbFetchOptions {
     )]
     fetch_limit: NonZeroU32,
 
-    /// Whether to include soft-deleted records when enumerating objects that
-    /// can be soft-deleted.
+    /// whether to include soft-deleted records when enumerating objects that
+    /// can be soft-deleted
     #[clap(long, default_value_t = false)]
     include_deleted: bool,
 }
