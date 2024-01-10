@@ -3148,9 +3148,7 @@ dependencies = [
  "futures-util",
  "http 0.2.11",
  "hyper",
- "log",
  "rustls 0.21.9",
- "rustls-native-certs 0.6.3",
  "tokio",
  "tokio-rustls 0.24.1",
 ]
@@ -3166,7 +3164,7 @@ dependencies = [
  "hyper",
  "log",
  "rustls 0.22.2",
- "rustls-native-certs 0.7.0",
+ "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.25.0",
@@ -5205,7 +5203,6 @@ dependencies = [
  "hex",
  "hmac",
  "hyper",
- "hyper-rustls 0.24.2",
  "indexmap 2.1.0",
  "inout",
  "ipnetwork",
@@ -7189,18 +7186,6 @@ dependencies = [
  "rustls-webpki 0.102.1",
  "subtle",
  "zeroize",
-]
-
-[[package]]
-name = "rustls-native-certs"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
-dependencies = [
- "openssl-probe",
- "rustls-pemfile 1.0.3",
- "schannel",
- "security-framework",
 ]
 
 [[package]]
