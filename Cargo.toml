@@ -563,9 +563,9 @@ opt-level = 3
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch.crates-io]
 #steno = { path = "../steno" }
-[patch."https://github.com/oxidecomputer/propolis"]
-propolis-client = { path = "../propolis/lib/propolis-client" }
-propolis-mock-server = { path = "../propolis/bin/mock-server" }
+#[patch."https://github.com/oxidecomputer/propolis"]
+#propolis-client = { path = "../propolis/lib/propolis-client" }
+#propolis-mock-server = { path = "../propolis/bin/mock-server" }
 #[patch."https://github.com/oxidecomputer/crucible"]
 #crucible-agent-client = { path = "../crucible/agent-client" }
 #crucible-pantry-client = { path = "../crucible/pantry-client" }
