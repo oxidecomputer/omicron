@@ -307,9 +307,9 @@ impl super::Nexus {
         let parent_blueprint = {
             let blueprints = self.blueprints.lock().unwrap();
             let Some(target_id) = blueprints.target.target_id else {
-                return Err(Error::conflict(&format!(
-                    "cannot regenerate blueprint without existing target"
-                )));
+                return Err(Error::conflict(
+                    "cannot regenerate blueprint without existing target",
+                ));
             };
             blueprints
                 .all_blueprints

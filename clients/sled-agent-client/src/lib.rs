@@ -403,7 +403,7 @@ impl From<omicron_common::api::internal::nexus::HostIdentifier>
         use omicron_common::api::internal::nexus::HostIdentifier::*;
         match s {
             Ip(net) => Self::Ip(net.into()),
-            Vpc(vni) => Self::Vpc(vni.into()),
+            Vpc(vni) => Self::Vpc(vni),
         }
     }
 }
@@ -484,9 +484,9 @@ impl From<omicron_common::api::internal::shared::NetworkInterface>
             kind: s.kind.into(),
             name: s.name,
             ip: s.ip,
-            mac: s.mac.into(),
+            mac: s.mac,
             subnet: s.subnet.into(),
-            vni: s.vni.into(),
+            vni: s.vni,
             primary: s.primary,
             slot: s.slot,
         }

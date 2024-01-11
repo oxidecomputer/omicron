@@ -1125,11 +1125,7 @@ impl InvOmicronZoneNic {
                     id: nic.id,
                     name: Name::from(nic.name.clone()),
                     ip: IpNetwork::from(nic.ip),
-                    mac: MacAddr::from(
-                        omicron_common::api::external::MacAddr::from(
-                            nic.mac.clone(),
-                        ),
-                    ),
+                    mac: MacAddr::from(nic.mac),
                     subnet: IpNetwork::from(nic.subnet.clone()),
                     vni: SqlU32::from(u32::from(nic.vni)),
                     is_primary: nic.primary,
@@ -1150,7 +1146,7 @@ impl InvOmicronZoneNic {
             kind: nexus_types::inventory::NetworkInterfaceKind::Service(
                 zone_id,
             ),
-            mac: (*self.mac).into(),
+            mac: *self.mac,
             name: self.name.into(),
             primary: self.is_primary,
             slot: *self.slot,

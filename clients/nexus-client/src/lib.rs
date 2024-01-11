@@ -116,7 +116,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     ) -> Self {
         Self {
             dst_propolis_id: s.dst_propolis_id,
-            gen: s.gen.into(),
+            gen: s.gen,
             migration_id: s.migration_id,
             propolis_id: s.propolis_id,
             time_updated: s.time_updated,
@@ -128,11 +128,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     for types::VmmRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
-        Self {
-            gen: s.gen.into(),
-            state: s.state.into(),
-            time_updated: s.time_updated,
-        }
+        Self { gen: s.gen, state: s.state.into(), time_updated: s.time_updated }
     }
 }
 
@@ -176,7 +172,7 @@ impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
     fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }

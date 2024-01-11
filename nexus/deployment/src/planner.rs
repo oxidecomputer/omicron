@@ -9,14 +9,11 @@
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::Policy;
 use slog::{info, Logger};
-use std::collections::BTreeMap;
 
 pub struct Planner<'a> {
     log: Logger,
-    parent_blueprint: &'a Blueprint,
     policy: &'a Policy,
     blueprint: BlueprintBuilder<'a>,
 }
@@ -30,7 +27,7 @@ impl<'a> Planner<'a> {
     ) -> Planner<'a> {
         let blueprint =
             BlueprintBuilder::new_based_on(parent_blueprint, policy, creator);
-        Planner { log, parent_blueprint, policy, blueprint }
+        Planner { log, policy, blueprint }
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {

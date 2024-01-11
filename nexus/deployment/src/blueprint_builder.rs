@@ -250,7 +250,7 @@ impl<'a> BlueprintBuilder<'a> {
         let ntp_servers = self
             .parent_blueprint
             .all_omicron_zones()
-            .filter_map(|(_, z)| {
+            .filter_map(|z| {
                 if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
                     Some(format!("{}.host.{}", z.id, DNS_ZONE))
                 } else {
