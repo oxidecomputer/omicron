@@ -5585,6 +5585,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxlog"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap 4.4.3",
+ "uuid",
+]
+
+[[package]]
 name = "p256"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

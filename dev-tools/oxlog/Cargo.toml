@@ -1,0 +1,18 @@
+[package]
+name = "oxlog"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+chrono.workspace = true
+clap.workspace = true
+uuid.workspace = true
+
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+[[bin]]
+name = "oxlog"
+doc = false
