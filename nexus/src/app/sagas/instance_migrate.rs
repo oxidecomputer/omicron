@@ -7,7 +7,7 @@ use crate::app::instance::{
     InstanceStateChangeError, InstanceStateChangeRequest,
 };
 use crate::app::sagas::{
-    declare_saga_actions, instance_common::allocate_sled_ipv6,
+    declare_saga_actions, instance_common::allocate_vmm_ipv6,
 };
 use crate::external_api::params;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
@@ -181,7 +181,7 @@ async fn sim_allocate_propolis_ip(
         &sagactx,
         &params.serialized_authn,
     );
-    allocate_sled_ipv6(
+    allocate_vmm_ipv6(
         &opctx,
         sagactx.user_data().datastore(),
         params.migrate_params.dst_sled_id,

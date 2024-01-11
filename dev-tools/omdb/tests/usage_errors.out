@@ -105,6 +105,8 @@ Options:
       --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
       --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
                                    OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
   -h, --help                       Print help
 =============================================
 EXECUTING COMMAND: omdb ["db", "--help"]
@@ -131,6 +133,8 @@ Options:
       --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
       --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
                                    OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
   -h, --help                       Print help
 ---------------------------------------------
 stderr:
