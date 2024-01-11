@@ -1637,6 +1637,7 @@ mod tests {
             .unwrap();
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 
     async fn create_cluster(logctx: &LogContext) -> ClickHouseCluster {
@@ -1887,6 +1888,8 @@ mod tests {
             .cleanup()
             .await
             .expect("Failed to cleanup ClickHouse server 2");
+
+        logctx.cleanup_successful();
     }
 
     async fn bad_db_connection_test() -> Result<(), Error> {
