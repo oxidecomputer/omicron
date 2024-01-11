@@ -108,7 +108,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
 
-    /* The last address allocated to an Oxide service on this sled. */
+    /* The last address allocated to a propolis instance on this sled. */
     last_used_address INET NOT NULL,
 
     /* The state of whether resources should be provisioned onto the sled */
@@ -3258,7 +3258,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '23.0.1', NULL)
+    ( TRUE, NOW(), NOW(), '24.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

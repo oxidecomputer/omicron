@@ -405,9 +405,9 @@ checksum = "4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf"
 
 [[package]]
 name = "base64"
-version = "0.21.5"
+version = "0.21.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35636a1494ede3b646cc98f74f8e62c773a38a659ebc777a2cf26b9b74171df9"
+checksum = "c79fed4cdb43e993fcdadc7e58a09fd0e3e649c4436fa11da71c9f1f3ee7feb9"
 
 [[package]]
 name = "base64ct"
@@ -417,9 +417,9 @@ checksum = "8c3c1a368f70d6cf7302d78f8f7093da241fb8e8807c05cc9e51a125895a6d5b"
 
 [[package]]
 name = "basic-toml"
-version = "0.1.4"
+version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bfc506e7a2370ec239e1d072507b2a80c833083699d3c6fa176fbb4de8448c6"
+checksum = "2db21524cad41c5591204d22d75e1970a2d1f71060214ca931dc7d5afe2c14e5"
 dependencies = [
  "serde",
 ]
@@ -461,7 +461,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1e25649e8c2ac274bd04adfe0513dd14a482058c#1e25649e8c2ac274bd04adfe0513dd14a482058c"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -471,7 +471,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1e25649e8c2ac274bd04adfe0513dd14a482058c#1e25649e8c2ac274bd04adfe0513dd14a482058c"
 dependencies = [
  "libc",
  "strum",
@@ -703,15 +703,6 @@ name = "bytes"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2bd12c1caf447e69cd4528f47f94d203fd2582878ecb9e9465484c4148a8223"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "bytesize"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3e368af43e418a04d52505cf3dbc23dda4e3407ae2fa99fd0e4f308ce546acc"
 dependencies = [
  "serde",
 ]
@@ -1321,7 +1312,7 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=fab27994d0bd12725c17d6b478a9bfc2673ad6f4#fab27994d0bd12725c17d6b478a9bfc2673ad6f4"
+source = "git+https://github.com/oxidecomputer/crucible?rev=e71b10d2f9f1fb52818b916bae83ba15a339548d#e71b10d2f9f1fb52818b916bae83ba15a339548d"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1337,7 +1328,7 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?rev=fab27994d0bd12725c17d6b478a9bfc2673ad6f4#fab27994d0bd12725c17d6b478a9bfc2673ad6f4"
+source = "git+https://github.com/oxidecomputer/crucible?rev=e71b10d2f9f1fb52818b916bae83ba15a339548d#e71b10d2f9f1fb52818b916bae83ba15a339548d"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1354,7 +1345,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?rev=fab27994d0bd12725c17d6b478a9bfc2673ad6f4#fab27994d0bd12725c17d6b478a9bfc2673ad6f4"
+source = "git+https://github.com/oxidecomputer/crucible?rev=e71b10d2f9f1fb52818b916bae83ba15a339548d#e71b10d2f9f1fb52818b916bae83ba15a339548d"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -3315,7 +3306,7 @@ dependencies = [
  "illumos-utils",
  "installinator-artifact-client",
  "installinator-common",
- "ipcc-key-value",
+ "ipcc",
  "itertools 0.12.0",
  "libc",
  "omicron-common",
@@ -3468,9 +3459,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ipcc-key-value"
+name = "ipcc"
 version = "0.1.0"
 dependencies = [
+ "cfg-if",
  "ciborium",
  "libc",
  "omicron-common",
@@ -3658,9 +3650,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.151"
+version = "0.2.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "302d7ab3130588088d277783b1e2d2e10c9e9e4a16dd9050e6ec93fb3e7048f4"
+checksum = "13e3bf6590cbc649f4d1a3eefc9d5d6eb746f5200ffb04e5e142700b8faa56e7"
 
 [[package]]
 name = "libdlpi-sys"
@@ -4274,6 +4266,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dropshot",
+ "futures",
  "gateway-messages",
  "gateway-test-utils",
  "headers",
@@ -4295,6 +4288,7 @@ dependencies = [
  "serde_json",
  "serde_urlencoded",
  "slog",
+ "tokio",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -4719,7 +4713,7 @@ dependencies = [
  "http",
  "hyper",
  "illumos-utils",
- "ipcc-key-value",
+ "ipcc",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -5711,6 +5705,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "parse-size"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "944553dd59c802559559161f9816429058b869003836120e262e8caec061b7ae"
+
+[[package]]
 name = "partial-io"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6284,7 +6284,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1e25649e8c2ac274bd04adfe0513dd14a482058c#1e25649e8c2ac274bd04adfe0513dd14a482058c"
 dependencies = [
  "async-trait",
  "base64",
@@ -6305,7 +6305,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1e25649e8c2ac274bd04adfe0513dd14a482058c#1e25649e8c2ac274bd04adfe0513dd14a482058c"
 dependencies = [
  "anyhow",
  "atty",
@@ -6335,7 +6335,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=f1571ce141421cff3d3328f43e7722f5df96fdda#f1571ce141421cff3d3328f43e7722f5df96fdda"
+source = "git+https://github.com/oxidecomputer/propolis?rev=1e25649e8c2ac274bd04adfe0513dd14a482058c#1e25649e8c2ac274bd04adfe0513dd14a482058c"
 dependencies = [
  "schemars",
  "serde",
@@ -7445,9 +7445,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.108"
+version = "1.0.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d1c7e3eac408d115102c4c24ad393e0821bb3a5df4d506a80f85f7a742a526b"
+checksum = "176e46fa42316f18edd598015a5166857fc835ec732f5215eac6b7bdbf0a84f4"
 dependencies = [
  "itoa",
  "ryu",
@@ -7456,9 +7456,9 @@ dependencies = [
 
 [[package]]
 name = "serde_path_to_error"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4beec8bce849d58d06238cb50db2e1c417cfeafa4c63f692b15c82b7c80f8335"
+checksum = "ebd154a240de39fdebcf5775d2675c204d7c13cf39a4c697be6493c8e734337c"
 dependencies = [
  "itoa",
  "serde",
@@ -8725,9 +8725,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.35.0"
+version = "1.35.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "841d45b238a16291a4e1584e61820b8ae57d696cc5015c459c229ccc6990cc1c"
+checksum = "c89b4efa943be685f629b149f53829423f8f5531ea21249408e8e2f8671ec104"
 dependencies = [
  "backtrace",
  "bytes",
@@ -9091,9 +9091,9 @@ checksum = "3528ecfd12c466c6f163363caf2d02a71161dd5e1cc6ae7b34207ea2d42d81ed"
 
 [[package]]
 name = "trybuild"
-version = "1.0.85"
+version = "1.0.88"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "196a58260a906cedb9bf6d8034b6379d0c11f552416960452f267402ceeddff1"
+checksum = "76de4f783e610194f6c98bfd53f9fc52bb2e0d02c947621e8a0f4ecc799b2880"
 dependencies = [
  "basic-toml",
  "glob",
@@ -9138,7 +9138,6 @@ dependencies = [
  "async-trait",
  "buf-list",
  "bytes",
- "bytesize",
  "camino",
  "camino-tempfile",
  "chrono",
@@ -9152,6 +9151,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "parse-size",
  "rand 0.8.5",
  "ring 0.17.7",
  "serde",
@@ -9528,9 +9528,9 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vsss-rs"
-version = "3.3.2"
+version = "3.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a18cf462590a38451396633ef9771f3e9afcf439309137fd6c6eaaec0fb38252"
+checksum = "196bbee60607a195bc850e94f0e040bd090e45794ad8df0e9c5a422b9975a00f"
 dependencies = [
  "curve25519-dalek",
  "elliptic-curve",
