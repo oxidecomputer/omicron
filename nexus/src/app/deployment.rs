@@ -70,6 +70,13 @@ impl Blueprints {
     }
 }
 
+/// Common structure for collecting information that the planner needs
+struct PlanningContext {
+    collection: Collection,
+    policy: Policy,
+    creator: String,
+}
+
 impl super::Nexus {
     pub async fn blueprint_list(
         &self,
@@ -334,10 +341,4 @@ impl super::Nexus {
         self.blueprint_add(&opctx, blueprint.clone()).await?;
         Ok(blueprint)
     }
-}
-
-struct PlanningContext {
-    collection: Collection,
-    policy: Policy,
-    creator: String,
 }
