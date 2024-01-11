@@ -168,6 +168,15 @@ pub const RSS_RESERVED_ADDRESSES: u16 = 32;
 // The maximum number of addresses per sled reserved for control plane services.
 pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 
+// Number of addresses reserved (by the Nexus deployment planner) for allocation
+// by the sled itself.  This is currently used for the first two addresses of
+// the sled subnet, which are used for the sled global zone and the switch zone,
+// if any.  Note that RSS does not honor this yet (in fact, per the above
+// RSS_RESERVED_ADDRESSES, it will _only_ choose from this range).  And
+// historically, systems did not have this reservation at all.  So it's not safe
+// to assume that addresses in this subnet are available.
+pub const SLED_RESERVED_ADDRESSES: u16 = 32;
+
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
 #[schemars(rename = "Ipv6Subnet")]

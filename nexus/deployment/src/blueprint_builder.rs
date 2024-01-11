@@ -7,6 +7,7 @@
 use crate::ip_allocator::IpAllocator;
 use anyhow::anyhow;
 use internal_dns::DNS_ZONE;
+use ipnet::IpAdd;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
@@ -21,9 +22,10 @@ use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::AZ_PREFIX;
+use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::DNS_REDUNDANCY;
 use omicron_common::address::NTP_PORT;
-use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::Generation;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -372,26 +374,26 @@ impl<'a> BlueprintBuilder<'a> {
         #[allow(clippy::map_entry)]
         if !self.sled_ip_allocators.contains_key(&sled_id) {
             let sled_subnet = sled_info.subnet;
-            let sled_control_plane_subnet: ipnetwork::Ipv6Network =
-                ipnetwork::Ipv6Network::new(
-                    sled_subnet.net().network(),
-                    // XXX-dap this should be a constant in "addresses"
-                    SLED_PREFIX + 16,
-                )
-                .expect("control plane prefix was too large");
+            let sled_subnet_addr = sled_subnet.net().network();
+            let minimum = sled_subnet_addr
+                .saturating_add(u128::from(SLED_RESERVED_ADDRESSES));
+            let maximum = sled_subnet_addr
+                .saturating_add(u128::from(CP_SERVICES_RESERVED_ADDRESSES));
+            assert!(sled_subnet.net().contains(minimum));
+            assert!(sled_subnet.net().contains(maximum));
+            let mut allocator = IpAllocator::new(minimum, maximum);
 
-            let mut allocator = IpAllocator::new(sled_control_plane_subnet);
-
-            // XXX-dap consider replacing the sled address and switch zone
-            // address reservations here with a single reserved number of
-            // addresses.
-
-            // Record the sled's address itself as allocated.
-            allocator.reserve(*get_sled_address(sled_subnet).ip());
-
-            // Record the switch zone's address as allocated.  We do this
-            // regardless of whether a sled is currently attached to a switch.
-            allocator.reserve(get_switch_zone_address(sled_subnet));
+            // We shouldn't need to explicitly reserve the sled's global zone
+            // and switch addresses because they should be out of our range, but
+            // we do so just to be sure.
+            let sled_gz_addr = *get_sled_address(sled_subnet).ip();
+            assert!(sled_subnet.net().contains(sled_gz_addr));
+            assert!(minimum > sled_gz_addr);
+            assert!(maximum > sled_gz_addr);
+            let switch_zone_addr = get_switch_zone_address(sled_subnet);
+            assert!(sled_subnet.net().contains(switch_zone_addr));
+            assert!(minimum > switch_zone_addr);
+            assert!(maximum > switch_zone_addr);
 
             // Record each of the sled's zones' underlay addresses as allocated.
             if let Some(sled_zones) = self.omicron_zones.get(&sled_id) {

@@ -16,50 +16,44 @@ use std::net::Ipv6Addr;
 // This overlaps with the bump allocator that's used in RSS.  That one is not
 // general enough to use here, though this one could potentially be used there.
 pub struct IpAllocator {
-    subnet: ipnetwork::Ipv6Network,
-    max_seen: Ipv6Addr,
+    last: Ipv6Addr,
+    maximum: Ipv6Addr,
 }
 
 impl IpAllocator {
-    pub fn new(subnet: ipnetwork::Ipv6Network) -> IpAllocator {
-        IpAllocator {
-            subnet,
-            max_seen: subnet
-                .iter()
-                .next()
-                .expect("expected at least one address in the subnet"),
-        }
+    /// Make an allocator that allocates addresses from the range `(minimum,
+    /// maximum)` (exclusive).
+    pub fn new(minimum: Ipv6Addr, maximum: Ipv6Addr) -> IpAllocator {
+        IpAllocator { last: minimum, maximum }
     }
 
     /// Mark the given address reserved so that it will never be returned by
-    /// `alloc()`
+    /// `alloc()`.
+    ///
+    /// The given address can be outside the range provided to
+    /// `IpAllocator::new()`, in which case this reservation will be ignored.
     pub fn reserve(&mut self, addr: Ipv6Addr) {
-        assert!(
-            self.subnet.contains(addr),
-            "attempted to reserve IP {} which is outside \
-            the current subnet {:?}",
-            addr,
-            self.subnet
-        );
-        if addr > self.max_seen {
-            self.max_seen = addr;
+        if addr < self.maximum && addr > self.last {
+            self.last = addr;
         }
     }
 
-    /// Allocate an unused address from this allocator's subnet
+    /// Allocate an unused address from this allocator's range
     pub fn alloc(&mut self) -> Option<Ipv6Addr> {
-        let next = self.max_seen.saturating_add(1);
-        if next == self.max_seen {
+        let next = self.last.saturating_add(1);
+        if next == self.last {
             // We ran out of the entire IPv6 address space.
             return None;
         }
 
-        if !self.subnet.contains(next) {
-            // We ran out of this subnet.
+        if next >= self.maximum {
+            // We ran out of our allotted range.
             return None;
         }
 
-        self.max_seen = next;
+        self.last = next;
         Some(next)
     }
 }
+
+// XXX-dap TODO-coverage
