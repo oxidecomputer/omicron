@@ -264,6 +264,10 @@ task: "phantom_disks"
     detects and un-deletes phantom disks
 
 
+task: "region_replacement"
+    detects if a region requires replacing and begins the process
+
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -368,6 +372,14 @@ task: "phantom_disks"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
+
+task: "region_replacement"
+  configured period: every 30s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    number of region replacements started ok: 0
+    number of region replacement start errors: 0
 
 ---------------------------------------------
 stderr:

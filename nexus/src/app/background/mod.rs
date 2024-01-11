@@ -13,6 +13,7 @@ mod init;
 mod inventory_collection;
 mod nat_cleanup;
 mod phantom_disks;
+mod region_replacement;
 mod status;
 
 pub use common::Driver;

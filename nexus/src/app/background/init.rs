@@ -12,6 +12,7 @@ use super::external_endpoints;
 use super::inventory_collection;
 use super::nat_cleanup;
 use super::phantom_disks;
+use super::region_replacement;
 use crate::app::sagas::SagaRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -58,6 +59,10 @@ pub struct BackgroundTasks {
 
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
+
+    /// task handle for the task that detects if regions need replacement and
+    /// begins the process
+    pub task_region_replacement: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -69,7 +74,7 @@ impl BackgroundTasks {
         dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
-        _saga_request: Sender<SagaRequest>,
+        saga_request: Sender<SagaRequest>,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -152,12 +157,33 @@ impl BackgroundTasks {
 
         // Background task: phantom disk detection
         let task_phantom_disks = {
-            let detector = phantom_disks::PhantomDiskDetector::new(datastore);
+            let detector =
+                phantom_disks::PhantomDiskDetector::new(datastore.clone());
 
             let task = driver.register(
                 String::from("phantom_disks"),
                 String::from("detects and un-deletes phantom disks"),
                 config.phantom_disks.period_secs,
+                Box::new(detector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
+        // Background task: detect if a region needs replacement and begin the
+        // process
+        let task_region_replacement = {
+            let detector = region_replacement::RegionReplacementDetector::new(
+                datastore,
+                saga_request.clone(),
+            );
+
+            let task = driver.register(
+                String::from("region_replacement"),
+                String::from("detects if a region requires replacing and begins the process"),
+                config.region_replacement.period_secs,
                 Box::new(detector),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -177,6 +203,7 @@ impl BackgroundTasks {
             nat_cleanup,
             task_inventory_collection,
             task_phantom_disks,
+            task_region_replacement,
         }
     }
 

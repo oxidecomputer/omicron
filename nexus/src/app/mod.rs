@@ -485,6 +485,9 @@ impl Nexus {
                 loop {
                     match saga_request_recv.recv().await {
                         None => {
+                            // If this channel is closed, then RPWs will not be
+                            // able to request that sagas be run. Panic Nexus so
+                            // that it can be restarted.
                             panic!("saga request channel closed!");
                         }
 

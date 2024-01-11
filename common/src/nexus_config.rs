@@ -341,6 +341,8 @@ pub struct BackgroundTaskConfig {
     pub inventory: InventoryConfig,
     /// configuration for phantom disks task
     pub phantom_disks: PhantomDiskConfig,
+    /// configuration for region replacement task
+    pub region_replacement: RegionReplacementConfig,
 }
 
 #[serde_as]
@@ -410,6 +412,14 @@ pub struct InventoryConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PhantomDiskConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionReplacementConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -519,8 +529,8 @@ mod test {
         Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
         ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
         LoadErrorKind, MgdConfig, NatCleanupConfig, PackageConfig,
-        PhantomDiskConfig, SchemeName, TimeseriesDbConfig, Tunables,
-        UpdatesConfig,
+        PhantomDiskConfig, RegionReplacementConfig, SchemeName,
+        TimeseriesDbConfig, Tunables, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
@@ -675,6 +685,7 @@ mod test {
             inventory.nkeep = 11
             inventory.disable = false
             phantom_disks.period_secs = 30
+            region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -780,6 +791,9 @@ mod test {
                         phantom_disks: PhantomDiskConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        region_replacement: RegionReplacementConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -838,6 +852,7 @@ mod test {
             inventory.nkeep = 3
             inventory.disable = false
             phantom_disks.period_secs = 30
+            region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,
