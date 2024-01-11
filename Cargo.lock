@@ -4902,6 +4902,7 @@ dependencies = [
  "reqwest",
  "ring 0.17.7",
  "rustls 0.22.2",
+ "rustls-pemfile 2.0.0",
  "samael",
  "schemars",
  "semver 1.0.21",
