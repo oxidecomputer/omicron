@@ -189,7 +189,7 @@ pub mod views {
         /// This should generally be left enabled.
         pub enabled: bool,
         /// when this blueprint was made the target
-        pub set_at: chrono::DateTime<chrono::Utc>,
+        pub time_set: chrono::DateTime<chrono::Utc>,
     }
 
     #[derive(Debug, Error)]
@@ -205,7 +205,7 @@ pub mod views {
             Ok(BlueprintTarget {
                 target_id: value.target_id.ok_or(NoTargetBlueprint)?,
                 enabled: value.enabled,
-                set_at: value.time_set,
+                time_set: value.time_set,
             })
         }
     }

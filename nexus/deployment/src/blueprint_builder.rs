@@ -17,19 +17,15 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::inventory::Collection;
+use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
-use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::ReservedRackSubnet;
-use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
-use omicron_common::address::DNS_REDUNDANCY;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::Generation;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
@@ -232,18 +228,8 @@ impl<'a> BlueprintBuilder<'a> {
         // actually deployed.  Instead, we take the same approach as RSS:
         // these are at known, fixed addresses relative to the AZ subnet
         // (which itself is a known-prefix parent subnet of the sled subnet).
-        // XXX-dap commonize with RSS?
-        let dns_servers: Vec<IpAddr> = {
-            let az_subnet =
-                Ipv6Subnet::<AZ_PREFIX>::new(sled_subnet.net().network());
-            let reserved_rack_subnet = ReservedRackSubnet::new(az_subnet);
-            let dns_subnets =
-                &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
-            dns_subnets
-                .iter()
-                .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().ip()))
-                .collect()
-        };
+        let dns_servers =
+            get_internal_dns_server_addresses(sled_subnet.net().network());
 
         // The list of boundary NTP servers is not necessarily stored
         // anywhere (unless there happens to be another internal NTP zone

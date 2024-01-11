@@ -2153,7 +2153,7 @@
             "description": "policy: should the system actively work towards this blueprint\n\nThis should generally be left enabled.",
             "type": "boolean"
           },
-          "set_at": {
+          "time_set": {
             "description": "when this blueprint was made the target",
             "type": "string",
             "format": "date-time"
@@ -2166,7 +2166,7 @@
         },
         "required": [
           "enabled",
-          "set_at",
+          "time_set",
           "target_id"
         ]
       },

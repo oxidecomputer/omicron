@@ -73,7 +73,7 @@ enum BlueprintsCommands {
     /// Delete a blueprint
     Delete(BlueprintIdArgs),
     /// Set the current target blueprint
-    SetTarget(BlueprintIdArgs),
+    Target(BlueprintsTargetArgs),
     /// Generate an initial blueprint from the current state
     GenerateCurrent,
     /// Generate a new blueprint
@@ -84,6 +84,20 @@ enum BlueprintsCommands {
 struct BlueprintIdArgs {
     /// id of a blueprint
     blueprint_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintsTargetArgs {
+    #[command(subcommand)]
+    command: BlueprintTargetCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum BlueprintTargetCommands {
+    /// Show the current target blueprint
+    Show,
+    /// Change the current target blueprint
+    Set(BlueprintIdArgs),
 }
 
 impl NexusArgs {
@@ -136,8 +150,17 @@ impl NexusArgs {
                 command: BlueprintsCommands::Delete(args),
             }) => cmd_nexus_blueprints_delete(&client, args).await,
             NexusCommands::Blueprints(BlueprintsArgs {
-                command: BlueprintsCommands::SetTarget(args),
-            }) => cmd_nexus_blueprints_set_target(&client, args).await,
+                command:
+                    BlueprintsCommands::Target(BlueprintsTargetArgs {
+                        command: BlueprintTargetCommands::Show,
+                    }),
+            }) => cmd_nexus_blueprints_target_show(&client).await,
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command:
+                    BlueprintsCommands::Target(BlueprintsTargetArgs {
+                        command: BlueprintTargetCommands::Set(args),
+                    }),
+            }) => cmd_nexus_blueprints_target_set(&client, args).await,
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
             }) => cmd_nexus_blueprints_regenerate(&client).await,
@@ -804,15 +827,33 @@ async fn cmd_nexus_blueprints_delete(
 // XXX-dap diff blueprint against latest inventory
 // XXX-dap diff blueprint against another blueprint
 
-async fn cmd_nexus_blueprints_set_target(
+async fn cmd_nexus_blueprints_target_show(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let target = client
+        .blueprint_target_view()
+        .await
+        .context("fetching target blueprint")?;
+    println!("target blueprint: {}", target.target_id);
+    println!("set at:           {}", target.time_set);
+    println!("enabled:          {}", target.enabled);
+    Ok(())
+}
+
+async fn cmd_nexus_blueprints_target_set(
     client: &nexus_client::Client,
     args: &BlueprintIdArgs,
 ) -> Result<(), anyhow::Error> {
+    // Try to preserve the value of "enabled", if possible.
+    let enabled = client
+        .blueprint_target_view()
+        .await
+        .map(|current| current.into_inner().enabled)
+        .unwrap_or(true);
     client
         .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
             target_id: args.blueprint_id,
-            // XXX-dap ideally keep existing value
-            enabled: true,
+            enabled,
         })
         .await
         .with_context(|| {

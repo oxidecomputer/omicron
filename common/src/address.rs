@@ -288,6 +288,19 @@ impl ReservedRackSubnet {
     }
 }
 
+/// Return the list of DNS servers for the rack, given any address in the AZ
+/// subnet
+pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
+    let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(addr);
+    let reserved_rack_subnet = ReservedRackSubnet::new(az_subnet);
+    let dns_subnets =
+        &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
+    dns_subnets
+        .iter()
+        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().ip()))
+        .collect()
+}
+
 const SLED_AGENT_ADDRESS_INDEX: usize = 1;
 const SWITCH_ZONE_ADDRESS_INDEX: usize = 2;
 
