@@ -714,7 +714,6 @@ async fn cmd_nexus_blueprints_list(
         is_target: &'static str,
         id: String,
         parent: String,
-        reason: String,
         time_created: String,
     }
 
@@ -750,7 +749,6 @@ async fn cmd_nexus_blueprints_list(
                     .parent_blueprint_id
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| String::from("<none>")),
-                reason: blueprint.reason,
                 time_created: humantime::format_rfc3339_millis(
                     blueprint.time_created.into(),
                 )
@@ -797,7 +795,7 @@ async fn cmd_nexus_blueprints_show(
         "created at {}",
         humantime::format_rfc3339_millis(blueprint.time_created.into(),)
     );
-    println!("created for: {}", blueprint.reason);
+    println!("comment: {}", blueprint.comment);
     println!("zones:\n");
     for (sled_id, sled_zones) in &blueprint.omicron_zones {
         println!(

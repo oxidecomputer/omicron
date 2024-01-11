@@ -158,7 +158,7 @@ pub mod views {
         pub parent_blueprint_id: Option<Uuid>,
         pub time_created: chrono::DateTime<chrono::Utc>,
         pub creator: String,
-        pub reason: String,
+        pub comment: String,
 
         pub sleds_in_cluster: BTreeSet<Uuid>,
         pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
@@ -171,7 +171,7 @@ pub mod views {
                 parent_blueprint_id: generic.parent_blueprint_id,
                 time_created: generic.time_created,
                 creator: generic.creator,
-                reason: generic.comment,
+                comment: generic.comment,
                 sleds_in_cluster: generic.sleds_in_cluster,
                 omicron_zones: generic.omicron_zones,
                 zones_in_service: generic.zones_in_service,
