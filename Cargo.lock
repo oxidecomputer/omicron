@@ -1836,7 +1836,7 @@ dependencies = [
  "dns-service-client",
  "dropshot",
  "expectorate",
- "http",
+ "http 0.2.11",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
@@ -1868,7 +1868,7 @@ name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "http",
+ "http 0.2.11",
  "omicron-workspace-hack",
  "progenitor",
  "reqwest",
@@ -1906,7 +1906,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
- "http",
+ "http 0.2.11",
  "ipnetwork",
  "omicron-workspace-hack",
  "omicron-zone-package",
@@ -1928,7 +1928,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff87a0175a6c8ce4462cfe7486edd7000f01be6e"
+source = "git+https://github.com/oxidecomputer//dropshot?rev=6f912a16aa7137303531d595796e56f908ba8a4c#6f912a16aa7137303531d595796e56f908ba8a4c"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1941,7 +1941,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "hostname",
- "http",
+ "http 0.2.11",
  "hyper",
  "indexmap 2.1.0",
  "multer",
@@ -1950,7 +1950,7 @@ dependencies = [
  "percent-encoding",
  "proc-macro2",
  "rustls",
- "rustls-pemfile",
+ "rustls-pemfile 2.0.0",
  "schemars",
  "serde",
  "serde_json",
@@ -1974,7 +1974,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#ff87a0175a6c8ce4462cfe7486edd7000f01be6e"
+source = "git+https://github.com/oxidecomputer//dropshot?rev=6f912a16aa7137303531d595796e56f908ba8a4c#6f912a16aa7137303531d595796e56f908ba8a4c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2112,7 +2112,7 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
- "http",
+ "http 0.2.11",
  "hyper",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -2749,7 +2749,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http",
+ "http 0.2.11",
  "indexmap 1.9.3",
  "slab",
  "tokio",
@@ -2802,7 +2802,7 @@ dependencies = [
  "base64",
  "bytes",
  "headers-core",
- "http",
+ "http 0.2.11",
  "httpdate",
  "mime",
  "sha1",
@@ -2814,7 +2814,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
 dependencies = [
- "http",
+ "http 0.2.11",
 ]
 
 [[package]]
@@ -2931,13 +2931,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "http"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b32afd38673a8016f7c9ae69e5af41a58f81b1d31689040f2f1959594ce194ea"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "http-body"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
 dependencies = [
  "bytes",
- "http",
+ "http 0.2.11",
  "pin-project-lite",
 ]
 
@@ -2970,7 +2981,7 @@ dependencies = [
  "crossbeam-channel",
  "form_urlencoded",
  "futures",
- "http",
+ "http 0.2.11",
  "hyper",
  "log",
  "once_cell",
@@ -3057,7 +3068,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "httparse",
  "httpdate",
@@ -3077,7 +3088,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
- "http",
+ "http 0.2.11",
  "hyper",
  "log",
  "rustls",
@@ -3093,7 +3104,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "318ca89e4827e7fe4ddd2824f52337239796ae8ecc761a663324407dc3d8d7e7"
 dependencies = [
  "futures-util",
- "http",
+ "http 0.2.11",
  "http-range",
  "httpdate",
  "hyper",
@@ -3302,7 +3313,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
- "http",
+ "http 0.2.11",
  "illumos-utils",
  "installinator-artifact-client",
  "installinator-common",
@@ -3999,14 +4010,14 @@ dependencies = [
 
 [[package]]
 name = "multer"
-version = "2.1.0"
+version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01acbdc23469fd8fe07ab135923371d5f5a422fbf9c522158677c8eb15bc51c2"
+checksum = "a15d522be0a9c3e46fd2632e272d178f56387bdb5c9fbb3a36c649062e9b5219"
 dependencies = [
  "bytes",
  "encoding_rs",
  "futures-util",
- "http",
+ "http 1.0.0",
  "httparse",
  "log",
  "memchr",
@@ -4150,7 +4161,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "headers",
- "http",
+ "http 0.2.11",
  "hyper",
  "hyper-rustls",
  "internal-dns",
@@ -4269,7 +4280,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "headers",
- "http",
+ "http 0.2.11",
  "hyper",
  "internal-dns",
  "nexus-db-queries",
@@ -4618,7 +4629,7 @@ dependencies = [
  "expectorate",
  "futures",
  "hex",
- "http",
+ "http 0.2.11",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -4709,7 +4720,7 @@ dependencies = [
  "gateway-sp-comms",
  "gateway-test-utils",
  "hex",
- "http",
+ "http 0.2.11",
  "hyper",
  "illumos-utils",
  "ipcc-key-value",
@@ -4767,7 +4778,7 @@ dependencies = [
  "gateway-test-utils",
  "headers",
  "hex",
- "http",
+ "http 0.2.11",
  "httptest",
  "hubtools",
  "hyper",
@@ -4979,7 +4990,7 @@ dependencies = [
  "glob",
  "guppy",
  "hex",
- "http",
+ "http 0.2.11",
  "hyper",
  "hyper-staticfile",
  "illumos-utils",
@@ -5051,7 +5062,7 @@ dependencies = [
  "filetime",
  "headers",
  "hex",
- "http",
+ "http 0.2.11",
  "libc",
  "omicron-common",
  "omicron-workspace-hack",
@@ -5069,6 +5080,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "usdt",
+ "walkdir",
 ]
 
 [[package]]
@@ -5384,7 +5396,7 @@ dependencies = [
  "base64",
  "chrono",
  "futures",
- "http",
+ "http 0.2.11",
  "hyper",
  "omicron-workspace-hack",
  "progenitor",
@@ -5539,7 +5551,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "futures",
- "http",
+ "http 0.2.11",
  "kstat-rs",
  "omicron-workspace-hack",
  "oximeter",
@@ -6247,7 +6259,7 @@ source = "git+https://github.com/oxidecomputer/progenitor?branch=main#9339b57628
 dependencies = [
  "getopts",
  "heck 0.4.1",
- "http",
+ "http 0.2.11",
  "indexmap 2.1.0",
  "openapiv3",
  "proc-macro2",
@@ -6745,7 +6757,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
+ "http 0.2.11",
  "http-body",
  "hyper",
  "hyper-rustls",
@@ -6759,7 +6771,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "rustls",
- "rustls-pemfile",
+ "rustls-pemfile 1.0.3",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -7097,7 +7109,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile",
+ "rustls-pemfile 1.0.3",
  "schannel",
  "security-framework",
 ]
@@ -7110,6 +7122,22 @@ checksum = "2d3987094b1d07b653b7dfdc3f70ce9a1da9c51ac18c1b06b662e4f9a0e9f4b2"
 dependencies = [
  "base64",
 ]
+
+[[package]]
+name = "rustls-pemfile"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "35e4980fa29e4c4b212ffb3db068a564cbf560e51d3944b7c88bd8bf5bec64f4"
+dependencies = [
+ "base64",
+ "rustls-pki-types",
+]
+
+[[package]]
+name = "rustls-pki-types"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e9d979b3ce68192e42760c7810125eb6cf2ea10efae545a156063e61f314e2a"
 
 [[package]]
 name = "rustls-webpki"
@@ -7374,9 +7402,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.194"
+version = "1.0.195"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b114498256798c94a0689e1a15fec6005dee8ac1f41de56404b67afc2a4b773"
+checksum = "63261df402c67811e9ac6def069e4786148c4563f4b50fd4bf30aa370d626b02"
 dependencies = [
  "serde_derive",
 ]
@@ -7412,9 +7440,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.194"
+version = "1.0.195"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3385e45322e8f9931410f01b3031ec534c3947d0e94c18049af4d9f9907d4e0"
+checksum = "46fe8f8603d81ba86327b23a2e9cdf49e1255fb94a4c5f297f6ee0547178ea2c"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7812,9 +7840,9 @@ dependencies = [
 
 [[package]]
 name = "slog-bunyan"
-version = "2.4.0"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "440fd32d0423c31e4f98d76c0b62ebdb847f905aa07357197e9b41ac620af97d"
+checksum = "dcaaf6e68789d3f0411f1e72bc443214ef252a1038b6e344836e50442541f190"
 dependencies = [
  "hostname",
  "slog",
@@ -9184,7 +9212,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "data-encoding",
- "http",
+ "http 0.2.11",
  "httparse",
  "log",
  "rand 0.8.5",
@@ -9839,7 +9867,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "hex",
- "http",
+ "http 0.2.11",
  "hubtools",
  "hyper",
  "illumos-utils",
