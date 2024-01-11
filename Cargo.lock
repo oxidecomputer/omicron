@@ -9555,9 +9555,9 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vsss-rs"
-version = "3.3.2"
+version = "3.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a18cf462590a38451396633ef9771f3e9afcf439309137fd6c6eaaec0fb38252"
+checksum = "196bbee60607a195bc850e94f0e040bd090e45794ad8df0e9c5a422b9975a00f"
 dependencies = [
  "curve25519-dalek",
  "elliptic-curve",
