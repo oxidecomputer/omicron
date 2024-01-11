@@ -433,7 +433,7 @@ impl TryFrom<Certificate> for TlsCertificate {
                 .private_key_to_der()
                 .context("serializing private key to DER")?;
             let rustls_private_key = rustls::pki_types::PrivateKeyDer::from(
-                rustls::pki_types::PrivatePkcs1KeyDer::from(private_key_der),
+                rustls::pki_types::PrivateSec1KeyDer::from(private_key_der),
             );
             let rustls_signing_key =
                 rustls::crypto::ring::sign::any_supported_type(
