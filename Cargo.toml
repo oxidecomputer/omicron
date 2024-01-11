@@ -33,7 +33,7 @@ members = [
     "installinator",
     "internal-dns-cli",
     "internal-dns",
-    "ipcc-key-value",
+    "ipcc",
     "key-manager",
     "nexus",
     "nexus/authz-macros",
@@ -105,7 +105,7 @@ default-members = [
     "installinator",
     "internal-dns-cli",
     "internal-dns",
-    "ipcc-key-value",
+    "ipcc",
     "key-manager",
     "nexus",
     "nexus/authz-macros",
@@ -225,7 +225,7 @@ installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "clients/installinator-artifact-client" }
 installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
-ipcc-key-value = { path = "ipcc-key-value" }
+ipcc = { path = "ipcc" }
 ipnetwork = { version = "0.20", features = ["schemars"] }
 itertools = "0.12.0"
 key-manager = { path = "key-manager" }

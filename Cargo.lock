@@ -3306,7 +3306,7 @@ dependencies = [
  "illumos-utils",
  "installinator-artifact-client",
  "installinator-common",
- "ipcc-key-value",
+ "ipcc",
  "itertools 0.12.0",
  "libc",
  "omicron-common",
@@ -3459,9 +3459,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ipcc-key-value"
+name = "ipcc"
 version = "0.1.0"
 dependencies = [
+ "cfg-if",
  "ciborium",
  "libc",
  "omicron-common",
@@ -4712,7 +4713,7 @@ dependencies = [
  "http",
  "hyper",
  "illumos-utils",
- "ipcc-key-value",
+ "ipcc",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
