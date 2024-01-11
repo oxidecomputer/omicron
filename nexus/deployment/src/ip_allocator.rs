@@ -55,5 +55,3 @@ impl IpAllocator {
         Some(next)
     }
 }
-
-// XXX-dap TODO-coverage

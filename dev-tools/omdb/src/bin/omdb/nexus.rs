@@ -822,9 +822,6 @@ async fn cmd_nexus_blueprints_delete(
     Ok(())
 }
 
-// XXX-dap diff blueprint against latest inventory
-// XXX-dap diff blueprint against another blueprint
-
 async fn cmd_nexus_blueprints_target_show(
     client: &nexus_client::Client,
 ) -> Result<(), anyhow::Error> {

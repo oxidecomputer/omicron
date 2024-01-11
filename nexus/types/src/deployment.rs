@@ -164,6 +164,7 @@ pub mod views {
         pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
         pub zones_in_service: BTreeSet<Uuid>,
     }
+
     impl From<super::Blueprint> for Blueprint {
         fn from(generic: super::Blueprint) -> Self {
             Blueprint {
