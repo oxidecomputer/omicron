@@ -2069,6 +2069,7 @@
         ]
       },
       "Blueprint": {
+        "description": "Describes all automatically-managed software and configuration in the rack",
         "type": "object",
         "properties": {
           "creator": {
@@ -2092,7 +2093,7 @@
           "reason": {
             "type": "string"
           },
-          "sleds": {
+          "sleds_in_cluster": {
             "type": "array",
             "items": {
               "type": "string",
@@ -2118,7 +2119,7 @@
           "id",
           "omicron_zones",
           "reason",
-          "sleds",
+          "sleds_in_cluster",
           "time_created",
           "zones_in_service"
         ]
@@ -2149,21 +2150,24 @@
         "type": "object",
         "properties": {
           "enabled": {
+            "description": "policy: should the system actively work towards this blueprint\n\nThis should generally be left enabled.",
             "type": "boolean"
           },
           "set_at": {
+            "description": "when this blueprint was made the target",
             "type": "string",
             "format": "date-time"
           },
           "target_id": {
-            "nullable": true,
+            "description": "id of the blueprint that the system is trying to make real",
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
           "enabled",
-          "set_at"
+          "set_at",
+          "target_id"
         ]
       },
       "BlueprintTargetSet": {

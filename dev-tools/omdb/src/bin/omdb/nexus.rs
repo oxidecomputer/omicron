@@ -17,6 +17,7 @@ use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
 use serde::Deserialize;
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use tabled::Tabled;
 use uuid::Uuid;
@@ -694,12 +695,19 @@ async fn cmd_nexus_blueprints_list(
         time_created: String,
     }
 
-    let target_id = client
-        .blueprint_target_view()
-        .await
-        .context("fetching current target blueprint")?
-        .into_inner()
-        .target_id;
+    let target_id = match client.blueprint_target_view().await {
+        Ok(result) => Some(result.into_inner().target_id),
+        Err(error) => {
+            // This request will fail if there's no target configured, so it's
+            // not necessarily a big deal.
+            eprintln!(
+                "warn: failed to fetch current target: {}",
+                InlineErrorChain::new(&error),
+            );
+            None
+        }
+    };
+
     let rows: Vec<BlueprintRow> = client
         .blueprint_list_stream(None, None)
         .try_collect::<Vec<_>>()

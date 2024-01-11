@@ -4904,6 +4904,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "slog",
+ "slog-error-chain",
  "strum",
  "subprocess",
  "tabled",
