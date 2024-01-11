@@ -92,16 +92,16 @@ impl<'a> BlueprintBuilder<'a> {
                     .ok_or_else(|| {
                         // We should not find a sled that's supposed to be
                         // in-service but is not part of the inventory.  It's
-                        // not that that can't ever happen.  But the initial
-                        // blueprint is supposed to reflect the current state
-                        // and this is more likely an "add sled" case or a case
-                        // where there was an inventory collection error that we
-                        // want to deal with before proceeding.
-                        // XXX-dap re-evaluate this.  Are we sure this would
-                        // never happen in a real deployment?  Would it be bad
-                        // to just trust whatever's in the inventory?  I think
-                        // so because if the inventory was somehow incomplete
-                        // then we'd leave out a sled erroneously.
+                        // not that that can't ever happen.  This could happen
+                        // when a sled is first being added to the system.  Of
+                        // course it could also happen if this sled agent failed
+                        // our inventory request.  But this is the initial
+                        // blueprint (so this shouldn't be the "add sled" case)
+                        // and we want to get it right (so we don't want to
+                        // leave out sleds whose sled agent happened to be down
+                        // when we tried to do this).  The operator (or, more
+                        // likely, a support person) will have to sort out
+                        // what's going on if this happens.
                         Error::Planner(anyhow!(
                             "building initial blueprint: sled {:?} is \
                             supposed to be in service but has no zones \
