@@ -173,7 +173,6 @@ async fn siid_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
     instance_ip_remove_nat(
         &sagactx,
         &params.serialized_authn,
-        &params.authz_instance,
         sled_id,
         target_ip,
     )

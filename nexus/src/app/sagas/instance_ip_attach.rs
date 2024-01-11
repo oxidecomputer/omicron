@@ -210,10 +210,28 @@ async fn siia_nat_undo(
     let params = sagactx.saga_params::<Params>()?;
     let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+
+    // This requires some explanation in one case, where we can fail because an
+    // instance may have moved running -> stopped -> deleted.
+    // An instance delete will cause us to unwind and return to this stage *but*
+    // the ExternalIp will no longer have a useful parent (or even a
+    // different parent!).
+    //
+    // Internally, we delete the NAT entry *without* checking its instance state because
+    // it may either be `None`, or another instance may have tried to attach. The
+    // first case is fine, but we need to consider NAT RPW semantics for the second:
+    // * The NAT entry table will ensure uniqueness on (external IP, low_port,
+    //   high_port) for non-deleted rows.
+    // * Instance start and IP attach on a running instance will try to insert such
+    //   a row and fail.
+    //   - Failure in either case will not unwind this NAT entry, because it cannot
+    //     *insert* such an entry.
+    // * Instance create will successfully set parent, since it won't attempt to ensure
+    //   DPD has correct NAT state unless set to `start: true`.
+    // So it is safe to remove using the old `ExternalIp` here.
     if let Err(e) = instance_ip_remove_nat(
         &sagactx,
         &params.serialized_authn,
-        &params.authz_instance,
         sled_id,
         target_ip,
     )

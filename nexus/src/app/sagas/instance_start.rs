@@ -437,7 +437,7 @@ async fn sis_dpd_ensure_undo(
 
     osagactx
         .nexus()
-        .instance_delete_dpd_config(&opctx, &authz_instance, None)
+        .instance_delete_dpd_config(&opctx, &authz_instance)
         .await?;
 
     Ok(())

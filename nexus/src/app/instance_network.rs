@@ -7,6 +7,7 @@
 use crate::app::sagas::retry_until_known_result;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_model::Vni as DbVni;
@@ -373,43 +374,39 @@ impl super::Nexus {
         let sled_address =
             Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
 
-        // Querying boundary switches also requires fleet access and the use of the
-        // instance allocator context.
-        let boundary_switches =
-            self.boundary_switches(&self.opctx_alloc).await?;
-
-        for external_ip in ips_of_interest {
+        let mut err_and_limit = None;
+        for (i, external_ip) in ips_of_interest.iter().enumerate() {
             // For each external ip, add a nat entry to the database
-            self.ensure_nat_entry(
-                external_ip,
-                sled_address,
-                &network_interface,
-                mac_address,
-                opctx,
-            )
-            .await?;
+            if let Err(e) = self
+                .ensure_nat_entry(
+                    external_ip,
+                    sled_address,
+                    &network_interface,
+                    mac_address,
+                    opctx,
+                )
+                .await
+            {
+                err_and_limit = Some((e, i));
+                break;
+            }
         }
 
-        for switch in &boundary_switches {
-            debug!(&self.log, "notifying dendrite of updates";
-                       "instance_id" => %authz_instance.id(),
-                       "switch" => switch.to_string());
-
-            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
-                Error::internal_error(&format!(
-                    "unable to find dendrite client for {switch}"
-                ))
-            })?;
-
-            // Notify dendrite that there are changes for it to reconcile.
-            // In the event of a failure to notify dendrite, we'll log an error
-            // and rely on dendrite's RPW timer to catch it up.
-            if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
-                error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
-            };
+        // In the event of an ongoing cleanup from IP attach, it's possible
+        // for an entry pointing at an another instance to still exist, which
+        // will fail to be ensured if we try to attach/start/... before that unwind
+        // completes. We need to remove the entries we just added because the undo
+        // won't call into `instance_delete_dpd_config`.
+        if let Some((e, max)) = err_and_limit {
+            for external_ip in &ips_of_interest[..max] {
+                let _ = self
+                    .external_ip_delete_dpd_config(opctx, external_ip)
+                    .await;
+            }
+            return Err(e);
         }
 
-        Ok(())
+        self.notify_dendrite_nat_state(Some(instance_id), true).await
     }
 
     async fn ensure_nat_entry(
@@ -472,7 +469,6 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        ip_filter: Option<Uuid>,
     ) -> Result<(), Error> {
         let log = &self.log;
         let instance_id = authz_instance.id();
@@ -485,20 +481,7 @@ impl super::Nexus {
             .instance_lookup_external_ips(opctx, instance_id)
             .await?;
 
-        let ips_of_interest = if let Some(wanted_id) = ip_filter {
-            if let Some(ip) = external_ips.iter().find(|v| v.id == wanted_id) {
-                std::slice::from_ref(ip)
-            } else {
-                return Err(Error::internal_error(&format!(
-                    "failed to find external ip address with id: {wanted_id}, saw {external_ips:?}",
-                )));
-            }
-        } else {
-            &external_ips[..]
-        };
-
-        let mut errors = vec![];
-        for entry in ips_of_interest {
+        for entry in external_ips {
             // Soft delete the NAT entry
             match self
                 .db_datastore
@@ -522,12 +505,72 @@ impl super::Nexus {
             }?;
         }
 
+        self.notify_dendrite_nat_state(Some(instance_id), false).await
+    }
+
+    /// Attempts to delete Dendrite NAT configuration for a single external IP.
+    ///
+    /// This function is primarily used to detach an IP which currently belongs
+    /// to a known instance, or to cleanup after the failed attach of an `ExternalIp`
+    /// which may no longer have a parent in the DB. Due to the latter case, this
+    /// function does not lookup and verify that an IP's parent is still a given instance.
+    pub(crate) async fn external_ip_delete_dpd_config(
+        &self,
+        opctx: &OpContext,
+        external_ip: &ExternalIp,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+        let instance_id = external_ip.parent_id;
+
+        info!(log, "deleting individual NAT entry from dpd configuration";
+              "instance_id" => ?instance_id,
+              "external_ip" => %external_ip.ip);
+
+        // Soft delete the NAT entry
+        match self
+            .db_datastore
+            .ipv4_nat_delete_by_external_ip(&opctx, external_ip)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(err) => match err {
+                Error::ObjectNotFound { .. } => {
+                    warn!(log, "no matching nat entries to soft delete");
+                    Ok(())
+                }
+                _ => {
+                    let message = format!(
+                        "failed to delete nat entry due to error: {err:?}"
+                    );
+                    error!(log, "{}", message);
+                    Err(Error::internal_error(&message))
+                }
+            },
+        }?;
+
+        self.notify_dendrite_nat_state(instance_id, false).await
+    }
+
+    /// Informs all available boundary switches that the set of NAT entries
+    /// has changed.
+    ///
+    /// When `fail_fast` is set, this function will return on any error when
+    /// acquiring a handle to a DPD client. Otherwise, it will attempt to notify
+    /// all clients and then finally return the first error.
+    async fn notify_dendrite_nat_state(
+        &self,
+        instance_id: Option<Uuid>,
+        fail_fast: bool,
+    ) -> Result<(), Error> {
+        // Querying boundary switches also requires fleet access and the use of the
+        // instance allocator context.
         let boundary_switches =
             self.boundary_switches(&self.opctx_alloc).await?;
 
+        let mut errors = vec![];
         for switch in &boundary_switches {
             debug!(&self.log, "notifying dendrite of updates";
-                       "instance_id" => %authz_instance.id(),
+                       "instance_id" => ?instance_id,
                        "switch" => switch.to_string());
 
             let client_result = self.dpd_clients.get(switch).ok_or_else(|| {
@@ -540,7 +583,11 @@ impl super::Nexus {
                 Ok(client) => client,
                 Err(new_error) => {
                     errors.push(new_error);
-                    continue;
+                    if fail_fast {
+                        break;
+                    } else {
+                        continue;
+                    }
                 }
             };
 
@@ -576,7 +623,6 @@ impl super::Nexus {
             .instance_lookup_external_ips(opctx, authz_instance.id())
             .await?;
 
-        let boundary_switches = self.boundary_switches(opctx).await?;
         for external_ip in external_ips {
             match self
                 .db_datastore
@@ -603,26 +649,7 @@ impl super::Nexus {
             }?;
         }
 
-        for switch in &boundary_switches {
-            debug!(&self.log, "notifying dendrite of updates";
-                       "instance_id" => %authz_instance.id(),
-                       "switch" => switch.to_string());
-
-            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
-                Error::internal_error(&format!(
-                    "unable to find dendrite client for {switch}"
-                ))
-            })?;
-
-            // Notify dendrite that there are changes for it to reconcile.
-            // In the event of a failure to notify dendrite, we'll log an error
-            // and rely on dendrite's RPW timer to catch it up.
-            if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
-                error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
-            };
-        }
-
-        Ok(())
+        self.notify_dendrite_nat_state(Some(authz_instance.id()), true).await
     }
 
     /// Given old and new instance runtime states, determines the desired

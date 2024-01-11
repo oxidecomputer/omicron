@@ -321,7 +321,6 @@ pub async fn instance_ip_add_nat(
 pub async fn instance_ip_remove_nat(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
-    authz_instance: &authz::Instance,
     sled_uuid: Option<Uuid>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
@@ -345,7 +344,7 @@ pub async fn instance_ip_remove_nat(
 
     osagactx
         .nexus()
-        .instance_delete_dpd_config(&opctx, authz_instance, Some(target_ip.id))
+        .external_ip_delete_dpd_config(&opctx, &target_ip)
         .await
         .map_err(ActionError::action_failed)?;
 
