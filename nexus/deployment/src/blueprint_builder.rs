@@ -194,10 +194,29 @@ impl<'a> BlueprintBuilder<'a> {
         self.comments.push(comment.to_owned());
     }
 
-    pub fn sled_add_zone_internal_ntp(
+    pub fn sled_ensure_zone_internal_ntp(
         &mut self,
         sled_id: Uuid,
-    ) -> Result<(), Error> {
+    ) -> Result<bool, Error> {
+        // If there's already an NTP zone on this sled, do nothing.
+        let has_ntp = self
+            .parent_blueprint
+            .omicron_zones
+            .get(&sled_id)
+            .map(|found_zones| {
+                found_zones.zones.iter().any(|z| {
+                    matches!(
+                        z.zone_type,
+                        OmicronZoneType::BoundaryNtp { .. }
+                            | OmicronZoneType::InternalNtp { .. }
+                    )
+                })
+            })
+            .unwrap_or(false);
+        if has_ntp {
+            return Ok(false);
+        }
+
         let sled_info = self.sled_resources(sled_id)?;
         let sled_subnet = sled_info.subnet;
         let ip = self.sled_alloc_ip(sled_id)?;
@@ -231,7 +250,7 @@ impl<'a> BlueprintBuilder<'a> {
         let ntp_servers = self
             .parent_blueprint
             .all_omicron_zones()
-            .filter_map(|z| {
+            .filter_map(|(_, z)| {
                 if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
                     Some(format!("{}.host.{}", z.id, DNS_ZONE))
                 } else {
@@ -251,15 +270,34 @@ impl<'a> BlueprintBuilder<'a> {
             },
         };
 
-        self.sled_add_zone(sled_id, zone)
+        self.sled_add_zone(sled_id, zone)?;
+        Ok(true)
     }
 
-    pub fn sled_add_zone_crucible(
+    pub fn sled_ensure_zone_crucible(
         &mut self,
         sled_id: Uuid,
         pool_name: ZpoolName,
-    ) -> Result<(), Error> {
-        // XXX-dap check that there's not already a crucible zone on this pool
+    ) -> Result<bool, Error> {
+        // If this sled already has a Crucible zone on this pool, do nothing.
+        let has_crucible_on_this_pool = self
+            .parent_blueprint
+            .omicron_zones
+            .get(&sled_id)
+            .map(|found_zones| {
+                found_zones.zones.iter().any(|z| {
+                    matches!(
+                        &z.zone_type,
+                        OmicronZoneType::Crucible { dataset, .. }
+                        if dataset.pool_name == pool_name
+                    )
+                })
+            })
+            .unwrap_or(false);
+        if has_crucible_on_this_pool {
+            return Ok(false);
+        }
+
         let sled_info = self.sled_resources(sled_id)?;
         if !sled_info.zpools.contains(&pool_name) {
             return Err(Error::Planner(anyhow!(
@@ -281,7 +319,8 @@ impl<'a> BlueprintBuilder<'a> {
                 dataset: OmicronZoneDataset { pool_name },
             },
         };
-        self.sled_add_zone(sled_id, zone)
+        self.sled_add_zone(sled_id, zone)?;
+        Ok(true)
     }
 
     fn sled_add_zone(

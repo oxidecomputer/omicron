@@ -12,6 +12,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::Policy;
 use slog::{info, Logger};
+use std::collections::BTreeMap;
 
 pub struct Planner<'a> {
     log: Logger,
@@ -40,31 +41,20 @@ impl<'a> Planner<'a> {
     fn do_plan(&mut self) -> Result<(), Error> {
         // The only thing this planner currently knows how to do is add services
         // to a sled that's missing them.  So let's see if we're in that case.
+
+        // Internal DNS is a prerequisite for bringing up all other zones.  At
+        // this point, we assume that internal DNS (as a service) is already
+        // functioning.  At some point, this function will have to grow the
+        // ability to determine whether more internal DNS zones need to be
+        // added and where they should go.  And the blueprint builder will need
+        // to grow the ability to provision one.
+
         for (sled_id, sled_info) in &self.policy.sleds {
-            let sled_zones = self.parent_blueprint.omicron_zones.get(sled_id);
-
-            // XXX-dap we should make sure there's internal DNS available first
-
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
             // provision anything else.
-            let has_ntp = sled_zones
-                .map(|found_zones| {
-                    found_zones.zones.iter().any(|z| {
-                        matches!(
-                            z.zone_type,
-                            OmicronZoneType::BoundaryNtp { .. }
-                                | OmicronZoneType::InternalNtp { .. }
-                        )
-                    })
-                })
-                .unwrap_or(false);
-            if !has_ntp {
-                // XXX-dap maybe this should be
-                // builder.sled_ensure_zone_internal_ntp() and it just does
-                // nothing if it finds one?  That would eliminate the risk that
-                // the builder is used improperly.
+            if self.blueprint.sled_ensure_zone_internal_ntp(*sled_id)? {
                 info!(
                     &self.log,
                     "found sled missing NTP zone (will add one)";
@@ -72,8 +62,6 @@ impl<'a> Planner<'a> {
                 );
                 self.blueprint
                     .comment(&format!("sled {}: add NTP zone", sled_id));
-                self.blueprint.sled_add_zone_internal_ntp(*sled_id)?;
-
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
@@ -83,18 +71,10 @@ impl<'a> Planner<'a> {
             // Every zpool on the sled should have a Crucible zone on it.
             let mut ncrucibles_added = 0;
             for zpool_name in &sled_info.zpools {
-                let has_crucible_on_this_pool = sled_zones
-                    .map(|found_zones| {
-                        found_zones.zones.iter().any(|z| {
-                            matches!(
-                                &z.zone_type,
-                                OmicronZoneType::Crucible { dataset, .. }
-                                if dataset.pool_name == *zpool_name
-                            )
-                        })
-                    })
-                    .unwrap_or(false);
-                if !has_crucible_on_this_pool {
+                if self
+                    .blueprint
+                    .sled_ensure_zone_crucible(*sled_id, zpool_name.clone())?
+                {
                     info!(
                         &self.log,
                         "found sled zpool missing Crucible zone (will add one)";
@@ -102,8 +82,6 @@ impl<'a> Planner<'a> {
                         "zpool_name" => ?zpool_name,
                     );
                     ncrucibles_added += 1;
-                    self.blueprint
-                        .sled_add_zone_crucible(*sled_id, zpool_name.clone())?;
                 }
             }
 
