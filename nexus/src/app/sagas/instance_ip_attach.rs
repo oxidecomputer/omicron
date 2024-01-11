@@ -4,14 +4,13 @@
 
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
-    instance_ip_move_state, instance_ip_remove_nat, instance_ip_remove_opte,
-    ModifyStateForExternalIp,
+    instance_ip_move_state, instance_ip_remove_opte, ModifyStateForExternalIp,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
-use nexus_db_model::IpAttachState;
+use nexus_db_model::{IpAttachState, Ipv4NatEntry};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 use omicron_common::api::external::{Error, NameOrId};
@@ -34,7 +33,9 @@ use uuid::Uuid;
 //
 // Overlap with stop is handled by treating comms failures with
 // sled-agent as temporary errors and unwinding. For the delete case, we
-// allow the attach/detach completion to have a missing record.
+// allow the detach completion to have a missing record -- both instance delete
+// and detach will leave NAT in the correct state. For attach, if we make it
+// to completion and an IP is `detached`, we unwind as a precaution.
 // See `instance_common::instance_ip_get_instance_state` for more info.
 //
 // One more consequence of sled state being able to change beneath us
@@ -54,7 +55,7 @@ declare_saga_actions! {
         + siia_get_instance_state
     }
 
-    REGISTER_NAT -> "no_result0" {
+    REGISTER_NAT -> "nat_entry" {
         + siia_nat
         - siia_nat_undo
     }
@@ -189,7 +190,10 @@ async fn siia_get_instance_state(
     .await
 }
 
-async fn siia_nat(sagactx: NexusActionContext) -> Result<(), ActionError> {
+// XXX: Need to abstract over v4 and v6 NAT entries when the time comes.
+async fn siia_nat(
+    sagactx: NexusActionContext,
+) -> Result<Option<Ipv4NatEntry>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
@@ -207,9 +211,19 @@ async fn siia_nat_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<Uuid>>("instance_state")?;
-    let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
+    let nat_entry = sagactx.lookup::<Option<Ipv4NatEntry>>("nat_entry")?;
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let Some(nat_entry) = nat_entry else {
+        // Seeing `None` here means that we never pushed DPD state in
+        // the first instance. Nothing to undo.
+        return Ok(());
+    };
 
     // This requires some explanation in one case, where we can fail because an
     // instance may have moved running -> stopped -> deleted.
@@ -218,24 +232,27 @@ async fn siia_nat_undo(
     // different parent!).
     //
     // Internally, we delete the NAT entry *without* checking its instance state because
-    // it may either be `None`, or another instance may have tried to attach. The
+    // it may either be `None`, or another instance may have attached. The
     // first case is fine, but we need to consider NAT RPW semantics for the second:
     // * The NAT entry table will ensure uniqueness on (external IP, low_port,
     //   high_port) for non-deleted rows.
     // * Instance start and IP attach on a running instance will try to insert such
-    //   a row and fail.
-    //   - Failure in either case will not unwind this NAT entry, because it cannot
-    //     *insert* such an entry.
+    //   a row, fail, and then delete this row before moving forwards.
+    //   - Until either side deletes the row, we're polluting switch NAT.
+    //   - We can't guarantee quick reuse to remove this rule via attach.
+    //   - This will lead to a *new* NAT entry we need to protect, so we need to be careful
+    //     that we only remove *our* incarnation. This is likelier to be hit
+    //     if an ephemeral IP is deallocated, reallocated, and reused in a short timeframe.
     // * Instance create will successfully set parent, since it won't attempt to ensure
     //   DPD has correct NAT state unless set to `start: true`.
-    // So it is safe to remove using the old `ExternalIp` here.
-    if let Err(e) = instance_ip_remove_nat(
-        &sagactx,
-        &params.serialized_authn,
-        sled_id,
-        target_ip,
-    )
-    .await
+    // So it is safe/necessary to remove using the old entry here to target the
+    // exact row we created..
+
+    if let Err(e) = osagactx
+        .nexus()
+        .delete_dpd_config_by_entry(&opctx, &nat_entry)
+        .await
+        .map_err(ActionError::action_failed)
     {
         error!(log, "siia_nat_undo: failed to notify DPD: {e}");
     }
@@ -280,6 +297,9 @@ async fn siia_complete_attach(
     let params = sagactx.saga_params::<Params>()?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
 
+    // There is a clause in `external_ip_complete_op` which specifically
+    // causes an unwind here if the instance delete saga fires and an IP is either
+    // detached or deleted.
     if !instance_ip_move_state(
         &sagactx,
         &params.serialized_authn,
@@ -289,10 +309,7 @@ async fn siia_complete_attach(
     )
     .await?
     {
-        warn!(
-            log,
-            "siia_complete_attach: external IP was deleted or call was idempotent"
-        )
+        warn!(log, "siia_complete_attach: call was idempotent")
     }
 
     target_ip

@@ -9,6 +9,7 @@ use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
+use nexus_db_model::Ipv4NatEntry;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_model::Vni as DbVni;
 use nexus_db_queries::authz;
@@ -277,6 +278,10 @@ impl super::Nexus {
     /// Ensures that the Dendrite configuration for the supplied instance is
     /// up-to-date.
     ///
+    /// Returns a list of live NAT RPW table entries from this call. Generally
+    /// these should only be needed for specific unwind operations, like in
+    /// the IP attach saga.
+    ///
     /// # Parameters
     ///
     /// - `opctx`: An operation context that grants read and list-children
@@ -298,7 +303,7 @@ impl super::Nexus {
         instance_id: Uuid,
         sled_ip_address: &std::net::SocketAddrV6,
         ip_filter: Option<Uuid>,
-    ) -> Result<(), Error> {
+    ) -> Result<Vec<Ipv4NatEntry>, Error> {
         let log = &self.log;
 
         info!(log, "looking up instance's primary network interface";
@@ -308,6 +313,9 @@ impl super::Nexus {
             .instance_id(instance_id)
             .lookup_for(authz::Action::ListChildren)
             .await?;
+
+        // XXX: Need to abstract over v6 and v4 entries here.
+        let mut nat_entries = vec![];
 
         // All external IPs map to the primary network interface, so find that
         // interface. If there is no such interface, there's no way to route
@@ -324,7 +332,7 @@ impl super::Nexus {
             None => {
                 info!(log, "Instance has no primary network interface";
                       "instance_id" => %instance_id);
-                return Ok(());
+                return Ok(nat_entries);
             }
         };
 
@@ -374,10 +382,17 @@ impl super::Nexus {
         let sled_address =
             Ipv6Net(Ipv6Network::new(*sled_ip_address.ip(), 128).unwrap());
 
+        // If all of our IPs are attached or are guaranteed to be owned
+        // by the saga calling this fn, then we need to disregard and
+        // remove conflicting rows. No other instance/service should be
+        // using these as its own, and we are dealing with detritus, e.g.,
+        // the case where we have a concurrent stop -> detach followed
+        // by an attach to another instance, or other ongoing attach saga
+        // cleanup.
         let mut err_and_limit = None;
         for (i, external_ip) in ips_of_interest.iter().enumerate() {
             // For each external ip, add a nat entry to the database
-            if let Err(e) = self
+            if let Ok(id) = self
                 .ensure_nat_entry(
                     external_ip,
                     sled_address,
@@ -387,26 +402,54 @@ impl super::Nexus {
                 )
                 .await
             {
+                nat_entries.push(id);
+                continue;
+            }
+
+            // We seem to be blocked by a bad row -- take it out and retry.
+            // This will return Ok() for a non-existent row.
+            if let Err(e) = self
+                .external_ip_delete_dpd_config_inner(opctx, external_ip)
+                .await
+            {
                 err_and_limit = Some((e, i));
                 break;
+            };
+
+            match self
+                .ensure_nat_entry(
+                    external_ip,
+                    sled_address,
+                    &network_interface,
+                    mac_address,
+                    opctx,
+                )
+                .await
+            {
+                Ok(id) => nat_entries.push(id),
+                Err(e) => {
+                    err_and_limit = Some((e, i));
+                    break;
+                }
             }
         }
 
-        // In the event of an ongoing cleanup from IP attach, it's possible
-        // for an entry pointing at an another instance to still exist, which
-        // will fail to be ensured if we try to attach/start/... before that unwind
-        // completes. We need to remove the entries we just added because the undo
-        // won't call into `instance_delete_dpd_config`.
+        // In the event of an unresolvable failure, we need to remove
+        // the entries we just added because the undo won't call into
+        // `instance_delete_dpd_config`. These entries won't stop a
+        // future caller, but it's better not to pollute switch state.
         if let Some((e, max)) = err_and_limit {
             for external_ip in &ips_of_interest[..max] {
                 let _ = self
-                    .external_ip_delete_dpd_config(opctx, external_ip)
+                    .external_ip_delete_dpd_config_inner(opctx, external_ip)
                     .await;
             }
             return Err(e);
         }
 
-        self.notify_dendrite_nat_state(Some(instance_id), true).await
+        self.notify_dendrite_nat_state(Some(instance_id), true).await?;
+
+        Ok(nat_entries)
     }
 
     async fn ensure_nat_entry(
@@ -416,7 +459,7 @@ impl super::Nexus {
         network_interface: &sled_agent_client::types::NetworkInterface,
         mac_address: macaddr::MacAddr6,
         opctx: &OpContext,
-    ) -> Result<(), Error> {
+    ) -> Result<Ipv4NatEntry, Error> {
         match target_ip.ip {
             IpNetwork::V4(v4net) => {
                 let nat_entry = Ipv4NatValues {
@@ -429,9 +472,10 @@ impl super::Nexus {
                         omicron_common::api::external::MacAddr(mac_address),
                     ),
                 };
-                self.db_datastore
+                Ok(self
+                    .db_datastore
                     .ensure_ipv4_nat_entry(opctx, nat_entry)
-                    .await?;
+                    .await?)
             }
             IpNetwork::V6(_v6net) => {
                 // TODO: implement handling of v6 nat.
@@ -439,8 +483,7 @@ impl super::Nexus {
                     internal_message: "ipv6 nat is not yet implemented".into(),
                 });
             }
-        };
-        Ok(())
+        }
     }
 
     /// Attempts to delete all of the Dendrite NAT configuration for the
@@ -482,27 +525,7 @@ impl super::Nexus {
             .await?;
 
         for entry in external_ips {
-            // Soft delete the NAT entry
-            match self
-                .db_datastore
-                .ipv4_nat_delete_by_external_ip(&opctx, &entry)
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(err) => match err {
-                    Error::ObjectNotFound { .. } => {
-                        warn!(log, "no matching nat entries to soft delete");
-                        Ok(())
-                    }
-                    _ => {
-                        let message = format!(
-                            "failed to delete nat entry due to error: {err:?}"
-                        );
-                        error!(log, "{}", message);
-                        Err(Error::internal_error(&message))
-                    }
-                },
-            }?;
+            self.external_ip_delete_dpd_config_inner(opctx, &entry).await?;
         }
 
         self.notify_dendrite_nat_state(Some(instance_id), false).await
@@ -511,9 +534,7 @@ impl super::Nexus {
     /// Attempts to delete Dendrite NAT configuration for a single external IP.
     ///
     /// This function is primarily used to detach an IP which currently belongs
-    /// to a known instance, or to cleanup after the failed attach of an `ExternalIp`
-    /// which may no longer have a parent in the DB. Due to the latter case, this
-    /// function does not lookup and verify that an IP's parent is still a given instance.
+    /// to a known instance.
     pub(crate) async fn external_ip_delete_dpd_config(
         &self,
         opctx: &OpContext,
@@ -525,6 +546,56 @@ impl super::Nexus {
         info!(log, "deleting individual NAT entry from dpd configuration";
               "instance_id" => ?instance_id,
               "external_ip" => %external_ip.ip);
+
+        self.external_ip_delete_dpd_config_inner(opctx, external_ip).await?;
+
+        self.notify_dendrite_nat_state(instance_id, false).await
+    }
+
+    /// Attempts to soft-delete Dendrite NAT configuration for a specific entry
+    /// via ID.
+    ///
+    /// This function is needed to safely cleanup in at least one unwind scenario
+    /// where a potential second user could need to use the same (IP, portset) pair,
+    /// e.g. a rapid reattach or a reallocated ephemeral IP.
+    pub(crate) async fn delete_dpd_config_by_entry(
+        &self,
+        opctx: &OpContext,
+        nat_entry: &Ipv4NatEntry,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+
+        info!(log, "deleting individual NAT entry from dpd configuration";
+              "id" => ?nat_entry.id,
+              "version_added" => %nat_entry.external_address.0);
+
+        match self.db_datastore.ipv4_nat_delete(&opctx, nat_entry).await {
+            Ok(_) => {}
+            Err(err) => match err {
+                Error::ObjectNotFound { .. } => {
+                    warn!(log, "no matching nat entries to soft delete");
+                }
+                _ => {
+                    let message = format!(
+                        "failed to delete nat entry due to error: {err:?}"
+                    );
+                    error!(log, "{}", message);
+                    return Err(Error::internal_error(&message));
+                }
+            },
+        }
+
+        self.notify_dendrite_nat_state(None, false).await
+    }
+
+    /// Soft-delete an individual external IP from the NAT RPW, without
+    /// triggering a Dendrite notification.
+    async fn external_ip_delete_dpd_config_inner(
+        &self,
+        opctx: &OpContext,
+        external_ip: &ExternalIp,
+    ) -> Result<(), Error> {
+        let log = &self.log;
 
         // Soft delete the NAT entry
         match self
@@ -546,9 +617,7 @@ impl super::Nexus {
                     Err(Error::internal_error(&message))
                 }
             },
-        }?;
-
-        self.notify_dendrite_nat_state(instance_id, false).await
+        }
     }
 
     /// Informs all available boundary switches that the set of NAT entries
@@ -618,36 +687,7 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         self.delete_instance_v2p_mappings(opctx, authz_instance.id()).await?;
 
-        let external_ips = self
-            .datastore()
-            .instance_lookup_external_ips(opctx, authz_instance.id())
-            .await?;
-
-        for external_ip in external_ips {
-            match self
-                .db_datastore
-                .ipv4_nat_delete_by_external_ip(&opctx, &external_ip)
-                .await
-            {
-                Ok(_) => Ok(()),
-                Err(err) => match err {
-                    Error::ObjectNotFound { .. } => {
-                        warn!(
-                            self.log,
-                            "no matching nat entries to soft delete"
-                        );
-                        Ok(())
-                    }
-                    _ => {
-                        let message = format!(
-                            "failed to delete nat entry due to error: {err:?}"
-                        );
-                        error!(self.log, "{}", message);
-                        Err(Error::internal_error(&message))
-                    }
-                },
-            }?;
-        }
+        self.instance_delete_dpd_config(opctx, authz_instance).await?;
 
         self.notify_dendrite_nat_state(Some(authz_instance.id()), true).await
     }

@@ -960,12 +960,13 @@ impl DataStore {
 
         let now = Utc::now();
         let conn = self.pool_connection_authorized(opctx).await?;
-        match (ip_kind, target_state) {
-            (IpKind::SNat, _) => return Err(Error::internal_error(
+        match (ip_kind, expected_state, target_state) {
+            (IpKind::SNat, _, _) => return Err(Error::internal_error(
                 "SNAT should not be removed via `external_ip_complete_op`, \
                     use `deallocate_external_ip`",
             )),
-            (IpKind::Ephemeral, IpAttachState::Detached) => {
+
+            (IpKind::Ephemeral, _, IpAttachState::Detached) => {
                 part_out
                     .set((
                         dsl::parent_id.eq(Option::<Uuid>::None),
@@ -976,7 +977,8 @@ impl DataStore {
                     .execute_async(&*conn)
                     .await
             }
-            (IpKind::Floating, IpAttachState::Detached) => {
+
+            (IpKind::Floating, _, IpAttachState::Detached) => {
                 part_out
                     .set((
                         dsl::parent_id.eq(Option::<Uuid>::None),
@@ -986,7 +988,41 @@ impl DataStore {
                     .execute_async(&*conn)
                     .await
             }
-            (_, IpAttachState::Attached) => {
+
+            // Attaching->Attached gets separate logic because we choose to fail
+            // and unwind on instance delete. This covers two cases:
+            // - External IP is deleted.
+            // - Floating IP is suddenly `detached`.
+            (_, IpAttachState::Attaching, IpAttachState::Attached) => {
+                return part_out
+                    .set((
+                        dsl::time_modified.eq(Utc::now()),
+                        dsl::state.eq(target_state),
+                    ))
+                    .check_if_exists::<ExternalIp>(ip_id)
+                    .execute_and_check(
+                        &*self.pool_connection_authorized(opctx).await?,
+                    )
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })
+                    .and_then(|r| match r.status {
+                        UpdateStatus::Updated => Ok(1),
+                        UpdateStatus::NotUpdatedButExists
+                            if r.found.state == IpAttachState::Detached
+                                || r.found.time_deleted.is_some() =>
+                        {
+                            Err(Error::internal_error(
+                                "unwinding due to concurrent instance delete",
+                            ))
+                        }
+                        UpdateStatus::NotUpdatedButExists => Ok(0),
+                    })
+            }
+
+            // Unwind from failed detach.
+            (_, _, IpAttachState::Attached) => {
                 part_out
                     .set((
                         dsl::time_modified.eq(Utc::now()),

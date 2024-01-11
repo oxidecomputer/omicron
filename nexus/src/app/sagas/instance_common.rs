@@ -9,8 +9,8 @@ use std::net::{IpAddr, Ipv6Addr};
 use crate::Nexus;
 use chrono::Utc;
 use nexus_db_model::{
-    ByteCount, ExternalIp, IpAttachState, SledReservationConstraints,
-    SledResource,
+    ByteCount, ExternalIp, IpAttachState, Ipv4NatEntry,
+    SledReservationConstraints, SledResource,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -272,7 +272,7 @@ pub async fn instance_ip_add_nat(
     authz_instance: &authz::Instance,
     sled_uuid: Option<Uuid>,
     target_ip: ModifyStateForExternalIp,
-) -> Result<(), ActionError> {
+) -> Result<Option<Ipv4NatEntry>, ActionError> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let opctx =
@@ -280,11 +280,11 @@ pub async fn instance_ip_add_nat(
 
     // No physical sled? Don't push NAT.
     let Some(sled_uuid) = sled_uuid else {
-        return Ok(());
+        return Ok(None);
     };
 
     if !target_ip.do_saga {
-        return Ok(());
+        return Ok(None);
     }
     let Some(target_ip) = target_ip.external_ip else {
         return Err(ActionError::action_failed(Error::internal_error(
@@ -309,9 +309,14 @@ pub async fn instance_ip_add_nat(
             Some(target_ip.id),
         )
         .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(())
+        .and_then(|v| {
+            v.into_iter().next().map(Some).ok_or_else(|| {
+                Error::internal_error(
+                    "NAT RPW failed to return concrete NAT entry",
+                )
+            })
+        })
+        .map_err(ActionError::action_failed)
 }
 
 /// Remove a single NAT entry from DPD, dropping packets bound for `target_ip`.
