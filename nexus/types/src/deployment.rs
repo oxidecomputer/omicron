@@ -18,6 +18,9 @@ pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::ZpoolName;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -97,15 +100,14 @@ pub struct SledResources {
 /// zones deployed on each host and some supporting configuration (e.g., DNS).
 /// This is aimed at supporting add/remove sleds.  The plan is to grow this to
 /// include more of the system as we support more use cases.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
 
-    /// set of sleds that we consider part of the control plane
-    pub sleds_in_cluster: BTreeSet<Uuid>,
-
     /// mapping: sled id -> zones deployed on each sled
+    /// A sled is considered part of the control plane cluster iff it has an
+    /// entry in this map.
     pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
 
     /// Omicron zones considered in-service (which generally means that they
@@ -128,8 +130,222 @@ pub struct Blueprint {
 impl Blueprint {
     pub fn all_omicron_zones(
         &self,
-    ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.omicron_zones.values().flat_map(|z| z.zones.iter())
+    ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> {
+        self.omicron_zones
+            .iter()
+            .flat_map(|(sled_id, z)| z.zones.iter().map(|z| (*sled_id, z)))
+    }
+
+    pub fn sleds(&self) -> impl Iterator<Item = Uuid> + '_ {
+        self.omicron_zones.keys().copied()
+    }
+
+    pub fn diff<'a>(&'a self, other: &'a Blueprint) -> BlueprintDiff<'a> {
+        BlueprintDiff { b1: self, b2: other }
+    }
+}
+
+pub struct BlueprintDiff<'a> {
+    b1: &'a Blueprint,
+    b2: &'a Blueprint,
+}
+
+impl<'a> BlueprintDiff<'a> {
+    fn print_whole_sled(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        prefix: char,
+        label: &str,
+        bbsledzones: &OmicronZonesConfig,
+        sled_id: Uuid,
+    ) -> std::fmt::Result {
+        writeln!(f, "{} sled {} ({})", prefix, sled_id, label)?;
+        writeln!(
+            f,
+            "{}     zone config generation {}",
+            prefix, bbsledzones.generation
+        )?;
+        for z in &bbsledzones.zones {
+            writeln!(
+                f,
+                "{}         zone {} type {} ({})",
+                prefix,
+                z.id,
+                z.zone_type.label(),
+                label
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a> std::fmt::Display for BlueprintDiff<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "diff blueprints {} {}", self.b1.id, self.b2.id)?;
+        writeln!(f, "--- {}", self.b1.id)?;
+        writeln!(f, "+++ {}", self.b2.id)?;
+
+        let b1 = &self.b1;
+        let b2 = &self.b2;
+
+        let all_sleds: BTreeSet<Uuid> = b1
+            .sleds()
+            .collect::<BTreeSet<_>>()
+            .union(&b2.sleds().collect::<BTreeSet<_>>())
+            .copied()
+            .collect();
+
+        for sled_id in all_sleds {
+            // First, figure out if this sled is only in one blueprint or common
+            // to both.
+            let maybe_b1sled = b1.omicron_zones.get(&sled_id);
+            let maybe_b2sled = b1.omicron_zones.get(&sled_id);
+            let (b1sledzones, b2sledzones) = match (maybe_b1sled, maybe_b2sled)
+            {
+                (None, None) => unreachable!(),
+                (Some(zones), None) => {
+                    // This sled was removed altogether.  Print it and move on.
+                    self.print_whole_sled(f, '-', "removed", zones, sled_id)?;
+                    continue;
+                }
+                (None, Some(zones)) => {
+                    // This sled was added.  Print it and move on.
+                    self.print_whole_sled(f, '+', "added", zones, sled_id)?;
+                    continue;
+                }
+                (Some(b1zones), Some(b2zones)) => (b1zones, b2zones),
+            };
+
+            // At this point, we're looking at a sled that's in both blueprints.
+            // Print a line about the sled regardless of whether it's changed.
+            writeln!(f, "  sled {}", sled_id)?;
+
+            // Print a line about the zone config regardless of whether it's
+            // changed.
+            if b1sledzones.generation != b2sledzones.generation {
+                writeln!(
+                    f,
+                    "-     zone config generation {}",
+                    b1sledzones.generation
+                )?;
+                writeln!(
+                    f,
+                    "+     zone config generation {}",
+                    b2sledzones.generation
+                )?;
+            } else {
+                writeln!(
+                    f,
+                    "      zone config generation {}",
+                    b1sledzones.generation
+                )?;
+            }
+
+            // Assemble separate summaries of the zones, indexed by zone id.
+            #[derive(Debug)]
+            struct ZoneInfo<'a> {
+                zone: &'a OmicronZoneConfig,
+                in_service: bool,
+            }
+
+            let b1zones: BTreeMap<Uuid, ZoneInfo> = b1sledzones
+                .zones
+                .iter()
+                .map(|zone| {
+                    (
+                        zone.id,
+                        ZoneInfo {
+                            zone,
+                            in_service: b1.zones_in_service.contains(&zone.id),
+                        },
+                    )
+                })
+                .collect();
+            let b2zones: BTreeMap<Uuid, ZoneInfo> = b2sledzones
+                .zones
+                .iter()
+                .map(|zone| {
+                    (
+                        zone.id,
+                        ZoneInfo {
+                            zone,
+                            in_service: b2.zones_in_service.contains(&zone.id),
+                        },
+                    )
+                })
+                .collect();
+
+            // Now go through each zone and compare them.
+            for (zone_id, b1z_info) in &b1zones {
+                let zone_type = b1z_info.zone.zone_type.label();
+                if let Some(b2z_info) = b2zones.get(zone_id) {
+                    let zone2_type = b2z_info.zone.zone_type.label();
+                    if b1z_info.zone != b2z_info.zone {
+                        writeln!(
+                            f,
+                            "-         zone {} type {} (changed)",
+                            zone_id, zone_type,
+                        )?;
+                        writeln!(
+                            f,
+                            "+         zone {} type {} (changed)",
+                            zone_id, zone2_type,
+                        )?;
+                    } else if b1z_info.in_service && !b2z_info.in_service {
+                        writeln!(
+                            f,
+                            "-         zone {} type {} (in service)",
+                            zone_id, zone_type,
+                        )?;
+                        writeln!(
+                            f,
+                            "+         zone {} type {} (removed from service)",
+                            zone_id, zone2_type,
+                        )?;
+                    } else if !b1z_info.in_service && b2z_info.in_service {
+                        writeln!(
+                            f,
+                            "-         zone {} type {} (not in service)",
+                            zone_id, zone_type,
+                        )?;
+                        writeln!(
+                            f,
+                            "+         zone {} type {} (added to service)",
+                            zone_id, zone2_type,
+                        )?;
+                    } else {
+                        writeln!(
+                            f,
+                            "         zone {} type {} (unchanged)",
+                            zone_id, zone_type,
+                        )?;
+                    }
+                } else {
+                    writeln!(
+                        f,
+                        "-        zone {} type {} (removed)",
+                        zone_id, zone_type,
+                    )?;
+                }
+            }
+
+            for (zone_id, b2z_info) in &b2zones {
+                if b1zones.contains_key(&zone_id) {
+                    // We handled this zone above.
+                    continue;
+                }
+
+                writeln!(
+                    f,
+                    "+        zone {} type {} (added)",
+                    zone_id,
+                    b2z_info.zone.zone_type.label(),
+                )?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -143,42 +359,10 @@ pub struct BlueprintTarget {
 }
 
 pub mod views {
-    use super::OmicronZonesConfig;
     use schemars::JsonSchema;
     use serde::Serialize;
-    use std::collections::{BTreeMap, BTreeSet};
     use thiserror::Error;
     use uuid::Uuid;
-
-    /// Describes all automatically-managed software and configuration in the
-    /// rack
-    #[derive(Serialize, JsonSchema)]
-    pub struct Blueprint {
-        pub id: Uuid,
-        pub parent_blueprint_id: Option<Uuid>,
-        pub time_created: chrono::DateTime<chrono::Utc>,
-        pub creator: String,
-        pub comment: String,
-
-        pub sleds_in_cluster: BTreeSet<Uuid>,
-        pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-        pub zones_in_service: BTreeSet<Uuid>,
-    }
-
-    impl From<super::Blueprint> for Blueprint {
-        fn from(generic: super::Blueprint) -> Self {
-            Blueprint {
-                id: generic.id,
-                parent_blueprint_id: generic.parent_blueprint_id,
-                time_created: generic.time_created,
-                creator: generic.creator,
-                comment: generic.comment,
-                sleds_in_cluster: generic.sleds_in_cluster,
-                omicron_zones: generic.omicron_zones,
-                zones_in_service: generic.zones_in_service,
-            }
-        }
-    }
 
     /// Describes what blueprint, if any, the system is currently working toward
     #[derive(Debug, Serialize, JsonSchema)]

@@ -16,3 +16,10 @@ thiserror.workspace = true
 uuid.workspace = true
 
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+nexus-inventory.workspace = true
+omicron-test-utils.workspace = true
+rand.workspace = true
+sled-agent-client.workspace = true

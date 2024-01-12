@@ -22,6 +22,10 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     replace = {
+        // It's kind of unfortunate to pull in such a complex and unstable type
+        // as "blueprint" this way, but we have really useful functionality
+        // (e.g., diff'ing) that's implemented on our local type.
+        Blueprint = nexus_types::deployment::Blueprint,
         Generation = omicron_common::api::external::Generation,
         Ipv4Network = ipnetwork::Ipv4Network,
         Ipv6Network = ipnetwork::Ipv6Network,

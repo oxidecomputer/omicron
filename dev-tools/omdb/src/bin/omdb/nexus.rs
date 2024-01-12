@@ -70,6 +70,8 @@ enum BlueprintsCommands {
     List,
     /// Show a blueprint
     Show(BlueprintIdArgs),
+    /// Diff two blueprint
+    Diff(BlueprintIdsArgs),
     /// Delete a blueprint
     Delete(BlueprintIdArgs),
     /// Set the current target blueprint
@@ -84,6 +86,14 @@ enum BlueprintsCommands {
 struct BlueprintIdArgs {
     /// id of a blueprint
     blueprint_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintIdsArgs {
+    /// id of first blueprint
+    blueprint1_id: Uuid,
+    /// id of second blueprint
+    blueprint2_id: Uuid,
 }
 
 #[derive(Debug, Args)]
@@ -146,6 +156,9 @@ impl NexusArgs {
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Show(args),
             }) => cmd_nexus_blueprints_show(&client, args).await,
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command: BlueprintsCommands::Diff(args),
+            }) => cmd_nexus_blueprints_diff(&client, args).await,
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Delete(args),
             }) => cmd_nexus_blueprints_delete(&client, args).await,
@@ -807,6 +820,22 @@ async fn cmd_nexus_blueprints_show(
         }
     }
 
+    Ok(())
+}
+
+async fn cmd_nexus_blueprints_diff(
+    client: &nexus_client::Client,
+    args: &BlueprintIdsArgs,
+) -> Result<(), anyhow::Error> {
+    let b1 = client
+        .blueprint_view(&args.blueprint1_id)
+        .await
+        .with_context(|| format!("fetching blueprint {}", args.blueprint1_id))?;
+    let b2 = client
+        .blueprint_view(&args.blueprint2_id)
+        .await
+        .with_context(|| format!("fetching blueprint {}", args.blueprint2_id))?;
+    println!("{}", b1.diff(&b2));
     Ok(())
 }
 

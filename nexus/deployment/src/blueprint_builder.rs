@@ -79,9 +79,9 @@ impl<'a> BlueprintBuilder<'a> {
         policy: &'a Policy,
         creator: &str,
     ) -> Result<Blueprint, Error> {
-        let sleds: BTreeSet<_> = policy.sleds.keys().copied().collect();
-        let omicron_zones = sleds
-            .iter()
+        let omicron_zones = policy
+            .sleds
+            .keys()
             .map(|sled_id| {
                 let zones = collection
                     .omicron_zones
@@ -114,7 +114,6 @@ impl<'a> BlueprintBuilder<'a> {
             collection.all_omicron_zones().map(|z| z.id).collect();
         Ok(Blueprint {
             id: Uuid::new_v4(),
-            sleds_in_cluster: sleds,
             omicron_zones: omicron_zones,
             zones_in_service,
             parent_blueprint_id: None,
@@ -145,9 +144,10 @@ impl<'a> BlueprintBuilder<'a> {
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for each in-service sled.
-        let sleds: BTreeSet<_> = self.policy.sleds.keys().copied().collect();
-        let omicron_zones = sleds
-            .iter()
+        let omicron_zones = self
+            .policy
+            .sleds
+            .keys()
             .map(|sled_id| {
                 // Start with self.omicron_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
@@ -174,7 +174,6 @@ impl<'a> BlueprintBuilder<'a> {
             .collect();
         Blueprint {
             id: Uuid::new_v4(),
-            sleds_in_cluster: sleds,
             omicron_zones: omicron_zones,
             zones_in_service: self.zones_in_service,
             parent_blueprint_id: Some(self.parent_blueprint.id),
@@ -238,7 +237,7 @@ impl<'a> BlueprintBuilder<'a> {
         let ntp_servers = self
             .parent_blueprint
             .all_omicron_zones()
-            .filter_map(|z| {
+            .filter_map(|(_, z)| {
                 if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
                     Some(format!("{}.host.{}", z.id, DNS_ZONE))
                 } else {

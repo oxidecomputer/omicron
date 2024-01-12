@@ -27,6 +27,7 @@ use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
 use nexus_types::deployment::params as deployment_params;
 use nexus_types::deployment::views as deployment_views;
+use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -618,24 +619,18 @@ async fn ipv4_nat_changeset(
 async fn blueprint_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<deployment_views::Blueprint>>, HttpError>
-{
+) -> Result<HttpResponseOk<ResultsPage<Blueprint>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
         let query = query_params.into_inner();
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let pagparams = data_page_params_for(&rqctx, &query)?;
-        let blueprints = nexus
-            .blueprint_list(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(deployment_views::Blueprint::from)
-            .collect();
+        let blueprints = nexus.blueprint_list(&opctx, &pagparams).await?;
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             blueprints,
-            &|_, blueprint: &deployment_views::Blueprint| blueprint.id,
+            &|_, blueprint: &Blueprint| blueprint.id,
         )?))
     };
 
@@ -650,14 +645,14 @@ async fn blueprint_list(
 async fn blueprint_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<nexus_types::external_api::params::BlueprintPath>,
-) -> Result<HttpResponseOk<deployment_views::Blueprint>, HttpError> {
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
         let blueprint = nexus.blueprint_view(&opctx, path.blueprint_id).await?;
-        Ok(HttpResponseOk(deployment_views::Blueprint::from(blueprint)))
+        Ok(HttpResponseOk(blueprint))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -737,13 +732,13 @@ async fn blueprint_target_set(
 }]
 async fn blueprint_create_current(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<deployment_views::Blueprint>, HttpError> {
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
         let result = nexus.blueprint_create_current(&opctx).await?;
-        Ok(HttpResponseOk(deployment_views::Blueprint::from(result)))
+        Ok(HttpResponseOk(result))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -756,13 +751,13 @@ async fn blueprint_create_current(
 }]
 async fn blueprint_regenerate(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<deployment_views::Blueprint>, HttpError> {
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
         let result = nexus.blueprint_create_regenerate(&opctx).await?;
-        Ok(HttpResponseOk(deployment_views::Blueprint::from(result)))
+        Ok(HttpResponseOk(result))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
