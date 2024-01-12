@@ -114,8 +114,7 @@ impl ServiceName {
     }
 
     /// Parses the [ServiceName] from the DNS name (ignoring the zone).
-    ///
-    /// This should be identical to the output of [Self::dns_name].
+    // This should be identical to the output of [Self::dns_name].
     pub fn from_dns_name(s: &str) -> Result<Self, ParseServiceNameError> {
         let mut parts = s.split('.');
         let first = parts
