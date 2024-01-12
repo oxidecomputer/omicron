@@ -302,8 +302,6 @@ struct ClickHouseDataDir {
 
 impl ClickHouseDataDir {
     fn new(logctx: &LogContext) -> Result<Self, anyhow::Error> {
-        // TODO: replace with log_prefix_for_test once
-        // https://github.com/oxidecomputer/dropshot/pull/878 is merged.
         let (parent_dir, prefix) = log_prefix_for_test(logctx.test_name());
 
         let dir = Builder::new()
