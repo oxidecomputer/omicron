@@ -994,54 +994,38 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
 
         assert_eq!(ip_pool_resources.len(), 4);
 
-        let type_silo = SqlEnum::from(("ip_pool_resource_type", "silo"));
-
         // pool1, which referenced silo1 in the "ip_pool" table, has a newly
         // created resource.
         //
         // The same relationship is true for pool2 / silo2.
-        assert_eq!(
-            ip_pool_resources[0].values,
-            vec![
-                ColumnValue::new("ip_pool_id", POOL1),
-                ColumnValue::new("resource_type", type_silo.clone()),
-                ColumnValue::new("resource_id", SILO1),
-                ColumnValue::new("is_default", true),
-            ],
-        );
-        assert_eq!(
-            ip_pool_resources[1].values,
-            vec![
-                ColumnValue::new("ip_pool_id", POOL2),
-                ColumnValue::new("resource_type", type_silo.clone()),
-                ColumnValue::new("resource_id", SILO2),
-                ColumnValue::new("is_default", false),
-            ],
-        );
+        fn assert_row(
+            row: &Vec<ColumnValue>,
+            ip_pool_id: Uuid,
+            silo_id: Uuid,
+            is_default: bool,
+        ) {
+            let type_silo = SqlEnum::from(("ip_pool_resource_type", "silo"));
+            assert_eq!(
+                row,
+                &vec![
+                    ColumnValue::new("ip_pool_id", ip_pool_id),
+                    ColumnValue::new("resource_type", type_silo),
+                    ColumnValue::new("resource_id", silo_id),
+                    ColumnValue::new("is_default", is_default),
+                ],
+            );
+        }
+
+        assert_row(&ip_pool_resources[0].values, POOL1, SILO1, true);
+        assert_row(&ip_pool_resources[1].values, POOL2, SILO2, false);
 
         // pool3 did not previously have a corresponding silo, so now it's associated
         // with both silos as a new resource in each.
         //
         // Additionally, silo1 already had a default pool (pool1), but silo2 did
         // not have one. As a result, pool3 becomes the new default pool for silo2.
-        assert_eq!(
-            ip_pool_resources[2].values,
-            vec![
-                ColumnValue::new("ip_pool_id", POOL3),
-                ColumnValue::new("resource_type", type_silo.clone()),
-                ColumnValue::new("resource_id", SILO1),
-                ColumnValue::new("is_default", false),
-            ],
-        );
-        assert_eq!(
-            ip_pool_resources[3].values,
-            vec![
-                ColumnValue::new("ip_pool_id", POOL3),
-                ColumnValue::new("resource_type", type_silo.clone()),
-                ColumnValue::new("resource_id", SILO2),
-                ColumnValue::new("is_default", true),
-            ],
-        );
+        assert_row(&ip_pool_resources[2].values, POOL3, SILO1, false);
+        assert_row(&ip_pool_resources[3].values, POOL3, SILO2, true);
     })
 }
 
