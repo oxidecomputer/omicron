@@ -81,6 +81,7 @@ impl DataStore {
         )
         .filter(ip_pool::time_deleted.is_null())
         .select(IpPool::as_select())
+        .distinct()
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))

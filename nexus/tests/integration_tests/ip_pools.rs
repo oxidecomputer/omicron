@@ -17,6 +17,7 @@ use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
@@ -36,6 +37,7 @@ use nexus_types::external_api::params::IpPoolUpdate;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::Ipv6Range;
+use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolSilo;
@@ -43,6 +45,7 @@ use nexus_types::external_api::views::Silo;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::SimpleIdentity;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
 use omicron_nexus::TestInterfaces;
 use sled_agent_client::TestInterfaces as SledTestInterfaces;
@@ -62,16 +65,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     let ip_pool_ranges_url = format!("{}/ranges", ip_pool_url);
     let ip_pool_add_range_url = format!("{}/add", ip_pool_ranges_url);
 
-    // Verify the list of IP pools is empty
-    let ip_pools = NexusRequest::iter_collection_authn::<IpPool>(
-        client,
-        ip_pools_url,
-        "",
-        None,
-    )
-    .await
-    .expect("Failed to list IP Pools")
-    .all_items;
+    let ip_pools = get_ip_pools(&client).await;
     assert_eq!(ip_pools.len(), 0, "Expected empty list of IP pools");
 
     // Verify 404 if the pool doesn't exist yet, both for creating or deleting
@@ -102,15 +96,7 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(created_pool.identity.name, pool_name);
     assert_eq!(created_pool.identity.description, description);
 
-    let list = NexusRequest::iter_collection_authn::<IpPool>(
-        client,
-        ip_pools_url,
-        "",
-        None,
-    )
-    .await
-    .expect("Failed to list IP Pools")
-    .all_items;
+    let list = get_ip_pools(client).await;
     assert_eq!(list.len(), 1, "Expected exactly 1 IP pool");
     assert_pools_eq(&created_pool, &list[0]);
 
@@ -210,6 +196,71 @@ async fn test_ip_pool_basic_crud(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("Expected to be able to delete an empty IP Pool");
+}
+
+async fn get_ip_pools(client: &ClientTestContext) -> Vec<IpPool> {
+    NexusRequest::iter_collection_authn::<IpPool>(
+        client,
+        "/v1/system/ip-pools",
+        "",
+        None,
+    )
+    .await
+    .expect("Failed to list IP Pools")
+    .all_items
+}
+
+// this test exists primarily because of a bug in the initial implementation
+// where we included a copy of each pool in the list response for every
+// associated silo instead of deduping the result of the left outer join
+#[nexus_test]
+async fn test_ip_pool_list_dedupe(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let ip_pools = get_ip_pools(&client).await;
+    assert_eq!(ip_pools.len(), 0);
+
+    let range1 = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 51),
+            std::net::Ipv4Addr::new(10, 0, 0, 52),
+        )
+        .unwrap(),
+    );
+    let (pool1, ..) = create_ip_pool(client, "pool1", Some(range1)).await;
+    let range2 = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 53),
+            std::net::Ipv4Addr::new(10, 0, 0, 54),
+        )
+        .unwrap(),
+    );
+    let (pool2, ..) = create_ip_pool(client, "pool2", Some(range2)).await;
+
+    let ip_pools = get_ip_pools(&client).await;
+    assert_eq!(ip_pools.len(), 2);
+    assert_eq!(ip_pools[0].identity.id, pool1.id());
+    assert_eq!(ip_pools[1].identity.id, pool2.id());
+
+    // create 3 silos and link
+    let silo1 =
+        create_silo(&client, "silo1", true, SiloIdentityMode::SamlJit).await;
+    link_ip_pool(client, "pool1", &silo1.id(), false).await;
+    // linking pool2 here only, just for variety
+    link_ip_pool(client, "pool2", &silo1.id(), false).await;
+
+    let silo2 =
+        create_silo(&client, "silo2", true, SiloIdentityMode::SamlJit).await;
+    link_ip_pool(client, "pool1", &silo2.id(), true).await;
+
+    let silo3 =
+        create_silo(&client, "silo3", true, SiloIdentityMode::SamlJit).await;
+    link_ip_pool(client, "pool1", &silo3.id(), true).await;
+
+    let ip_pools = get_ip_pools(&client).await;
+    assert_eq!(ip_pools.len(), 2);
+    assert_eq!(ip_pools[0].identity.id, pool1.id());
+    assert_eq!(ip_pools[1].identity.id, pool2.id());
 }
 
 /// The internal IP pool, defined by its association with the internal silo,
