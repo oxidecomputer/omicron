@@ -1001,6 +1001,8 @@ pub struct InstanceCreate {
     pub disks: Vec<InstanceDiskAttachment>,
 
     /// List of public SSH keys (identified by ID or name) to be associated with the instance.
+    /// If not provided, all public keys from the user's profile will be used. If an empty list is
+    /// provided, no public keys will be transmitted to the instance.
     #[serde(default)]
     pub ssh_keys: Option<Vec<NameOrId>>,
 

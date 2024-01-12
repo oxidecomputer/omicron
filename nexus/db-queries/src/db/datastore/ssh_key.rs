@@ -21,11 +21,98 @@ use diesel::prelude::*;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use ref_cast::RefCast;
+use uuid::Uuid;
 
 impl DataStore {
+    /// Resolves a list of names or IDs to a list of IDs that are validated to
+    /// both exist and be owned by the current user.
+    pub async fn ssh_keys_batch_lookup(
+        &self,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
+        keys: &Vec<NameOrId>,
+    ) -> ListResultVec<Uuid> {
+        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
+
+        let mut names: Vec<Name> = vec![];
+        let mut ids: Vec<Uuid> = vec![];
+
+        for key in keys.iter() {
+            match key {
+                NameOrId::Name(name) => names.push(name.clone().into()),
+                NameOrId::Id(id) => ids.push(*id),
+            }
+        }
+
+        use db::schema::ssh_key::dsl;
+        let result: Vec<(Uuid, Name)> = dsl::ssh_key
+            .filter(dsl::id.eq_any(ids).or(dsl::name.eq_any(names)))
+            .filter(dsl::silo_user_id.eq(authz_user.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select((dsl::id, dsl::name))
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // If a key isn't present in the result that was present in the input that means it either
+        // doesn't exist or isn't owned by the user. Either way we want to give a specific lookup error
+        // for at least the first result. It would be nice to include an aggregate error with all the missing
+        // keys.
+        // TODO: Optimize the performance of this
+        for key in keys.iter() {
+            match key {
+                NameOrId::Name(name) => {
+                    if !result
+                        .iter()
+                        .any(|(_, n)| n.clone() == name.clone().into())
+                    {
+                        return Err(Error::ObjectNotFound {
+                            type_name: ResourceType::SshKey,
+                            lookup_type: LookupType::ByName(name.to_string()),
+                        });
+                    }
+                }
+                NameOrId::Id(id) => {
+                    if !result.iter().any(|(i, _)| i == id) {
+                        return Err(Error::ObjectNotFound {
+                            type_name: ResourceType::SshKey,
+                            lookup_type: LookupType::ById(*id),
+                        });
+                    }
+                }
+            }
+        }
+
+        return Ok(result.iter().map(|&(id, _)| id).collect());
+    }
+
+    /// Given a list of IDs for SSH public keys, fetches the keys that belong to
+    /// the user and aren't deleted. Does not fail if keys are missing.
+    pub async fn ssh_keys_batch_fetch(
+        &self,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
+        keys: &Vec<Uuid>,
+    ) -> ListResultVec<SshKey> {
+        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
+
+        use db::schema::ssh_key::dsl;
+        dsl::ssh_key
+            .filter(dsl::id.eq_any(keys.to_owned()))
+            .filter(dsl::silo_user_id.eq(authz_user.id()))
+            .filter(dsl::time_deleted.is_null())
+            .select(SshKey::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn ssh_keys_list(
         &self,
         opctx: &OpContext,
