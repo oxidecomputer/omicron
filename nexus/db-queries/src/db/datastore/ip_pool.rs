@@ -10,10 +10,10 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::SERVICE_IP_POOL_NAME;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
-use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
 use crate::db::model::ExternalIp;
 use crate::db::model::IpKind;
@@ -56,7 +56,6 @@ impl DataStore {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
         use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
@@ -71,17 +70,9 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .left_outer_join(ip_pool_resource::table)
-        .filter(
-            ip_pool_resource::resource_id
-                .ne(*INTERNAL_SILO_ID)
-                // resource_id is not nullable -- null here means the
-                // pool has no entry in the join table
-                .or(ip_pool_resource::resource_id.is_null()),
-        )
+        .filter(ip_pool::name.ne(SERVICE_IP_POOL_NAME))
         .filter(ip_pool::time_deleted.is_null())
         .select(IpPool::as_select())
-        .distinct()
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -234,23 +225,24 @@ impl DataStore {
         opctx: &OpContext,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
         use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
             .await?;
 
+        // TODO: just use LookupPath, come on
+        // let (.., authz_pool, pool) = db::lookup::LookupPath::new(&opctx, self)
+        //     .ip_pool_name(*SERVICE_IP_POOL_NAME.parse().unwrap())
+        //     .lookup_for(authz::Action::Read)
+        //     .await?;
+        // Ok((authz_pool, pool))
+
         // Look up IP pool by its association with the internal silo.
         // We assume there is only one pool for that silo, or at least,
         // if there is more than one, it doesn't matter which one we pick.
         let (authz_pool, pool) = ip_pool::table
-            .inner_join(ip_pool_resource::table)
             .filter(ip_pool::time_deleted.is_null())
-            .filter(
-                ip_pool_resource::resource_type
-                    .eq(IpPoolResourceType::Silo)
-                    .and(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID)),
-            )
+            .filter(ip_pool::name.eq(SERVICE_IP_POOL_NAME))
             .select(IpPool::as_select())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -375,15 +367,10 @@ impl DataStore {
         authz_pool: &authz::IpPool,
     ) -> LookupResult<bool> {
         use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
 
         ip_pool::table
-            .inner_join(ip_pool_resource::table)
             .filter(ip_pool::id.eq(authz_pool.id()))
-            .filter(
-                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
-            )
-            .filter(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID))
+            .filter(ip_pool::name.eq(SERVICE_IP_POOL_NAME))
             .filter(ip_pool::time_deleted.is_null())
             .select(ip_pool::id)
             .first_async::<Uuid>(
