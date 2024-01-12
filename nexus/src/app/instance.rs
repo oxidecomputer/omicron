@@ -322,10 +322,33 @@ impl super::Nexus {
             ));
         }
 
+        let actor = opctx.authn.actor_required().internal_context(
+            "loading current user's ssh keys for new Instance",
+        )?;
+        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(actor.actor_id())
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+
+        let ssh_keys = match &params.ssh_keys {
+            Some(keys) => Some(
+                self.db_datastore
+                    .ssh_keys_batch_lookup(opctx, &authz_user, keys)
+                    .await?
+                    .iter()
+                    .map(|id| NameOrId::Id(id.clone()))
+                    .collect::<Vec<NameOrId>>(),
+            ),
+            None => None,
+        };
+
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
-            create_params: params.clone(),
+            create_params: params::InstanceCreate {
+                ssh_keys,
+                ..params.clone()
+            },
             boundary_switches: self
                 .boundary_switches(&self.opctx_alloc)
                 .await?,
@@ -978,6 +1001,7 @@ impl super::Nexus {
         initial_vmm: &db::model::Vmm,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
+        let params = sagactx.saga_params::<Params>()?;
 
         // Gather disk information and turn that into DiskRequests
         let disks = self
@@ -1120,20 +1144,9 @@ impl super::Nexus {
             .lookup_for(authz::Action::ListChildren)
             .await?;
 
-        let checked_keys = db_instance.ssh_keys.clone().unwrap_or_default();
-
         let ssh_keys = self
             .db_datastore
-            .ssh_keys_list(
-                opctx,
-                &authz_user,
-                &PaginatedBy::Name(DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: std::num::NonZeroU32::new(MAX_KEYS_PER_INSTANCE)
-                        .unwrap(),
-                }),
-            )
+            .ssh_keys_batch_fetch(opctx, &authz_user, params.ssh_keys)
             .await?
             .into_iter();
 
