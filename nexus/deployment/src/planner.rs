@@ -111,15 +111,12 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use rand::Fill;
-    use rand::SeedableRng;
     use sled_agent_client::types::{
         Baseboard, Inventory, OmicronZoneConfig, OmicronZoneDataset,
         OmicronZoneType, OmicronZonesConfig, SledRole,
     };
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
-    use std::fmt::Write;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
@@ -149,20 +146,6 @@ mod test {
     /// Returns a collection and policy describing a pretty simple system
     fn example() -> (Collection, Policy) {
         let mut builder = nexus_inventory::CollectionBuilder::new("test-suite");
-
-        // We want deterministic uuid generation in this test so that we get
-        // consistent output for expectorate.
-        // XXX-dap this is not quite good enough because the blueprint ids and
-        // the ids for new sleds and zones are generated elsewhere with
-        // Uuid::new_v4().  What to do?  Pass the RNG around everywhere?
-        // Find/replace these uuids in the output?  Add a programmatic interface
-        // to the differ?
-        let mut rng = rand::rngs::StdRng::from_seed(Default::default());
-        fn new_uuid(r: &mut rand::rngs::StdRng) -> Uuid {
-            let mut bytes = uuid::Bytes::default();
-            bytes.try_fill(r).unwrap();
-            uuid::Builder::from_random_bytes(bytes).into_uuid()
-        }
 
         let sled_ids = [
             "72443b6c-b8bb-4ffa-ab3a-aeaa428ed79b",
@@ -199,7 +182,7 @@ mod test {
             let zpools = &policy.sleds.get(&sled_id).unwrap().zpools;
             let ip1 = sled_ip.saturating_add(1);
             let zones: Vec<_> = std::iter::once(OmicronZoneConfig {
-                id: new_uuid(&mut rng),
+                id: Uuid::new_v4(),
                 underlay_address: sled_ip.saturating_add(1),
                 zone_type: OmicronZoneType::InternalNtp {
                     address: SocketAddrV6::new(ip1, 12345, 0, 0).to_string(),
@@ -211,7 +194,7 @@ mod test {
             .chain(zpools.iter().enumerate().map(|(i, zpool_name)| {
                 let ip = sled_ip.saturating_add(u128::try_from(i + 2).unwrap());
                 OmicronZoneConfig {
-                    id: new_uuid(&mut rng),
+                    id: Uuid::new_v4(),
                     underlay_address: ip,
                     zone_type: OmicronZoneType::Crucible {
                         address: String::from("[::1]:12345"),
@@ -245,9 +228,6 @@ mod test {
     fn test_basic_add_sled() {
         let logctx = test_setup_log("planner_basic_add_sled");
 
-        // Assemble an output string that we'll check at the end.
-        let mut out = String::new();
-
         // Use our example inventory collection.
         let (collection, mut policy) = example();
 
@@ -273,12 +253,11 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        writeln!(
-            &mut out,
-            "1 -> 2 (expected no changes):\n{}",
-            blueprint1.diff(&blueprint2)
-        )
-        .unwrap();
+        let diff = blueprint1.diff(&blueprint2);
+        println!("1 -> 2 (expected no changes):\n{}", diff);
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_changed().count(), 0);
 
         // Now add a new sled.
         let new_sled_id =
@@ -295,12 +274,22 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        writeln!(
-            &mut out,
-            "2 -> 3 (expect new NTP zone on new sled):\n{}",
-            blueprint2.diff(&blueprint3)
-        )
-        .unwrap();
+        let diff = blueprint2.diff(&blueprint3);
+        println!("2 -> 3 (expect new NTP zone on new sled):\n{}", diff,);
+        let sleds = diff.sleds_added().collect::<Vec<_>>();
+        let (sled_id, sled_zones) = sleds[0];
+        // We have defined elsewhere that the first generation contains no
+        // zones.  So the first one with zones must be newer.  See
+        // OMICRON_ZONES_CONFIG_INITIAL_GENERATION.
+        assert!(sled_zones.generation > Generation::new());
+        assert_eq!(sled_id, new_sled_id);
+        assert_eq!(sled_zones.zones.len(), 1);
+        assert!(matches!(
+            sled_zones.zones[0].zone_type,
+            OmicronZoneType::InternalNtp { .. }
+        ));
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_changed().count(), 0);
 
         // Check that the next step is to add Crucible zones
         let blueprint4 = Planner::new_based_on(
@@ -312,12 +301,27 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        writeln!(
-            &mut out,
-            "3 -> 4 (expect Crucible zones):\n{}",
-            blueprint3.diff(&blueprint4)
-        )
-        .unwrap();
+        let diff = blueprint3.diff(&blueprint4);
+        println!("3 -> 4 (expect Crucible zones):\n{}", diff);
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        let sleds = diff.sleds_changed().collect::<Vec<_>>();
+        assert_eq!(sleds.len(), 1);
+        let (sled_id, sled_changes) = &sleds[0];
+        assert_eq!(
+            sled_changes.generation_after,
+            sled_changes.generation_before.next()
+        );
+        assert_eq!(*sled_id, new_sled_id);
+        assert_eq!(sled_changes.zones_removed().count(), 0);
+        assert_eq!(sled_changes.zones_changed().count(), 0);
+        let zones = sled_changes.zones_added().collect::<Vec<_>>();
+        assert_eq!(zones.len(), 3);
+        for zone in &zones {
+            let OmicronZoneType::Crucible { .. } = zone.zone_type else {
+                panic!("unexpectedly added a non-Crucible zone");
+            };
+        }
 
         // Check that there are no more steps
         let blueprint5 = Planner::new_based_on(
@@ -329,14 +333,11 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        writeln!(
-            &mut out,
-            "4 -> 5 (expect no changes):\n{}",
-            blueprint4.diff(&blueprint5)
-        )
-        .unwrap();
-
-        expectorate::assert_contents("tests/output/planner_basic.out", &out);
+        let diff = blueprint4.diff(&blueprint5);
+        println!("4 -> 5 (expect no changes):\n{}", diff);
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_changed().count(), 0);
 
         logctx.cleanup_successful();
     }

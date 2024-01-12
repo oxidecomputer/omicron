@@ -2069,20 +2069,24 @@
         ]
       },
       "Blueprint": {
-        "description": "Describes all automatically-managed software and configuration in the rack",
+        "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
           "comment": {
+            "description": "human-readable string describing why this blueprint was created (for debugging)",
             "type": "string"
           },
           "creator": {
+            "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
             "type": "string"
           },
           "id": {
+            "description": "unique identifier for this blueprint",
             "type": "string",
             "format": "uuid"
           },
           "omicron_zones": {
+            "description": "mapping: sled id -> zones deployed on each sled A sled is considered part of the control plane cluster iff it has an entry in this map.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/OmicronZonesConfig"
@@ -2090,22 +2094,17 @@
           },
           "parent_blueprint_id": {
             "nullable": true,
+            "description": "which blueprint this blueprint is based on",
             "type": "string",
             "format": "uuid"
           },
-          "sleds_in_cluster": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "uniqueItems": true
-          },
           "time_created": {
+            "description": "when this blueprint was generated (for debugging)",
             "type": "string",
             "format": "date-time"
           },
           "zones_in_service": {
+            "description": "Omicron zones considered in-service (which generally means that they should appear in DNS)",
             "type": "array",
             "items": {
               "type": "string",
@@ -2119,7 +2118,6 @@
           "creator",
           "id",
           "omicron_zones",
-          "sleds_in_cluster",
           "time_created",
           "zones_in_service"
         ]

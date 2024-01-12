@@ -4221,7 +4221,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "expectorate",
  "internal-dns",
  "ipnet",
  "ipnetwork",
@@ -4230,7 +4229,6 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "rand 0.8.5",
  "sled-agent-client",
  "slog",
  "thiserror",

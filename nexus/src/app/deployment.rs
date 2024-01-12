@@ -11,7 +11,6 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
-use nexus_types::deployment::params;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::Policy;
@@ -35,6 +34,7 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
+use nexus_types::deployment::BlueprintTargetSet;
 
 /// "limit" used in SQL queries that paginate through all sleds, zpools, etc.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
@@ -159,7 +159,7 @@ impl super::Nexus {
     pub async fn blueprint_target_set(
         &self,
         opctx: &OpContext,
-        params: params::BlueprintTargetSet,
+        params: BlueprintTargetSet,
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(Action::Modify, &authz::BLUEPRINT_CONFIG).await?;
         let new_target_id = params.target_id;
