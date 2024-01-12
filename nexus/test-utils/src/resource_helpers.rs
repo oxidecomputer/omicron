@@ -325,8 +325,8 @@ pub async fn create_switch(
         "/switches",
         &internal_params::SwitchPutRequest {
             baseboard: Baseboard {
-                serial_number: serial.to_string(),
-                part_number: part.to_string(),
+                serial: serial.to_string(),
+                part: part.to_string(),
                 revision,
             },
             rack_id,

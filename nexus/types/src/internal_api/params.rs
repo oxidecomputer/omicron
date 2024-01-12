@@ -37,12 +37,9 @@ pub enum SledRole {
 
 // TODO: We need a unified representation of these hardware identifiers
 /// Describes properties that should uniquely identify Oxide manufactured hardware
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Baseboard {
-    pub serial_number: String,
-    pub part_number: String,
-    pub revision: i64,
-}
+pub type Baseboard = crate::external_api::shared::Baseboard;
+
+pub type SledProvisionState = crate::external_api::views::SledProvisionState;
 
 /// Sent by a sled agent on startup to Nexus to request further instruction
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]

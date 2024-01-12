@@ -103,11 +103,11 @@ impl Server {
                             sa_address: sa_address.to_string(),
                             role: NexusTypes::SledRole::Scrimlet,
                             baseboard: NexusTypes::Baseboard {
-                                serial_number: format!(
+                                serial: format!(
                                     "sim-{}",
                                     &config.id.to_string()[0..8]
                                 ),
-                                part_number: String::from("Unknown"),
+                                part: String::from("Unknown"),
                                 revision: 0,
                             },
                             usable_hardware_threads: config

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! omdb commands that query services
+//! omdb commands that query DNS
 
 use crate::Omdb;
 
@@ -10,51 +10,45 @@ use anyhow::bail;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
-use dns_service_client::{types::DnsRecord, Client};
+use dns_service_client::{
+    types::{DnsRecord, Srv},
+    Client
+};
 use internal_dns::ServiceName;
 use slog::{Logger, info, warn};
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 
 #[derive(Debug, Args)]
-pub struct ServiceArgs {
-    /// URL of the Nexus internal API
-    #[clap(long, env("OMDB_NEXUS_URL"))]
-    nexus_internal_url: Option<String>,
-
+pub struct DnsArgs {
     #[command(subcommand)]
-    command: ServiceCommands,
+    command: DnsCommands,
 }
 
-#[derive(Clone, Debug, ValueEnum)]
-enum ServiceSource {
-    /// Ask DNS for records of services
-    ///
-    /// This collects SRV records and associated AAAA records
-    /// to construct a view of the services on the rack.
-    Dns,
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum SortOrder {
+    /// Sort the records by service
+    ByService,
 
-    /// Ask Nexus for records of services
-    ///
-    /// This queries the Nexus internal API to ask for service
-    /// records.
-    Nexus
+    /// Sorts the records by address
+    ByAddress,
 }
 
-/// Subcommands that query oximeter collector state
+/// Subcommands that query internal DNS servers
 #[derive(Debug, Subcommand)]
-enum ServiceCommands {
-    /// List services
+enum DnsCommands {
+    /// List all DNS records
     List {
-        #[arg(long = "source")]
-        source: ServiceSource,
+        #[clap(value_enum, default_value_t=SortOrder::ByService)]
+        order: SortOrder,
     }
 }
 
-impl ServiceArgs {
+impl DnsArgs {
     async fn list_by_dns(
         &self,
         omdb: &Omdb,
+        order: SortOrder,
         log: &Logger,
     ) -> anyhow::Result<()> {
         let addrs = omdb
@@ -79,7 +73,7 @@ impl ServiceArgs {
             bail!("Could not find DNS zone config for {}", internal_dns::names::DNS_ZONE);
         };
 
-        let mut srvs: BTreeMap<ServiceName, Vec<String>> = BTreeMap::new();
+        let mut srvs: BTreeMap<ServiceName, Vec<Srv>> = BTreeMap::new();
         let mut aaaas: BTreeMap<String, Ipv6Addr> = BTreeMap::new();
 
         for (name, records) in &zone_config.records {
@@ -97,38 +91,68 @@ impl ServiceArgs {
                             warn!(log, "Failed to parse {name} as Service Name");
                             continue;
                         };
-                        // TODO: port?
                         let entry = srvs.entry(service_name);
                         let targets = entry.or_insert(vec![]);
-                        targets.push(srv.target.clone());
+                        targets.push(srv.clone());
                     }
                 }
             }
         }
+
+        // Convert the results to this "Output" struct we can manipulate output
+        // separately from performing the lookup
+        struct Output {
+            service_kind: String,
+            address: String,
+            port: u16,
+        }
+        let mut outputs = vec![];
+        for (service, srvs) in &srvs {
+            for srv in srvs {
+                let service_kind = service.service_kind().to_string();
+                let address = aaaas.get(&srv.target)
+                    .map(|address| address.to_string())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                let port = srv.port;
+
+                outputs.push(
+                    Output {
+                        service_kind,
+                        address,
+                        port,
+                    }
+                );
+            }
+        }
+
+        match order {
+            SortOrder::ByService => {
+                outputs.sort_by(|a, b| {
+                    a.service_kind.cmp(&b.service_kind)
+                });
+            },
+            SortOrder::ByAddress => {
+                outputs.sort_by(|a, b| {
+                    match a.address.cmp(&b.address) {
+                        std::cmp::Ordering::Equal => a.port.cmp(&b.port),
+                        other => other,
+                    }
+                });
+            },
+        }
+
         println!("DNS-Specific Info:");
         println!("generation {}", config.generation);
         println!("   created {}", config.time_created);
         println!("   applied {}", config.time_applied);
 
-        println!("{:<15} {:<25}", "SERVICE", "ADDRESS");
-        for (service, targets) in &srvs {
-            for target in targets {
-                let service_kind = service.service_kind();
-                let address = aaaas.get(target)
-                    .map(|address| address.to_string())
-                    .unwrap_or_else(|| "Unknown".to_string());
-                println!("{service_kind:<15} {address:<25}");
-            }
+        println!("{:<15} {:<25} {:<10}", "SERVICE", "ADDRESS", "PORT");
+
+        for output in &outputs {
+            let Output { service_kind, address, port } = output;
+            println!("{service_kind:<15} {address:<25} {port:<10}");
         }
         Ok(())
-    }
-
-    async fn list_by_nexus(
-        &self,
-        _omdb: &Omdb,
-        _log: &Logger,
-    ) -> anyhow::Result<()> {
-        todo!();
     }
 
     pub async fn run_cmd(
@@ -137,21 +161,8 @@ impl ServiceArgs {
         log: &Logger,
     ) -> anyhow::Result<()> {
         match &self.command {
-            ServiceCommands::List { source } => {
-                match source {
-                    ServiceSource::Dns => {
-                        self.list_by_dns(omdb, log).await?;
-                    },
-                    ServiceSource::Nexus => {
-                        self.list_by_nexus(omdb, log).await?;
-                    },
-                }
-
-                // TODO: Group by sleds?
-                // TODO: Provide an option to lookup via Nexus?
-                // TODO: Provide an option to lookup by asking sleds?
-
-
+            DnsCommands::List { order } => {
+                self.list_by_dns(omdb, *order, log).await?;
             }
         }
         Ok(())
