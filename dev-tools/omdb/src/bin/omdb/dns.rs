@@ -12,10 +12,10 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use dns_service_client::{
     types::{DnsRecord, Srv},
-    Client
+    Client,
 };
 use internal_dns::ServiceName;
-use slog::{Logger, info, warn};
+use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
 
@@ -41,7 +41,7 @@ enum DnsCommands {
     List {
         #[clap(value_enum, default_value_t=SortOrder::ByService)]
         order: SortOrder,
-    }
+    },
 }
 
 impl DnsArgs {
@@ -52,10 +52,7 @@ impl DnsArgs {
         log: &Logger,
     ) -> anyhow::Result<()> {
         let addrs = omdb
-            .dns_lookup_all(
-                log.clone(),
-                internal_dns::ServiceName::InternalDns,
-            )
+            .dns_lookup_all(log.clone(), internal_dns::ServiceName::InternalDns)
             .await?;
         let addr = addrs.into_iter().next().expect(
             "expected at least one DNS address from \
@@ -70,7 +67,10 @@ impl DnsArgs {
         let Some(zone_config) = config.zones.iter().find(|zone_config| {
             zone_config.zone_name == internal_dns::names::DNS_ZONE
         }) else {
-            bail!("Could not find DNS zone config for {}", internal_dns::names::DNS_ZONE);
+            bail!(
+                "Could not find DNS zone config for {}",
+                internal_dns::names::DNS_ZONE
+            );
         };
 
         let mut srvs: BTreeMap<ServiceName, Vec<Srv>> = BTreeMap::new();
@@ -83,12 +83,18 @@ impl DnsArgs {
                         warn!(log, "Ignoring A record (underlay should be IPv6 only): {addr:?}");
                     }
                     DnsRecord::Aaaa(addr) => {
-                        let full_aaaa_name = [name, internal_dns::names::DNS_ZONE].join(".");
+                        let full_aaaa_name =
+                            [name, internal_dns::names::DNS_ZONE].join(".");
                         aaaas.insert(full_aaaa_name.to_string(), *addr);
                     }
                     DnsRecord::Srv(srv) => {
-                        let Ok(service_name) = ServiceName::from_dns_name(&name) else {
-                            warn!(log, "Failed to parse {name} as Service Name");
+                        let Ok(service_name) =
+                            ServiceName::from_dns_name(&name)
+                        else {
+                            warn!(
+                                log,
+                                "Failed to parse {name} as Service Name"
+                            );
                             continue;
                         };
                         let entry = srvs.entry(service_name);
@@ -110,35 +116,26 @@ impl DnsArgs {
         for (service, srvs) in &srvs {
             for srv in srvs {
                 let service_kind = service.service_kind().to_string();
-                let address = aaaas.get(&srv.target)
+                let address = aaaas
+                    .get(&srv.target)
                     .map(|address| address.to_string())
                     .unwrap_or_else(|| "Unknown".to_string());
                 let port = srv.port;
 
-                outputs.push(
-                    Output {
-                        service_kind,
-                        address,
-                        port,
-                    }
-                );
+                outputs.push(Output { service_kind, address, port });
             }
         }
 
         match order {
             SortOrder::ByService => {
-                outputs.sort_by(|a, b| {
-                    a.service_kind.cmp(&b.service_kind)
-                });
-            },
+                outputs.sort_by(|a, b| a.service_kind.cmp(&b.service_kind));
+            }
             SortOrder::ByAddress => {
-                outputs.sort_by(|a, b| {
-                    match a.address.cmp(&b.address) {
-                        std::cmp::Ordering::Equal => a.port.cmp(&b.port),
-                        other => other,
-                    }
+                outputs.sort_by(|a, b| match a.address.cmp(&b.address) {
+                    std::cmp::Ordering::Equal => a.port.cmp(&b.port),
+                    other => other,
                 });
-            },
+            }
         }
 
         println!("DNS-Specific Info:");

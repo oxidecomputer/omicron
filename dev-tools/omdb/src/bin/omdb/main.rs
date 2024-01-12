@@ -157,7 +157,7 @@ impl Omdb {
     async fn get_nexus_client(
         &self,
         nexus_internal_url: &Option<String>,
-        log: &slog::Logger
+        log: &slog::Logger,
     ) -> Result<nexus_client::Client, anyhow::Error> {
         let nexus_url = match &nexus_internal_url {
             Some(cli_or_env_url) => cli_or_env_url.clone(),
@@ -181,7 +181,6 @@ impl Omdb {
         eprintln!("note: using Nexus URL {}", &nexus_url);
         Ok(nexus_client::Client::new(&nexus_url, log.clone()))
     }
-
 }
 
 #[derive(Debug, Subcommand)]

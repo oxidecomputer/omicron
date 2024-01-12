@@ -61,7 +61,8 @@ impl NexusArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let client = omdb.get_nexus_client(&self.nexus_internal_url, log).await?;
+        let client =
+            omdb.get_nexus_client(&self.nexus_internal_url, log).await?;
 
         match &self.command {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {

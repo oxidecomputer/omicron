@@ -65,7 +65,10 @@ trait Command {
     fn emit_header(&self);
 
     // Execute the command, return the result
-    async fn run(&self, client: &sled_agent_client::Client) -> Result<(), anyhow::Error>;
+    async fn run(
+        &self,
+        client: &sled_agent_client::Client,
+    ) -> Result<(), anyhow::Error>;
 }
 
 /// Runs `omdb sled-agent inventory show`
@@ -77,8 +80,12 @@ impl Command for InventoryShow {
         println!("{:<40} {:<30} {:<10}", "UUID", "ADDRESS", "ROLE");
     }
 
-    async fn run(&self, client: &sled_agent_client::Client) -> Result<(), anyhow::Error> {
-        let response = client.inventory().await.context("accessing inventory")?;
+    async fn run(
+        &self,
+        client: &sled_agent_client::Client,
+    ) -> Result<(), anyhow::Error> {
+        let response =
+            client.inventory().await.context("accessing inventory")?;
         let inventory = response.into_inner();
 
         let id = inventory.sled_id.to_string();
@@ -103,7 +110,10 @@ impl Command for ZonesList {
         println!("{:<40} {:<20}", "CLIENT", "ZONE");
     }
 
-    async fn run(&self, client: &sled_agent_client::Client) -> Result<(), anyhow::Error> {
+    async fn run(
+        &self,
+        client: &sled_agent_client::Client,
+    ) -> Result<(), anyhow::Error> {
         let response = client.zones_list().await.context("listing zones")?;
         let zones = response.into_inner();
         let zones: Vec<_> = zones.into_iter().collect();
@@ -128,7 +138,10 @@ impl Command for ZpoolsList {
         println!("{:<40} {:<20}", "CLIENT", "ZPOOL");
     }
 
-    async fn run(&self, client: &sled_agent_client::Client) -> Result<(), anyhow::Error> {
+    async fn run(
+        &self,
+        client: &sled_agent_client::Client,
+    ) -> Result<(), anyhow::Error> {
         let response = client.zpools_get().await.context("listing zpools")?;
         let zpools = response.into_inner();
 
@@ -152,11 +165,13 @@ impl SledAgentArgs {
     ) -> Result<(), anyhow::Error> {
         // This is a little goofy. The sled URL is required, but can come
         // from the environment, in which case it won't be on the command line.
-        let sled_agent_urls = if let Some(sled_agent_url) = &self.sled_agent_url {
+        let sled_agent_urls = if let Some(sled_agent_url) = &self.sled_agent_url
+        {
             vec![sled_agent_url.clone()]
         } else {
             eprintln!("note: Sled URL not specified. Will ask Nexus for sleds");
-            let nexus_client = omdb.get_nexus_client(&self.nexus_internal_url, log).await?;
+            let nexus_client =
+                omdb.get_nexus_client(&self.nexus_internal_url, log).await?;
 
             let mut sled_agent_urls = vec![];
 
@@ -165,11 +180,17 @@ impl SledAgentArgs {
             let sort = Some(nexus_client::types::IdSortMode::IdAscending);
 
             loop {
-                let sleds = nexus_client.sled_list(limit, marker.as_deref(), sort).await?.into_inner();
+                let sleds = nexus_client
+                    .sled_list(limit, marker.as_deref(), sort)
+                    .await?
+                    .into_inner();
                 // Gather all the sleds observed in this query
-                sled_agent_urls.extend(sleds.items.into_iter().map(|sled| {
-                    format!("http://{}", sled.address)
-                }));
+                sled_agent_urls.extend(
+                    sleds
+                        .items
+                        .into_iter()
+                        .map(|sled| format!("http://{}", sled.address)),
+                );
 
                 // If there are additional sleds, get them too
                 if sleds.next_page.is_some() {
@@ -180,9 +201,9 @@ impl SledAgentArgs {
             }
             sled_agent_urls
         };
-        let clients = sled_agent_urls.into_iter().map(|url| {
-            sled_agent_client::Client::new(&url, log.clone())
-        });
+        let clients = sled_agent_urls
+            .into_iter()
+            .map(|url| sled_agent_client::Client::new(&url, log.clone()));
 
         let command: Box<dyn Command> = match &self.command {
             SledAgentCommands::Inventory(InventoryCommands::Show) => {
@@ -203,7 +224,10 @@ impl SledAgentArgs {
         let mut err = None;
         for client in clients {
             if let Err(e) = command.run(&client).await {
-                eprintln!("    <failed to access sled at {}>", client.baseurl());
+                eprintln!(
+                    "    <failed to access sled at {}>",
+                    client.baseurl()
+                );
                 err = e.into();
             }
         }
