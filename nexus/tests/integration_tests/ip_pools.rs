@@ -211,8 +211,8 @@ async fn get_ip_pools(client: &ClientTestContext) -> Vec<IpPool> {
 }
 
 // this test exists primarily because of a bug in the initial implementation
-// where we included a copy of each pool in the list response for every
-// associated silo instead of deduping the result of the left outer join
+// where we included a duplicate of each pool in the list response for every
+// associated silo
 #[nexus_test]
 async fn test_ip_pool_list_dedupe(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;

@@ -15,6 +15,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
+use crate::db::lookup::LookupPath;
 use crate::db::model::ExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
@@ -217,49 +218,15 @@ impl DataStore {
             })
     }
 
-    /// Looks up an IP pool intended for internal services.
+    /// Look up IP pool intended for internal services by its well-known name.
     ///
     /// This method may require an index by Availability Zone in the future.
     pub async fn ip_pools_service_lookup(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
-        use db::schema::ip_pool;
-
-        opctx
-            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
-            .await?;
-
-        // TODO: just use LookupPath, come on
-        // let (.., authz_pool, pool) = db::lookup::LookupPath::new(&opctx, self)
-        //     .ip_pool_name(*SERVICE_IP_POOL_NAME.parse().unwrap())
-        //     .lookup_for(authz::Action::Read)
-        //     .await?;
-        // Ok((authz_pool, pool))
-
-        // Look up IP pool by its association with the internal silo.
-        // We assume there is only one pool for that silo, or at least,
-        // if there is more than one, it doesn't matter which one we pick.
-        let (authz_pool, pool) = ip_pool::table
-            .filter(ip_pool::time_deleted.is_null())
-            .filter(ip_pool::name.eq(SERVICE_IP_POOL_NAME))
-            .select(IpPool::as_select())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-            .map(|ip_pool| {
-                (
-                    authz::IpPool::new(
-                        authz::FLEET,
-                        ip_pool.id(),
-                        LookupType::ByCompositeId(
-                            "Service IP Pool".to_string(),
-                        ),
-                    ),
-                    ip_pool,
-                )
-            })?;
-        Ok((authz_pool, pool))
+        let name = SERVICE_IP_POOL_NAME.parse().unwrap();
+        LookupPath::new(&opctx, self).ip_pool_name(&Name(name)).fetch().await
     }
 
     /// Creates a new IP pool.
