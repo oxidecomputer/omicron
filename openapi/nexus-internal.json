@@ -194,7 +194,8 @@
     },
     "/hardware/sleds": {
       "get": {
-        "summary": "List sleds known to nexus",
+        "summary": "List sleds known to nexus.",
+        "description": "Exposed to provide omdb additional context about sleds known to Nexus.",
         "operationId": "sled_list",
         "parameters": [
           {
@@ -5429,7 +5430,7 @@
         ]
       },
       "Sled": {
-        "description": "An operator's view of a Sled.",
+        "description": "A view of the Sled which is exposed through the internal API for debugging purposes.",
         "type": "object",
         "properties": {
           "address": {
