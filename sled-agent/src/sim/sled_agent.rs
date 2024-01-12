@@ -20,7 +20,7 @@ use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
-use dropshot_old::HttpServer;
+use dropshot::HttpServer;
 use futures::lock::Mutex;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
@@ -645,7 +645,7 @@ impl SledAgent {
         }
         let propolis_bind_address =
             SocketAddr::new(Ipv6Addr::LOCALHOST.into(), PROPOLIS_PORT);
-        let dropshot_config = dropshot_old::ConfigDropshot {
+        let dropshot_config = dropshot::ConfigDropshot {
             bind_address: propolis_bind_address,
             ..Default::default()
         };
@@ -655,7 +655,7 @@ impl SledAgent {
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let mock_api = propolis_mock_server::api();
 
-        let srv = dropshot_old::HttpServerStarter::new(
+        let srv = dropshot::HttpServerStarter::new(
             &dropshot_config,
             mock_api,
             private,

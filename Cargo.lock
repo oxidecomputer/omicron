@@ -1148,7 +1148,7 @@ name = "crdb-seed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "slog",
@@ -1834,7 +1834,7 @@ dependencies = [
  "chrono",
  "clap 4.4.3",
  "dns-service-client",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "http 0.2.11",
  "omicron-test-utils",
@@ -1928,7 +1928,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#89c2fddb7bf914336ad87ad77f7269b61e1c64e9"
+source = "git+https://github.com//oxidecomputer/dropshot?branch=rustls-0.22#b4e30b6cbe41af8c3245fcdbbdf245fdbf8be44f"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1937,53 +1937,7 @@ dependencies = [
  "camino",
  "chrono",
  "debug-ignore",
- "dropshot_endpoint 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
- "form_urlencoded",
- "futures",
- "hostname",
- "http 0.2.11",
- "hyper",
- "indexmap 2.1.0",
- "multer",
- "openapiv3",
- "paste",
- "percent-encoding",
- "proc-macro2",
- "rustls 0.21.9",
- "rustls-pemfile 2.0.0",
- "schemars",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "serde_urlencoded",
- "sha1",
- "slog",
- "slog-async",
- "slog-bunyan",
- "slog-json",
- "slog-term",
- "tokio",
- "tokio-rustls 0.24.1",
- "toml 0.8.8",
- "usdt",
- "uuid",
- "version_check",
- "waitgroup",
-]
-
-[[package]]
-name = "dropshot"
-version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22#b4e30b6cbe41af8c3245fcdbbdf245fdbf8be44f"
-dependencies = [
- "async-stream",
- "async-trait",
- "base64",
- "bytes",
- "camino",
- "chrono",
- "debug-ignore",
- "dropshot_endpoint 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot_endpoint",
  "form_urlencoded",
  "futures",
  "hostname",
@@ -2020,19 +1974,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#89c2fddb7bf914336ad87ad77f7269b61e1c64e9"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "serde_tokenstream 0.2.0",
- "syn 2.0.46",
-]
-
-[[package]]
-name = "dropshot_endpoint"
-version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22#b4e30b6cbe41af8c3245fcdbbdf245fdbf8be44f"
+source = "git+https://github.com//oxidecomputer/dropshot?branch=rustls-0.22#b4e30b6cbe41af8c3245fcdbbdf245fdbf8be44f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2662,7 +2604,7 @@ name = "gateway-test-utils"
 version = "0.1.0"
 dependencies = [
  "camino",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "gateway-messages",
  "omicron-gateway",
  "omicron-test-utils",
@@ -3441,7 +3383,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "hyper",
  "installinator-common",
@@ -3496,7 +3438,7 @@ dependencies = [
  "chrono",
  "dns-server",
  "dns-service-client",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "futures",
  "hyper",
@@ -3522,7 +3464,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "internal-dns",
  "omicron-common",
  "omicron-workspace-hack",
@@ -4229,7 +4171,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-client",
@@ -4348,7 +4290,7 @@ dependencies = [
  "crucible-agent-client",
  "dns-server",
  "dns-service-client",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "futures",
  "gateway-messages",
  "gateway-test-utils",
@@ -4698,7 +4640,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "futures",
  "hex",
@@ -4753,7 +4695,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-messages",
@@ -4786,7 +4728,7 @@ dependencies = [
  "base64",
  "camino",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-messages",
@@ -4842,7 +4784,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "fatfs",
  "futures",
@@ -4940,7 +4882,7 @@ dependencies = [
  "clap 4.4.3",
  "crucible-agent-client",
  "diesel",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "futures",
  "gateway-client",
@@ -5056,8 +4998,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "flate2",
  "futures",
@@ -5132,7 +5073,7 @@ dependencies = [
  "atomicwrites",
  "camino",
  "camino-tempfile",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "filetime",
  "headers",
@@ -5541,7 +5482,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "futures",
  "hyper",
@@ -5584,7 +5525,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "expectorate",
  "futures",
  "highway",
@@ -5622,7 +5563,7 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "chrono",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "futures",
  "http 0.2.11",
  "kstat-rs",
@@ -5654,7 +5595,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "nexus-client",
  "omicron-common",
  "omicron-workspace-hack",
@@ -6394,7 +6335,7 @@ dependencies = [
  "atty",
  "base64",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
+ "dropshot",
  "futures",
  "hyper",
  "progenitor",
@@ -8152,7 +8093,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap 4.4.3",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "futures",
  "gateway-messages",
  "hex",
@@ -9496,7 +9437,7 @@ dependencies = [
  "clap 4.4.3",
  "debug-ignore",
  "display-error-chain",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "futures",
  "hex",
  "hubtools",
@@ -9966,7 +9907,7 @@ dependencies = [
  "debug-ignore",
  "display-error-chain",
  "dpd-client",
- "dropshot 0.9.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=rustls-0.22)",
+ "dropshot",
  "either",
  "expectorate",
  "flate2",
