@@ -387,10 +387,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub async fn start_clickhouse(&mut self) {
         let log = &self.logctx.log;
         debug!(log, "Starting Clickhouse");
-        let clickhouse =
-            dev::clickhouse::ClickHouseInstance::new_single_node(0)
-                .await
-                .unwrap();
+        let clickhouse = dev::clickhouse::ClickHouseInstance::new_single_node(
+            &self.logctx,
+            0,
+        )
+        .await
+        .unwrap();
         let port = clickhouse.port();
 
         let zpool_id = Uuid::new_v4();
