@@ -827,14 +827,12 @@ async fn cmd_nexus_blueprints_diff(
     client: &nexus_client::Client,
     args: &BlueprintIdsArgs,
 ) -> Result<(), anyhow::Error> {
-    let b1 = client
-        .blueprint_view(&args.blueprint1_id)
-        .await
-        .with_context(|| format!("fetching blueprint {}", args.blueprint1_id))?;
-    let b2 = client
-        .blueprint_view(&args.blueprint2_id)
-        .await
-        .with_context(|| format!("fetching blueprint {}", args.blueprint2_id))?;
+    let b1 = client.blueprint_view(&args.blueprint1_id).await.with_context(
+        || format!("fetching blueprint {}", args.blueprint1_id),
+    )?;
+    let b2 = client.blueprint_view(&args.blueprint2_id).await.with_context(
+        || format!("fetching blueprint {}", args.blueprint2_id),
+    )?;
     println!("{}", b1.diff(&b2));
     Ok(())
 }

@@ -13,6 +13,7 @@ use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
@@ -34,7 +35,6 @@ use std::collections::BTreeSet;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
-use nexus_types::deployment::BlueprintTargetSet;
 
 /// "limit" used in SQL queries that paginate through all sleds, zpools, etc.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.

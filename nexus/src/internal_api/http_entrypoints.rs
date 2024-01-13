@@ -699,9 +699,9 @@ impl TryFrom<nexus_types::deployment::BlueprintTarget> for BlueprintTarget {
         value: nexus_types::deployment::BlueprintTarget,
     ) -> Result<Self, Error> {
         Ok(BlueprintTarget {
-            target_id: value.target_id.ok_or_else(|| Error::conflict(
-                "no target blueprint has been configured",
-            ))?,
+            target_id: value.target_id.ok_or_else(|| {
+                Error::conflict("no target blueprint has been configured")
+            })?,
             enabled: value.enabled,
             time_set: value.time_set,
         })
