@@ -10,7 +10,7 @@ anyhow = { workspace = true, features = ["backtrace"] }
 camino.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 chrono.workspace = true
-console = { version = "0.15.7", default-features = false }
+console = { version = "0.15.8", default-features = false }
 humantime.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
