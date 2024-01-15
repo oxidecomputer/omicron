@@ -30,7 +30,6 @@ tar.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
-topological-sort.workspace = true
 walkdir.workspace = true
 omicron-workspace-hack.workspace = true
 
