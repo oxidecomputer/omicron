@@ -57,7 +57,7 @@ pub struct Sled {
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
 
-    /// The last IP address provided to an Oxide service on this sled
+    /// The last IP address provided to a propolis instance on this sled
     pub last_used_address: ipv6::Ipv6Addr,
 
     provision_state: SledProvisionState,
@@ -183,7 +183,9 @@ impl SledUpdate {
     pub fn into_insertable(self) -> Sled {
         let last_used_address = {
             let mut segments = self.ip().segments();
-            segments[7] += omicron_common::address::RSS_RESERVED_ADDRESSES;
+            // We allocate the entire last segment to control plane services
+            segments[7] =
+                omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
             ipv6::Ipv6Addr::from(Ipv6Addr::from(segments))
         };
         Sled {
