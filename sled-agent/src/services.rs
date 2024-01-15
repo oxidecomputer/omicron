@@ -1419,6 +1419,25 @@ impl ServiceManager {
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
+    fn zone_network_setup_install(
+        info: &SledAgentInfo,
+        zone: &InstalledZone,
+        static_addr: &String,
+    ) -> Result<ServiceBuilder, Error> {
+        let datalink = zone.get_control_vnic_name();
+        let gateway = &info.underlay_address.to_string();
+
+        let mut config_builder = PropertyGroupBuilder::new("config");
+        config_builder = config_builder
+            .add_property("datalink", "astring", datalink)
+            .add_property("gateway", "astring", gateway)
+            .add_property("static_addr", "astring", static_addr);
+
+        Ok(ServiceBuilder::new("oxide/zone-network-setup")
+            .add_property_group(config_builder)
+            .add_instance(ServiceInstanceBuilder::new("default")))
+    }
+
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
@@ -1532,16 +1551,18 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
+                let dns_service = Self::dns_install(info).await?;
+
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
@@ -1552,6 +1573,7 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(clickhouse_service)
                     .add_service(dns_service);
@@ -1577,16 +1599,18 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
+                let dns_service = Self::dns_install(info).await?;
+
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
@@ -1597,6 +1621,7 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(clickhouse_keeper_service)
                     .add_service(dns_service);
@@ -1625,11 +1650,6 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                // Configure the CockroachDB service.
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let address = SocketAddr::new(
                     IpAddr::V6(*underlay_address),
                     COCKROACH_PORT,
@@ -1637,9 +1657,16 @@ impl ServiceManager {
                 let listen_addr = &address.ip().to_string();
                 let listen_port = &address.port().to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
+                let dns_service = Self::dns_install(info).await?;
+
+                // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
@@ -1650,6 +1677,7 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(cockroachdb_service)
                     .add_service(dns_service);
