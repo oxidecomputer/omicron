@@ -6,6 +6,7 @@
 
 use crate::zone::ROUTE;
 use crate::{execute, inner, output_to_exec_error, ExecutionError, PFEXEC};
+use libc::ESRCH;
 use std::net::Ipv6Addr;
 
 /// Wraps commands for interacting with routing tables.
@@ -39,7 +40,7 @@ impl Route {
             // If the entry is not found in the table,
             // the exit status of the command will be 3 (ESRCH).
             // When that is the case, we'll add the route.
-            Some(3) => {
+            Some(ESRCH) => {
                 let mut cmd = std::process::Command::new(PFEXEC);
                 let cmd = cmd.args(&[
                     ROUTE,
