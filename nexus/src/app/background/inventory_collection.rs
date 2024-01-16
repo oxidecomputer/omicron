@@ -5,16 +5,14 @@
 //! Background task for reading inventory for the rack
 
 use super::common::BackgroundTask;
+use super::common::DbSledAgentEnumerator;
 use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
-use nexus_inventory::InventoryError;
-use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
 use serde_json::json;
 use std::num::NonZeroU32;
@@ -153,64 +151,14 @@ async fn inventory_activate(
     Ok(collection)
 }
 
-/// Determine which sleds to inventory based on what's in the database
-///
-/// We only want to inventory what's actually part of the control plane (i.e.,
-/// has a "sled" record).
-struct DbSledAgentEnumerator<'a> {
-    opctx: &'a OpContext,
-    datastore: &'a DataStore,
-    page_size: NonZeroU32,
-}
-
-impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
-    fn list_sled_agents(
-        &self,
-    ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>> {
-        async {
-            let mut all_sleds = Vec::new();
-            let mut paginator = Paginator::new(self.page_size);
-            while let Some(p) = paginator.next() {
-                let records_batch = self
-                    .datastore
-                    .sled_list(&self.opctx, &p.current_pagparams())
-                    .await
-                    .context("listing sleds")?;
-                paginator = p.found_batch(
-                    &records_batch,
-                    &|s: &nexus_db_model::Sled| s.id(),
-                );
-                all_sleds.extend(
-                    records_batch
-                        .into_iter()
-                        .map(|sled| format!("http://{}", sled.address())),
-                );
-            }
-
-            Ok(all_sleds)
-        }
-        .boxed()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use crate::app::background::common::BackgroundTask;
-    use crate::app::background::inventory_collection::DbSledAgentEnumerator;
     use crate::app::background::inventory_collection::InventoryCollector;
-    use nexus_db_model::SledBaseboard;
-    use nexus_db_model::SledSystemHardware;
-    use nexus_db_model::SledUpdate;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DataStoreInventoryTest;
-    use nexus_inventory::SledAgentEnumerator;
     use nexus_test_utils_macros::nexus_test;
-    use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev::poll;
-    use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::num::NonZeroU32;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -301,81 +249,5 @@ mod test {
         let _ = task.activate(&opctx).await;
         let latest = datastore.inventory_collections().await.unwrap();
         assert_eq!(previous, latest);
-    }
-
-    #[nexus_test(server = crate::Server)]
-    async fn test_db_sled_enumerator(cptestctx: &ControlPlaneTestContext) {
-        let nexus = &cptestctx.server.apictx().nexus;
-        let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
-        let db_enum = DbSledAgentEnumerator {
-            opctx: &opctx,
-            datastore: &datastore,
-            page_size: NonZeroU32::new(3).unwrap(),
-        };
-
-        // There will be one sled agent set up as part of the test context.
-        let found_urls = db_enum.list_sled_agents().await.unwrap();
-        assert_eq!(found_urls.len(), 1);
-
-        // Insert some sleds.
-        let rack_id = Uuid::new_v4();
-        let mut sleds = Vec::new();
-        for i in 0..64 {
-            let sled = SledUpdate::new(
-                Uuid::new_v4(),
-                SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1200 + i, 0, 0),
-                SledBaseboard {
-                    serial_number: format!("serial-{}", i),
-                    part_number: String::from("fake-sled"),
-                    revision: 3,
-                },
-                SledSystemHardware {
-                    is_scrimlet: false,
-                    usable_hardware_threads: 12,
-                    usable_physical_ram: ByteCount::from_gibibytes_u32(16)
-                        .into(),
-                    reservoir_size: ByteCount::from_gibibytes_u32(8).into(),
-                },
-                rack_id,
-            );
-            sleds.push(datastore.sled_upsert(sled).await.unwrap());
-        }
-
-        // The same enumerator should immediately find all the new sleds.
-        let mut expected_urls: Vec<_> = found_urls
-            .into_iter()
-            .chain(sleds.into_iter().map(|s| format!("http://{}", s.address())))
-            .collect();
-        expected_urls.sort();
-        println!("expected_urls: {:?}", expected_urls);
-
-        let mut found_urls = db_enum.list_sled_agents().await.unwrap();
-        found_urls.sort();
-        assert_eq!(expected_urls, found_urls);
-
-        // We should get the same result even with a page size of 1.
-        let db_enum = DbSledAgentEnumerator {
-            opctx: &opctx,
-            datastore: &datastore,
-            page_size: NonZeroU32::new(1).unwrap(),
-        };
-        let mut found_urls = db_enum.list_sled_agents().await.unwrap();
-        found_urls.sort();
-        assert_eq!(expected_urls, found_urls);
-
-        // We should get the same result even with a page size much larger than
-        // we need.
-        let db_enum = DbSledAgentEnumerator {
-            opctx: &opctx,
-            datastore: &datastore,
-            page_size: NonZeroU32::new(1024).unwrap(),
-        };
-        let mut found_urls = db_enum.list_sled_agents().await.unwrap();
-        found_urls.sort();
-        assert_eq!(expected_urls, found_urls);
     }
 }

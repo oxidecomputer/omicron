@@ -526,6 +526,8 @@ pub enum OmicronZoneType {
         /// The service vNIC providing outbound connectivity using OPTE.
         nic: NetworkInterface,
         /// The SNAT configuration for outbound connections.
+        // TODO: internet-diglett
+        // needs NAT entry persisted in RPW
         snat_cfg: SourceNatConfig,
     },
 
@@ -585,6 +587,8 @@ pub enum OmicronZoneType {
         /// The address at which the internal nexus server is reachable.
         internal_address: SocketAddrV6,
         /// The address at which the external nexus server is reachable.
+        // TODO: internet-diglett
+        // needs NAT entry persisted in RPW
         external_ip: IpAddr,
         /// The service vNIC providing external connectivity using OPTE.
         nic: NetworkInterface,

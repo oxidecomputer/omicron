@@ -128,6 +128,7 @@
 //!   intermediate states.)  We don't have to worry about an unbounded queue, or
 //!   handling a full queue, or other forms of backpressure.
 
+use anyhow::Context;
 use assert_matches::assert_matches;
 use chrono::Utc;
 use futures::future::BoxFuture;
@@ -135,6 +136,10 @@ use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pagination::Paginator;
+use nexus_db_queries::db::DataStore;
+use nexus_inventory::InventoryError;
+use nexus_types::identity::Asset;
 use nexus_types::internal_api::views::ActivationReason;
 use nexus_types::internal_api::views::CurrentStatus;
 use nexus_types::internal_api::views::CurrentStatusRunning;
@@ -142,6 +147,7 @@ use nexus_types::internal_api::views::LastResult;
 use nexus_types::internal_api::views::LastResultCompleted;
 use nexus_types::internal_api::views::TaskStatus;
 use std::collections::BTreeMap;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -462,6 +468,46 @@ impl<T: Send + Sync> GenericWatcher for watch::Receiver<T> {
         &mut self,
     ) -> BoxFuture<'_, Result<(), watch::error::RecvError>> {
         async { self.changed().await }.boxed()
+    }
+}
+
+/// Determine which sleds to inventory based on what's in the database
+///
+/// We only want to inventory what's actually part of the control plane (i.e.,
+/// has a "sled" record).
+pub struct DbSledAgentEnumerator<'a> {
+    pub opctx: &'a OpContext,
+    pub datastore: &'a DataStore,
+    pub page_size: NonZeroU32,
+}
+
+impl<'a> nexus_inventory::SledAgentEnumerator for DbSledAgentEnumerator<'a> {
+    fn list_sled_agents(
+        &self,
+    ) -> BoxFuture<'_, Result<Vec<String>, InventoryError>> {
+        async {
+            let mut all_sleds = Vec::new();
+            let mut paginator = Paginator::new(self.page_size);
+            while let Some(p) = paginator.next() {
+                let records_batch = self
+                    .datastore
+                    .sled_list(&self.opctx, &p.current_pagparams())
+                    .await
+                    .context("listing sleds")?;
+                paginator = p.found_batch(
+                    &records_batch,
+                    &|s: &nexus_db_model::Sled| s.id(),
+                );
+                all_sleds.extend(
+                    records_batch
+                        .into_iter()
+                        .map(|sled| format!("http://{}", sled.address())),
+                );
+            }
+
+            Ok(all_sleds)
+        }
+        .boxed()
     }
 }
 
@@ -824,5 +870,93 @@ mod test {
         // legitimate periodic activation.  It's hard to choose a period for
         // such a task that would allow us to reliably distinguish between these
         // two without also spending a lot of wall-clock time on this test.
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_db_sled_enumerator(cptestctx: &ControlPlaneTestContext) {
+        use super::DbSledAgentEnumerator;
+        use nexus_db_model::SledBaseboard;
+        use nexus_db_model::SledSystemHardware;
+        use nexus_db_model::SledUpdate;
+        use nexus_db_queries::context::OpContext;
+        use nexus_inventory::SledAgentEnumerator;
+        use omicron_common::api::external::ByteCount;
+        use std::net::Ipv6Addr;
+        use std::net::SocketAddrV6;
+        use std::num::NonZeroU32;
+        use uuid::Uuid;
+
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let db_enum = DbSledAgentEnumerator {
+            opctx: &opctx,
+            datastore: &datastore,
+            page_size: NonZeroU32::new(3).unwrap(),
+        };
+
+        // There will be one sled agent set up as part of the test context.
+        let found_urls = db_enum.list_sled_agents().await.unwrap();
+        assert_eq!(found_urls.len(), 1);
+
+        // Insert some sleds.
+        let rack_id = Uuid::new_v4();
+        let mut sleds = Vec::new();
+        for i in 0..64 {
+            let sled = SledUpdate::new(
+                Uuid::new_v4(),
+                SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1200 + i, 0, 0),
+                SledBaseboard {
+                    serial_number: format!("serial-{}", i),
+                    part_number: String::from("fake-sled"),
+                    revision: 3,
+                },
+                SledSystemHardware {
+                    is_scrimlet: false,
+                    usable_hardware_threads: 12,
+                    usable_physical_ram: ByteCount::from_gibibytes_u32(16)
+                        .into(),
+                    reservoir_size: ByteCount::from_gibibytes_u32(8).into(),
+                },
+                rack_id,
+            );
+            sleds.push(datastore.sled_upsert(sled).await.unwrap());
+        }
+
+        // The same enumerator should immediately find all the new sleds.
+        let mut expected_urls: Vec<_> = found_urls
+            .into_iter()
+            .chain(sleds.into_iter().map(|s| format!("http://{}", s.address())))
+            .collect();
+        expected_urls.sort();
+        println!("expected_urls: {:?}", expected_urls);
+
+        let mut found_urls = db_enum.list_sled_agents().await.unwrap();
+        found_urls.sort();
+        assert_eq!(expected_urls, found_urls);
+
+        // We should get the same result even with a page size of 1.
+        let db_enum = DbSledAgentEnumerator {
+            opctx: &opctx,
+            datastore: &datastore,
+            page_size: NonZeroU32::new(1).unwrap(),
+        };
+        let mut found_urls = db_enum.list_sled_agents().await.unwrap();
+        found_urls.sort();
+        assert_eq!(expected_urls, found_urls);
+
+        // We should get the same result even with a page size much larger than
+        // we need.
+        let db_enum = DbSledAgentEnumerator {
+            opctx: &opctx,
+            datastore: &datastore,
+            page_size: NonZeroU32::new(1024).unwrap(),
+        };
+        let mut found_urls = db_enum.list_sled_agents().await.unwrap();
+        found_urls.sort();
+        assert_eq!(expected_urls, found_urls);
     }
 }
