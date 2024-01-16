@@ -120,8 +120,6 @@ function install_packages {
       exit "$rc"
     fi
 
-    pfexec svcadm enable chrony
-
     pkg list -v "${packages[@]}"
   elif [[ "${HOST_OS}" == "Linux" ]]; then
     packages=(
