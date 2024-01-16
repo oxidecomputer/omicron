@@ -713,7 +713,7 @@ table! {
 }
 
 table! {
-    instance_ssk_key (instance_id, ssh_key_id) {
+    instance_ssh_key (instance_id, ssh_key_id) {
         instance_id -> Uuid,
         ssh_key_id -> Uuid,
     }
