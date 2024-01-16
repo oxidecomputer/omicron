@@ -11,6 +11,7 @@
 //! nexus/deployment does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::inventory::Collection;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;
@@ -144,8 +145,42 @@ impl Blueprint {
     }
 
     /// Summarize the difference between two blueprints
-    pub fn diff<'a>(&'a self, other: &'a Blueprint) -> BlueprintDiff<'a> {
-        BlueprintDiff { b1: self, b2: other }
+    pub fn diff<'a>(&'a self, other: &'a Blueprint) -> OmicronZonesDiff<'a> {
+        OmicronZonesDiff {
+            before_label: format!("blueprint {}", self.id),
+            before_zones: self.omicron_zones.clone(),
+            before_zones_in_service: &self.zones_in_service,
+            after_label: format!("blueprint {}", other.id),
+            after_zones: &other.omicron_zones,
+            after_zones_in_service: &other.zones_in_service,
+        }
+    }
+
+    /// Summarize the difference between a collection and a blueprint
+    ///
+    /// This gives an idea about what would change about a running system if one
+    /// were to execute the blueprint.
+    ///
+    /// Note that collections do not currently include information about what
+    /// zones are in-service, so the caller must provide that information.
+    pub fn diff_from_collection<'a>(
+        &'a self,
+        collection: &'a Collection,
+        before_zones_in_service: &'a BTreeSet<Uuid>,
+    ) -> OmicronZonesDiff<'a> {
+        let before_zones = collection
+            .omicron_zones
+            .iter()
+            .map(|(sled_id, zones_found)| (*sled_id, zones_found.zones.clone()))
+            .collect();
+        OmicronZonesDiff {
+            before_label: format!("collection {}", collection.id),
+            before_zones,
+            before_zones_in_service,
+            after_label: format!("blueprint {}", self.id),
+            after_zones: &self.omicron_zones,
+            after_zones_in_service: &self.zones_in_service,
+        }
     }
 }
 
@@ -166,9 +201,15 @@ pub struct BlueprintTargetSet {
 }
 
 /// Summarizes the differences between two blueprints
-pub struct BlueprintDiff<'a> {
-    b1: &'a Blueprint,
-    b2: &'a Blueprint,
+pub struct OmicronZonesDiff<'a> {
+    before_label: String,
+    // We store an owned copy of "before_zones" to make it easier to support
+    // collections here, where we need to assemble this map ourselves.
+    before_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+    before_zones_in_service: &'a BTreeSet<Uuid>,
+    after_label: String,
+    after_zones: &'a BTreeMap<Uuid, OmicronZonesConfig>,
+    after_zones_in_service: &'a BTreeSet<Uuid>,
 }
 
 /// Describes a sled that appeared on both sides of a diff (possibly changed)
@@ -239,22 +280,28 @@ pub enum DiffZoneChangedHow {
     DetailsChanged,
 }
 
-impl<'a> BlueprintDiff<'a> {
+impl<'a> OmicronZonesDiff<'a> {
+    fn sleds_before(&self) -> BTreeSet<Uuid> {
+        self.before_zones.keys().copied().collect()
+    }
+
+    fn sleds_after(&self) -> BTreeSet<Uuid> {
+        self.after_zones.keys().copied().collect()
+    }
+
     /// Iterate over sleds only present in the second blueprint of a diff
     pub fn sleds_added(
         &self,
     ) -> impl Iterator<Item = (Uuid, &OmicronZonesConfig)> + '_ {
         let sled_ids = self
-            .b2
-            .sleds()
-            .collect::<BTreeSet<_>>()
-            .difference(&self.b1.sleds().collect::<BTreeSet<_>>())
+            .sleds_after()
+            .difference(&self.sleds_before())
             .copied()
             .collect::<BTreeSet<_>>();
 
-        sled_ids.into_iter().map(|sled_id| {
-            (sled_id, self.b2.omicron_zones.get(&sled_id).unwrap())
-        })
+        sled_ids
+            .into_iter()
+            .map(|sled_id| (sled_id, self.after_zones.get(&sled_id).unwrap()))
     }
 
     /// Iterate over sleds only present in the first blueprint of a diff
@@ -262,31 +309,27 @@ impl<'a> BlueprintDiff<'a> {
         &self,
     ) -> impl Iterator<Item = (Uuid, &OmicronZonesConfig)> + '_ {
         let sled_ids = self
-            .b1
-            .sleds()
-            .collect::<BTreeSet<_>>()
-            .difference(&self.b2.sleds().collect::<BTreeSet<_>>())
+            .sleds_before()
+            .difference(&self.sleds_after())
             .copied()
             .collect::<BTreeSet<_>>();
-        sled_ids.into_iter().map(|sled_id| {
-            (sled_id, self.b1.omicron_zones.get(&sled_id).unwrap())
-        })
+        sled_ids
+            .into_iter()
+            .map(|sled_id| (sled_id, self.before_zones.get(&sled_id).unwrap()))
     }
 
     /// Iterate over sleds present in both blueprints in a diff
     pub fn sleds_in_common(
-        &self,
+        &'a self,
     ) -> impl Iterator<Item = (Uuid, DiffSledCommon<'a>)> + '_ {
         let sled_ids = self
-            .b1
-            .sleds()
-            .collect::<BTreeSet<_>>()
-            .intersection(&self.b2.sleds().collect::<BTreeSet<_>>())
+            .sleds_before()
+            .intersection(&self.sleds_after())
             .copied()
             .collect::<BTreeSet<_>>();
         sled_ids.into_iter().map(|sled_id| {
-            let b1sledzones = self.b1.omicron_zones.get(&sled_id).unwrap();
-            let b2sledzones = self.b2.omicron_zones.get(&sled_id).unwrap();
+            let b1sledzones = self.before_zones.get(&sled_id).unwrap();
+            let b2sledzones = self.after_zones.get(&sled_id).unwrap();
 
             // Assemble separate summaries of the zones, indexed by zone id.
             #[derive(Debug)]
@@ -304,8 +347,7 @@ impl<'a> BlueprintDiff<'a> {
                         ZoneInfo {
                             zone,
                             in_service: self
-                                .b1
-                                .zones_in_service
+                                .before_zones_in_service
                                 .contains(&zone.id),
                         },
                     )
@@ -320,8 +362,7 @@ impl<'a> BlueprintDiff<'a> {
                         ZoneInfo {
                             zone,
                             in_service: self
-                                .b2
-                                .zones_in_service
+                                .after_zones_in_service
                                 .contains(&zone.id),
                         },
                     )
@@ -377,7 +418,7 @@ impl<'a> BlueprintDiff<'a> {
     }
 
     pub fn sleds_changed(
-        &self,
+        &'a self,
     ) -> impl Iterator<Item = (Uuid, DiffSledCommon<'a>)> + '_ {
         self.sleds_in_common().filter(|(_, sled_changes)| {
             sled_changes.zones_added().next().is_some()
@@ -416,11 +457,11 @@ impl<'a> BlueprintDiff<'a> {
 }
 
 /// Implements diff(1)-like output for diff'ing two blueprints
-impl<'a> std::fmt::Display for BlueprintDiff<'a> {
+impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "diff blueprints {} {}", self.b1.id, self.b2.id)?;
-        writeln!(f, "--- {}", self.b1.id)?;
-        writeln!(f, "+++ {}", self.b2.id)?;
+        writeln!(f, "diff {} {}", self.before_label, self.after_label)?;
+        writeln!(f, "--- {}", self.before_label)?;
+        writeln!(f, "+++ {}", self.after_label)?;
 
         for (sled_id, sled_zones) in self.sleds_removed() {
             self.print_whole_sled(f, '-', "removed", sled_zones, sled_id)?;

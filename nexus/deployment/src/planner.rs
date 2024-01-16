@@ -239,7 +239,15 @@ mod test {
         )
         .expect("failed to create initial blueprint");
 
-        // XXX-dap implement diff against collection and check that
+        // Since collections don't include what was in service, we have to
+        // provide that ourselves.  For our purposes, we don't care.
+        let zones_in_service = blueprint1.zones_in_service.clone();
+        let diff =
+            blueprint1.diff_from_collection(&collection, &zones_in_service);
+        println!("0 -> 1 (expected no changes):\n{}", diff);
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_changed().count(), 0);
 
         // Now run the planner.  It should do nothing because our initial
         // system didn't have any issues that the planner currently knows how to
