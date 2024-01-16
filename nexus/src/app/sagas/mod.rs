@@ -412,7 +412,12 @@ pub enum SagaRequest {
 impl SagaRequest {
     pub fn channel() -> (mpsc::Sender<SagaRequest>, mpsc::Receiver<SagaRequest>)
     {
-        // XXX this is a magic number!
-        mpsc::channel(128)
+        // Limit the maximum number of saga requests that background tasks can
+        // queue for Nexus to run.
+        //
+        // Note this value was chosen arbitrarily!
+        const MAX_QUEUED_SAGA_REQUESTS: usize = 128;
+
+        mpsc::channel(MAX_QUEUED_SAGA_REQUESTS)
     }
 }
