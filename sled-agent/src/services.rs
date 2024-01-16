@@ -2923,12 +2923,12 @@ impl ServiceManager {
                 }
             }
 
-            // For each new zone request, we pick an arbitrary U.2 to store
-            // the zone filesystem. Note: This isn't known to Nexus right now,
-            // so it's a local-to-sled decision.
+            // For each new zone request, we pick a U.2 to store the zone
+            // filesystem. Note: This isn't known to Nexus right now, so it's a
+            // local-to-sled decision.
             //
-            // This is (currently) intentional, as the zone filesystem should
-            // be destroyed between reboots.
+            // Currently, the zone filesystem should be destroyed between
+            // reboots, so it's fine to make this decision locally.
             let root = if let Some(dataset) = zone.dataset_name() {
                 // If the zone happens to already manage a dataset, then
                 // we co-locate the zone dataset on the same zpool.
@@ -2949,6 +2949,8 @@ impl ServiceManager {
                 }
                 data_pool.dataset_mountpoint(ZONE_DATASET)
             } else {
+                // If the zone it not coupled to other datsets, we pick one
+                // arbitrarily.
                 let mut rng = rand::thread_rng();
                 all_u2_pools
                     .choose(&mut rng)
