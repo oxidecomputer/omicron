@@ -22,6 +22,7 @@ pub const IPADM: &str = "/usr/sbin/ipadm";
 pub const SVCADM: &str = "/usr/sbin/svcadm";
 pub const SVCCFG: &str = "/usr/sbin/svccfg";
 pub const ZLOGIN: &str = "/usr/sbin/zlogin";
+pub const ROUTE: &str = "/usr/sbin/route";
 
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";

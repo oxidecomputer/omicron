@@ -397,7 +397,7 @@ impl From<StartupOptions> for HostStartupOptions {
     }
 }
 
-impl From<InstallinatorImageId> for ipcc_key_value::InstallinatorImageId {
+impl From<InstallinatorImageId> for ipcc::InstallinatorImageId {
     fn from(id: InstallinatorImageId) -> Self {
         Self {
             update_id: id.update_id,
