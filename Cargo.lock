@@ -4933,7 +4933,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.8",
- "topological-sort",
  "walkdir",
 ]
 
@@ -5201,9 +5200,9 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.9.1"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "620c53207d39a385f298444337d575690e0d9e793561d471ba7a614dc213e372"
+checksum = "cdfd257b7067e7a6aa9fba896a89b0f625bac7660213bb830db36e543bd3cdb8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5222,6 +5221,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.7.8",
+ "topological-sort",
  "walkdir",
 ]
 

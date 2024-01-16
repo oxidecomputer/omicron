@@ -145,6 +145,7 @@ async fn do_for_all_rust_packages(
     let (release_pkgs, debug_pkgs): (Vec<_>, _) = config
         .package_config
         .packages_to_build(&config.target)
+        .0
         .into_iter()
         .filter_map(|(name, pkg)| match &pkg.source {
             PackageSource::Local { rust: Some(rust_pkg), .. } => {
@@ -463,8 +464,6 @@ async fn get_package(
 }
 
 async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
-    use topological_sort::TopologicalSort;
-
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
@@ -472,54 +471,12 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
 
     do_build(&config).await?;
 
-    let mut all_packages = config
-        .package_config
-        .packages_to_build(&config.target)
-        .into_iter()
-        .map(|(package_name, package)| {
-            (package.get_output_file(package_name), (package_name, package))
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
+    let packages = config.package_config.packages_to_build(&config.target);
 
-    let mut outputs = TopologicalSort::<String>::new();
-    for (package_output, (_, package)) in &all_packages {
-        match &package.source {
-            PackageSource::Local { .. }
-            | PackageSource::Prebuilt { .. }
-            | PackageSource::Manual => {
-                // Skip intermediate leaf packages; if necessary they'll be
-                // added to the dependency graph by whatever composite package
-                // actually depends on them.
-                if !matches!(
-                    package.output,
-                    PackageOutput::Zone { intermediate_only: true }
-                ) {
-                    outputs.insert(package_output);
-                }
-            }
-            PackageSource::Composite { packages: deps } => {
-                for dep in deps {
-                    outputs.add_dependency(dep, package_output);
-                }
-            }
-        }
-    }
-
-    while !outputs.is_empty() {
-        let batch = outputs.pop_all();
-        assert!(
-            !batch.is_empty() || outputs.is_empty(),
-            "cyclic dependency in package manifest!"
-        );
-
-        let packages = batch.into_iter().map(|output| {
-            all_packages
-                .remove(&output)
-                .expect("package should've already been handled.")
-        });
-
-        let ui_refs = vec![ui.clone(); packages.len()];
-        let pkg_stream = stream::iter(packages)
+    let package_iter = packages.build_order();
+    for batch in package_iter {
+        let ui_refs = vec![ui.clone(); batch.len()];
+        let pkg_stream = stream::iter(batch)
             .zip(stream::iter(ui_refs))
             .map(Ok::<_, anyhow::Error>)
             .try_for_each_concurrent(
@@ -553,6 +510,7 @@ async fn do_stamp(
     let (_name, package) = config
         .package_config
         .packages_to_deploy(&config.target)
+        .0
         .into_iter()
         .find(|(name, _pkg)| name.as_str() == package_name)
         .ok_or_else(|| anyhow!("Package {package_name} not found"))?;
@@ -574,7 +532,7 @@ async fn do_unpack(
     })?;
 
     // Copy all packages to the install location in parallel.
-    let packages = config.package_config.packages_to_deploy(&config.target);
+    let packages = config.package_config.packages_to_deploy(&config.target).0;
 
     packages.par_iter().try_for_each(
         |(package_name, package)| -> Result<()> {
@@ -704,6 +662,7 @@ fn uninstall_all_packages(config: &Config) {
     for (_, package) in config
         .package_config
         .packages_to_deploy(&config.target)
+        .0
         .into_iter()
         .filter(|(_, package)| matches!(package.output, PackageOutput::Tarball))
     {
