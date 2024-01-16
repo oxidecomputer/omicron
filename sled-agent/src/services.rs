@@ -2887,12 +2887,9 @@ impl ServiceManager {
         }
 
         // Create zones that should be running
-        let all_u2_roots = self
-            .inner
-            .storage
-            .get_latest_resources()
-            .await
-            .all_u2_mountpoints(ZONE_DATASET);
+        let storage = self.inner.storage.get_latest_resources().await;
+        let all_u2_pools = storage.all_u2_zpools();
+
         let mut new_zones = Vec::new();
         for zone in zones_to_be_added {
             // Check if we think the zone should already be running
@@ -2926,17 +2923,41 @@ impl ServiceManager {
                 }
             }
 
-            // For each new zone request, we pick an arbitrary U.2 to store
-            // the zone filesystem. Note: This isn't known to Nexus right now,
-            // so it's a local-to-sled decision.
+            // For each new zone request, we pick a U.2 to store the zone
+            // filesystem. Note: This isn't known to Nexus right now, so it's a
+            // local-to-sled decision.
             //
-            // This is (currently) intentional, as the zone filesystem should
-            // be destroyed between reboots.
-            let mut rng = rand::thread_rng();
-            let root = all_u2_roots
-                .choose(&mut rng)
-                .ok_or_else(|| Error::U2NotFound)?
-                .clone();
+            // Currently, the zone filesystem should be destroyed between
+            // reboots, so it's fine to make this decision locally.
+            let root = if let Some(dataset) = zone.dataset_name() {
+                // If the zone happens to already manage a dataset, then
+                // we co-locate the zone dataset on the same zpool.
+                //
+                // This slightly reduces the underlying fault domain for the
+                // service.
+                let data_pool = dataset.pool();
+                if !all_u2_pools.contains(&data_pool) {
+                    warn!(
+                        log,
+                        "zone dataset requested on a zpool which doesn't exist";
+                        "zone" => &name,
+                        "zpool" => %data_pool
+                    );
+                    return Err(Error::MissingDevice {
+                        device: format!("zpool: {data_pool}"),
+                    });
+                }
+                data_pool.dataset_mountpoint(ZONE_DATASET)
+            } else {
+                // If the zone it not coupled to other datsets, we pick one
+                // arbitrarily.
+                let mut rng = rand::thread_rng();
+                all_u2_pools
+                    .choose(&mut rng)
+                    .map(|pool| pool.dataset_mountpoint(ZONE_DATASET))
+                    .ok_or_else(|| Error::U2NotFound)?
+                    .clone()
+            };
 
             new_zones.push(OmicronZoneConfigLocal { zone: zone.clone(), root });
         }
