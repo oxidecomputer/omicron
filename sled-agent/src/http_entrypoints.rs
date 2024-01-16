@@ -10,9 +10,9 @@ use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, OmicronZonesConfig,
-    SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
-    ZoneBundleMetadata, Zpool,
+    InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
+    ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -77,11 +77,12 @@ pub fn api() -> SledApiDescription {
         api.register(uplink_ensure)?;
         api.register(read_network_bootstore_config_cache)?;
         api.register(write_network_bootstore_config)?;
-        api.register(add_sled_to_initialized_rack)?;
+        api.register(sled_add)?;
         api.register(metrics_collect)?;
         api.register(host_os_write_start)?;
         api.register(host_os_write_status_get)?;
         api.register(host_os_write_status_delete)?;
+        api.register(inventory)?;
 
         Ok(())
     }
@@ -713,7 +714,7 @@ async fn write_network_bootstore_config(
     method = PUT,
     path = "/sleds"
 }]
-async fn add_sled_to_initialized_rack(
+async fn sled_add(
     rqctx: RequestContext<SledAgent>,
     body: TypedBody<AddSledRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -731,7 +732,7 @@ async fn add_sled_to_initialized_rack(
         ));
     }
 
-    crate::sled_agent::add_sled_to_initialized_rack(
+    crate::sled_agent::sled_add(
         sa.logger().clone(),
         request.sled_id,
         request.start_request,
@@ -924,4 +925,16 @@ async fn host_os_write_status_delete(
         .clear_terminal_status(boot_disk, update_id)
         .map_err(|err| HttpError::from(&err))?;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Fetch basic information about this sled
+#[endpoint {
+    method = GET,
+    path = "/inventory",
+}]
+async fn inventory(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<Inventory>, HttpError> {
+    let sa = request_context.context();
+    Ok(HttpResponseOk(sa.inventory()?))
 }

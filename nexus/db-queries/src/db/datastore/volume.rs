@@ -1059,3 +1059,118 @@ pub fn read_only_resources_associated_with_volume(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::db::datastore::datastore_test;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_test_utils::dev;
+
+    // Assert that Nexus will not fail to deserialize an old version of
+    // CrucibleResources that was serialized before schema update 6.0.0.
+    #[tokio::test]
+    async fn test_deserialize_old_crucible_resources() {
+        let logctx =
+            dev::test_setup_log("test_deserialize_old_crucible_resources");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+
+        // Start with a fake volume, doesn't matter if it's empty
+
+        let volume_id = Uuid::new_v4();
+        let _volume = db_datastore
+            .volume_create(nexus_db_model::Volume::new(
+                volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        // Add old CrucibleResources json in the `resources_to_clean_up` column -
+        // this was before the `deleting` column / field was added to
+        // ResourceSnapshot.
+
+        {
+            use db::schema::volume::dsl;
+
+            let conn =
+                db_datastore.pool_connection_unauthorized().await.unwrap();
+
+            let resources_to_clean_up = r#"{
+  "V1": {
+    "datasets_and_regions": [],
+    "datasets_and_snapshots": [
+      [
+        {
+          "identity": {
+            "id": "844ee8d5-7641-4b04-bca8-7521e258028a",
+            "time_created": "2023-12-19T21:38:34.000000Z",
+            "time_modified": "2023-12-19T21:38:34.000000Z"
+          },
+          "time_deleted": null,
+          "rcgen": 1,
+          "pool_id": "81a98506-4a97-4d92-8de5-c21f6fc71649",
+          "ip": "fd00:1122:3344:101::1",
+          "port": 32345,
+          "kind": "Crucible",
+          "size_used": 10737418240
+        },
+        {
+          "dataset_id": "b69edd77-1b3e-4f11-978c-194a0a0137d0",
+          "region_id": "8d668bf9-68cc-4387-8bc0-b4de7ef9744f",
+          "snapshot_id": "f548332c-6026-4eff-8c1c-ba202cd5c834",
+          "snapshot_addr": "[fd00:1122:3344:101::2]:19001",
+          "volume_references": 0
+        }
+      ]
+    ]
+  }
+}
+"#;
+
+            diesel::update(dsl::volume)
+                .filter(dsl::id.eq(volume_id))
+                .set(dsl::resources_to_clean_up.eq(resources_to_clean_up))
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+        }
+
+        // Soft delete the volume, which runs the CTE
+
+        let cr = db_datastore
+            .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
+            .await
+            .unwrap();
+
+        // Assert the contents of the returned CrucibleResources
+
+        let datasets_and_regions =
+            db_datastore.regions_to_delete(&cr).await.unwrap();
+        let datasets_and_snapshots =
+            db_datastore.snapshots_to_delete(&cr).await.unwrap();
+
+        assert!(datasets_and_regions.is_empty());
+        assert_eq!(datasets_and_snapshots.len(), 1);
+
+        let region_snapshot = &datasets_and_snapshots[0].1;
+
+        assert_eq!(
+            region_snapshot.snapshot_id,
+            "f548332c-6026-4eff-8c1c-ba202cd5c834".parse().unwrap()
+        );
+        assert_eq!(region_snapshot.deleting, false);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+}

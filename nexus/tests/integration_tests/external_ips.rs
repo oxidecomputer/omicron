@@ -12,21 +12,31 @@ use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::Method;
 use http::StatusCode;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance_with;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
+use nexus_test_utils::resource_helpers::create_silo;
+use nexus_test_utils::resource_helpers::link_ip_pool;
+use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
+use nexus_test_utils::resource_helpers::object_delete;
+use nexus_test_utils::resource_helpers::object_delete_error;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
 use nexus_types::external_api::views::FloatingIp;
+use nexus_types::identity::Resource;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::NameOrId;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -34,7 +44,8 @@ type ControlPlaneTestContext =
 
 const PROJECT_NAME: &str = "rootbeer-float";
 
-const FIP_NAMES: &[&str] = &["vanilla", "chocolate", "strawberry", "pistachio"];
+const FIP_NAMES: &[&str] =
+    &["vanilla", "chocolate", "strawberry", "pistachio", "caramel"];
 
 pub fn get_floating_ips_url(project_name: &str) -> String {
     format!("/v1/floating-ips?project={project_name}")
@@ -55,7 +66,7 @@ pub fn get_floating_ip_by_id_url(fip_id: &Uuid) -> String {
 async fn test_floating_ip_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     // Create a floating IP from the default pool.
@@ -102,11 +113,14 @@ async fn test_floating_ip_access(cptestctx: &ControlPlaneTestContext) {
 async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    // automatically linked to current silo
+    create_default_ip_pool(&client).await;
+
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
             .unwrap(),
     );
+    // not automatically linked to currently silo. see below
     create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
 
     let project = create_project(client, PROJECT_NAME).await;
@@ -142,22 +156,33 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
 
-    // Create with no chosen IP from named pool.
+    // Creating with other-pool fails with 404 until it is linked to the current silo
     let fip_name = FIP_NAMES[2];
-    let fip = create_floating_ip(
-        client,
-        fip_name,
-        project.identity.name.as_str(),
-        None,
-        Some("other-pool"),
-    )
-    .await;
+    let params = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: fip_name.parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
+        address: None,
+        pool: Some(NameOrId::Name("other-pool".parse().unwrap())),
+    };
+    let url = format!("/v1/floating-ips?project={}", project.identity.name);
+    let error =
+        object_create_error(client, &url, &params, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, "not found: ip-pool with name \"other-pool\"");
+
+    // now link the pool and everything should work with the exact same params
+    let silo_id = DEFAULT_SILO.id();
+    link_ip_pool(&client, "other-pool", &silo_id, false).await;
+
+    // Create with no chosen IP from named pool.
+    let fip: FloatingIp = object_create(client, &url, &params).await;
     assert_eq!(fip.identity.name.as_str(), fip_name);
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 1, 0, 1)));
 
-    // Create with chosen IP from named pool.
+    // Create with chosen IP from fleet-scoped named pool.
     let fip_name = FIP_NAMES[3];
     let ip_addr = "10.1.0.5".parse().unwrap();
     let fip = create_floating_ip(
@@ -175,12 +200,69 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
+async fn test_floating_ip_create_fails_in_other_silo_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let project = create_project(client, PROJECT_NAME).await;
+
+    // Create other silo and pool linked to that silo
+    let other_silo = create_silo(
+        &client,
+        "not-my-silo",
+        true,
+        shared::SiloIdentityMode::SamlJit,
+    )
+    .await;
+    let other_pool_range = IpRange::V4(
+        Ipv4Range::new(Ipv4Addr::new(10, 2, 0, 1), Ipv4Addr::new(10, 2, 0, 5))
+            .unwrap(),
+    );
+    create_ip_pool(&client, "external-silo-pool", Some(other_pool_range)).await;
+    // don't link pool to silo yet
+
+    let fip_name = FIP_NAMES[4];
+
+    // creating a floating IP should fail with a 404 as if the specified pool
+    // does not exist
+    let url =
+        format!("/v1/floating-ips?project={}", project.identity.name.as_str());
+    let body = params::FloatingIpCreate {
+        identity: IdentityMetadataCreateParams {
+            name: fip_name.parse().unwrap(),
+            description: String::from("a floating ip"),
+        },
+        address: None,
+        pool: Some(NameOrId::Name("external-silo-pool".parse().unwrap())),
+    };
+
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"external-silo-pool\""
+    );
+
+    // error is the same after linking the pool to the other silo
+    link_ip_pool(&client, "external-silo-pool", &other_silo.identity.id, false)
+        .await;
+
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"external-silo-pool\""
+    );
+}
+
+#[nexus_test]
 async fn test_floating_ip_create_ip_in_use(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
 
     let project = create_project(client, PROJECT_NAME).await;
     let contested_ip = "10.0.0.0".parse().unwrap();
@@ -228,7 +310,7 @@ async fn test_floating_ip_create_name_in_use(
 ) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
 
     let project = create_project(client, PROJECT_NAME).await;
     let contested_name = FIP_NAMES[0];
@@ -277,7 +359,7 @@ async fn test_floating_ip_create_name_in_use(
 async fn test_floating_ip_delete(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     let fip = create_floating_ip(
@@ -289,15 +371,24 @@ async fn test_floating_ip_delete(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
+    // unlink fails because there are outstanding IPs
+    let silo_id = DEFAULT_SILO.id();
+    let silo_link_url =
+        format!("/v1/system/ip-pools/default/silos/{}", silo_id);
+    let error =
+        object_delete_error(client, &silo_link_url, StatusCode::BAD_REQUEST)
+            .await;
+    assert_eq!(
+        error.message,
+        "IP addresses from this pool are in use in the linked silo"
+    );
+
     // Delete the floating IP.
-    NexusRequest::object_delete(
-        client,
-        &get_floating_ip_by_id_url(&fip.identity.id),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
+    let floating_ip_url = get_floating_ip_by_id_url(&fip.identity.id);
+    object_delete(client, &floating_ip_url).await;
+
+    // now unlink works
+    object_delete(client, &silo_link_url).await;
 }
 
 #[nexus_test]
@@ -306,7 +397,7 @@ async fn test_floating_ip_attachment(cptestctx: &ControlPlaneTestContext) {
     let apictx = &cptestctx.server.apictx();
     let nexus = &apictx.nexus;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
     let fip = create_floating_ip(

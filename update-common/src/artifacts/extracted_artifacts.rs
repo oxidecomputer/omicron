@@ -106,7 +106,7 @@ pub struct ExtractedArtifacts {
 impl ExtractedArtifacts {
     pub fn new(log: &Logger) -> Result<Self, RepositoryError> {
         let tempdir = camino_tempfile::Builder::new()
-            .prefix("wicketd-update-artifacts.")
+            .prefix("update-artifacts.")
             .tempdir()
             .map_err(RepositoryError::TempDirCreate)?;
         info!(

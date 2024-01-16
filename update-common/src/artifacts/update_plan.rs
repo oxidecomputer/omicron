@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Constructor for the `UpdatePlan` wicketd uses to drive sled mupdates.
+//! Constructor for the `UpdatePlan` wicketd and Nexus use to drive sled
+//! mupdates.
 //!
 //! This is a "plan" in name only: it is a strict list of which artifacts to
 //! apply to which components; the ordering and application of the plan lives
@@ -657,8 +658,17 @@ impl<'a> UpdatePlanBuilder<'a> {
             .entry(tuf_repo_artifact_id.clone())
             .or_default()
             .push(by_hash_slot.key().clone());
+
+        // In the artifacts_meta document, use the expanded artifact ID
+        // (artifact kind = data_kind, and name and version from
+        // tuf_repo_artifact_id).
+        let artifacts_meta_id = ArtifactId {
+            name: tuf_repo_artifact_id.name,
+            version: tuf_repo_artifact_id.version,
+            kind: data_kind,
+        };
         self.artifacts_meta.push(TufArtifactMeta {
-            id: tuf_repo_artifact_id,
+            id: artifacts_meta_id,
             hash: data.hash(),
             size: data.file_size() as u64,
         });
@@ -924,7 +934,7 @@ mod tests {
             UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
                 .unwrap();
 
-        // Add a couple artifacts with kinds wicketd doesn't understand; it
+        // Add a couple artifacts with kinds wicketd/nexus don't understand; it
         // should still ingest and serve them.
         let mut expected_unknown_artifacts = BTreeSet::new();
 

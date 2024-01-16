@@ -66,7 +66,7 @@ impl super::Nexus {
 
         let response = self
             .db_datastore
-            .update_tuf_repo_description_insert(opctx, tuf_repo_description)
+            .update_tuf_repo_insert(opctx, tuf_repo_description)
             .await
             .map_err(HttpError::from)?;
         Ok(response.into_external())

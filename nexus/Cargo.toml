@@ -34,7 +34,6 @@ http.workspace = true
 hyper.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
-lazy_static.workspace = true
 macaddr.workspace = true
 mime_guess.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
@@ -92,6 +91,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
+camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
@@ -119,6 +119,8 @@ rustls = { workspace = true }
 subprocess.workspace = true
 term.workspace = true
 trust-dns-resolver.workspace = true
+tufaceous.workspace = true
+tufaceous-lib.workspace = true
 httptest.workspace = true
 strum.workspace = true
 

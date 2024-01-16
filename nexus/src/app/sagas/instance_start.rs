@@ -7,7 +7,7 @@
 use std::net::Ipv6Addr;
 
 use super::{
-    instance_common::allocate_sled_ipv6, NexusActionContext, NexusSaga,
+    instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
     SagaInitError, ACTION_GENERATE_ID,
 };
 use crate::app::instance::InstanceStateChangeError;
@@ -159,7 +159,7 @@ async fn sis_alloc_propolis_ip(
         &params.serialized_authn,
     );
     let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
-    allocate_sled_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
+    allocate_vmm_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
 }
 
 async fn sis_create_vmm_record(
@@ -734,7 +734,7 @@ mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::{
-        create_project, object_create, populate_ip_pool,
+        create_default_ip_pool, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
@@ -751,7 +751,7 @@ mod test {
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        populate_ip_pool(&client, "default", None).await;
+        create_default_ip_pool(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }

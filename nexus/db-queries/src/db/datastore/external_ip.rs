@@ -76,22 +76,18 @@ impl DataStore {
                     .fetch_for(authz::Action::CreateChild)
                     .await?;
 
-                // If the named pool conflicts with user's current scope, i.e.,
-                // if it has a silo and it's different from the current silo,
-                // then as far as IP allocation is concerned, that pool doesn't
-                // exist. If the pool has no silo, it's fleet-scoped and can
-                // always be used.
-                let authz_silo_id = opctx.authn.silo_required()?.id();
-                if let Some(pool_silo_id) = pool.silo_id {
-                    if pool_silo_id != authz_silo_id {
-                        return Err(authz_pool.not_found());
-                    }
+                // If this pool is not linked to the current silo, 404
+                if self.ip_pool_fetch_link(opctx, pool.id()).await.is_err() {
+                    return Err(authz_pool.not_found());
                 }
 
                 pool
             }
             // If no name given, use the default logic
-            None => self.ip_pools_fetch_default(&opctx).await?,
+            None => {
+                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
+                pool
+            }
         };
 
         let pool_id = pool.identity.id;
@@ -147,24 +143,29 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        let pool_id = match params.pool {
+        // TODO: NameOrId resolution should happen a level higher, in the nexus function
+        let (.., authz_pool, pool) = match params.pool {
             Some(NameOrId::Name(name)) => {
                 LookupPath::new(opctx, self)
                     .ip_pool_name(&Name(name))
                     .fetch_for(authz::Action::Read)
                     .await?
-                    .1
             }
             Some(NameOrId::Id(id)) => {
                 LookupPath::new(opctx, self)
                     .ip_pool_id(id)
                     .fetch_for(authz::Action::Read)
                     .await?
-                    .1
             }
             None => self.ip_pools_fetch_default(opctx).await?,
+        };
+
+        let pool_id = pool.id();
+
+        // If this pool is not linked to the current silo, 404
+        if self.ip_pool_fetch_link(opctx, pool_id).await.is_err() {
+            return Err(authz_pool.not_found());
         }
-        .id();
 
         let data = if let Some(ip) = params.address {
             IncompleteExternalIp::for_floating_explicit(

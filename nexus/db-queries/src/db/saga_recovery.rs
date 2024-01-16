@@ -305,9 +305,9 @@ mod test {
     use super::*;
     use crate::context::OpContext;
     use crate::db::test_utils::UnpluggableCockroachDbSecStore;
-    use lazy_static::lazy_static;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
+    use once_cell::sync::Lazy;
     use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use steno::{
         new_action_noop_undo, Action, ActionContext, ActionError,
@@ -376,12 +376,10 @@ mod test {
         type ExecContextType = TestContext;
     }
 
-    lazy_static! {
-        static ref ACTION_N1: Arc<dyn Action<TestOp>> =
-            new_action_noop_undo("n1_action", node_one);
-        static ref ACTION_N2: Arc<dyn Action<TestOp>> =
-            new_action_noop_undo("n2_action", node_two);
-    }
+    static ACTION_N1: Lazy<Arc<dyn Action<TestOp>>> =
+        Lazy::new(|| new_action_noop_undo("n1_action", node_one));
+    static ACTION_N2: Lazy<Arc<dyn Action<TestOp>>> =
+        Lazy::new(|| new_action_noop_undo("n2_action", node_two));
 
     fn registry_create() -> Arc<ActionRegistry<TestOp>> {
         let mut registry = ActionRegistry::new();

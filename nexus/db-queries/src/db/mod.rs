@@ -24,6 +24,7 @@ pub mod lookup;
 // Public for doctests.
 pub mod pagination;
 mod pool;
+mod pool_connection;
 // This is marked public because the error types are used elsewhere, e.g., in
 // sagas.
 pub mod queries;

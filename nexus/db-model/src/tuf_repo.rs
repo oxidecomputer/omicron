@@ -24,8 +24,7 @@ use uuid::Uuid;
 /// A description of a TUF update: a repo, along with the artifacts it
 /// contains.
 ///
-/// This is equivalent to [`external::TufRepoDescription`], but is more
-/// Diesel-friendly.
+/// This is the internal variant of [`external::TufRepoDescription`].
 #[derive(Debug, Clone)]
 pub struct TufRepoDescription {
     /// The repository.
@@ -36,8 +35,8 @@ pub struct TufRepoDescription {
 }
 
 impl TufRepoDescription {
-    /// Creates a new `TufRepoDescription` from an external
-    /// `TufRepoDescription`.
+    /// Creates a new `TufRepoDescription` from an
+    /// [`external::TufRepoDescription`].
     ///
     /// This is not implemented as a `From` impl because we insert new fields
     /// as part of the process, which `From` doesn't necessarily communicate
@@ -68,8 +67,7 @@ impl TufRepoDescription {
 
 /// A record representing an uploaded TUF repository.
 ///
-/// This is equivalent to [`external::TufRepoMeta`], but is more
-/// Diesel-friendly.
+/// This is the internal variant of [`external::TufRepoMeta`].
 #[derive(
     Queryable, Identifiable, Insertable, Clone, Debug, Selectable, AsChangeset,
 )]
@@ -201,8 +199,7 @@ impl TufArtifact {
 
 /// The ID (primary key) of a [`TufArtifact`].
 ///
-/// This is equivalent to an [`ExternalArtifactId`] but is more
-/// Diesel-friendly.
+/// This is the internal variant of a [`ExternalArtifactId`].
 #[derive(
     Queryable,
     Insertable,
@@ -257,19 +254,8 @@ impl From<ArtifactId> for (String, SemverVersion, String) {
 }
 
 /// A many-to-many relationship between [`TufRepo`] and [`TufArtifact`].
-#[derive(
-    Queryable, Identifiable, Insertable, Clone, Debug, Selectable, Associations,
-)]
-#[diesel(belongs_to(TufRepo))]
-// Diesel doesn't support belongs_to with a composite primary key, sadly, so
-// we'll have to construct queries by hand.
+#[derive(Queryable, Insertable, Clone, Debug, Selectable)]
 #[diesel(table_name = tuf_repo_artifact)]
-#[diesel(primary_key(
-    tuf_repo_id,
-    tuf_artifact_name,
-    tuf_artifact_version,
-    tuf_artifact_kind
-))]
 pub struct TufRepoArtifact {
     pub tuf_repo_id: Uuid,
     pub tuf_artifact_name: String,
