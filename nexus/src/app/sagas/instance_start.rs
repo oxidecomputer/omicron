@@ -7,7 +7,7 @@
 use std::net::Ipv6Addr;
 
 use super::{
-    instance_common::allocate_sled_ipv6, NexusActionContext, NexusSaga,
+    instance_common::allocate_vmm_ipv6, NexusActionContext, NexusSaga,
     SagaInitError, ACTION_GENERATE_ID,
 };
 use crate::app::instance::InstanceStateChangeError;
@@ -159,7 +159,7 @@ async fn sis_alloc_propolis_ip(
         &params.serialized_authn,
     );
     let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
-    allocate_sled_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
+    allocate_vmm_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
 }
 
 async fn sis_create_vmm_record(

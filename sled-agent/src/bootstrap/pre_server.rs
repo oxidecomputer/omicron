@@ -18,6 +18,7 @@ use crate::long_running_tasks::{
     spawn_all_longrunning_tasks, LongRunningTaskHandles,
 };
 use crate::services::ServiceManager;
+use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
 use crate::storage_monitor::UnderlayAccess;
 use camino::Utf8PathBuf;
@@ -127,12 +128,18 @@ impl BootstrapAgentStartup {
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
 
+        let time_sync = if let Some(true) = config.skip_timesync {
+            TimeSyncConfig::Skip
+        } else {
+            TimeSyncConfig::Normal
+        };
+
         let service_manager = ServiceManager::new(
             &base_log,
             ddm_admin_localhost_client.clone(),
             startup_networking,
             sled_mode,
-            config.skip_timesync,
+            time_sync,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
             long_running_task_handles.storage_manager.clone(),

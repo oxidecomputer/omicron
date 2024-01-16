@@ -132,7 +132,7 @@ output.type = "zone"
 service_name = "clickhouse"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
 output.type = "zone"
 
 [package.clickhouse_svc]
@@ -153,7 +153,7 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "clickhouse_keeper"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz" ]
+source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
 output.type = "zone"
 
 [package.clickhouse_keeper_svc]
@@ -174,7 +174,7 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "cockroachdb"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz" ]
+source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
 output.type = "zone"
 
 [package.cockroachdb-service]
@@ -396,10 +396,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "fab27994d0bd12725c17d6b478a9bfc2673ad6f4"
+source.commit = "e71b10d2f9f1fb52818b916bae83ba15a339548d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "850b468c308cf63ef9e10addee36a923a91b7ab64af0fa0836130c830fb42863"
+source.sha256 = "030a02551e487f561bcfad47426b953d15c4430d77770765c7fc03afd8d61bd9"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -407,10 +407,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "fab27994d0bd12725c17d6b478a9bfc2673ad6f4"
+source.commit = "e71b10d2f9f1fb52818b916bae83ba15a339548d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "893f845caa5d9b146137b503e80d5615cbd6e9d393745e81e772b10a9072b58b"
+source.sha256 = "c74e23e7f7995ba3a69a9ec3a31f1db517ec15cd3a9942c2c07621b219b743b2"
 output.type = "zone"
 
 # Refer to
@@ -421,10 +421,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "f1571ce141421cff3d3328f43e7722f5df96fdda"
+source.commit = "1e25649e8c2ac274bd04adfe0513dd14a482058c"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "6e2607f103419a6338936434f3e67afb7cbe14d6397f2d01982ba94b8d0182a9"
+source.sha256 = "09c124315da3e434c85fe1ddb16459c36d8302e15705ff18fe6bbc7b4876f5f9"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -613,3 +613,15 @@ source.packages = [
   "sp-sim-softnpu.tar.gz"
 ]
 output.type = "zone"
+
+[package.zone-network-setup]
+service_name = "zone-network-setup"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["zone-networking"]
+source.rust.release = true
+source.paths = [
+    { from = "smf/zone-network-setup/manifest.xml", to = "/var/svc/manifest/site/zone-network-setup/manifest.xml" },
+]
+output.type = "zone"
+output.intermediate_only = true

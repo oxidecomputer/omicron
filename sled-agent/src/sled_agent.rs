@@ -159,7 +159,7 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         match err {
-            crate::sled_agent::Error::Instance(instance_manager_error) => {
+            Error::Instance(instance_manager_error) => {
                 match instance_manager_error {
                     crate::instance_manager::Error::Instance(
                         instance_error,
@@ -196,7 +196,7 @@ impl From<Error> for dropshot::HttpError {
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
-            crate::sled_agent::Error::ZoneBundle(ref inner) => match inner {
+            Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
                 }

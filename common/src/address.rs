@@ -165,6 +165,9 @@ const GZ_ADDRESS_INDEX: usize = 2;
 /// The maximum number of addresses per sled reserved for RSS.
 pub const RSS_RESERVED_ADDRESSES: u16 = 32;
 
+// The maximum number of addresses per sled reserved for control plane services.
+pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
+
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
 #[schemars(rename = "Ipv6Subnet")]

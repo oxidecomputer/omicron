@@ -27,9 +27,9 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.4.3", features = ["derive", "env", "wrap_help"] }
-clap_builder = { version = "4.4.2", default-features = false, features = ["color", "env", "std", "suggestions", "usage", "wrap_help"] }
-console = { version = "0.15.7" }
+clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.4.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+console = { version = "0.15.8" }
 const-oid = { version = "0.9.5", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.15" }
 crossbeam-utils = { version = "0.8.16" }
@@ -62,7 +62,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.151", features = ["extra_traits"] }
+libc = { version = "0.2.152", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.6.3" }
@@ -87,7 +87,7 @@ reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.17.7", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.21", features = ["serde"] }
-serde = { version = "1.0.194", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.195", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.111", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
@@ -130,9 +130,9 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.4.3", features = ["derive", "env", "wrap_help"] }
-clap_builder = { version = "4.4.2", default-features = false, features = ["color", "env", "std", "suggestions", "usage", "wrap_help"] }
-console = { version = "0.15.7" }
+clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.4.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+console = { version = "0.15.8" }
 const-oid = { version = "0.9.5", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.15" }
 crossbeam-utils = { version = "0.8.16" }
@@ -165,7 +165,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.151", features = ["extra_traits"] }
+libc = { version = "0.2.152", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.6.3" }
@@ -190,7 +190,7 @@ reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.17.7", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.21", features = ["serde"] }
-serde = { version = "1.0.194", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.195", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.111", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
