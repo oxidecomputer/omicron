@@ -185,6 +185,9 @@ impl DataStore {
         // join ip_pool to ip_pool_resource and filter
 
         // used in both success and error outcomes
+        // TODO: Correctness
+        // we're not propogating the data used to performed the query, which
+        // makes troubleshooting a lookup failure a lot more time consuming
         let lookup_type = LookupType::ByCompositeId(
             "Default pool for current silo".to_string(),
         );
