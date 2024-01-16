@@ -2889,7 +2889,6 @@ impl ServiceManager {
         // Create zones that should be running
         let storage = self.inner.storage.get_latest_resources().await;
         let all_u2_pools = storage.all_u2_zpools();
-        let all_u2_roots = storage.all_u2_mountpoints(ZONE_DATASET);
 
         let mut new_zones = Vec::new();
         for zone in zones_to_be_added {
@@ -2951,8 +2950,9 @@ impl ServiceManager {
                 data_pool.dataset_mountpoint(ZONE_DATASET)
             } else {
                 let mut rng = rand::thread_rng();
-                all_u2_roots
+                all_u2_pools
                     .choose(&mut rng)
+                    .map(|pool| pool.dataset_mountpoint(ZONE_DATASET))
                     .ok_or_else(|| Error::U2NotFound)?
                     .clone()
             };
