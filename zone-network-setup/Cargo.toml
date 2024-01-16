@@ -13,3 +13,4 @@ slog.workspace = true
 dropshot.workspace = true
 tokio.workspace = true
 omicron-workspace-hack.workspace = true
+zone.workspace = true
