@@ -954,6 +954,7 @@ const SILO2: Uuid = Uuid::from_u128(0x222251F0_5c3d_4647_83b0_8f3515da7be1);
 const POOL1: Uuid = Uuid::from_u128(0x11116001_5c3d_4647_83b0_8f3515da7be1);
 const POOL2: Uuid = Uuid::from_u128(0x22226001_5c3d_4647_83b0_8f3515da7be1);
 const POOL3: Uuid = Uuid::from_u128(0x33336001_5c3d_4647_83b0_8f3515da7be1);
+const POOL4: Uuid = Uuid::from_u128(0x44446001_5c3d_4647_83b0_8f3515da7be1);
 
 // "513D" -> "Sled"
 const SLED1: Uuid = Uuid::from_u128(0x1111513d_5c3d_4647_83b0_8f3515da7be1);
@@ -977,7 +978,8 @@ fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
             (id, name, description, time_created, time_modified, time_deleted, rcgen, silo_id, is_default) VALUES
           ('{POOL1}', 'pool1', '', now(), now(), NULL, 1, '{SILO1}', true),
           ('{POOL2}', 'pool2', '', now(), now(), NULL, 1, '{SILO2}', false),
-          ('{POOL3}', 'pool3', '', now(), now(), NULL, 1, null, true);
+          ('{POOL3}', 'pool3', '', now(), now(), NULL, 1, null, true),
+          ('{POOL4}', 'pool4', '', now(), now(), NULL, 1, null, false);
         ")).await.expect("Failed to create IP Pool");
     })
 }
@@ -992,12 +994,8 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
             .expect("Failed to query ip pool resource");
         let ip_pool_resources = process_rows(&rows);
 
-        assert_eq!(ip_pool_resources.len(), 4);
+        assert_eq!(ip_pool_resources.len(), 6);
 
-        // pool1, which referenced silo1 in the "ip_pool" table, has a newly
-        // created resource.
-        //
-        // The same relationship is true for pool2 / silo2.
         fn assert_row(
             row: &Vec<ColumnValue>,
             ip_pool_id: Uuid,
@@ -1016,16 +1014,26 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
             );
         }
 
+        // pool1 was default on silo1, so gets an entry in the join table
+        // reflecting that
         assert_row(&ip_pool_resources[0].values, POOL1, SILO1, true);
+
+        // pool1 was default on silo1, so gets an entry in the join table
+        // reflecting that
         assert_row(&ip_pool_resources[1].values, POOL2, SILO2, false);
 
-        // pool3 did not previously have a corresponding silo, so now it's associated
-        // with both silos as a new resource in each.
-        //
-        // Additionally, silo1 already had a default pool (pool1), but silo2 did
-        // not have one. As a result, pool3 becomes the new default pool for silo2.
+        // fleet-scoped silos are a little more complicated
+
+        // pool3 was a fleet-level default, so now it's associated with both
+        // silos. silo1 had its own default pool as well (pool1), so pool3
+        // cannot also be default for silo1. silo2 did not have its own default,
+        // so pool3 is default for silo2.
         assert_row(&ip_pool_resources[2].values, POOL3, SILO1, false);
         assert_row(&ip_pool_resources[3].values, POOL3, SILO2, true);
+
+        // fleet-level pool that was not default becomes non-default on all silos
+        assert_row(&ip_pool_resources[4].values, POOL4, SILO1, false);
+        assert_row(&ip_pool_resources[5].values, POOL4, SILO2, false);
     })
 }
 
