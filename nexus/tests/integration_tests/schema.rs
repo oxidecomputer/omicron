@@ -21,7 +21,6 @@ use similar_asserts;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
-use std::path::PathBuf;
 use tokio::time::timeout;
 use tokio::time::Duration;
 use uuid::Uuid;
@@ -54,7 +53,7 @@ async fn test_setup<'a>(
         );
     let populate = false;
     builder.start_crdb(populate).await;
-    let schema_dir = PathBuf::from(SCHEMA_DIR);
+    let schema_dir = Utf8PathBuf::from(SCHEMA_DIR);
     builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
