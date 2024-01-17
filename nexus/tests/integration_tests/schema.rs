@@ -479,10 +479,14 @@ async fn nexus_applies_update_on_boot() {
     // Start Nexus. It should auto-format itself to the latest version,
     // upgrading through each intermediate update.
     //
+    // The timeout here is a bit longer than usual (120s vs 60s) because if
+    // lots of tests are running at the same time, there can be contention
+    // here.
+    //
     // NOTE: If this grows excessively, we could break it into several smaller
     // tests.
     assert!(
-        timeout(Duration::from_secs(60), builder.start_nexus_internal())
+        timeout(Duration::from_secs(120), builder.start_nexus_internal())
             .await
             .is_ok(),
         "Nexus should have started"
