@@ -318,11 +318,11 @@ fn make_upload_request<'a>(
     request
 }
 
-fn make_get_request<'a>(
-    client: &'a dropshot::test_util::ClientTestContext,
+fn make_get_request(
+    client: &dropshot::test_util::ClientTestContext,
     system_version: SemverVersion,
     expected_status: StatusCode,
-) -> NexusRequest<'a> {
+) -> NexusRequest<'_> {
     let request = NexusRequest::new(
         RequestBuilder::new(
             client,
