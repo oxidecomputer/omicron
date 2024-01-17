@@ -3723,8 +3723,7 @@ mod test {
     const GLOBAL_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
-    // Change here
-    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_oximeter";
+    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_ntp";
     const EXPECTED_PORT: u16 = 12223;
 
     fn make_bootstrap_networking_config() -> BootstrapNetworking {
@@ -3901,7 +3900,12 @@ mod test {
             mgr,
             id,
             generation,
-            OmicronZoneType::Oximeter { address },
+            OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         )
         .await
         .expect("Could not create service");
@@ -3940,7 +3944,12 @@ mod test {
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
-                zone_type: OmicronZoneType::Oximeter { address },
+                zone_type: OmicronZoneType::InternalNtp {
+                    address,
+                    ntp_servers: vec![],
+                    dns_servers: vec![],
+                    domain: None,
+                },
             }],
         })
         .await
@@ -4309,7 +4318,12 @@ mod test {
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
+            zone_type: OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         }];
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
             generation: v2,
@@ -4330,7 +4344,12 @@ mod test {
         zones.push(OmicronZoneConfig {
             id: id2,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
+            zone_type: OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         });
 
         // Now try to apply that list with an older generation number.  This
@@ -4503,7 +4522,12 @@ mod test {
         zones.push(OmicronZoneConfig {
             id,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
+            zone_type: OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         });
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
             generation: vv,
