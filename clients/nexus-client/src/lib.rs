@@ -241,32 +241,6 @@ impl From<omicron_common::api::external::SemverVersion>
     }
 }
 
-impl From<omicron_common::api::internal::nexus::KnownArtifactKind>
-    for types::KnownArtifactKind
-{
-    fn from(
-        s: omicron_common::api::internal::nexus::KnownArtifactKind,
-    ) -> Self {
-        use omicron_common::api::internal::nexus::KnownArtifactKind;
-
-        match s {
-            KnownArtifactKind::GimletSp => types::KnownArtifactKind::GimletSp,
-            KnownArtifactKind::GimletRot => types::KnownArtifactKind::GimletRot,
-            KnownArtifactKind::Host => types::KnownArtifactKind::Host,
-            KnownArtifactKind::Trampoline => {
-                types::KnownArtifactKind::Trampoline
-            }
-            KnownArtifactKind::ControlPlane => {
-                types::KnownArtifactKind::ControlPlane
-            }
-            KnownArtifactKind::PscSp => types::KnownArtifactKind::PscSp,
-            KnownArtifactKind::PscRot => types::KnownArtifactKind::PscRot,
-            KnownArtifactKind::SwitchSp => types::KnownArtifactKind::SwitchSp,
-            KnownArtifactKind::SwitchRot => types::KnownArtifactKind::SwitchRot,
-        }
-    }
-}
-
 impl From<std::time::Duration> for types::Duration {
     fn from(s: std::time::Duration) -> Self {
         Self { secs: s.as_secs(), nanos: s.subsec_nanos() }

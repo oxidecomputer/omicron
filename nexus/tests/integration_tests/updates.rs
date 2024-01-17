@@ -7,7 +7,7 @@
 // - test that an unknown artifact returns 404, not 500
 // - tests around target names and artifact names that contain dangerous paths like `../`
 
-use anyhow::{ensure, Context};
+use anyhow::{ensure, Context, Result};
 use camino::Utf8Path;
 use camino_tempfile::{Builder, Utf8TempDir, Utf8TempPath};
 use clap::Parser;
@@ -16,10 +16,13 @@ use http::{Method, StatusCode};
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::{
-    TufRepoInsertResponse, TufRepoInsertStatus,
+    SemverVersion, TufRepoGetResponse, TufRepoInsertResponse,
+    TufRepoInsertStatus,
 };
 use omicron_common::api::internal::nexus::KnownArtifactKind;
+use omicron_common::nexus_config::UpdatesConfig;
 use omicron_sled_agent::sim;
+use pretty_assertions::assert_eq;
 use serde::Deserialize;
 use std::fmt::Debug;
 use std::fs::File;
@@ -29,12 +32,70 @@ use tufaceous_lib::assemble::{DeserializedManifest, ManifestTweak};
 const FAKE_MANIFEST_PATH: &'static str = "../tufaceous/manifests/fake.toml";
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_update_end_to_end() {
-    test_update_end_to_end_impl().await.expect("test_update_end_to_end failed");
+async fn test_update_uninitialized() -> Result<()> {
+    let mut config = load_test_config();
+    let logctx = LogContext::new("test_update_uninitialized", &config.pkg.log);
+
+    // Build a fake TUF repo
+    let temp_dir = Utf8TempDir::new()?;
+    let archive_path = temp_dir.path().join("archive.zip");
+
+    let args = tufaceous::Args::try_parse_from([
+        "tufaceous",
+        "assemble",
+        FAKE_MANIFEST_PATH,
+        archive_path.as_str(),
+    ])
+    .context("error parsing args")?;
+
+    args.exec(&logctx.log).await.context("error executing assemble command")?;
+
+    let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
+        "test_update_end_to_end",
+        &mut config,
+        sim::SimMode::Explicit,
+        None,
+    )
+    .await;
+    let client = &cptestctx.external_client;
+
+    // Attempt to upload the repository to Nexus. This should fail with a 500
+    // error because the updates system is not configured.
+    {
+        make_upload_request(
+            client,
+            &archive_path,
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )
+        .execute()
+        .await
+        .context("repository upload should have failed with 500 error")?;
+    }
+
+    // Attempt to fetch a repository description from Nexus. This should also
+    // fail with a 500 error.
+    {
+        make_get_request(
+            client,
+            "1.0.0".parse().unwrap(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+        )
+        .execute()
+        .await
+        .context("repository fetch should have failed with 500 error")?;
+    }
+
+    Ok(())
 }
 
-async fn test_update_end_to_end_impl() -> anyhow::Result<()> {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_update_end_to_end() -> Result<()> {
     let mut config = load_test_config();
+    config.pkg.updates = Some(UpdatesConfig {
+        // XXX: This is currently not used by the update system, but
+        // trusted_root will become meaningful in the future.
+        trusted_root: "does-not-exist.json".into(),
+    });
     let logctx = LogContext::new("test_update_end_to_end", &config.pkg.log);
 
     // Build a fake TUF repo
@@ -61,7 +122,7 @@ async fn test_update_end_to_end_impl() -> anyhow::Result<()> {
     let client = &cptestctx.external_client;
 
     // Upload the repository to Nexus.
-    {
+    let mut initial_description = {
         let response =
             make_upload_request(client, &archive_path, StatusCode::OK)
                 .execute()
@@ -72,11 +133,12 @@ async fn test_update_end_to_end_impl() -> anyhow::Result<()> {
             serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
                 .context("error deserializing response body")?;
         assert_eq!(response.status, TufRepoInsertStatus::Inserted);
-    }
+        response.recorded
+    };
 
     // Upload the repository to Nexus again. This should return a 200 with an
     // `AlreadyExists` status.
-    {
+    let mut reupload_description = {
         let response =
             make_upload_request(client, &archive_path, StatusCode::OK)
                 .execute()
@@ -87,7 +149,40 @@ async fn test_update_end_to_end_impl() -> anyhow::Result<()> {
             serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
                 .context("error deserializing response body")?;
         assert_eq!(response.status, TufRepoInsertStatus::AlreadyExists);
-    }
+        response.recorded
+    };
+
+    initial_description.sort_artifacts();
+    reupload_description.sort_artifacts();
+
+    assert_eq!(
+        initial_description, reupload_description,
+        "initial description matches reupload"
+    );
+
+    // Now get the repository that was just uploaded.
+    let mut get_description = {
+        let response = make_get_request(
+            client,
+            "1.0.0".parse().unwrap(), // this is the system version of the fake manifest
+            StatusCode::OK,
+        )
+        .execute()
+        .await
+        .context("error fetching repository")?;
+
+        let response =
+            serde_json::from_slice::<TufRepoGetResponse>(&response.body)
+                .context("error deserializing response body")?;
+        response.description
+    };
+
+    get_description.sort_artifacts();
+
+    assert_eq!(
+        initial_description, get_description,
+        "initial description matches fetched description"
+    );
 
     // TODO: attempt to download extracted artifacts.
 
@@ -102,11 +197,17 @@ async fn test_update_end_to_end_impl() -> anyhow::Result<()> {
         let archive_path =
             make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
 
-        let response =
-            make_upload_request(client, &archive_path, StatusCode::CONFLICT)
-                .execute()
-                .await
-                .context("error uploading repository with different hash")?;
+        let response = make_upload_request(
+            client,
+            &archive_path,
+            StatusCode::CONFLICT,
+        )
+        .execute()
+        .await
+        .context(
+            "error uploading repository with different artifact version \
+             but same system version",
+        )?;
         assert_error_message_contains(
             &response.body,
             "Uploaded repository with system version 1.0.0 has SHA256 hash",
@@ -118,10 +219,10 @@ async fn test_update_end_to_end_impl() -> anyhow::Result<()> {
     {
         let tweaks = &[
             ManifestTweak::SystemVersion("2.0.0".parse().unwrap()),
-            // ManifestTweak::ArtifactContents {
-            //     kind: KnownArtifactKind::GimletSp,
-            //     size_delta: 1024,
-            // },
+            ManifestTweak::ArtifactContents {
+                kind: KnownArtifactKind::ControlPlane,
+                size_delta: 1024,
+            },
         ];
         let archive_path =
             make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
@@ -132,7 +233,7 @@ async fn test_update_end_to_end_impl() -> anyhow::Result<()> {
                 .await
                 .context(
                     "error uploading repository with artifact \
-                     containing different hash",
+                     containing different hash for same version",
                 )?;
         assert_error_message_contains(
             &response.body,
@@ -140,7 +241,24 @@ async fn test_update_end_to_end_impl() -> anyhow::Result<()> {
         )?;
     }
 
-    panic!("wat");
+    // Upload a new repository with a different system version but no other
+    // changes. This should be accepted.
+    {
+        let tweaks = &[ManifestTweak::SystemVersion("2.0.0".parse().unwrap())];
+        let archive_path =
+            make_tweaked_archive(&logctx.log, &temp_dir, tweaks).await?;
+
+        let response =
+            make_upload_request(client, &archive_path, StatusCode::OK)
+                .execute()
+                .await
+                .context("error uploading repository with different system version (should succeed)")?;
+
+        let response =
+            serde_json::from_slice::<TufRepoInsertResponse>(&response.body)
+                .context("error deserializing response body")?;
+        assert_eq!(response.status, TufRepoInsertStatus::Inserted);
+    }
 
     cptestctx.teardown().await;
     logctx.cleanup_successful();
@@ -194,6 +312,23 @@ fn make_upload_request<'a>(
             &format!("/v1/system/update/repository?file_name={}", file_name),
         )
         .body_file(Some(archive_path))
+        .expect_status(Some(expected_status)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser);
+    request
+}
+
+fn make_get_request<'a>(
+    client: &'a dropshot::test_util::ClientTestContext,
+    system_version: SemverVersion,
+    expected_status: StatusCode,
+) -> NexusRequest<'a> {
+    let request = NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::GET,
+            &format!("/v1/system/update/repository/{system_version}"),
+        )
         .expect_status(Some(expected_status)),
     )
     .authn_as(AuthnMode::PrivilegedUser);

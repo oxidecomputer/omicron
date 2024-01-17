@@ -218,8 +218,6 @@ pub struct ConsoleConfig {
 pub struct UpdatesConfig {
     /// Trusted root.json role for the TUF updates repository.
     pub trusted_root: PathBuf,
-    /// Default base URL for the TUF repository.
-    pub default_base_url: String,
 }
 
 /// Options to tweak database schema changes.
@@ -638,7 +636,6 @@ mod test {
             address = "[::1]:8123"
             [updates]
             trusted_root = "/path/to/root.json"
-            default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 27
             [deployment]
@@ -735,7 +732,6 @@ mod test {
                     },
                     updates: Some(UpdatesConfig {
                         trusted_root: PathBuf::from("/path/to/root.json"),
-                        default_base_url: "http://example.invalid/".into(),
                     }),
                     schema: None,
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },

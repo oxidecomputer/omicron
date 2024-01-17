@@ -127,7 +127,7 @@ impl UpdateManager {
 
                 let response = nexus
                     .cpapi_artifact_download(
-                        nexus_client::types::KnownArtifactKind::ControlPlane,
+                        &KnownArtifactKind::ControlPlane.to_string(),
                         &artifact.name,
                         &artifact.version.clone().into(),
                     )

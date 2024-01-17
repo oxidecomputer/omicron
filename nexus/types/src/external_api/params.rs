@@ -1924,39 +1924,17 @@ pub struct ResourceMetrics {
 
 // SYSTEM UPDATE
 
-/// Parameters for `/v1/system/update/repository`.
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
-pub struct PutRepositoryParams {
+/// Parameters for PUT requests for `/v1/system/update/repository`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct UpdatesPutRepositoryParams {
     /// The name of the uploaded file.
     pub file_name: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdatePath {
-    pub version: SemverVersion,
-}
+/// Parameters for GET requests for `/v1/system/update/repository`.
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdateStart {
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdateCreate {
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ComponentUpdateCreate {
-    pub version: SemverVersion,
-    pub component_type: shared::UpdateableComponentType,
-    pub system_update_id: Uuid,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateableComponentCreate {
-    pub version: SemverVersion,
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct UpdatesGetRepositoryParams {
+    /// The version to get.
     pub system_version: SemverVersion,
-    pub component_type: shared::UpdateableComponentType,
-    pub device_id: String,
 }

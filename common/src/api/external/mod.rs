@@ -2628,7 +2628,7 @@ pub struct BgpImportedRouteIpv4 {
 }
 
 /// A description of an uploaded TUF repository.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {
     // Information about the repository.
     pub repo: TufRepoMeta,
@@ -2637,10 +2637,17 @@ pub struct TufRepoDescription {
     pub artifacts: Vec<TufArtifactMeta>,
 }
 
+impl TufRepoDescription {
+    /// Sorts the artifacts so that descriptions can be compared.
+    pub fn sort_artifacts(&mut self) {
+        self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+}
+
 /// Metadata about a TUF repository.
 ///
 /// Found within a [`TufRepoDescription`].
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoMeta {
     /// The hash of the repository.
     ///
@@ -2669,7 +2676,7 @@ pub struct TufRepoMeta {
 /// Metadata about an individual TUF artifact.
 ///
 /// Found within a [`TufRepoDescription`].
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufArtifactMeta {
     /// The artifact ID.
     pub id: ArtifactId,
@@ -2705,6 +2712,14 @@ pub enum TufRepoInsertStatus {
 
     /// The repository did not exist, and was inserted into the database.
     Inserted,
+}
+
+/// Data about a successful TUF repo get from Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoGetResponse {
+    /// The description of the repository.
+    pub description: TufRepoDescription,
 }
 
 #[cfg(test)]

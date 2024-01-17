@@ -433,8 +433,9 @@ async fn cpapi_artifact_download(
     let opctx =
         crate::context::op_context_for_internal_api(&request_context).await;
     // TODO: return 404 if the error we get here says that the record isn't found
-    let body =
-        nexus.download_artifact(&opctx, path_params.into_inner()).await?;
+    let body = nexus
+        .updates_download_artifact(&opctx, path_params.into_inner())
+        .await?;
 
     Ok(HttpResponseOk(Body::from(body).into()))
 }

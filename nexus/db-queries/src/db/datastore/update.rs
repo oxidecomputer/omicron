@@ -11,24 +11,15 @@ use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::{public_error_from_diesel, ErrorHandler};
-use crate::db::model::{
-    ComponentUpdate, SemverVersion, SystemUpdate, UpdateDeployment,
-    UpdateStatus, UpdateableComponent,
-};
-use crate::db::pagination::paginated;
+use crate::db::model::SemverVersion;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
-use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
-use nexus_db_model::{
-    ArtifactHash, SystemUpdateComponentUpdate, TufArtifact, TufRepo,
-    TufRepoDescription,
-};
-use nexus_types::identity::Asset;
+use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, ListResultVec, LookupResult,
-    LookupType, ResourceType, TufRepoInsertStatus, UpdateResult,
+    self, CreateResult, LookupResult, LookupType, ResourceType,
+    TufRepoInsertStatus,
 };
 use swrite::{swrite, SWrite};
 use uuid::Uuid;
@@ -81,7 +72,9 @@ impl DataStore {
     /// Inserts a new TUF repository into the database.
     ///
     /// Returns the repository just inserted, or an existing
-    /// `TufRepoDescription` if one was already found. (This is not an upsert.)
+    /// `TufRepoDescription` if one was already found. (This is not an upsert,
+    /// because if we know about an existing repo but with different contents,
+    /// we reject that.)
     pub async fn update_tuf_repo_insert(
         &self,
         opctx: &OpContext,
@@ -118,11 +111,11 @@ impl DataStore {
             })
     }
 
-    /// Returns the TUF repo description corresponding to this hash.
-    pub async fn update_tuf_repo_lookup_by_hash(
+    /// Returns the TUF repo description corresponding to this system version.
+    pub async fn update_tuf_repo_get(
         &self,
         opctx: &OpContext,
-        hash: ArtifactHash,
+        system_version: SemverVersion,
     ) -> LookupResult<TufRepoDescription> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
 
@@ -131,7 +124,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         let repo = dsl::tuf_repo
-            .filter(dsl::sha256.eq(hash))
+            .filter(dsl::system_version.eq(system_version.clone()))
             .select(TufRepo::as_select())
             .first_async::<TufRepo>(&*conn)
             .await
@@ -140,7 +133,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::TufRepo,
-                        LookupType::ByCompositeId(hash.to_string()),
+                        LookupType::ByCompositeId(system_version.to_string()),
                     ),
                 )
             })?;
@@ -149,318 +142,6 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(TufRepoDescription { repo, artifacts })
-    }
-
-    pub async fn upsert_system_update(
-        &self,
-        opctx: &OpContext,
-        update: SystemUpdate,
-    ) -> CreateResult<SystemUpdate> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
-        use db::schema::system_update::dsl::*;
-
-        diesel::insert_into(system_update)
-            .values(update.clone())
-            .on_conflict(version)
-            .do_update()
-            // for now the only modifiable field is time_modified, but we intend
-            // to add more metadata to this model
-            .set(time_modified.eq(Utc::now()))
-            .returning(SystemUpdate::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::SystemUpdate,
-                        &update.version.to_string(),
-                    ),
-                )
-            })
-    }
-
-    // version is unique but not the primary key, so we can't use LookupPath to handle this for us
-    pub async fn system_update_fetch_by_version(
-        &self,
-        opctx: &OpContext,
-        target: SemverVersion,
-    ) -> LookupResult<SystemUpdate> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        use db::schema::system_update::dsl::*;
-
-        let version_string = target.to_string();
-
-        system_update
-            .filter(version.eq(target))
-            .select(SystemUpdate::as_select())
-            .first_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::SystemUpdate,
-                        LookupType::ByCompositeId(version_string),
-                    ),
-                )
-            })
-    }
-
-    pub async fn create_component_update(
-        &self,
-        opctx: &OpContext,
-        system_update_id: Uuid,
-        update: ComponentUpdate,
-    ) -> CreateResult<ComponentUpdate> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
-        // TODO: make sure system update with that ID exists first
-        // let (.., db_system_update) = LookupPath::new(opctx, &self)
-
-        use db::schema::component_update;
-        use db::schema::system_update_component_update as join_table;
-
-        let version_string = update.version.to_string();
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        self.transaction_retry_wrapper("create_component_update")
-            .transaction(&conn, |conn| {
-                let update = update.clone();
-                async move {
-                    let db_update =
-                        diesel::insert_into(component_update::table)
-                            .values(update.clone())
-                            .returning(ComponentUpdate::as_returning())
-                            .get_result_async(&conn)
-                            .await?;
-
-                    diesel::insert_into(join_table::table)
-                        .values(SystemUpdateComponentUpdate {
-                            system_update_id,
-                            component_update_id: update.id(),
-                        })
-                        .returning(SystemUpdateComponentUpdate::as_returning())
-                        .get_result_async(&conn)
-                        .await?;
-
-                    Ok(db_update)
-                }
-            })
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::ComponentUpdate,
-                        &version_string,
-                    ),
-                )
-            })
-    }
-
-    pub async fn system_updates_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<SystemUpdate> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        use db::schema::system_update::dsl::*;
-
-        paginated(system_update, id, pagparams)
-            .select(SystemUpdate::as_select())
-            .order(version.desc())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    pub async fn system_update_components_list(
-        &self,
-        opctx: &OpContext,
-        system_update_id: Uuid,
-    ) -> ListResultVec<ComponentUpdate> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        use db::schema::component_update;
-        use db::schema::system_update_component_update as join_table;
-
-        component_update::table
-            .inner_join(join_table::table)
-            .filter(join_table::columns::system_update_id.eq(system_update_id))
-            .select(ComponentUpdate::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    pub async fn create_updateable_component(
-        &self,
-        opctx: &OpContext,
-        component: UpdateableComponent,
-    ) -> CreateResult<UpdateableComponent> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
-        // make sure system version exists
-        let sys_version = component.system_version.clone();
-        self.system_update_fetch_by_version(opctx, sys_version).await?;
-
-        use db::schema::updateable_component::dsl::*;
-
-        diesel::insert_into(updateable_component)
-            .values(component.clone())
-            .returning(UpdateableComponent::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::UpdateableComponent,
-                        &component.id().to_string(), // TODO: more informative identifier
-                    ),
-                )
-            })
-    }
-
-    pub async fn updateable_components_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<UpdateableComponent> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        use db::schema::updateable_component::dsl::*;
-
-        paginated(updateable_component, id, pagparams)
-            .select(UpdateableComponent::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    pub async fn lowest_component_system_version(
-        &self,
-        opctx: &OpContext,
-    ) -> LookupResult<SemverVersion> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        use db::schema::updateable_component::dsl::*;
-
-        updateable_component
-            .select(system_version)
-            .order(system_version.asc())
-            .first_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    pub async fn highest_component_system_version(
-        &self,
-        opctx: &OpContext,
-    ) -> LookupResult<SemverVersion> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        use db::schema::updateable_component::dsl::*;
-
-        updateable_component
-            .select(system_version)
-            .order(system_version.desc())
-            .first_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    pub async fn create_update_deployment(
-        &self,
-        opctx: &OpContext,
-        deployment: UpdateDeployment,
-    ) -> CreateResult<UpdateDeployment> {
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
-        use db::schema::update_deployment::dsl::*;
-
-        diesel::insert_into(update_deployment)
-            .values(deployment.clone())
-            .returning(UpdateDeployment::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::UpdateDeployment,
-                        &deployment.id().to_string(),
-                    ),
-                )
-            })
-    }
-
-    pub async fn steady_update_deployment(
-        &self,
-        opctx: &OpContext,
-        deployment_id: Uuid,
-    ) -> UpdateResult<UpdateDeployment> {
-        // TODO: use authz::UpdateDeployment as the input so we can check Modify
-        // on that instead
-        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
-
-        use db::schema::update_deployment::dsl::*;
-
-        diesel::update(update_deployment)
-            .filter(id.eq(deployment_id))
-            .set((
-                status.eq(UpdateStatus::Steady),
-                time_modified.eq(diesel::dsl::now),
-            ))
-            .returning(UpdateDeployment::as_returning())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::UpdateDeployment,
-                        LookupType::ById(deployment_id),
-                    ),
-                )
-            })
-    }
-
-    pub async fn update_deployments_list_by_id(
-        &self,
-        opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<UpdateDeployment> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        use db::schema::update_deployment::dsl::*;
-
-        paginated(update_deployment, id, pagparams)
-            .select(UpdateDeployment::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    pub async fn latest_update_deployment(
-        &self,
-        opctx: &OpContext,
-    ) -> LookupResult<UpdateDeployment> {
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        use db::schema::update_deployment::dsl::*;
-
-        update_deployment
-            .select(UpdateDeployment::as_returning())
-            .order(time_created.desc())
-            .first_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }
 
