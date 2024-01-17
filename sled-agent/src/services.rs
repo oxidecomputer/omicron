@@ -1783,6 +1783,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
+                        id,
                         zone_type: OmicronZoneType::Oximeter { .. },
                         underlay_address,
                         ..
@@ -1796,14 +1797,13 @@ impl ServiceManager {
                 // Configure the Oximeter service.
                 let datalink = installed_zone.get_control_vnic_name();
                 let gateway = &info.underlay_address.to_string();
-                assert_eq!(request.zone.addresses.len(), 1);
                 let address = SocketAddr::new(
-                    IpAddr::V6(request.zone.addresses[0]),
+                    IpAddr::V6(*underlay_address),
                     OXIMETER_PORT,
                 );
                 let listen_addr = &address.ip().to_string();
                 let listen_port = &address.port().to_string();
-                let id = &request.zone.id.to_string();
+                let id = &id.to_string();
 
                 let oximeter_config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
@@ -2182,14 +2182,6 @@ impl ServiceManager {
                         // service is enabled.
                         smfh.refresh()?;
                     }
-
-                    OmicronZoneType::Oximeter { address } => {
-                        info!(self.inner.log, "Setting up oximeter service");
-                        smfh.setprop("config/id", zone_config.zone.id)?;
-                        smfh.setprop("config/address", address.to_string())?;
-                        smfh.refresh()?;
-                    }
-
                     OmicronZoneType::BoundaryNtp {
                         ntp_servers,
                         dns_servers,
@@ -3729,6 +3721,7 @@ mod test {
     const GLOBAL_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
+    // Change here
     const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_oximeter";
     const EXPECTED_PORT: u16 = 12223;
 
