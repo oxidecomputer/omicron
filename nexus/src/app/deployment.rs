@@ -76,6 +76,8 @@ struct PlanningContext {
 }
 
 impl super::Nexus {
+    // Once we store blueprints in the database, this function will likely just
+    // delegate to a corresponding datastore function.
     pub async fn blueprint_list(
         &self,
         opctx: &OpContext,
@@ -96,6 +98,8 @@ impl super::Nexus {
             .collect())
     }
 
+    // Once we store blueprints in the database, this function will likely just
+    // delegate to a corresponding datastore function.
     pub async fn blueprint_view(
         &self,
         opctx: &OpContext,
@@ -116,6 +120,8 @@ impl super::Nexus {
             .ok_or_else(|| blueprint.not_found())
     }
 
+    // Once we store blueprints in the database, this function will likely just
+    // delegate to a corresponding datastore function.
     pub async fn blueprint_delete(
         &self,
         opctx: &OpContext,
@@ -149,11 +155,29 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<BlueprintTarget, Error> {
-        opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
-        let blueprints = self.blueprints.lock().unwrap();
-        Ok(blueprints.target.clone())
+        self.blueprint_target(opctx).await.map(|(target, _)| target)
     }
 
+    // This is a stand-in for a datastore function that fetches the current
+    // target information and the target blueprint's contents.  This helper
+    // exists to combine the authz check with the lookup, which is what the
+    // datastore function will eventually do.
+    async fn blueprint_target(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(BlueprintTarget, Option<Blueprint>), Error> {
+        opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let blueprints = self.blueprints.lock().unwrap();
+        Ok((
+            blueprints.target.clone(),
+            blueprints.target.target_id.and_then(|target_id| {
+                blueprints.all_blueprints.get(&target_id).cloned()
+            }),
+        ))
+    }
+
+    // Once we store blueprints in the database, this function will likely just
+    // delegate to a corresponding datastore function.
     pub async fn blueprint_target_set(
         &self,
         opctx: &OpContext,
@@ -262,6 +286,8 @@ impl super::Nexus {
         Ok(PlanningContext { creator, policy: Policy { sleds } })
     }
 
+    // Once we store blueprints in the database, this function will likely just
+    // delegate to a corresponding datastore function.
     async fn blueprint_add(
         &self,
         opctx: &OpContext,
@@ -281,7 +307,6 @@ impl super::Nexus {
         opctx: &OpContext,
         collection_id: Uuid,
     ) -> CreateResult<Blueprint> {
-        opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let collection = self
             .datastore()
             .inventory_collection_read_all_or_nothing(
@@ -312,20 +337,13 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
-        opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
-        let parent_blueprint = {
-            let blueprints = self.blueprints.lock().unwrap();
-            let Some(target_id) = blueprints.target.target_id else {
-                return Err(Error::conflict(
-                    "cannot regenerate blueprint without existing target",
-                ));
-            };
-            blueprints
-                .all_blueprints
-                .get(&target_id)
-                .cloned()
-                .expect("expected target_id to correspond to a blueprint")
+        let (_, maybe_parent) = self.blueprint_target(opctx).await?;
+        let Some(parent_blueprint) = maybe_parent else {
+            return Err(Error::conflict(
+                "cannot regenerate blueprint without existing target",
+            ));
         };
+
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let planner = Planner::new_based_on(
             opctx.log.clone(),
