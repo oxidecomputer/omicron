@@ -100,128 +100,12 @@ impl<'a> Planner<'a> {
 #[cfg(test)]
 mod test {
     use super::Planner;
+    use crate::blueprint_builder::test::example;
+    use crate::blueprint_builder::test::policy_add_sled;
     use crate::blueprint_builder::BlueprintBuilder;
-    use ipnet::IpAdd;
-    use nexus_types::deployment::Policy;
-    use nexus_types::deployment::SledResources;
-    use nexus_types::deployment::ZpoolName;
-    use nexus_types::inventory::Collection;
-    use omicron_common::address::Ipv6Subnet;
-    use omicron_common::address::SLED_PREFIX;
-    use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_client::types::{
-        Baseboard, Inventory, OmicronZoneConfig, OmicronZoneDataset,
-        OmicronZoneType, OmicronZonesConfig, SledRole,
-    };
-    use std::collections::BTreeMap;
-    use std::collections::BTreeSet;
-    use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use std::str::FromStr;
-    use uuid::Uuid;
-
-    fn policy_add_sled(policy: &mut Policy, sled_id: Uuid) -> Ipv6Addr {
-        let i = policy.sleds.len() + 1;
-        let sled_ip: Ipv6Addr =
-            format!("fd00:1122:3344:{}::1", i + 1).parse().unwrap();
-
-        let zpools: BTreeSet<ZpoolName> = [
-            "oxp_be776cf5-4cba-4b7d-8109-3dfd020f22ee",
-            "oxp_aee23a17-b2ce-43f2-9302-c738d92cca28",
-            "oxp_f7940a6b-c865-41cf-ad61-1b831d594286",
-        ]
-        .iter()
-        .map(|name_str| {
-            ZpoolName::from_str(name_str).expect("not a valid zpool name")
-        })
-        .collect();
-
-        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_ip);
-        policy.sleds.insert(sled_id, SledResources { zpools, subnet });
-        sled_ip
-    }
-
-    /// Returns a collection and policy describing a pretty simple system
-    fn example() -> (Collection, Policy) {
-        let mut builder = nexus_inventory::CollectionBuilder::new("test-suite");
-
-        let sled_ids = [
-            "72443b6c-b8bb-4ffa-ab3a-aeaa428ed79b",
-            "a5f3db3a-61aa-4f90-ad3e-02833c253bf5",
-            "0d168386-2551-44e8-98dd-ae7a7570f8a0",
-        ];
-        let mut policy = Policy { sleds: BTreeMap::new() };
-        for sled_id_str in sled_ids.iter() {
-            let sled_id: Uuid = sled_id_str.parse().unwrap();
-            let sled_ip = policy_add_sled(&mut policy, sled_id);
-            let serial_number = format!("s{}", policy.sleds.len());
-            builder
-                .found_sled_inventory(
-                    "test-suite",
-                    Inventory {
-                        baseboard: Baseboard::Gimlet {
-                            identifier: serial_number,
-                            model: String::from("model1"),
-                            revision: 0,
-                        },
-                        reservoir_size: ByteCount::from(1024),
-                        sled_role: SledRole::Gimlet,
-                        sled_agent_address: SocketAddrV6::new(
-                            sled_ip, 12345, 0, 0,
-                        )
-                        .to_string(),
-                        sled_id,
-                        usable_hardware_threads: 10,
-                        usable_physical_ram: ByteCount::from(1024 * 1024),
-                    },
-                )
-                .unwrap();
-
-            let zpools = &policy.sleds.get(&sled_id).unwrap().zpools;
-            let ip1 = sled_ip.saturating_add(1);
-            let zones: Vec<_> = std::iter::once(OmicronZoneConfig {
-                id: Uuid::new_v4(),
-                underlay_address: sled_ip.saturating_add(1),
-                zone_type: OmicronZoneType::InternalNtp {
-                    address: SocketAddrV6::new(ip1, 12345, 0, 0).to_string(),
-                    dns_servers: vec![],
-                    domain: None,
-                    ntp_servers: vec![],
-                },
-            })
-            .chain(zpools.iter().enumerate().map(|(i, zpool_name)| {
-                let ip = sled_ip.saturating_add(u128::try_from(i + 2).unwrap());
-                OmicronZoneConfig {
-                    id: Uuid::new_v4(),
-                    underlay_address: ip,
-                    zone_type: OmicronZoneType::Crucible {
-                        address: String::from("[::1]:12345"),
-                        dataset: OmicronZoneDataset {
-                            pool_name: zpool_name.clone(),
-                        },
-                    },
-                }
-            }))
-            .collect();
-
-            builder
-                .found_sled_omicron_zones(
-                    "test-suite",
-                    sled_id,
-                    OmicronZonesConfig {
-                        generation: Generation::new().next(),
-                        zones,
-                    },
-                )
-                .unwrap();
-        }
-
-        let collection = builder.build();
-
-        (collection, policy)
-    }
+    use sled_agent_client::types::OmicronZoneType;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -231,23 +115,14 @@ mod test {
         // Use our example inventory collection.
         let (collection, mut policy) = example();
 
-        // Build the initial blueprint.
+        // Build the initial blueprint.  We don't bother verifying it here
+        // because there's a separate test for that.
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
             &policy,
             "the_test",
         )
         .expect("failed to create initial blueprint");
-
-        // Since collections don't include what was in service, we have to
-        // provide that ourselves.  For our purposes, we don't care.
-        let zones_in_service = blueprint1.zones_in_service.clone();
-        let diff =
-            blueprint1.diff_from_collection(&collection, &zones_in_service);
-        println!("0 -> 1 (expected no changes):\n{}", diff);
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_changed().count(), 0);
 
         // Now run the planner.  It should do nothing because our initial
         // system didn't have any issues that the planner currently knows how to

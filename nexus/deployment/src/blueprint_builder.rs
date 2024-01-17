@@ -407,3 +407,276 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 }
+
+#[cfg(test)]
+pub mod test {
+    use super::BlueprintBuilder;
+    use ipnet::IpAdd;
+    use nexus_types::deployment::Policy;
+    use nexus_types::deployment::SledResources;
+    use nexus_types::deployment::ZpoolName;
+    use nexus_types::inventory::Collection;
+    use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::SLED_PREFIX;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::Generation;
+    use sled_agent_client::types::{
+        Baseboard, Inventory, OmicronZoneConfig, OmicronZoneDataset,
+        OmicronZoneType, OmicronZonesConfig, SledRole,
+    };
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
+    use std::str::FromStr;
+    use uuid::Uuid;
+
+    /// Returns a collection and policy describing a pretty simple system
+    pub fn example() -> (Collection, Policy) {
+        let mut builder = nexus_inventory::CollectionBuilder::new("test-suite");
+
+        let sled_ids = [
+            "72443b6c-b8bb-4ffa-ab3a-aeaa428ed79b",
+            "a5f3db3a-61aa-4f90-ad3e-02833c253bf5",
+            "0d168386-2551-44e8-98dd-ae7a7570f8a0",
+        ];
+        let mut policy = Policy { sleds: BTreeMap::new() };
+        for sled_id_str in sled_ids.iter() {
+            let sled_id: Uuid = sled_id_str.parse().unwrap();
+            let sled_ip = policy_add_sled(&mut policy, sled_id);
+            let serial_number = format!("s{}", policy.sleds.len());
+            builder
+                .found_sled_inventory(
+                    "test-suite",
+                    Inventory {
+                        baseboard: Baseboard::Gimlet {
+                            identifier: serial_number,
+                            model: String::from("model1"),
+                            revision: 0,
+                        },
+                        reservoir_size: ByteCount::from(1024),
+                        sled_role: SledRole::Gimlet,
+                        sled_agent_address: SocketAddrV6::new(
+                            sled_ip, 12345, 0, 0,
+                        )
+                        .to_string(),
+                        sled_id,
+                        usable_hardware_threads: 10,
+                        usable_physical_ram: ByteCount::from(1024 * 1024),
+                    },
+                )
+                .unwrap();
+
+            let zpools = &policy.sleds.get(&sled_id).unwrap().zpools;
+            let ip1 = sled_ip.saturating_add(1);
+            let zones: Vec<_> = std::iter::once(OmicronZoneConfig {
+                id: Uuid::new_v4(),
+                underlay_address: sled_ip.saturating_add(1),
+                zone_type: OmicronZoneType::InternalNtp {
+                    address: SocketAddrV6::new(ip1, 12345, 0, 0).to_string(),
+                    dns_servers: vec![],
+                    domain: None,
+                    ntp_servers: vec![],
+                },
+            })
+            .chain(zpools.iter().enumerate().map(|(i, zpool_name)| {
+                let ip = sled_ip.saturating_add(u128::try_from(i + 2).unwrap());
+                OmicronZoneConfig {
+                    id: Uuid::new_v4(),
+                    underlay_address: ip,
+                    zone_type: OmicronZoneType::Crucible {
+                        address: String::from("[::1]:12345"),
+                        dataset: OmicronZoneDataset {
+                            pool_name: zpool_name.clone(),
+                        },
+                    },
+                }
+            }))
+            .collect();
+
+            builder
+                .found_sled_omicron_zones(
+                    "test-suite",
+                    sled_id,
+                    OmicronZonesConfig {
+                        generation: Generation::new().next(),
+                        zones,
+                    },
+                )
+                .unwrap();
+        }
+
+        let collection = builder.build();
+
+        (collection, policy)
+    }
+
+    pub fn policy_add_sled(policy: &mut Policy, sled_id: Uuid) -> Ipv6Addr {
+        let i = policy.sleds.len() + 1;
+        let sled_ip: Ipv6Addr =
+            format!("fd00:1122:3344:{}::1", i + 1).parse().unwrap();
+
+        let zpools: BTreeSet<ZpoolName> = [
+            "oxp_be776cf5-4cba-4b7d-8109-3dfd020f22ee",
+            "oxp_aee23a17-b2ce-43f2-9302-c738d92cca28",
+            "oxp_f7940a6b-c865-41cf-ad61-1b831d594286",
+        ]
+        .iter()
+        .map(|name_str| {
+            ZpoolName::from_str(name_str).expect("not a valid zpool name")
+        })
+        .collect();
+
+        let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_ip);
+        policy.sleds.insert(sled_id, SledResources { zpools, subnet });
+        sled_ip
+    }
+
+    #[test]
+    fn test_initial() {
+        // Test creating a blueprint from a collection and verifying that it
+        // describes no changes.
+        let (collection, policy) = example();
+        let blueprint_initial =
+            BlueprintBuilder::build_initial_from_collection(
+                &collection,
+                &policy,
+                "the_test",
+            )
+            .expect("failed to create initial blueprint");
+
+        // Since collections don't include what was in service, we have to
+        // provide that ourselves.  For our purposes though we don't care.
+        let zones_in_service = blueprint_initial.zones_in_service.clone();
+        let diff = blueprint_initial
+            .diff_from_collection(&collection, &zones_in_service);
+        println!(
+            "collection -> initial blueprint (expected no changes):\n{}",
+            diff
+        );
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_changed().count(), 0);
+
+        // Test a no-op blueprint.
+        let builder = BlueprintBuilder::new_based_on(
+            &blueprint_initial,
+            &policy,
+            "test_basic",
+        );
+        let blueprint = builder.build();
+        let diff = blueprint_initial.diff(&blueprint);
+        println!(
+            "initial blueprint -> next blueprint (expected no changes):\n{}",
+            diff
+        );
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_changed().count(), 0);
+    }
+
+    #[test]
+    fn test_basic() {
+        let (collection, mut policy) = example();
+        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            &policy,
+            "the_test",
+        )
+        .expect("failed to create initial blueprint");
+
+        let mut builder =
+            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test_basic");
+
+        // The initial blueprint should have internal NTP zones on all the
+        // existing sleds, plus Crucible zones on all pools.  So if we ensure
+        // all these zones exist, we should see no change.
+        for (sled_id, sled_resources) in &policy.sleds {
+            builder.sled_ensure_zone_internal_ntp(*sled_id).unwrap();
+            for pool_name in &sled_resources.zpools {
+                builder
+                    .sled_ensure_zone_crucible(*sled_id, pool_name.clone())
+                    .unwrap();
+            }
+        }
+
+        let blueprint2 = builder.build();
+        let diff = blueprint1.diff(&blueprint2);
+        println!(
+            "initial blueprint -> next blueprint (expected no changes):\n{}",
+            diff
+        );
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_changed().count(), 0);
+
+        // The next step is adding these zones to a new sled.
+        let new_sled_id = Uuid::new_v4();
+        let _ = policy_add_sled(&mut policy, new_sled_id);
+        let mut builder =
+            BlueprintBuilder::new_based_on(&blueprint2, &policy, "test_basic");
+        builder.sled_ensure_zone_internal_ntp(new_sled_id).unwrap();
+        let new_sled_resources = policy.sleds.get(&new_sled_id).unwrap();
+        for pool_name in &new_sled_resources.zpools {
+            builder
+                .sled_ensure_zone_crucible(new_sled_id, pool_name.clone())
+                .unwrap();
+        }
+
+        let blueprint3 = builder.build();
+        let diff = blueprint2.diff(&blueprint3);
+        println!("expecting new NTP and Crucible zones:\n{}", diff);
+
+        // No sleds were changed or removed.
+        assert_eq!(diff.sleds_changed().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+
+        // One sled was added.
+        let sleds: Vec<_> = diff.sleds_added().collect();
+        assert_eq!(sleds.len(), 1);
+        let (sled_id, new_sled_zones) = sleds[0];
+        assert_eq!(sled_id, new_sled_id);
+        // The generation number should be newer than the initial default.
+        assert!(new_sled_zones.generation > Generation::new());
+
+        // All zones' underlay addresses ought to be on the sled's subnet.
+        for z in &new_sled_zones.zones {
+            assert!(new_sled_resources
+                .subnet
+                .net()
+                .contains(z.underlay_address));
+        }
+
+        // Check for an NTP zone.  Its sockaddr's IP should also be on the
+        // sled's subnet.
+        assert!(new_sled_zones.zones.iter().any(|z| {
+            if let OmicronZoneType::InternalNtp { address, .. } = &z.zone_type {
+                let sockaddr = address.parse::<SocketAddrV6>().unwrap();
+                assert!(new_sled_resources
+                    .subnet
+                    .net()
+                    .contains(*sockaddr.ip()));
+                true
+            } else {
+                false
+            }
+        }));
+        let crucible_pool_names = new_sled_zones
+            .zones
+            .iter()
+            .filter_map(|z| {
+                if let OmicronZoneType::Crucible { address, dataset } =
+                    &z.zone_type
+                {
+                    let sockaddr = address.parse::<SocketAddrV6>().unwrap();
+                    let ip = sockaddr.ip();
+                    assert!(new_sled_resources.subnet.net().contains(*ip));
+                    Some(dataset.pool_name.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeSet<_>>();
+        assert_eq!(crucible_pool_names, new_sled_resources.zpools);
+    }
+}
