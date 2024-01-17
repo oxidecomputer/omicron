@@ -449,6 +449,7 @@ pub(crate) async fn ensure_zpool_datasets_are_encrypted(
     log: &Logger,
     zpool_name: &ZpoolName,
 ) -> Result<(), DatasetEncryptionMigrationError> {
+    info!(log, "Looking for unencrypted datasets in {zpool_name}");
     let unencrypted_datasets =
         find_all_unencrypted_datasets_directly_within_pool(&zpool_name).await?;
 
