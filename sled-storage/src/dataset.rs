@@ -451,7 +451,8 @@ pub(crate) async fn ensure_zpool_datasets_are_encrypted(
 ) -> Result<(), DatasetEncryptionMigrationError> {
     info!(log, "Looking for unencrypted datasets in {zpool_name}");
     let unencrypted_datasets =
-        find_all_unencrypted_datasets_directly_within_pool(&zpool_name).await?;
+        find_all_unencrypted_datasets_directly_within_pool(&log, &zpool_name)
+            .await?;
 
     // TODO: Could do this in parallel?
     for dataset in unencrypted_datasets {
@@ -464,6 +465,7 @@ pub(crate) async fn ensure_zpool_datasets_are_encrypted(
 }
 
 async fn find_all_unencrypted_datasets_directly_within_pool(
+    log: &Logger,
     zpool_name: &ZpoolName,
 ) -> Result<Vec<String>, DatasetEncryptionMigrationError> {
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
@@ -482,20 +484,36 @@ async fn find_all_unencrypted_datasets_directly_within_pool(
             "zfs list {pool_name}"
         )));
     }
+
     let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(stdout
-        .trim()
-        .split('\n')
-        .filter_map(|line| {
-            let mut iter = line.split_whitespace();
-            let dataset = iter.next()?;
-            let encrypted = iter.next()? != "off";
-            if encrypted {
-                return None;
-            }
+    let lines = stdout.trim().split('\n');
+
+    let mut unencrypted_datasets = vec![];
+    for line in lines {
+        let mut iter = line.split_whitespace();
+        info!(log, "Observing line: {:?}", line);
+        let Some(dataset) = iter.next() else {
+            continue;
+        };
+        let log = log.new(slog::o!("dataset" => dataset.to_string()));
+        info!(log, "Found dataset");
+
+        let Some(encryption) = iter.next() else {
+            continue;
+        };
+        let encrypted = encryption != "off";
+        if encrypted {
+            info!(log, "Found dataset, but it is already encrypted");
+            continue;
+        }
+        info!(log, "Found dataset, and it isn't encrypted");
+        if let Some(dataset) =
             dataset.strip_prefix(&format!("{pool_name}/")).map(String::from)
-        })
-        .collect())
+        {
+            unencrypted_datasets.push(dataset);
+        }
+    }
+    Ok(unencrypted_datasets)
 }
 
 // Precondition:
