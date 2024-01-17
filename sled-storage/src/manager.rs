@@ -575,7 +575,7 @@ impl StorageManager {
         }
 
         let zoned = true;
-        let fs_name = &request.dataset_name.full();
+        let fs_name = &request.dataset_name.full_name();
         let do_format = true;
         let encryption_details = None;
         let size_details = None;

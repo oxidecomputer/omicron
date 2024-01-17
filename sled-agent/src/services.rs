@@ -1474,7 +1474,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(zone_config) => zone_config
                 .zone
                 .dataset_name()
-                .map(|n| zone::Dataset { name: n.full() })
+                .map(|n| zone::Dataset { name: n.full_name() })
                 .into_iter()
                 .collect(),
             ZoneArgs::Switch(_) => vec![],
@@ -1711,7 +1711,7 @@ impl ServiceManager {
                     dataset.pool_name.clone(),
                     DatasetKind::Crucible,
                 )
-                .full();
+                .full_name();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)

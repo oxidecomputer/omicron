@@ -19,6 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
 use slog::{info, Logger};
+use std::str::FromStr;
 use std::sync::OnceLock;
 
 pub const INSTALL_DATASET: &'static str = "install";
@@ -138,16 +139,57 @@ pub enum DatasetKind {
     InternalDns,
 }
 
+impl DatasetKind {
+    fn dataset_should_be_encrypted(&self) -> bool {
+        match self {
+            // We encrypt all datasets except Crucible.
+            //
+            // Crucible already performs encryption internally, and we
+            // avoid double-encryption.
+            DatasetKind::Crucible => false,
+            _ => true,
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DatasetKindParseError {
+    #[error("Dataset unknown: {0}")]
+    UnknownDataset(String),
+}
+
+impl FromStr for DatasetKind {
+    type Err = DatasetKindParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use DatasetKind::*;
+        let kind = match s {
+            "crucible" => Crucible,
+            "cockroachdb" => CockroachDb,
+            "clickhouse" => Clickhouse,
+            "clickhouse_keeper" => ClickhouseKeeper,
+            "external_dns" => ExternalDns,
+            "internal_dns" => InternalDns,
+            _ => {
+                return Err(DatasetKindParseError::UnknownDataset(
+                    s.to_string(),
+                ))
+            }
+        };
+        Ok(kind)
+    }
+}
+
 impl std::fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
-            CockroachDb { .. } => "cockroachdb",
+            CockroachDb => "cockroachdb",
             Clickhouse => "clickhouse",
             ClickhouseKeeper => "clickhouse_keeper",
-            ExternalDns { .. } => "external_dns",
-            InternalDns { .. } => "internal_dns",
+            ExternalDns => "external_dns",
+            InternalDns => "internal_dns",
         };
         write!(f, "{}", s)
     }
@@ -176,7 +218,28 @@ impl DatasetName {
         &self.kind
     }
 
-    pub fn full(&self) -> String {
+    /// Returns the full name of the dataset, as would be returned from
+    /// "zfs get" or "zfs list".
+    ///
+    /// If this dataset should be encrypted, this automatically adds the
+    /// "crypt" dataset component.
+    pub fn full_name(&self) -> String {
+        // Currently, we encrypt all datasets except Crucible.
+        //
+        // Crucible already performs encryption internally, and we
+        // avoid double-encryption.
+        if self.kind.dataset_should_be_encrypted() {
+            self.full_encrypted_name()
+        } else {
+            self.full_unencrypted_name()
+        }
+    }
+
+    fn full_encrypted_name(&self) -> String {
+        format!("{}/crypt/{}", self.pool_name, self.kind)
+    }
+
+    fn full_unencrypted_name(&self) -> String {
         format!("{}/{}", self.pool_name, self.kind)
     }
 }
@@ -201,6 +264,8 @@ pub enum DatasetError {
         #[source]
         err: Box<zfs::SetValueError>,
     },
+    #[error("Failed to make datasets encrypted")]
+    EncryptionMigration(#[from] DatasetEncryptionMigrationError),
 }
 
 /// Ensure that the zpool contains all the datasets we would like it to
@@ -360,6 +425,241 @@ pub(crate) async fn ensure_zpool_has_datasets(
                 },
             )?;
         }
+    }
+    Ok(())
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DatasetEncryptionMigrationError {
+    #[error(transparent)]
+    IoError(#[from] std::io::Error),
+
+    #[error("Failed to run command")]
+    FailedCommand(String),
+
+    #[error("Cannot create new encrypted dataset")]
+    DatasetCreation(#[from] illumos_utils::zfs::EnsureFilesystemError),
+
+    #[error("Missing stdout stream during 'zfs send' command")]
+    MissingStdoutForZfsSend,
+}
+
+/// Migrates unencrypted datasets to their encrypted formats.
+pub(crate) async fn ensure_zpool_datasets_are_encrypted(
+    log: &Logger,
+    zpool_name: &ZpoolName,
+) -> Result<(), DatasetEncryptionMigrationError> {
+    let unencrypted_datasets =
+        find_all_unencrypted_datasets_directly_within_pool(&zpool_name).await?;
+
+    // TODO: Could do this in parallel?
+    for dataset in unencrypted_datasets {
+        let log = &log.new(slog::o!("dataset" => dataset.clone()));
+        info!(log, "Found unencrypted dataset");
+
+        ensure_zpool_dataset_is_encrypted(&log, &zpool_name, &dataset).await?;
+    }
+    Ok(())
+}
+
+async fn find_all_unencrypted_datasets_directly_within_pool(
+    zpool_name: &ZpoolName,
+) -> Result<Vec<String>, DatasetEncryptionMigrationError> {
+    let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+    let pool_name = zpool_name.to_string();
+    let cmd = command.args(&[
+        "list",
+        "-rHo",
+        "name,encryption",
+        "-d",
+        "1",
+        &pool_name,
+    ]);
+    let output = cmd.output().await?;
+    if !output.status.success() {
+        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
+            "zfs list {pool_name}"
+        )));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .trim()
+        .split('\n')
+        .filter_map(|line| {
+            let mut iter = line.split_whitespace();
+            let dataset = iter.next()?;
+            let encrypted = iter.next()? != "off";
+            if encrypted {
+                return None;
+            }
+            dataset.strip_prefix(&format!("{pool_name}/")).map(String::from)
+        })
+        .collect())
+}
+
+// Precondition:
+// - We found the dataset as a direct descendant of "zpool_name", which
+// has encryption set to "off".
+//
+// "dataset" does not include the zpool prefix; format!("{zpool_name}/dataset")
+// would be the full name of the unencrypted dataset.
+async fn ensure_zpool_dataset_is_encrypted(
+    log: &Logger,
+    zpool_name: &ZpoolName,
+    unencrypted_dataset: &str,
+) -> Result<(), DatasetEncryptionMigrationError> {
+    let Ok(kind) = DatasetKind::from_str(&unencrypted_dataset) else {
+        info!(log, "Unrecognized dataset kind");
+        return Ok(());
+    };
+    info!(log, "Dataset recognized");
+
+    if !kind.dataset_should_be_encrypted() {
+        info!(log, "Dataset should not be encrypted");
+        return Ok(());
+    }
+    info!(log, "Dataset should be encrypted");
+
+    let encrypted_dataset = DatasetName::new(zpool_name.clone(), kind);
+    if dataset_exists(&encrypted_dataset.full_name()).await? {
+        info!(log, "Dataset already has encrypted variant");
+        return Ok(());
+    }
+    info!(log, "Dataset has not yet been encrypted");
+
+    // Creates the target dataset, with a "temporary" prefix.
+    let encrypted_dataset_tmp =
+        format!("{}-tmp", encrypted_dataset.full_name());
+    ensure_dataset_exists(&encrypted_dataset_tmp).await?;
+    info!(log, "Encrypted dataset exists");
+
+    // Use the full name to reference the unencrypted dataset
+    let unencrypted_dataset = format!("{zpool_name}/{unencrypted_dataset}");
+    let unencrypted_dataset_snapshot =
+        format!("{unencrypted_dataset}@migration");
+
+    // We don't care if the snapshot didn't exist
+    let _ = zfs_destroy(&unencrypted_dataset_snapshot).await;
+    zfs_create_snapshot(&unencrypted_dataset_snapshot).await?;
+    info!(log, "Encrypted dataset snapshotted");
+
+    piped_xfer(&unencrypted_dataset_snapshot, &encrypted_dataset_tmp).await?;
+    info!(log, "Dataset transferred to encrypted location");
+
+    zfs_destroy(&unencrypted_dataset_snapshot).await?;
+    zfs_rename(&encrypted_dataset_tmp, &encrypted_dataset.full_name()).await?;
+
+    // TODO: We **could** destroy the original dataset here
+    Ok(())
+}
+
+// Returns true if the dataset exists
+async fn dataset_exists(
+    dataset: &str,
+) -> Result<bool, DatasetEncryptionMigrationError> {
+    let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+    let cmd = command.args(&["list", "-H", dataset]);
+    Ok(cmd.status().await?.success())
+}
+
+async fn ensure_dataset_exists(
+    dataset: &str,
+) -> Result<(), DatasetEncryptionMigrationError> {
+    let zoned = true;
+    let do_format = true;
+    // This is a misnomer; YES, we're encrypting the filesystem.
+    // This is only necessary when making the "crypt" dataset.
+    let encryption_details = None;
+    let size_details = None;
+    Zfs::ensure_filesystem(
+        dataset,
+        Mountpoint::Path(Utf8PathBuf::from("/data")),
+        zoned,
+        do_format,
+        encryption_details,
+        size_details,
+        None,
+    )?;
+    Ok(())
+}
+
+async fn zfs_destroy(
+    dataset: &str,
+) -> Result<(), DatasetEncryptionMigrationError> {
+    let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+    let cmd = command.args(&["destroy", dataset]);
+    let status = cmd.status().await?;
+    if !status.success() {
+        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
+            "zfs destroy {dataset}"
+        )));
+    }
+    Ok(())
+}
+
+async fn zfs_create_snapshot(
+    unencrypted_dataset_snapshot: &str,
+) -> Result<(), DatasetEncryptionMigrationError> {
+    let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+    let cmd = command.args(&["snapshot", unencrypted_dataset_snapshot]);
+    let status = cmd.status().await?;
+    if !status.success() {
+        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
+            "zfs snapshot {unencrypted_dataset_snapshot}"
+        )));
+    }
+    Ok(())
+}
+
+async fn piped_xfer(
+    from: &str,
+    to: &str,
+) -> Result<(), DatasetEncryptionMigrationError> {
+    let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+    let mut sender = command
+        .args(&["send", from])
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+
+    let Some(sender_stdout) = sender.stdout.take() else {
+        return Err(DatasetEncryptionMigrationError::MissingStdoutForZfsSend);
+    };
+    let sender_stdout: std::process::Stdio =
+        sender_stdout.try_into().map_err(|_| {
+            DatasetEncryptionMigrationError::MissingStdoutForZfsSend
+        })?;
+
+    let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+    let mut receiver =
+        command.args(&["receive", to]).stdin(sender_stdout).spawn()?;
+
+    let status = receiver.wait().await?;
+    if !status.success() {
+        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
+            "zfs receive {to}"
+        )));
+    }
+    let status = sender.wait().await?;
+    if !status.success() {
+        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
+            "zfs send {from}"
+        )));
+    }
+
+    Ok(())
+}
+
+async fn zfs_rename(
+    from: &str,
+    to: &str,
+) -> Result<(), DatasetEncryptionMigrationError> {
+    let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
+    let cmd = command.args(&["rename", from, to]);
+    let status = cmd.status().await?;
+    if !status.success() {
+        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
+            "zfs rename {from} {to}"
+        )));
     }
     Ok(())
 }
