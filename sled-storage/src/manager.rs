@@ -471,7 +471,8 @@ impl StorageManager {
             Err(err) => {
                 error!(
                     self.log,
-                    "Persistent error: {err}: not queueing disk";
+                    "Persistent error:not queueing disk";
+                    "err" => ?err,
                     "disk_id" => ?raw_disk.identity()
                 );
                 Err(err.into())

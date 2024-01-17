@@ -435,13 +435,34 @@ pub enum DatasetEncryptionMigrationError {
     IoError(#[from] std::io::Error),
 
     #[error("Failed to run command")]
-    FailedCommand(String),
+    FailedCommand { command: String, stderr: Option<String> },
 
     #[error("Cannot create new encrypted dataset")]
     DatasetCreation(#[from] illumos_utils::zfs::EnsureFilesystemError),
 
     #[error("Missing stdout stream during 'zfs send' command")]
     MissingStdoutForZfsSend,
+}
+
+fn status_ok_or_get_stderr(
+    command: &tokio::process::Command,
+    output: &std::process::Output,
+) -> Result<(), DatasetEncryptionMigrationError> {
+    if !output.status.success() {
+        let stdcmd = command.as_std();
+        return Err(DatasetEncryptionMigrationError::FailedCommand {
+            command: format!(
+                "{:?} {:?}",
+                stdcmd.get_program(),
+                stdcmd
+                    .get_args()
+                    .collect::<Vec<_>>()
+                    .join(std::ffi::OsStr::new(" "))
+            ),
+            stderr: Some(String::from_utf8_lossy(&output.stderr).to_string()),
+        });
+    }
+    Ok(())
 }
 
 /// Migrates unencrypted datasets to their encrypted formats.
@@ -479,11 +500,7 @@ async fn find_all_unencrypted_datasets_directly_within_pool(
         &pool_name,
     ]);
     let output = cmd.output().await?;
-    if !output.status.success() {
-        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
-            "zfs list {pool_name}"
-        )));
-    }
+    status_ok_or_get_stderr(&cmd, &output)?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines = stdout.trim().split('\n');
@@ -491,12 +508,10 @@ async fn find_all_unencrypted_datasets_directly_within_pool(
     let mut unencrypted_datasets = vec![];
     for line in lines {
         let mut iter = line.split_whitespace();
-        info!(log, "Observing line: {:?}", line);
         let Some(dataset) = iter.next() else {
             continue;
         };
         let log = log.new(slog::o!("dataset" => dataset.to_string()));
-        info!(log, "Found dataset");
 
         let Some(encryption) = iter.next() else {
             continue;
@@ -607,12 +622,8 @@ async fn zfs_destroy(
 ) -> Result<(), DatasetEncryptionMigrationError> {
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["destroy", dataset]);
-    let status = cmd.status().await?;
-    if !status.success() {
-        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
-            "zfs destroy {dataset}"
-        )));
-    }
+    let output = cmd.output().await?;
+    status_ok_or_get_stderr(&cmd, &output)?;
     Ok(())
 }
 
@@ -621,12 +632,8 @@ async fn zfs_create_snapshot(
 ) -> Result<(), DatasetEncryptionMigrationError> {
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["snapshot", unencrypted_dataset_snapshot]);
-    let status = cmd.status().await?;
-    if !status.success() {
-        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
-            "zfs snapshot {unencrypted_dataset_snapshot}"
-        )));
-    }
+    let output = cmd.output().await?;
+    status_ok_or_get_stderr(&cmd, &output)?;
     Ok(())
 }
 
@@ -635,10 +642,9 @@ async fn piped_xfer(
     to: &str,
 ) -> Result<(), DatasetEncryptionMigrationError> {
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
-    let mut sender = command
-        .args(&["send", from])
-        .stdout(std::process::Stdio::piped())
-        .spawn()?;
+    let sender_cmd =
+        command.args(&["send", from]).stdout(std::process::Stdio::piped());
+    let mut sender = sender_cmd.spawn()?;
 
     let Some(sender_stdout) = sender.stdout.take() else {
         return Err(DatasetEncryptionMigrationError::MissingStdoutForZfsSend);
@@ -649,21 +655,13 @@ async fn piped_xfer(
         })?;
 
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
-    let mut receiver =
-        command.args(&["receive", to]).stdin(sender_stdout).spawn()?;
+    let receiver_cmd = command.args(&["receive", to]).stdin(sender_stdout);
+    let receiver = receiver_cmd.spawn()?;
 
-    let status = receiver.wait().await?;
-    if !status.success() {
-        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
-            "zfs receive {to}"
-        )));
-    }
-    let status = sender.wait().await?;
-    if !status.success() {
-        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
-            "zfs send {from}"
-        )));
-    }
+    let output = receiver.wait_with_output().await?;
+    status_ok_or_get_stderr(&receiver_cmd, &output)?;
+    let output = sender.wait_with_output().await?;
+    status_ok_or_get_stderr(&sender_cmd, &output)?;
 
     Ok(())
 }
@@ -674,12 +672,8 @@ async fn zfs_rename(
 ) -> Result<(), DatasetEncryptionMigrationError> {
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.args(&["rename", from, to]);
-    let status = cmd.status().await?;
-    if !status.success() {
-        return Err(DatasetEncryptionMigrationError::FailedCommand(format!(
-            "zfs rename {from} {to}"
-        )));
-    }
+    let output = cmd.output().await?;
+    status_ok_or_get_stderr(&cmd, &output)?;
     Ok(())
 }
 
