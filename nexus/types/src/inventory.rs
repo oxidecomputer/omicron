@@ -9,13 +9,27 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::params::UninitializedSledId;
+use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+use omicron_common::api::external::ByteCount;
+pub use sled_agent_client::types::NetworkInterface;
+pub use sled_agent_client::types::NetworkInterfaceKind;
+pub use sled_agent_client::types::OmicronZoneConfig;
+pub use sled_agent_client::types::OmicronZoneDataset;
+pub use sled_agent_client::types::OmicronZoneType;
+pub use sled_agent_client::types::OmicronZonesConfig;
+pub use sled_agent_client::types::SledRole;
+pub use sled_agent_client::types::SourceNatConfig;
+pub use sled_agent_client::types::Vni;
+pub use sled_agent_client::types::ZpoolName;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
 use uuid::Uuid;
@@ -56,6 +70,11 @@ pub struct Collection {
     ///
     /// In practice, these will be inserted into the `sw_caboose` table.
     pub cabooses: BTreeSet<Arc<Caboose>>,
+    /// unique root of trust page contents that were found in this collection
+    ///
+    /// In practice, these will be inserted into the `sw_root_of_trust_page`
+    /// table.
+    pub rot_pages: BTreeSet<Arc<RotPage>>,
 
     /// all service processors, keyed by baseboard id
     ///
@@ -73,6 +92,20 @@ pub struct Collection {
     /// In practice, these will be inserted into the `inv_caboose` table.
     pub cabooses_found:
         BTreeMap<CabooseWhich, BTreeMap<Arc<BaseboardId>, CabooseFound>>,
+    /// all root of trust page contents found, keyed first by the kind of page
+    /// (`RotPageWhich`), then the baseboard id of the sled where they were
+    /// found
+    ///
+    /// In practice, these will be inserted into the `inv_root_of_trust_page`
+    /// table.
+    pub rot_pages_found:
+        BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+
+    /// Sled Agent information, by *sled* id
+    pub sled_agents: BTreeMap<Uuid, SledAgent>,
+
+    /// Omicron zones found, by *sled* id
+    pub omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
 }
 
 impl Collection {
@@ -82,6 +115,16 @@ impl Collection {
         baseboard_id: &BaseboardId,
     ) -> Option<&CabooseFound> {
         self.cabooses_found
+            .get(&which)
+            .and_then(|by_bb| by_bb.get(baseboard_id))
+    }
+
+    pub fn rot_page_for(
+        &self,
+        which: RotPageWhich,
+        baseboard_id: &BaseboardId,
+    ) -> Option<&RotPageFound> {
+        self.rot_pages_found
             .get(&which)
             .and_then(|by_bb| by_bb.get(baseboard_id))
     }
@@ -106,6 +149,18 @@ pub struct BaseboardId {
     pub part_number: String,
     /// Serial number (unique for a given part number)
     pub serial_number: String,
+}
+
+impl From<Baseboard> for BaseboardId {
+    fn from(value: Baseboard) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
+}
+
+impl From<UninitializedSledId> for BaseboardId {
+    fn from(value: UninitializedSledId) -> Self {
+        BaseboardId { part_number: value.part, serial_number: value.serial }
+    }
 }
 
 /// Caboose contents found during a collection
@@ -176,4 +231,85 @@ pub enum CabooseWhich {
     SpSlot1,
     RotSlotA,
     RotSlotB,
+}
+
+/// Root of trust page contents found during a collection
+///
+/// These are normalized in the database.  Each distinct `RotPage` is assigned a
+/// uuid and shared across many possible collections that reference it.
+#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+pub struct RotPage {
+    pub data_base64: String,
+}
+
+/// Indicates that a particular `RotPage` was found (at a particular time from a
+/// particular source, but these are only for debugging)
+#[derive(Clone, Debug, Ord, Eq, PartialOrd, PartialEq)]
+pub struct RotPageFound {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub page: Arc<RotPage>,
+}
+
+/// Describes which root of trust page this is
+#[derive(Clone, Copy, Debug, EnumIter, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RotPageWhich {
+    Cmpa,
+    CfpaActive,
+    CfpaInactive,
+    CfpaScratch,
+}
+
+/// Trait to convert between the two MGS root of trust page types and a tuple of
+/// `([RotPageWhich], [RotPage])`.
+///
+/// This cannot use the standard `From` trait due to orphan rules: we do not own
+/// the `gateway_client` type, and tuples are always considered foreign.
+pub trait IntoRotPage {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage);
+}
+
+impl IntoRotPage for gateway_client::types::RotCmpa {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage) {
+        (RotPageWhich::Cmpa, RotPage { data_base64: self.base64_data })
+    }
+}
+
+impl IntoRotPage for gateway_client::types::RotCfpa {
+    fn into_rot_page(self) -> (RotPageWhich, RotPage) {
+        use gateway_client::types::RotCfpaSlot;
+        let which = match self.slot {
+            RotCfpaSlot::Active => RotPageWhich::CfpaActive,
+            RotCfpaSlot::Inactive => RotPageWhich::CfpaInactive,
+            RotCfpaSlot::Scratch => RotPageWhich::CfpaScratch,
+        };
+        (which, RotPage { data_base64: self.base64_data })
+    }
+}
+
+/// Inventory reported by sled agent
+///
+/// This is a software notion of a sled, distinct from an underlying baseboard.
+/// A sled may be on a PC (in dev/test environments) and have no associated
+/// baseboard.  There might also be baseboards with no associated sled (if
+/// they have not been formally added to the control plane).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SledAgent {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub baseboard_id: Option<Arc<BaseboardId>>,
+    pub sled_agent_address: SocketAddrV6,
+    pub sled_role: SledRole,
+    pub usable_hardware_threads: u32,
+    pub usable_physical_ram: ByteCount,
+    pub reservoir_size: ByteCount,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OmicronZonesFound {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub zones: OmicronZonesConfig,
 }

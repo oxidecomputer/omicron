@@ -42,9 +42,9 @@ use crate::db::DataStore;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use lazy_static::lazy_static;
 use nexus_types::external_api::shared::{FleetRole, ProjectRole, SiloRole};
 use omicron_common::api::external::{Error, LookupType, ResourceType};
+use once_cell::sync::Lazy;
 use oso::PolarClass;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -169,9 +169,8 @@ pub struct Fleet;
 /// Singleton representing the [`Fleet`] itself for authz purposes
 pub const FLEET: Fleet = Fleet;
 
-lazy_static! {
-    pub static ref FLEET_LOOKUP: LookupType = LookupType::ById(*FLEET_ID);
-}
+pub static FLEET_LOOKUP: Lazy<LookupType> =
+    Lazy::new(|| LookupType::ById(*FLEET_ID));
 
 impl Eq for Fleet {}
 impl PartialEq for Fleet {
@@ -786,6 +785,14 @@ authz_resource! {
 authz_resource! {
     name = "VpcSubnet",
     parent = "Vpc",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
+    name = "FloatingIp",
+    parent = "Project",
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = InProject,

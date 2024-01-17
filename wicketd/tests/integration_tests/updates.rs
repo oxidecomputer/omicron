@@ -17,7 +17,7 @@ use omicron_common::{
     api::internal::nexus::KnownArtifactKind,
     update::{ArtifactHashId, ArtifactKind},
 };
-use tokio::sync::watch;
+use tokio::sync::oneshot;
 use update_engine::NestedError;
 use uuid::Uuid;
 use wicket::OutputKind;
@@ -177,15 +177,15 @@ async fn test_updates() {
         StepEventKind::ExecutionFailed { failed_step, .. } => {
             // TODO: obviously we shouldn't stop here, get past more of the
             // update process in this test.
-            assert_eq!(failed_step.info.component, UpdateComponent::Rot);
+            assert_eq!(failed_step.info.component, UpdateComponent::Host);
         }
         other => {
             panic!("unexpected terminal event kind: {other:?}");
         }
     }
 
-    // Try starting the update again -- this should fail because we require that update state is
-    // cleared before starting a new one.
+    // Try starting the update again -- this should fail because we require that
+    // update state is cleared before starting a new one.
     {
         let error = wicketd_testctx
             .wicketd_client
@@ -197,8 +197,8 @@ async fn test_updates() {
             );
         let error_str = error.to_string();
         assert!(
-            // Errors lose type information across the OpenAPI boundary, so sadly we have to match on
-            // the error string.
+            // Errors lose type information across the OpenAPI boundary, so
+            // sadly we have to match on the error string.
             error_str.contains("existing update data found"),
             "unexpected error: {error_str}"
         );
@@ -436,7 +436,7 @@ async fn test_update_races() {
     };
     let sps: BTreeSet<_> = vec![sp].into_iter().collect();
 
-    let (sender, receiver) = watch::channel(());
+    let (sender, receiver) = oneshot::channel();
     wicketd_testctx
         .server
         .update_tracker
@@ -455,7 +455,7 @@ async fn test_update_races() {
     // Also try starting another fake update, which should fail -- we don't let updates be started
     // if there's current update state.
     {
-        let (_, receiver) = watch::channel(());
+        let (_, receiver) = oneshot::channel();
         let err = wicketd_testctx
             .server
             .update_tracker
@@ -470,9 +470,10 @@ async fn test_update_races() {
     }
 
     // Unblock the update, letting it run to completion.
-    sender.send(()).expect("receiver kept open by update engine");
+    let (final_sender, final_receiver) = oneshot::channel();
+    sender.send(final_sender).expect("receiver kept open by update engine");
+    final_receiver.await.expect("update engine completed successfully");
 
-    // Ensure that the event buffer indicates completion.
     let event_buffer = wicketd_testctx
         .wicketd_client
         .get_update_sp(&SpType::Sled, 0)

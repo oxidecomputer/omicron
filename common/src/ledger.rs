@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{de::DeserializeOwned, Serialize};
-use slog::{error, info, warn, Logger};
+use slog::{debug, info, warn, Logger};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -54,6 +54,7 @@ impl From<Error> for crate::api::external::Error {
 ///
 /// This structure is intended to help with serialization and deserialization
 /// of configuration information to both M.2s.
+#[derive(Debug)]
 pub struct Ledger<T> {
     log: Logger,
     ledger: T,
@@ -87,7 +88,7 @@ impl<T: Ledgerable> Ledger<T> {
             match T::read_from(log, &path).await {
                 Ok(ledger) => ledgers.push(ledger),
                 Err(err) => {
-                    error!(log, "Failed to read ledger: {err}"; "path" => %path)
+                    debug!(log, "Failed to read ledger: {err}"; "path" => %path)
                 }
             }
         }
@@ -183,7 +184,7 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
                 err,
             })
         } else {
-            warn!(log, "No ledger in {path}");
+            info!(log, "No ledger in {path}");
             Err(Error::NotFound)
         }
     }

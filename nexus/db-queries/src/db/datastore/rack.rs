@@ -13,8 +13,9 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
+use crate::db::error::MaybeRetryable::*;
 use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
@@ -26,6 +27,7 @@ use crate::db::model::Rack;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -41,6 +43,7 @@ use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
+use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -55,7 +58,9 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
+use omicron_common::bail_unless;
 use std::net::IpAddr;
+use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
 /// Groups arguments related to rack initialization
@@ -86,18 +91,30 @@ enum RackInitError {
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
+    // Retryable database error
+    Retryable(DieselError),
+    // Other non-retryable database error
+    Database(DieselError),
 }
-type TxnError = TransactionError<RackInitError>;
 
-impl From<TxnError> for Error {
-    fn from(e: TxnError) -> Self {
+// Catch-all for Diesel error conversion into RackInitError, which
+// can also label errors as retryable.
+impl From<DieselError> for RackInitError {
+    fn from(e: DieselError) -> Self {
+        if retryable(&e) {
+            Self::Retryable(e)
+        } else {
+            Self::Database(e)
+        }
+    }
+}
+
+impl From<RackInitError> for Error {
+    fn from(e: RackInitError) -> Self {
         match e {
-            TxnError::CustomError(RackInitError::AddingIp(err)) => err,
-            TxnError::CustomError(RackInitError::AddingNic(err)) => err,
-            TxnError::CustomError(RackInitError::DatasetInsert {
-                err,
-                zpool_id,
-            }) => match err {
+            RackInitError::AddingIp(err) => err,
+            RackInitError::AddingNic(err) => err,
+            RackInitError::DatasetInsert { err, zpool_id } => match err {
                 AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
                     type_name: ResourceType::Zpool,
                     lookup_type: LookupType::ById(zpool_id),
@@ -106,43 +123,36 @@ impl From<TxnError> for Error {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             },
-            TxnError::CustomError(RackInitError::ServiceInsert(err)) => {
-                Error::internal_error(&format!(
-                    "failed to insert Service record: {:#}",
-                    err
-                ))
-            }
-            TxnError::CustomError(RackInitError::RackUpdate {
-                err,
-                rack_id,
-            }) => public_error_from_diesel(
-                err,
-                ErrorHandler::NotFoundByLookup(
-                    ResourceType::Rack,
-                    LookupType::ById(rack_id),
-                ),
+            RackInitError::ServiceInsert(err) => Error::internal_error(
+                &format!("failed to insert Service record: {:#}", err),
             ),
-            TxnError::CustomError(RackInitError::DnsSerialization(err)) => {
-                Error::internal_error(&format!(
-                    "failed to serialize initial DNS records: {:#}",
-                    err
-                ))
+            RackInitError::RackUpdate { err, rack_id } => {
+                public_error_from_diesel(
+                    err,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Rack,
+                        LookupType::ById(rack_id),
+                    ),
+                )
             }
-            TxnError::CustomError(RackInitError::Silo(err)) => {
-                Error::internal_error(&format!(
-                    "failed to create recovery Silo: {:#}",
-                    err
-                ))
-            }
-            TxnError::CustomError(RackInitError::RoleAssignment(err)) => {
-                Error::internal_error(&format!(
-                    "failed to assign role to initial user: {:#}",
-                    err
-                ))
-            }
-            TxnError::Database(e) => {
-                Error::internal_error(&format!("Transaction error: {}", e))
-            }
+            RackInitError::DnsSerialization(err) => Error::internal_error(
+                &format!("failed to serialize initial DNS records: {:#}", err),
+            ),
+            RackInitError::Silo(err) => Error::internal_error(&format!(
+                "failed to create recovery Silo: {:#}",
+                err
+            )),
+            RackInitError::RoleAssignment(err) => Error::internal_error(
+                &format!("failed to assign role to initial user: {:#}", err),
+            ),
+            RackInitError::Retryable(err) => Error::internal_error(&format!(
+                "failed operation due to database contention: {:#}",
+                err
+            )),
+            RackInitError::Database(err) => Error::internal_error(&format!(
+                "failed operation due to database error: {:#}",
+                err
+            )),
         }
     }
 }
@@ -214,8 +224,125 @@ impl DataStore {
         Ok(())
     }
 
-    // The following methods which return a `TxnError` take a `conn` parameter
-    // which comes from the transaction created in `rack_set_initialized`.
+    // Return the subnet for the rack
+    pub async fn rack_subnet(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<IpNetwork, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        use db::schema::rack::dsl;
+        // It's safe to unwrap the returned `rack_subnet` because
+        // we filter on `rack_subnet.is_not_null()`
+        let subnet = dsl::rack
+            .filter(dsl::id.eq(rack_id))
+            .filter(dsl::rack_subnet.is_not_null())
+            .select(dsl::rack_subnet)
+            .first_async::<Option<IpNetwork>>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        match subnet {
+            Some(subnet) => Ok(subnet),
+            None => Err(Error::internal_error(
+                "DB Error(bug): returned a null subnet for {rack_id}",
+            )),
+        }
+    }
+
+    /// Allocate a rack subnet octet to a given sled
+    ///
+    /// 1. Find the existing allocations
+    /// 2. Calculate the new allocation
+    /// 3. Save the new allocation, if there isn't one for the given
+    ///    `hw_baseboard_id`
+    /// 4. Return the new allocation
+    ///
+    // TODO: This could all actually be done in SQL using a `next_item` query.
+    // See https://github.com/oxidecomputer/omicron/issues/4544
+    pub async fn allocate_sled_underlay_subnet_octets(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        hw_baseboard_id: Uuid,
+    ) -> Result<SledUnderlaySubnetAllocation, Error> {
+        // Fetch all the existing allocations via self.rack_id
+        let allocations = self.rack_subnet_allocations(opctx, rack_id).await?;
+
+        // Calculate the allocation for the new sled by choosing the minimum
+        // octet. The returned allocations are ordered by octet, so we will know
+        // when we have a free one. However, if we already have an allocation
+        // for the given sled then reuse that one.
+        const MIN_SUBNET_OCTET: i16 = 33;
+        let mut new_allocation = SledUnderlaySubnetAllocation {
+            rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: MIN_SUBNET_OCTET,
+            hw_baseboard_id,
+        };
+        let mut allocation_already_exists = false;
+        for allocation in allocations {
+            if allocation.hw_baseboard_id == new_allocation.hw_baseboard_id {
+                // We already have an allocation for this sled.
+                new_allocation = allocation;
+                allocation_already_exists = true;
+                break;
+            }
+            if allocation.subnet_octet == new_allocation.subnet_octet {
+                bail_unless!(
+                    new_allocation.subnet_octet < 255,
+                    "Too many sled subnets allocated"
+                );
+                new_allocation.subnet_octet += 1;
+            }
+        }
+
+        // Write the new allocation row to CRDB. The UNIQUE constraint
+        // on `subnet_octet` will prevent dueling administrators reusing
+        // allocations when sleds are being added. We will need another
+        // mechanism ala generation numbers when we must interleave additions
+        // and removals of sleds.
+        if !allocation_already_exists {
+            self.sled_subnet_allocation_insert(opctx, &new_allocation).await?;
+        }
+
+        Ok(new_allocation)
+    }
+
+    /// Return all current underlay allocations for the rack.
+    ///
+    /// Order allocations by `subnet_octet`
+    pub async fn rack_subnet_allocations(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+    ) -> Result<Vec<SledUnderlaySubnetAllocation>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::sled_underlay_subnet_allocation::dsl as subnet_dsl;
+        subnet_dsl::sled_underlay_subnet_allocation
+            .filter(subnet_dsl::rack_id.eq(rack_id))
+            .select(SledUnderlaySubnetAllocation::as_select())
+            .order_by(subnet_dsl::subnet_octet.asc())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Store a new sled subnet allocation in the database
+    pub async fn sled_subnet_allocation_insert(
+        &self,
+        opctx: &OpContext,
+        allocation: &SledUnderlaySubnetAllocation,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use db::schema::sled_underlay_subnet_allocation::dsl;
+        diesel::insert_into(dsl::sled_underlay_subnet_allocation)
+            .values(allocation.clone())
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
+    }
 
     #[allow(clippy::too_many_arguments)]
     async fn rack_create_recovery_silo(
@@ -228,7 +355,7 @@ impl DataStore {
         recovery_user_id: external_params::UserId,
         recovery_user_password_hash: omicron_passwords::PasswordHashString,
         dns_update: DnsVersionUpdateBuilder,
-    ) -> Result<(), TxnError> {
+    ) -> Result<(), RackInitError> {
         let db_silo = self
             .silo_create_conn(
                 conn,
@@ -239,8 +366,10 @@ impl DataStore {
                 dns_update,
             )
             .await
-            .map_err(RackInitError::Silo)
-            .map_err(TxnError::CustomError)?;
+            .map_err(|err| match err.retryable() {
+                NotRetryable(err) => RackInitError::Silo(err.into()),
+                Retryable(err) => RackInitError::Retryable(err),
+            })?;
         info!(log, "Created recovery silo");
 
         // Create the first user in the initial Recovery Silo
@@ -294,8 +423,7 @@ impl DataStore {
             }],
         )
         .await
-        .map_err(RackInitError::RoleAssignment)
-        .map_err(TxnError::CustomError)?;
+        .map_err(RackInitError::RoleAssignment)?;
         debug!(log, "Generated role assignment queries");
 
         q1.execute_async(conn).await?;
@@ -311,7 +439,7 @@ impl DataStore {
         log: &slog::Logger,
         service_pool: &db::model::IpPool,
         service: internal_params::ServicePutRequest,
-    ) -> Result<(), TxnError> {
+    ) -> Result<(), RackInitError> {
         use internal_params::ServiceKind;
 
         let service_db = db::model::Service::new(
@@ -321,9 +449,12 @@ impl DataStore {
             service.address,
             service.kind.clone().into(),
         );
-        self.service_upsert_conn(conn, service_db).await.map_err(|e| {
-            TxnError::CustomError(RackInitError::ServiceInsert(e))
-        })?;
+        self.service_upsert_conn(conn, service_db).await.map_err(
+            |e| match e.retryable() {
+                Retryable(e) => RackInitError::Retryable(e),
+                NotRetryable(e) => RackInitError::ServiceInsert(e.into()),
+            },
+        )?;
 
         // For services with external connectivity, we record their
         // explicit IP allocation and create a service NIC as well.
@@ -354,9 +485,7 @@ impl DataStore {
                     Some(nic.ip),
                     Some(nic.mac),
                 )
-                .map_err(|e| {
-                    TxnError::CustomError(RackInitError::AddingNic(e))
-                })?;
+                .map_err(|e| RackInitError::AddingNic(e))?;
                 Some((db_ip, db_nic))
             }
             ServiceKind::BoundaryNtp { snat, ref nic } => {
@@ -378,9 +507,7 @@ impl DataStore {
                     Some(nic.ip),
                     Some(nic.mac),
                 )
-                .map_err(|e| {
-                    TxnError::CustomError(RackInitError::AddingNic(e))
-                })?;
+                .map_err(|e| RackInitError::AddingNic(e))?;
                 Some((db_ip, db_nic))
             }
             _ => None,
@@ -395,7 +522,10 @@ impl DataStore {
                         IP address for {}",
                         service.kind,
                     );
-                    TxnError::CustomError(RackInitError::AddingIp(err))
+                    match err.retryable() {
+                        Retryable(e) => RackInitError::Retryable(e),
+                        NotRetryable(e) => RackInitError::AddingIp(e.into()),
+                    }
                 })?;
 
             self.create_network_interface_raw_conn(conn, db_nic)
@@ -408,9 +538,10 @@ impl DataStore {
                             _,
                             db::model::NetworkInterfaceKind::Service,
                         ) => Ok(()),
-                        _ => Err(TxnError::CustomError(
-                            RackInitError::AddingNic(e.into_external()),
-                        )),
+                        InsertError::Retryable(err) => {
+                            Err(RackInitError::Retryable(err))
+                        }
+                        _ => Err(RackInitError::AddingNic(e.into_external())),
                     }
                 })?;
         }
@@ -429,146 +560,187 @@ impl DataStore {
 
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
 
-        let rack_id = rack_init.rack_id;
-        let services = rack_init.services;
-        let datasets = rack_init.datasets;
-        let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
-        let internal_dns = rack_init.internal_dns;
-        let external_dns = rack_init.external_dns;
-
         let (authz_service_pool, service_pool) =
             self.ip_pools_service_lookup(&opctx).await?;
 
         // NOTE: This operation could likely be optimized with a CTE, but given
         // the low-frequency of calls, this optimization has been deferred.
         let log = opctx.log.clone();
+        let err = Arc::new(OnceLock::new());
+
+        // NOTE: This transaction cannot yet be made retryable, as it uses
+        // nested transactions.
         let rack = self
             .pool_connection_authorized(opctx)
             .await?
-            .transaction_async(|conn| async move {
-                // Early exit if the rack has already been initialized.
-                let rack = rack_dsl::rack
-                    .filter(rack_dsl::id.eq(rack_id))
-                    .select(Rack::as_select())
-                    .get_result_async(&conn)
-                    .await
-                    .map_err(|e| {
-                        warn!(log, "Initializing Rack: Rack UUID not found");
-                        TxnError::CustomError(RackInitError::RackUpdate {
-                            err: e,
-                            rack_id,
-                        })
-                    })?;
-                if rack.initialized {
-                    info!(log, "Early exit: Rack already initialized");
-                    return Ok(rack);
-                }
+            .transaction_async(|conn| {
+                let err = err.clone();
+                let log = log.clone();
+                let authz_service_pool = authz_service_pool.clone();
+                let rack_init = rack_init.clone();
+                let service_pool = service_pool.clone();
+                async move {
+                    let rack_id = rack_init.rack_id;
+                    let services = rack_init.services;
+                    let datasets = rack_init.datasets;
+                    let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
+                    let internal_dns = rack_init.internal_dns;
+                    let external_dns = rack_init.external_dns;
 
-                // Otherwise, insert services and datasets.
+                    // Early exit if the rack has already been initialized.
+                    let rack = rack_dsl::rack
+                        .filter(rack_dsl::id.eq(rack_id))
+                        .select(Rack::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            warn!(log, "Initializing Rack: Rack UUID not found");
+                            err.set(RackInitError::RackUpdate {
+                                err: e,
+                                rack_id,
+                            }).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    if rack.initialized {
+                        info!(log, "Early exit: Rack already initialized");
+                        return Ok::<_, DieselError>(rack);
+                    }
 
-                // Set up the IP pool for internal services.
-                for range in service_ip_pool_ranges {
-                    Self::ip_pool_add_range_on_connection(
-                        &conn,
-                        opctx,
-                        &authz_service_pool,
-                        &range,
-                    )
-                    .await
-                    .map_err(|err| {
-                        warn!(
-                            log,
-                            "Initializing Rack: Failed to add IP pool range"
-                        );
-                        TxnError::CustomError(RackInitError::AddingIp(err))
-                    })?;
-                }
+                    // Otherwise, insert services and datasets.
 
-                // Allocate records for all services.
-                for service in services {
-                    self.rack_populate_service_records(
+                    // Set up the IP pool for internal services.
+                    for range in service_ip_pool_ranges {
+                        Self::ip_pool_add_range_on_connection(
+                            &conn,
+                            opctx,
+                            &authz_service_pool,
+                            &range,
+                        )
+                        .await
+                        .map_err(|e| {
+                            warn!(
+                                log,
+                                "Initializing Rack: Failed to add IP pool range"
+                            );
+                            err.set(RackInitError::AddingIp(e)).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    }
+
+                    // Allocate records for all services.
+                    for service in services {
+                        self.rack_populate_service_records(
+                            &conn,
+                            &log,
+                            &service_pool,
+                            service,
+                        )
+                        .await
+                        .map_err(|e| {
+                            err.set(e).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    }
+                    info!(log, "Inserted services");
+
+                    for dataset in datasets {
+                        use db::schema::dataset::dsl;
+                        let zpool_id = dataset.pool_id;
+                        <Zpool as DatastoreCollection<Dataset>>::insert_resource(
+                            zpool_id,
+                            diesel::insert_into(dsl::dataset)
+                                .values(dataset.clone())
+                                .on_conflict(dsl::id)
+                                .do_update()
+                                .set((
+                                    dsl::time_modified.eq(Utc::now()),
+                                    dsl::pool_id.eq(excluded(dsl::pool_id)),
+                                    dsl::ip.eq(excluded(dsl::ip)),
+                                    dsl::port.eq(excluded(dsl::port)),
+                                    dsl::kind.eq(excluded(dsl::kind)),
+                                )),
+                        )
+                        .insert_and_get_result_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.set(RackInitError::DatasetInsert {
+                                err: e,
+                                zpool_id,
+                            }).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    }
+                    info!(log, "Inserted datasets");
+
+                    // Insert the initial contents of the internal and external DNS
+                    // zones.
+                    Self::load_dns_data(&conn, internal_dns)
+                        .await
+                        .map_err(|e| {
+                            err.set(RackInitError::DnsSerialization(e)).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    info!(log, "Populated DNS tables for internal DNS");
+
+                    Self::load_dns_data(&conn, external_dns)
+                        .await
+                        .map_err(|e| {
+                           err.set(RackInitError::DnsSerialization(e)).unwrap();
+                           DieselError::RollbackTransaction
+                        })?;
+                    info!(log, "Populated DNS tables for external DNS");
+
+                    // Create the initial Recovery Silo
+                    self.rack_create_recovery_silo(
+                        &opctx,
                         &conn,
                         &log,
-                        &service_pool,
-                        service,
+                        rack_init.recovery_silo,
+                        rack_init.recovery_silo_fq_dns_name,
+                        rack_init.recovery_user_id,
+                        rack_init.recovery_user_password_hash,
+                        rack_init.dns_update,
                     )
-                    .await?;
-                }
-                info!(log, "Inserted services");
-
-                for dataset in datasets {
-                    use db::schema::dataset::dsl;
-                    let zpool_id = dataset.pool_id;
-                    <Zpool as DatastoreCollection<Dataset>>::insert_resource(
-                        zpool_id,
-                        diesel::insert_into(dsl::dataset)
-                            .values(dataset.clone())
-                            .on_conflict(dsl::id)
-                            .do_update()
-                            .set((
-                                dsl::time_modified.eq(Utc::now()),
-                                dsl::pool_id.eq(excluded(dsl::pool_id)),
-                                dsl::ip.eq(excluded(dsl::ip)),
-                                dsl::port.eq(excluded(dsl::port)),
-                                dsl::kind.eq(excluded(dsl::kind)),
-                            )),
-                    )
-                    .insert_and_get_result_async(&conn)
                     .await
-                    .map_err(|err| {
-                        TxnError::CustomError(RackInitError::DatasetInsert {
-                            err,
-                            zpool_id,
-                        })
+                    .map_err(|e| match e {
+                        RackInitError::Retryable(e) => e,
+                        _ => {
+                            err.set(e).unwrap();
+                            DieselError::RollbackTransaction
+                        },
                     })?;
+
+                    let rack = diesel::update(rack_dsl::rack)
+                        .filter(rack_dsl::id.eq(rack_id))
+                        .set((
+                            rack_dsl::initialized.eq(true),
+                            rack_dsl::time_modified.eq(Utc::now()),
+                        ))
+                        .returning(Rack::as_returning())
+                        .get_result_async::<Rack>(&conn)
+                        .await
+                        .map_err(|e| {
+                            if retryable(&e) {
+                                return e;
+                            }
+                            err.set(RackInitError::RackUpdate {
+                                err: e,
+                                rack_id,
+                            }).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+                    Ok(rack)
                 }
-                info!(log, "Inserted datasets");
-
-                // Insert the initial contents of the internal and external DNS
-                // zones.
-                Self::load_dns_data(&conn, internal_dns)
-                    .await
-                    .map_err(RackInitError::DnsSerialization)
-                    .map_err(TxnError::CustomError)?;
-                info!(log, "Populated DNS tables for internal DNS");
-
-                Self::load_dns_data(&conn, external_dns)
-                    .await
-                    .map_err(RackInitError::DnsSerialization)
-                    .map_err(TxnError::CustomError)?;
-                info!(log, "Populated DNS tables for external DNS");
-
-                // Create the initial Recovery Silo
-                self.rack_create_recovery_silo(
-                    &opctx,
-                    &conn,
-                    &log,
-                    rack_init.recovery_silo,
-                    rack_init.recovery_silo_fq_dns_name,
-                    rack_init.recovery_user_id,
-                    rack_init.recovery_user_password_hash,
-                    rack_init.dns_update,
-                )
-                .await?;
-
-                let rack = diesel::update(rack_dsl::rack)
-                    .filter(rack_dsl::id.eq(rack_id))
-                    .set((
-                        rack_dsl::initialized.eq(true),
-                        rack_dsl::time_modified.eq(Utc::now()),
-                    ))
-                    .returning(Rack::as_returning())
-                    .get_result_async::<Rack>(&conn)
-                    .await
-                    .map_err(|err| {
-                        TxnError::CustomError(RackInitError::RackUpdate {
-                            err,
-                            rack_id,
-                        })
-                    })?;
-                Ok::<_, TxnError>(rack)
-            })
-            .await?;
+            },
+            )
+            .await
+            .map_err(|e| {
+                if let Some(err) = Arc::try_unwrap(err).unwrap().take() {
+                    err.into()
+                } else {
+                    Error::internal_error(&format!("Transaction error: {}", e))
+                }
+            })?;
         Ok(rack)
     }
 
@@ -581,36 +753,37 @@ impl DataStore {
 
         self.rack_insert(opctx, &db::model::Rack::new(rack_id)).await?;
 
-        let internal_pool = db::model::IpPool::new(
-            &IdentityMetadataCreateParams {
+        let internal_pool =
+            db::model::IpPool::new(&IdentityMetadataCreateParams {
                 name: SERVICE_IP_POOL_NAME.parse::<Name>().unwrap(),
                 description: String::from("IP Pool for Oxide Services"),
-            },
-            Some(*INTERNAL_SILO_ID),
-            true, // default for internal silo
-        );
+            });
 
-        self.ip_pool_create(opctx, internal_pool).await.map(|_| ()).or_else(
-            |e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
-                _ => Err(e),
-            },
-        )?;
+        let internal_pool_id = internal_pool.id();
 
-        let default_pool = db::model::IpPool::new(
-            &IdentityMetadataCreateParams {
-                name: "default".parse::<Name>().unwrap(),
-                description: String::from("default IP pool"),
-            },
-            None, // no silo ID, fleet scoped
-            true, // default for fleet
-        );
-        self.ip_pool_create(opctx, default_pool).await.map(|_| ()).or_else(
-            |e| match e {
-                Error::ObjectAlreadyExists { .. } => Ok(()),
+        let internal_created = self
+            .ip_pool_create(opctx, internal_pool)
+            .await
+            .map(|_| true)
+            .or_else(|e| match e {
+                Error::ObjectAlreadyExists { .. } => Ok(false),
                 _ => Err(e),
-            },
-        )?;
+            })?;
+
+        // make default for the internal silo. only need to do this if
+        // the create went through, i.e., if it wasn't already there
+        if internal_created {
+            self.ip_pool_link_silo(
+                opctx,
+                db::model::IpPoolResource {
+                    ip_pool_id: internal_pool_id,
+                    resource_type: db::model::IpPoolResourceType::Silo,
+                    resource_id: *INTERNAL_SILO_ID,
+                    is_default: true,
+                },
+            )
+            .await?;
+        }
 
         Ok(())
     }
@@ -623,42 +796,54 @@ impl DataStore {
 
         use crate::db::schema::external_ip::dsl as extip_dsl;
         use crate::db::schema::service::dsl as service_dsl;
-        type TxnError = TransactionError<Error>;
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                let ips = extip_dsl::external_ip
-                    .inner_join(
-                        service_dsl::service.on(service_dsl::id
-                            .eq(extip_dsl::parent_id.assume_not_null())),
-                    )
-                    .filter(extip_dsl::parent_id.is_not_null())
-                    .filter(extip_dsl::time_deleted.is_null())
-                    .filter(extip_dsl::is_service)
-                    .filter(service_dsl::kind.eq(db::model::ServiceKind::Nexus))
-                    .select(ExternalIp::as_select())
-                    .get_results_async(&conn)
-                    .await?
-                    .into_iter()
-                    .map(|external_ip| external_ip.ip.ip())
-                    .collect();
 
-                let dns_zones = self
-                    .dns_zones_list_all_on_connection(
-                        opctx,
-                        &conn,
-                        DnsGroup::External,
-                    )
-                    .await?;
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("nexus_external_addresses")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let ips = extip_dsl::external_ip
+                        .inner_join(
+                            service_dsl::service.on(service_dsl::id
+                                .eq(extip_dsl::parent_id.assume_not_null())),
+                        )
+                        .filter(extip_dsl::parent_id.is_not_null())
+                        .filter(extip_dsl::time_deleted.is_null())
+                        .filter(extip_dsl::is_service)
+                        .filter(
+                            service_dsl::kind.eq(db::model::ServiceKind::Nexus),
+                        )
+                        .select(ExternalIp::as_select())
+                        .get_results_async(&conn)
+                        .await?
+                        .into_iter()
+                        .map(|external_ip| external_ip.ip.ip())
+                        .collect();
 
-                Ok((ips, dns_zones))
+                    let dns_zones = self
+                        .dns_zones_list_all_on_connection(
+                            opctx,
+                            &conn,
+                            DnsGroup::External,
+                        )
+                        .await
+                        .map_err(|e| match e.retryable() {
+                            NotRetryable(not_retryable_err) => {
+                                err.bail(not_retryable_err)
+                            }
+                            Retryable(retryable_err) => retryable_err,
+                        })?;
+
+                    Ok((ips, dns_zones))
+                }
             })
             .await
-            .map_err(|error: TxnError| match error {
-                TransactionError::CustomError(err) => err,
-                TransactionError::Database(e) => {
-                    public_error_from_diesel(e, ErrorHandler::Server)
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err.into();
                 }
+                public_error_from_diesel(e, ErrorHandler::Server)
             })
     }
 }
@@ -680,7 +865,7 @@ mod test {
     use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_params::DnsRecord;
-    use nexus_db_model::{DnsGroup, InitialDnsGroup};
+    use nexus_db_model::{DnsGroup, InitialDnsGroup, SledUpdate};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
@@ -728,6 +913,8 @@ mod test {
                         name: "test-silo".parse().unwrap(),
                         description: String::new(),
                     },
+                    // Set a default quota of a half rack's worth of resources
+                    quotas: external_params::SiloQuotasCreate::arbitrarily_high_default(),
                     discoverable: false,
                     identity_mode: SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
@@ -870,14 +1057,14 @@ mod test {
     async fn create_test_sled(db: &DataStore) -> Sled {
         let sled_id = Uuid::new_v4();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
-        let sled = Sled::new(
+        let sled_update = SledUpdate::new(
             sled_id,
             addr,
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id(),
         );
-        db.sled_upsert(sled)
+        db.sled_upsert(sled_update)
             .await
             .expect("Could not upsert sled during test prep")
     }
@@ -892,14 +1079,16 @@ mod test {
                 async fn [<get_all_ $table s>](db: &DataStore) -> Vec<$model> {
                     use crate::db::schema::$table::dsl;
                     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
-                    db.pool_connection_for_tests()
+                    let conn = db.pool_connection_for_tests()
                         .await
-                        .unwrap()
-                        .transaction_async(|conn| async move {
+                        .unwrap();
+
+                    db.transaction_retry_wrapper(concat!("fn_to_get_all_", stringify!($table)))
+                        .transaction(&conn, |conn| async move {
                             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                                 .await
                                 .unwrap();
-                            Ok::<_, crate::db::TransactionError<()>>(
+                            Ok(
                                 dsl::$table
                                     .select($model::as_select())
                                     .get_results_async(&conn)
@@ -1141,7 +1330,7 @@ mod test {
         // been allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        assert_eq!(svc_pool.silo_id, Some(*INTERNAL_SILO_ID));
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1343,7 +1532,7 @@ mod test {
         // allocated as a part of the service IP pool.
         let (.., svc_pool) =
             datastore.ip_pools_service_lookup(&opctx).await.unwrap();
-        assert_eq!(svc_pool.silo_id, Some(*INTERNAL_SILO_ID));
+        assert_eq!(svc_pool.name().as_str(), "oxide-service-pool");
 
         let observed_ip_pool_ranges = get_all_ip_pool_ranges(&datastore).await;
         assert_eq!(observed_ip_pool_ranges.len(), 1);
@@ -1514,6 +1703,138 @@ mod test {
         assert!(get_all_services(&datastore).await.is_empty());
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn rack_sled_subnet_allocations() {
+        let logctx = dev::test_setup_log("rack_sled_subnet_allocations");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id = Uuid::new_v4();
+
+        // Ensure we get an empty list when there are no allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+        assert!(allocations.is_empty());
+
+        // Add 5 allocations
+        for i in 0..5i16 {
+            let allocation = SledUnderlaySubnetAllocation {
+                rack_id,
+                sled_id: Uuid::new_v4(),
+                subnet_octet: 33 + i,
+                hw_baseboard_id: Uuid::new_v4(),
+            };
+            datastore
+                .sled_subnet_allocation_insert(&opctx, &allocation)
+                .await
+                .unwrap();
+        }
+
+        // List all 5 allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+
+        assert_eq!(5, allocations.len());
+
+        // Try to add another allocation for the same octet, but with a distinct
+        // sled_id. Ensure we get an error due to a unique constraint.
+        let mut should_fail_allocation = SledUnderlaySubnetAllocation {
+            rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: 37,
+            hw_baseboard_id: Uuid::new_v4(),
+        };
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // Adding an allocation for the same {rack_id, sled_id} pair fails
+        // the second time, even with a distinct subnet_epoch
+        let mut allocation = should_fail_allocation.clone();
+        allocation.subnet_octet = 38;
+        datastore
+            .sled_subnet_allocation_insert(&opctx, &allocation)
+            .await
+            .unwrap();
+
+        should_fail_allocation.subnet_octet = 39;
+        should_fail_allocation.hw_baseboard_id = Uuid::new_v4();
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // Allocations outside our expected range fail
+        let mut should_fail_allocation = SledUnderlaySubnetAllocation {
+            rack_id,
+            sled_id: Uuid::new_v4(),
+            subnet_octet: 32,
+            hw_baseboard_id: Uuid::new_v4(),
+        };
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+        should_fail_allocation.subnet_octet = 256;
+        let _err = datastore
+            .sled_subnet_allocation_insert(&opctx, &should_fail_allocation)
+            .await
+            .unwrap_err();
+
+        // We should have 6 allocations
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+
+        assert_eq!(6, allocations.len());
+        assert_eq!(
+            vec![33, 34, 35, 36, 37, 38],
+            allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn allocate_sled_underlay_subnet_octets() {
+        let logctx = dev::test_setup_log("rack_sled_subnet_allocations");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let rack_id = Uuid::new_v4();
+
+        let mut allocated_octets = vec![];
+        for _ in 0..5 {
+            allocated_octets.push(
+                datastore
+                    .allocate_sled_underlay_subnet_octets(
+                        &opctx,
+                        rack_id,
+                        Uuid::new_v4(),
+                    )
+                    .await
+                    .unwrap()
+                    .subnet_octet,
+            );
+        }
+
+        let expected = vec![33, 34, 35, 36, 37];
+        assert_eq!(expected, allocated_octets);
+
+        // We should have 5 allocations in the DB, sorted appropriately
+        let allocations =
+            datastore.rack_subnet_allocations(&opctx, rack_id).await.unwrap();
+        assert_eq!(5, allocations.len());
+        assert_eq!(
+            expected,
+            allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

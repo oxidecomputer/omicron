@@ -56,8 +56,10 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 sled-hardware.workspace = true
 tufaceous-lib.workspace = true
+update-common.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
+wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 
 [[bin]]
@@ -83,4 +85,3 @@ tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tufaceous.workspace = true
 wicket.workspace = true
-wicketd-client.workspace = true

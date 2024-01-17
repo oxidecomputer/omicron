@@ -46,19 +46,23 @@ pub fn from_diesel(e: DieselError) -> external::Error {
         NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL,
     ];
     if let Some(sentinel) = matches_sentinel(&e, &sentinels) {
+        let external_message = "Not enough storage";
         match sentinel {
             NOT_ENOUGH_DATASETS_SENTINEL => {
-                return external::Error::unavail(
+                return external::Error::insufficient_capacity(
+                    external_message,
                     "Not enough datasets to allocate disks",
                 );
             }
             NOT_ENOUGH_ZPOOL_SPACE_SENTINEL => {
-                return external::Error::unavail(
+                return external::Error::insufficient_capacity(
+                    external_message,
                     "Not enough zpool space to allocate disks. There may not be enough disks with space for the requested region. You may also see this if your rack is in a degraded state, or you're running the default multi-rack topology configuration in a 1-sled development environment.",
                 );
             }
             NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL => {
-                return external::Error::unavail(
+                return external::Error::insufficient_capacity(
+                    external_message,
                     "Not enough unique zpools selected while allocating disks",
                 );
             }
@@ -290,6 +294,7 @@ impl CandidateZpools {
         seed: u128,
         distinct_sleds: bool,
     ) -> Self {
+        use schema::sled::dsl as sled_dsl;
         use schema::zpool::dsl as zpool_dsl;
 
         // Why are we using raw `diesel::dsl::sql` here?
@@ -310,13 +315,20 @@ impl CandidateZpools {
             + diesel::dsl::sql(&zpool_size_delta.to_string()))
         .le(diesel::dsl::sql(zpool_dsl::total_size::NAME));
 
+        // We need to join on the sled table to access provision_state.
+        let with_sled = sled_dsl::sled.on(zpool_dsl::sled_id.eq(sled_dsl::id));
         let with_zpool = zpool_dsl::zpool
-            .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id));
+            .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id))
+            .inner_join(with_sled);
+
+        let sled_is_provisionable = sled_dsl::provision_state
+            .eq(crate::db::model::SledProvisionState::Provisionable);
 
         let base_query = old_zpool_usage
             .query_source()
             .inner_join(with_zpool)
             .filter(it_will_fit)
+            .filter(sled_is_provisionable)
             .select((old_zpool_usage::dsl::pool_id,));
 
         let query = if distinct_sleds {

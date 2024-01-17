@@ -40,6 +40,7 @@ struct CrucibleDataInner {
     running_snapshots: HashMap<Uuid, HashMap<String, RunningSnapshot>>,
     on_create: Option<CreateCallback>,
     region_creation_error: bool,
+    region_deletion_error: bool,
     creating_a_running_snapshot_should_fail: bool,
     next_port: u16,
 }
@@ -53,6 +54,7 @@ impl CrucibleDataInner {
             running_snapshots: HashMap::new(),
             on_create: None,
             region_creation_error: false,
+            region_deletion_error: false,
             creating_a_running_snapshot_should_fail: false,
             next_port: crucible_port,
         }
@@ -127,6 +129,10 @@ impl CrucibleDataInner {
                     .map(|s| s.name)
                     .collect::<Vec<String>>(),
             );
+        }
+
+        if self.region_deletion_error {
+            bail!("region deletion error!");
         }
 
         let id = Uuid::from_str(&id.0).unwrap();
@@ -227,6 +233,10 @@ impl CrucibleDataInner {
 
     fn set_region_creation_error(&mut self, value: bool) {
         self.region_creation_error = value;
+    }
+
+    fn set_region_deletion_error(&mut self, value: bool) {
+        self.region_deletion_error = value;
     }
 
     fn create_running_snapshot(
@@ -389,6 +399,10 @@ impl CrucibleData {
 
     pub async fn set_region_creation_error(&self, value: bool) {
         self.inner.lock().await.set_region_creation_error(value);
+    }
+
+    pub async fn set_region_deletion_error(&self, value: bool) {
+        self.inner.lock().await.set_region_deletion_error(value);
     }
 
     pub async fn create_running_snapshot(

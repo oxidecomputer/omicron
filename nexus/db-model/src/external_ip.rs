@@ -7,10 +7,12 @@
 
 use crate::impl_enum_type;
 use crate::schema::external_ip;
+use crate::schema::floating_ip;
 use crate::Name;
 use crate::SqlU16;
 use chrono::DateTime;
 use chrono::Utc;
+use db_macros::Resource;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
@@ -18,13 +20,16 @@ use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadata;
+use serde::Deserialize;
+use serde::Serialize;
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone, Copy, QueryId)]
-    #[diesel(postgres_type(name = "ip_kind"))]
+    #[diesel(postgres_type(name = "ip_kind", schema = "public"))]
      pub struct IpKindEnum;
 
      #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -69,6 +74,30 @@ pub struct ExternalIp {
     pub ip: IpNetwork,
     pub first_port: SqlU16,
     pub last_port: SqlU16,
+    // Only Some(_) for instance Floating IPs
+    pub project_id: Option<Uuid>,
+}
+
+/// A view type constructed from `ExternalIp` used to represent Floating IP
+/// objects in user-facing APIs.
+///
+/// This View type fills a similar niche to `ProjectImage` etc.: we need to
+/// represent identity as non-nullable (ditto for parent project) so as to
+/// play nicely with authz and resource APIs.
+#[derive(
+    Queryable, Selectable, Clone, Debug, Resource, Serialize, Deserialize,
+)]
+#[diesel(table_name = floating_ip)]
+pub struct FloatingIp {
+    #[diesel(embed)]
+    pub identity: FloatingIpIdentity,
+
+    pub ip_pool_id: Uuid,
+    pub ip_pool_range_id: Uuid,
+    pub is_service: bool,
+    pub parent_id: Option<Uuid>,
+    pub ip: IpNetwork,
+    pub project_id: Uuid,
 }
 
 impl From<ExternalIp> for sled_agent_client::types::SourceNatConfig {
@@ -93,6 +122,7 @@ pub struct IncompleteExternalIp {
     is_service: bool,
     parent_id: Option<Uuid>,
     pool_id: Uuid,
+    project_id: Option<Uuid>,
     // Optional address requesting that a specific IP address be allocated.
     explicit_ip: Option<IpNetwork>,
     // Optional range when requesting a specific SNAT range be allocated.
@@ -114,6 +144,7 @@ impl IncompleteExternalIp {
             is_service: false,
             parent_id: Some(instance_id),
             pool_id,
+            project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
         }
@@ -129,6 +160,7 @@ impl IncompleteExternalIp {
             is_service: false,
             parent_id: Some(instance_id),
             pool_id,
+            project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
         }
@@ -138,6 +170,7 @@ impl IncompleteExternalIp {
         id: Uuid,
         name: &Name,
         description: &str,
+        project_id: Uuid,
         pool_id: Uuid,
     ) -> Self {
         Self {
@@ -149,7 +182,31 @@ impl IncompleteExternalIp {
             is_service: false,
             parent_id: None,
             pool_id,
+            project_id: Some(project_id),
             explicit_ip: None,
+            explicit_port_range: None,
+        }
+    }
+
+    pub fn for_floating_explicit(
+        id: Uuid,
+        name: &Name,
+        description: &str,
+        project_id: Uuid,
+        explicit_ip: IpAddr,
+        pool_id: Uuid,
+    ) -> Self {
+        Self {
+            id,
+            name: Some(name.clone()),
+            description: Some(description.to_string()),
+            time_created: Utc::now(),
+            kind: IpKind::Floating,
+            is_service: false,
+            parent_id: None,
+            pool_id,
+            project_id: Some(project_id),
+            explicit_ip: Some(explicit_ip.into()),
             explicit_port_range: None,
         }
     }
@@ -171,6 +228,7 @@ impl IncompleteExternalIp {
             is_service: true,
             parent_id: Some(service_id),
             pool_id,
+            project_id: None,
             explicit_ip: Some(IpNetwork::from(address)),
             explicit_port_range: None,
         }
@@ -199,6 +257,7 @@ impl IncompleteExternalIp {
             is_service: true,
             parent_id: Some(service_id),
             pool_id,
+            project_id: None,
             explicit_ip: Some(IpNetwork::from(address)),
             explicit_port_range,
         }
@@ -220,6 +279,7 @@ impl IncompleteExternalIp {
             is_service: true,
             parent_id: Some(service_id),
             pool_id,
+            project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
         }
@@ -235,6 +295,7 @@ impl IncompleteExternalIp {
             is_service: true,
             parent_id: Some(service_id),
             pool_id,
+            project_id: None,
             explicit_ip: None,
             explicit_port_range: None,
         }
@@ -272,6 +333,10 @@ impl IncompleteExternalIp {
         &self.pool_id
     }
 
+    pub fn project_id(&self) -> &Option<Uuid> {
+        &self.project_id
+    }
+
     pub fn explicit_ip(&self) -> &Option<IpNetwork> {
         &self.explicit_ip
     }
@@ -306,5 +371,80 @@ impl TryFrom<ExternalIp> for views::ExternalIp {
         }
         let kind = ip.kind.try_into()?;
         Ok(views::ExternalIp { kind, ip: ip.ip.ip() })
+    }
+}
+
+impl TryFrom<ExternalIp> for FloatingIp {
+    type Error = Error;
+
+    fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
+        if ip.kind != IpKind::Floating {
+            return Err(Error::internal_error(
+                "attempted to convert non-floating external IP to floating",
+            ));
+        }
+        if ip.is_service {
+            return Err(Error::internal_error(
+                "Service IPs should not be exposed in the API",
+            ));
+        }
+
+        let project_id = ip.project_id.ok_or(Error::internal_error(
+            "database schema guarantees parent project for non-service FIP",
+        ))?;
+
+        let name = ip.name.ok_or(Error::internal_error(
+            "database schema guarantees ID metadata for non-service FIP",
+        ))?;
+
+        let description = ip.description.ok_or(Error::internal_error(
+            "database schema guarantees ID metadata for non-service FIP",
+        ))?;
+
+        let identity = FloatingIpIdentity {
+            id: ip.id,
+            name,
+            description,
+            time_created: ip.time_created,
+            time_modified: ip.time_modified,
+            time_deleted: ip.time_deleted,
+        };
+
+        Ok(FloatingIp {
+            ip: ip.ip,
+            identity,
+            project_id,
+            ip_pool_id: ip.ip_pool_id,
+            ip_pool_range_id: ip.ip_pool_range_id,
+            is_service: ip.is_service,
+            parent_id: ip.parent_id,
+        })
+    }
+}
+
+impl TryFrom<ExternalIp> for views::FloatingIp {
+    type Error = Error;
+
+    fn try_from(ip: ExternalIp) -> Result<Self, Self::Error> {
+        FloatingIp::try_from(ip).map(Into::into)
+    }
+}
+
+impl From<FloatingIp> for views::FloatingIp {
+    fn from(ip: FloatingIp) -> Self {
+        let identity = IdentityMetadata {
+            id: ip.identity.id,
+            name: ip.identity.name.into(),
+            description: ip.identity.description,
+            time_created: ip.identity.time_created,
+            time_modified: ip.identity.time_modified,
+        };
+
+        views::FloatingIp {
+            ip: ip.ip.ip(),
+            identity,
+            project_id: ip.project_id,
+            instance_id: ip.parent_id,
+        }
     }
 }

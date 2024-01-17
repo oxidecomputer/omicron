@@ -70,9 +70,10 @@ impl Server {
         .await
         .map_err(|e| e.to_string())?;
 
-        let mut dropshot_config = dropshot::ConfigDropshot::default();
-        dropshot_config.request_body_max_bytes = 1024 * 1024;
-        dropshot_config.bind_address = SocketAddr::V6(sled_address);
+        let dropshot_config = dropshot::ConfigDropshot {
+            bind_address: SocketAddr::V6(sled_address),
+            ..config.dropshot
+        };
         let dropshot_log = log.new(o!("component" => "dropshot (SledAgent)"));
         let http_server = dropshot::HttpServerStarter::new(
             &dropshot_config,

@@ -39,7 +39,7 @@ pub fn path_to_executable(cmd_name: &str) -> PathBuf {
 #[track_caller]
 pub fn assert_exit_code(exit_status: ExitStatus, code: u32, stderr_text: &str) {
     if let ExitStatus::Exited(exit_code) = exit_status {
-        assert_eq!(exit_code, code);
+        assert_eq!(exit_code, code, "stderr:\n{}", stderr_text);
     } else {
         panic!(
             "expected normal process exit with code {}, got {:?}\n\nprocess stderr:{}",

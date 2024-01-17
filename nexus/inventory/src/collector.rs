@@ -5,28 +5,44 @@
 //! Collection of inventory from Omicron components
 
 use crate::builder::CollectionBuilder;
+use crate::builder::InventoryError;
+use crate::SledAgentEnumerator;
 use anyhow::Context;
+use gateway_client::types::GetCfpaParams;
+use gateway_client::types::RotCfpaSlot;
+use gateway_messages::SpComponent;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::RotPage;
+use nexus_types::inventory::RotPageWhich;
+use slog::o;
 use slog::{debug, error};
 use std::sync::Arc;
+use std::time::Duration;
 use strum::IntoEnumIterator;
 
-pub struct Collector {
+/// connection and request timeout used for Sled Agent HTTP client
+const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Collect all inventory data from an Oxide system
+pub struct Collector<'a> {
     log: slog::Logger,
     mgs_clients: Vec<Arc<gateway_client::Client>>,
+    sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
 
-impl Collector {
+impl<'a> Collector<'a> {
     pub fn new(
         creator: &str,
         mgs_clients: &[Arc<gateway_client::Client>],
+        sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
         Collector {
             log,
             mgs_clients: mgs_clients.to_vec(),
+            sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
     }
@@ -48,9 +64,8 @@ impl Collector {
 
         debug!(&self.log, "begin collection");
 
-        // When we add stages to collect from other components (e.g., sled
-        // agents), those will go here.
         self.collect_all_mgs().await;
+        self.collect_all_sled_agents().await;
 
         debug!(&self.log, "finished collection");
 
@@ -88,7 +103,7 @@ impl Collector {
         // being able to identify this particular condition.
         let sps = match ignition_result {
             Err(error) => {
-                self.in_progress.found_error(error);
+                self.in_progress.found_error(InventoryError::from(error));
                 return;
             }
 
@@ -124,7 +139,7 @@ impl Collector {
                 });
             let sp_state = match result {
                 Err(error) => {
-                    self.in_progress.found_error(error);
+                    self.in_progress.found_error(InventoryError::from(error));
                     continue;
                 }
                 Ok(response) => response.into_inner(),
@@ -174,7 +189,8 @@ impl Collector {
                     });
                 let caboose = match result {
                     Err(error) => {
-                        self.in_progress.found_error(error);
+                        self.in_progress
+                            .found_error(InventoryError::from(error));
                         continue;
                     }
                     Ok(response) => response.into_inner(),
@@ -195,6 +211,159 @@ impl Collector {
                     );
                 }
             }
+
+            // For each kind of RoT page that we care about, if it hasn't been
+            // fetched already, fetch it and record it.  Generally, we'd only
+            // get here for the first MGS client.  Assuming that one succeeds,
+            // the other(s) will skip this loop.
+            for which in RotPageWhich::iter() {
+                if self.in_progress.found_rot_page_already(&baseboard_id, which)
+                {
+                    continue;
+                }
+
+                let component = SpComponent::ROT.const_as_str();
+
+                let result = match which {
+                    RotPageWhich::Cmpa => client
+                        .sp_rot_cmpa_get(sp.type_, sp.slot, component)
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaActive => client
+                        .sp_rot_cfpa_get(
+                            sp.type_,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Active },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaInactive => client
+                        .sp_rot_cfpa_get(
+                            sp.type_,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Inactive },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                    RotPageWhich::CfpaScratch => client
+                        .sp_rot_cfpa_get(
+                            sp.type_,
+                            sp.slot,
+                            component,
+                            &GetCfpaParams { slot: RotCfpaSlot::Scratch },
+                        )
+                        .await
+                        .map(|response| response.into_inner().base64_data),
+                }
+                .with_context(|| {
+                    format!(
+                        "MGS {:?}: SP {:?}: rot page {:?}",
+                        client.baseurl(),
+                        sp,
+                        which
+                    )
+                });
+
+                let page = match result {
+                    Err(error) => {
+                        self.in_progress
+                            .found_error(InventoryError::from(error));
+                        continue;
+                    }
+                    Ok(data_base64) => RotPage { data_base64 },
+                };
+                if let Err(error) = self.in_progress.found_rot_page(
+                    &baseboard_id,
+                    which,
+                    client.baseurl(),
+                    page,
+                ) {
+                    error!(
+                        &self.log,
+                        "error reporting rot page: {:?} {:?} {:?}: {:#}",
+                        baseboard_id,
+                        which,
+                        client.baseurl(),
+                        error
+                    );
+                }
+            }
+        }
+    }
+
+    /// Collect inventory from all sled agent instances
+    async fn collect_all_sled_agents(&mut self) {
+        let urls = match self.sled_agent_lister.list_sled_agents().await {
+            Err(error) => {
+                self.in_progress.found_error(error);
+                return;
+            }
+            Ok(clients) => clients,
+        };
+
+        for url in urls {
+            let log = self.log.new(o!("SledAgent" => url.clone()));
+            let reqwest_client = reqwest::ClientBuilder::new()
+                .connect_timeout(SLED_AGENT_TIMEOUT)
+                .timeout(SLED_AGENT_TIMEOUT)
+                .build()
+                .unwrap();
+            let client = Arc::new(sled_agent_client::Client::new_with_client(
+                &url,
+                reqwest_client,
+                log,
+            ));
+
+            if let Err(error) = self.collect_one_sled_agent(&client).await {
+                error!(
+                    &self.log,
+                    "sled agent {:?}: {:#}",
+                    client.baseurl(),
+                    error
+                );
+            }
+        }
+    }
+
+    async fn collect_one_sled_agent(
+        &mut self,
+        client: &sled_agent_client::Client,
+    ) -> Result<(), anyhow::Error> {
+        let sled_agent_url = client.baseurl();
+        debug!(&self.log, "begin collection from Sled Agent";
+            "sled_agent_url" => client.baseurl()
+        );
+
+        let maybe_ident = client.inventory().await.with_context(|| {
+            format!("Sled Agent {:?}: inventory", &sled_agent_url)
+        });
+        let inventory = match maybe_ident {
+            Ok(inventory) => inventory.into_inner(),
+            Err(error) => {
+                self.in_progress.found_error(InventoryError::from(error));
+                return Ok(());
+            }
+        };
+
+        let sled_id = inventory.sled_id;
+        self.in_progress.found_sled_inventory(&sled_agent_url, inventory)?;
+
+        let maybe_config =
+            client.omicron_zones_get().await.with_context(|| {
+                format!("Sled Agent {:?}: omicron zones", &sled_agent_url)
+            });
+        match maybe_config {
+            Err(error) => {
+                self.in_progress.found_error(InventoryError::from(error));
+                Ok(())
+            }
+            Ok(zones) => self.in_progress.found_sled_omicron_zones(
+                &sled_agent_url,
+                sled_id,
+                zones.into_inner(),
+            ),
         }
     }
 }
@@ -202,10 +371,16 @@ impl Collector {
 #[cfg(test)]
 mod test {
     use super::Collector;
+    use crate::StaticSledAgentEnumerator;
     use gateway_messages::SpPort;
     use nexus_types::inventory::Collection;
+    use omicron_common::api::external::Generation;
+    use omicron_sled_agent::sim;
     use std::fmt::Write;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
     use std::sync::Arc;
+    use uuid::Uuid;
 
     fn dump_collection(collection: &Collection) -> String {
         // Construct a stable, human-readable summary of the Collection
@@ -234,6 +409,11 @@ mod test {
                 c.board, c.name, c.version, c.git_commit,
             )
             .unwrap();
+        }
+
+        write!(&mut s, "\nrot pages:\n").unwrap();
+        for p in &collection.rot_pages {
+            write!(&mut s, "    data_base64 {:?}\n", p.data_base64).unwrap();
         }
 
         // All we really need to check here is that we're reporting the right
@@ -272,6 +452,51 @@ mod test {
             }
         }
 
+        write!(&mut s, "\nrot pages found:\n").unwrap();
+        for (kind, bb_to_found) in &collection.rot_pages_found {
+            for (bb, found) in bb_to_found {
+                write!(
+                    &mut s,
+                    "    {:?} baseboard part {:?} serial {:?}: \
+                              data_base64 {:?}\n",
+                    kind,
+                    bb.part_number,
+                    bb.serial_number,
+                    found.page.data_base64
+                )
+                .unwrap();
+            }
+        }
+
+        write!(&mut s, "\nsled agents found:\n").unwrap();
+        for (sled_id, sled_info) in &collection.sled_agents {
+            assert_eq!(*sled_id, sled_info.sled_id);
+            write!(&mut s, "  sled {} ({:?})\n", sled_id, sled_info.sled_role)
+                .unwrap();
+            write!(&mut s, "    baseboard {:?}\n", sled_info.baseboard_id)
+                .unwrap();
+
+            if let Some(found_zones) = collection.omicron_zones.get(sled_id) {
+                assert_eq!(*sled_id, found_zones.sled_id);
+                write!(
+                    &mut s,
+                    "    zone generation: {:?}\n",
+                    found_zones.zones.generation
+                )
+                .unwrap();
+                write!(&mut s, "    zones found:\n").unwrap();
+                for zone in &found_zones.zones.zones {
+                    write!(
+                        &mut s,
+                        "        zone {} type {}\n",
+                        zone.id,
+                        zone.zone_type.label(),
+                    )
+                    .unwrap();
+                }
+            }
+        }
+
         write!(&mut s, "\nerrors:\n").unwrap();
         for e in &collection.errors {
             // Some error strings have OS error numbers in them.  We want to
@@ -295,19 +520,75 @@ mod test {
         s
     }
 
+    async fn sim_sled_agent(
+        log: slog::Logger,
+        sled_id: Uuid,
+        zone_id: Uuid,
+    ) -> sim::Server {
+        // Start a simulated sled agent.
+        let config =
+            sim::Config::for_testing(sled_id, sim::SimMode::Auto, None, None);
+        let agent = sim::Server::start(&config, &log, false).await.unwrap();
+
+        // Pretend to put some zones onto this sled.  We don't need to test this
+        // exhaustively here because there are builder tests that exercise a
+        // variety of different data.  We just want to make sure that if the
+        // sled agent reports something specific (some non-degenerate case),
+        // then it shows up in the resulting collection.
+        let sled_url = format!("http://{}/", agent.http_server.local_addr());
+        let client = sled_agent_client::Client::new(&sled_url, log);
+
+        let zone_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0);
+        client
+            .omicron_zones_put(&sled_agent_client::types::OmicronZonesConfig {
+                generation: Generation::from(3),
+                zones: vec![sled_agent_client::types::OmicronZoneConfig {
+                    id: zone_id,
+                    underlay_address: *zone_address.ip(),
+                    zone_type:
+                        sled_agent_client::types::OmicronZoneType::Oximeter {
+                            address: zone_address.to_string(),
+                        },
+                }],
+            })
+            .await
+            .expect("failed to write initial zone version to fake sled agent");
+
+        agent
+    }
+
     #[tokio::test]
     async fn test_basic() {
-        // Set up the stock MGS test setup which includes a couple of fake SPs.
-        // Then run a collection against it.
+        // Set up the stock MGS test setup (which includes a couple of fake SPs)
+        // and a simulated sled agent.  Then run a collection against these.
         let gwtestctx =
             gateway_test_utils::setup::test_setup("test_basic", SpPort::One)
                 .await;
         let log = &gwtestctx.logctx.log;
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+        )
+        .await;
+        let sled2 = sim_sled_agent(
+            log.clone(),
+            "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+        )
+        .await;
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
         let mgs_client =
             Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
-        let collector =
-            Collector::new("test-suite", &[mgs_client], log.clone());
+        let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
+        let collector = Collector::new(
+            "test-suite",
+            &[mgs_client],
+            &sled_enum,
+            log.clone(),
+        );
         let collection = collector
             .collect_all()
             .await
@@ -318,6 +599,7 @@ mod test {
         let s = dump_collection(&collection);
         expectorate::assert_contents("tests/output/collector_basic.txt", &s);
 
+        sled1.http_server.close().await.unwrap();
         gwtestctx.teardown().await;
     }
 
@@ -337,6 +619,20 @@ mod test {
         )
         .await;
         let log = &gwtestctx1.logctx.log;
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+        )
+        .await;
+        let sled2 = sim_sled_agent(
+            log.clone(),
+            "03265caf-da7d-46c7-b1c2-39fa90ce5c65".parse().unwrap(),
+            "8b88a56f-3eb6-4d80-ba42-75d867bc427d".parse().unwrap(),
+        )
+        .await;
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_clients = [&gwtestctx1, &gwtestctx2]
             .into_iter()
             .map(|g| {
@@ -345,7 +641,9 @@ mod test {
                 Arc::new(client)
             })
             .collect::<Vec<_>>();
-        let collector = Collector::new("test-suite", &mgs_clients, log.clone());
+        let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
+        let collector =
+            Collector::new("test-suite", &mgs_clients, &sled_enum, log.clone());
         let collection = collector
             .collect_all()
             .await
@@ -356,6 +654,7 @@ mod test {
         let s = dump_collection(&collection);
         expectorate::assert_contents("tests/output/collector_basic.txt", &s);
 
+        sled1.http_server.close().await.unwrap();
         gwtestctx1.teardown().await;
         gwtestctx2.teardown().await;
     }
@@ -383,7 +682,9 @@ mod test {
             Arc::new(client)
         };
         let mgs_clients = &[bad_client, real_client];
-        let collector = Collector::new("test-suite", mgs_clients, log.clone());
+        let sled_enum = StaticSledAgentEnumerator::empty();
+        let collector =
+            Collector::new("test-suite", mgs_clients, &sled_enum, log.clone());
         let collection = collector
             .collect_all()
             .await
@@ -393,6 +694,52 @@ mod test {
         let s = dump_collection(&collection);
         expectorate::assert_contents("tests/output/collector_errors.txt", &s);
 
+        gwtestctx.teardown().await;
+    }
+
+    #[tokio::test]
+    async fn test_sled_agent_failure() {
+        // Similar to the basic test, but use multiple sled agents, one of which
+        // is non-functional.
+        let gwtestctx = gateway_test_utils::setup::test_setup(
+            "test_sled_agent_failure",
+            SpPort::One,
+        )
+        .await;
+        let log = &gwtestctx.logctx.log;
+        let sled1 = sim_sled_agent(
+            log.clone(),
+            "9cb9b78f-5614-440c-b66d-e8e81fab69b0".parse().unwrap(),
+            "5125277f-0988-490b-ac01-3bba20cc8f07".parse().unwrap(),
+        )
+        .await;
+        let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
+        let sledbogus_url = String::from("http://[100::1]:45678");
+        let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
+        let mgs_client =
+            Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
+        let sled_enum =
+            StaticSledAgentEnumerator::new([sled1_url, sledbogus_url]);
+        let collector = Collector::new(
+            "test-suite",
+            &[mgs_client],
+            &sled_enum,
+            log.clone(),
+        );
+        let collection = collector
+            .collect_all()
+            .await
+            .expect("failed to carry out collection");
+        assert!(!collection.errors.is_empty());
+        assert_eq!(collection.collector, "test-suite");
+
+        let s = dump_collection(&collection);
+        expectorate::assert_contents(
+            "tests/output/collector_sled_agent_errors.txt",
+            &s,
+        );
+
+        sled1.http_server.close().await.unwrap();
         gwtestctx.teardown().await;
     }
 }

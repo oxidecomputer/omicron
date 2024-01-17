@@ -6,6 +6,7 @@
 
 use crate::updates::ConfigUpdates;
 use camino::{Utf8Path, Utf8PathBuf};
+use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
@@ -44,6 +45,11 @@ pub struct SoftPortConfig {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Configuration for the sled agent dropshot server
+    ///
+    /// If the `bind_address` is set, it will be ignored. The remaining fields
+    /// will be respected.
+    pub dropshot: ConfigDropshot,
     /// Configuration for the sled agent debug log
     pub log: ConfigLogging,
     /// The sled's mode of operation (auto detect or force gimlet/scrimlet).

@@ -71,6 +71,23 @@ pub trait ObjectIdentity {
     fn identity(&self) -> &IdentityMetadata;
 }
 
+/// Exists for types that don't properly implement `ObjectIdentity` but
+/// still need to be paginated by name or id.
+pub trait SimpleIdentity {
+    fn id(&self) -> Uuid;
+    fn name(&self) -> &Name;
+}
+
+impl<T: ObjectIdentity> SimpleIdentity for T {
+    fn id(&self) -> Uuid {
+        self.identity().id
+    }
+
+    fn name(&self) -> &Name {
+        &self.identity().name
+    }
+}
+
 /// Parameters used to request a specific page of results when listing a
 /// collection of objects
 ///
@@ -299,7 +316,7 @@ impl JsonSchema for Name {
                         r#"^"#,
                         // Cannot match a UUID
                         r#"(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)"#,
-                        r#"^[a-z][a-z0-9-]*[a-zA-Z0-9]*"#,
+                        r#"^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?"#,
                         r#"$"#,
                     )
                     .to_string(),
@@ -316,10 +333,7 @@ impl Name {
     /// `Name::try_from(String)` that marshals any error into an appropriate
     /// `Error`.
     pub fn from_param(value: String, label: &str) -> Result<Name, Error> {
-        value.parse().map_err(|e| Error::InvalidValue {
-            label: String::from(label),
-            message: e,
-        })
+        value.parse().map_err(|e| Error::invalid_value(label, e))
     }
 
     /// Return the `&str` representing the actual name.
@@ -409,7 +423,7 @@ impl SemverVersion {
     /// This is the official ECMAScript-compatible validation regex for
     /// semver:
     /// <https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string>
-    const VALIDATION_REGEX: &str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
+    const VALIDATION_REGEX: &'static str = r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$";
 }
 
 impl JsonSchema for SemverVersion {
@@ -511,7 +525,9 @@ impl JsonSchema for RoleName {
 // to serialize the value.
 //
 // TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
 pub struct ByteCount(u64);
 
 #[allow(non_upper_case_globals)]
@@ -622,6 +638,7 @@ impl From<ByteCount> for i64 {
     Debug,
     Deserialize,
     Eq,
+    Hash,
     JsonSchema,
     Ord,
     PartialEq,
@@ -704,6 +721,7 @@ pub enum ResourceType {
     Silo,
     SiloUser,
     SiloGroup,
+    SiloQuotas,
     IdentityProvider,
     SamlIdentityProvider,
     SshKey,
@@ -721,6 +739,7 @@ pub enum ResourceType {
     LoopbackAddress,
     SwitchPortSettings,
     IpPool,
+    IpPoolResource,
     InstanceNetworkInterface,
     PhysicalDisk,
     Rack,
@@ -751,6 +770,7 @@ pub enum ResourceType {
     Zpool,
     Vmm,
     Ipv4NatEntry,
+    FloatingIp,
 }
 
 // IDENTITY METADATA
@@ -1899,7 +1919,7 @@ impl MacAddr {
     /// Iterate the MAC addresses in the system address range
     /// (used as an allocator in contexts where collisions are not expected and
     /// determinism is useful, like in the test suite)
-    pub fn iter_system() -> impl Iterator<Item = MacAddr> {
+    pub fn iter_system() -> impl Iterator<Item = MacAddr> + Send {
         ((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR)
             .map(Self::from_i64)
     }
@@ -2826,10 +2846,10 @@ mod test {
         assert!(result.is_err());
         assert_eq!(
             result,
-            Err(Error::InvalidValue {
-                label: "the_name".to_string(),
-                message: "name requires at least one character".to_string()
-            })
+            Err(Error::invalid_value(
+                "the_name",
+                "name requires at least one character"
+            ))
         );
     }
 

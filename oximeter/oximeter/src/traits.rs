@@ -30,8 +30,15 @@ use std::ops::AddAssign;
 /// definition can be thought of as a schema, and an instance of that struct as identifying an
 /// individual target.
 ///
-/// Target fields may have one of a set of supported types: `bool`, `i64`, `String`, `IpAddr`, or
-/// `Uuid`. Any number of fields greater than zero is supported.
+/// Target fields may have one of a set of supported types:
+///
+/// - `bool`
+/// - any fixed-width integer, e.g., `u8` or `i64`
+/// - `String`
+/// - `IpAddr`
+/// - `Uuid`
+///
+/// Any number of fields greater than zero is supported.
 ///
 /// Examples
 /// --------
@@ -105,9 +112,28 @@ pub trait Target {
 /// One field of the struct is special, describing the actual measured data that the metric
 /// represents. This should be a field named `datum`, or another field (with any name you choose)
 /// annotated with the `#[datum]` attribute. This field represents the underlying data for the
-/// metric, and must be one of the supported types, implementing the [`Datum`] trait. This can
-/// be any of: `i64`, `f64`, `bool`, `String`, or `Bytes` for gauges, and `Cumulative<T>` or
-/// `Histogram<T>` for cumulative metrics, where `T` is `i64` or `f64`.
+/// metric, and must be one of the supported types, implementing the [`Datum`] trait.
+///
+/// For gauge types, this can be any of:
+///
+/// - `bool`
+/// - a fixed-width integer, e.g. `u8` or `i64`
+/// - `f32` or `f64`
+/// - `String`
+/// - `Bytes`
+///
+/// Cumulative types can be any of `Cumulative<T>`, where `T` is
+///
+/// - `i64`
+/// - `u64`
+/// - `f32`
+/// - `f64`
+///
+/// Histogram types can be any `Histogram<T>`, wher `T` is:
+///
+/// - a fixed-width integer, e.g. `u8` or `i64`
+/// - `f32`
+/// - `f64`
 ///
 /// The value of the metric's data is _measured_ by using the `measure()` method, which returns a
 /// [`Measurement`]. This describes a timestamped data point for the metric.

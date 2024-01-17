@@ -24,14 +24,15 @@ headers.workspace = true
 http.workspace = true
 hyper.workspace = true
 ipnetwork.workspace = true
-lazy_static.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
+once_cell.workspace = true
 openssl.workspace = true
 oso.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
+rand.workspace = true
 ref-cast.workspace = true
 samael.workspace = true
 serde.workspace = true
@@ -58,6 +59,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+camino-tempfile.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
 gateway-client.workspace = true
@@ -70,10 +72,10 @@ omicron-test-utils.workspace = true
 openapiv3.workspace = true
 pem.workspace = true
 petgraph.workspace = true
+pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
 strum.workspace = true
 subprocess.workspace = true
-tempfile.workspace = true
 term.workspace = true

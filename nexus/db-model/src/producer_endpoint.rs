@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Copy, Clone, Debug, QueryId)]
-    #[diesel(postgres_type(name = "producer_kind"))]
+    #[diesel(postgres_type(name = "producer_kind", schema = "public"))]
     pub struct ProducerKindEnum;
 
     #[derive(AsExpression, Copy, Clone, Debug, FromSqlRow, PartialEq)]
@@ -52,7 +52,7 @@ pub struct ProducerEndpoint {
     #[diesel(embed)]
     identity: ProducerEndpointIdentity,
 
-    pub kind: Option<ProducerKind>,
+    pub kind: ProducerKind,
     pub ip: ipnetwork::IpNetwork,
     pub port: SqlU16,
     pub interval: f64,
@@ -69,7 +69,7 @@ impl ProducerEndpoint {
     ) -> Self {
         Self {
             identity: ProducerEndpointIdentity::new(endpoint.id),
-            kind: endpoint.kind.map(Into::into),
+            kind: endpoint.kind.into(),
             ip: endpoint.address.ip().into(),
             port: endpoint.address.port().into(),
             base_route: endpoint.base_route.clone(),

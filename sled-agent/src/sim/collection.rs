@@ -217,6 +217,16 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         }
     }
 
+    /// Forcibly removes the object `id` from the collection without simulating
+    /// any further state changes for it.
+    pub async fn sim_force_remove(&self, id: Uuid) {
+        let mut objects = self.objects.lock().await;
+        let object = objects.remove(&id).unwrap();
+        if let Some(mut tx) = object.channel_tx {
+            tx.close_channel();
+        }
+    }
+
     /// Complete a desired asynchronous state transition for object `id`.
     /// This is invoked either by `sim_step()` (if the simulation mode is
     /// `SimMode::Auto`) or `instance_finish_transition` (if the simulation mode
@@ -777,7 +787,7 @@ mod test {
         let error =
             disk.transition(DiskStateRequested::Attached(id2)).unwrap_err();
         if let Error::InvalidRequest { message } = error {
-            assert_eq!("disk is already attached", message);
+            assert_eq!("disk is already attached", message.external_message());
         } else {
             panic!("unexpected error type");
         }
@@ -829,7 +839,10 @@ mod test {
         let error =
             disk.transition(DiskStateRequested::Attached(id)).unwrap_err();
         if let Error::InvalidRequest { message } = error {
-            assert_eq!("cannot attach from detaching", message);
+            assert_eq!(
+                "cannot attach from detaching",
+                message.external_message()
+            );
         } else {
             panic!("unexpected error type");
         }

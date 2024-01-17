@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool_local ON CLUSTER oximeter_
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt8
+    datum Nullable(UInt8)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_bool_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_bool ON CLUSTER oximeter_cluste
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt8
+    datum Nullable(UInt8)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_bool_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i8_local ON CLUSTER oximeter_cl
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int8
+    datum Nullable(Int8)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_i8_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i8 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int8
+    datum Nullable(Int8)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_i8_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -64,7 +64,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u8_local ON CLUSTER oximeter_cl
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt8
+    datum Nullable(UInt8)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_u8_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -75,7 +75,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u8 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt8
+    datum Nullable(UInt8)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_u8_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i16_local ON CLUSTER oximeter_c
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int16
+    datum Nullable(Int16)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_i16_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -95,7 +95,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i16 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int16
+    datum Nullable(Int16)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_i16_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u16_local ON CLUSTER oximeter_c
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt16
+    datum Nullable(UInt16)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_u16_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u16 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt16
+    datum Nullable(UInt16)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_u16_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i32_local ON CLUSTER oximeter_c
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int32
+    datum Nullable(Int32)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_i32_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i32 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int32
+    datum Nullable(Int32)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_i32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u32_local ON CLUSTER oximeter_c
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt32
+    datum Nullable(UInt32)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_u32_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u32 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt32
+    datum Nullable(UInt32)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_u32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -164,7 +164,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64_local ON CLUSTER oximeter_c
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int64
+    datum Nullable(Int64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_i64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_i64 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Int64
+    datum Nullable(Int64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_i64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u64_local ON CLUSTER oximeter_c
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt64
+    datum Nullable(UInt64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_u64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -195,7 +195,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_u64 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum UInt64
+    datum Nullable(UInt64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_u64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f32_local ON CLUSTER oximeter_c
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Float32
+    datum Nullable(Float32)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_f32_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f32 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Float32
+    datum Nullable(Float32)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -224,7 +224,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64_local ON CLUSTER oximeter_c
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Float64
+    datum Nullable(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_f64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_f64 ON CLUSTER oximeter_cluster
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum Float64
+    datum Nullable(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_f64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -244,7 +244,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string_local ON CLUSTER oximete
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum String
+    datum Nullable(String)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_string_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, timestamp)
@@ -255,7 +255,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_string ON CLUSTER oximeter_clus
     timeseries_name String,
     timeseries_key UInt64,
     timestamp DateTime64(9, 'UTC'),
-    datum String
+    datum Nullable(String)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_string_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64_local ON CLUSTER 
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Int64
+    datum Nullable(Int64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_cumulativei64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -297,7 +297,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativei64 ON CLUSTER oximet
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Int64
+    datum Nullable(Int64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativei64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -307,7 +307,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativeu64_local ON CLUSTER 
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum UInt64
+    datum Nullable(UInt64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_cumulativeu64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -319,7 +319,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativeu64 ON CLUSTER oximet
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum UInt64
+    datum Nullable(UInt64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativeu64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -329,7 +329,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef32_local ON CLUSTER 
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Float32
+    datum Nullable(Float32)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_cumulativef32_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -341,7 +341,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef32 ON CLUSTER oximet
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Float32
+    datum Nullable(Float32)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativef32_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 
@@ -351,7 +351,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64_local ON CLUSTER 
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Float64
+    datum Nullable(Float64)
 )
 ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/measurements_cumulativef64_local', '{replica}')
 ORDER BY (timeseries_name, timeseries_key, start_time, timestamp)
@@ -363,7 +363,7 @@ CREATE TABLE IF NOT EXISTS oximeter.measurements_cumulativef64 ON CLUSTER oximet
     timeseries_key UInt64,
     start_time DateTime64(9, 'UTC'),
     timestamp DateTime64(9, 'UTC'),
-    datum Float64
+    datum Nullable(Float64)
 )
 ENGINE = Distributed('oximeter_cluster', 'oximeter', 'measurements_cumulativef64_local', xxHash64(splitByChar(':', timeseries_name)[1]));
 

@@ -11,10 +11,10 @@ use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::identity_eq;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::object_create;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -54,8 +54,8 @@ fn get_disk_attach_url(instance_name: &str) -> String {
     )
 }
 
-async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    populate_ip_pool(&client, "default", None).await;
+async fn create_project_and_pool(client: &ClientTestContext) -> Uuid {
+    create_default_ip_pool(client).await;
     let project = create_project(client, PROJECT_NAME).await;
     project.identity.id
 }
@@ -302,25 +302,6 @@ async fn bulk_write_stop(
     .unwrap();
 }
 
-async fn import_blocks_from_url(client: &ClientTestContext) {
-    // Import blocks from a URL
-    let import_blocks_from_url_url =
-        format!("/v1/disks/{}/import?project={}", DISK_NAME, PROJECT_NAME,);
-
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &import_blocks_from_url_url)
-            .body(Some(&params::ImportBlocksFromUrl {
-                url: "http://fake.endpoint/image.iso".to_string(),
-                expected_digest: None,
-            }))
-            .expect_status(Some(StatusCode::NO_CONTENT)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-}
-
 async fn finalize_import(
     client: &ClientTestContext,
     expected_status: StatusCode,
@@ -369,7 +350,7 @@ async fn validate_disk_state(client: &ClientTestContext, state: DiskState) {
 async fn test_disk_create_for_importing(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
     let disks_url = get_disks_url();
 
     let new_disk = params::DiskCreate {
@@ -415,7 +396,7 @@ async fn test_cannot_mount_import_ready_disk(
     let nexus = &cptestctx.server.apictx().nexus;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -446,7 +427,7 @@ async fn test_cannot_mount_import_from_bulk_writes_disk(
     let nexus = &cptestctx.server.apictx().nexus;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -461,33 +442,6 @@ async fn test_cannot_mount_import_from_bulk_writes_disk(
         .await;
 }
 
-// Test the normal flow of importing from a URL
-#[nexus_test]
-async fn test_import_blocks_from_url(cptestctx: &ControlPlaneTestContext) {
-    let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
-
-    DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
-
-    create_disk_with_state_importing_blocks(client).await;
-
-    // Import blocks from a URL
-    import_blocks_from_url(client).await;
-
-    // Validate disk is in state ImportReady
-    validate_disk_state(client, DiskState::ImportReady).await;
-
-    // Finalize import
-    finalize_import(client, StatusCode::NO_CONTENT).await;
-
-    // Validate disk is in state Detached
-    validate_disk_state(client, DiskState::Detached).await;
-
-    // Create an instance to attach the disk.
-    create_instance_and_attach_disk(client, nexus, StatusCode::ACCEPTED).await;
-}
-
 // Test the normal flow of importing from bulk writes
 #[nexus_test]
 async fn test_import_blocks_with_bulk_write(
@@ -497,7 +451,7 @@ async fn test_import_blocks_with_bulk_write(
     let nexus = &cptestctx.server.apictx().nexus;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -538,7 +492,7 @@ async fn test_import_blocks_with_bulk_write_with_snapshot(
     let nexus = &cptestctx.server.apictx().nexus;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -589,7 +543,7 @@ async fn test_cannot_finalize_without_stopping_bulk_writes(
     let client = &cptestctx.external_client;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -618,7 +572,7 @@ async fn test_cannot_bulk_write_to_unaligned_offset(
     let client = &cptestctx.external_client;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -651,7 +605,7 @@ async fn test_cannot_bulk_write_data_not_block_size_multiple(
     let client = &cptestctx.external_client;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -683,7 +637,7 @@ async fn test_cannot_bulk_write_data_past_end_of_disk(
     let client = &cptestctx.external_client;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -715,7 +669,7 @@ async fn test_cannot_bulk_write_data_non_base64(
     let client = &cptestctx.external_client;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -753,7 +707,7 @@ async fn test_can_stop_start_import_from_bulk_write(
     let client = &cptestctx.external_client;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -781,7 +735,7 @@ async fn test_cannot_bulk_write_start_attached_disk(
     let nexus = &cptestctx.server.apictx().nexus;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -811,7 +765,7 @@ async fn test_cannot_bulk_write_attached_disk(
     let nexus = &cptestctx.server.apictx().nexus;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -841,7 +795,7 @@ async fn test_cannot_bulk_write_stop_attached_disk(
     let nexus = &cptestctx.server.apictx().nexus;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 
@@ -870,7 +824,7 @@ async fn test_cannot_finalize_attached_disk(
     let nexus = &cptestctx.server.apictx().nexus;
 
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     create_disk_with_state_importing_blocks(client).await;
 

@@ -3,9 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
-use crate::app::instance::InstanceStateChangeRequest;
+use crate::app::instance::{
+    InstanceStateChangeError, InstanceStateChangeRequest,
+};
 use crate::app::sagas::{
-    declare_saga_actions, instance_common::allocate_sled_ipv6,
+    declare_saga_actions, instance_common::allocate_vmm_ipv6,
 };
 use crate::external_api::params;
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
@@ -179,7 +181,7 @@ async fn sim_allocate_propolis_ip(
         &sagactx,
         &params.serialized_authn,
     );
-    allocate_sled_ipv6(
+    allocate_vmm_ipv6(
         &opctx,
         sagactx.user_data().datastore(),
         params.migrate_params.dst_sled_id,
@@ -387,28 +389,26 @@ async fn sim_ensure_destination_propolis_undo(
           "prev_runtime_state" => ?db_instance.runtime());
 
     // Ensure that the destination sled has no Propolis matching the description
-    // the saga previously generated.
-    //
-    // Sled agent guarantees that if an instance is unregistered from a sled
-    // that does not believe it holds the "active" Propolis for the instance,
-    // then the sled's copy of the instance record will not change during
-    // unregistration. This precondition always holds here because the "start
-    // migration" step is not allowed to unwind once migration has possibly
-    // started. Not changing the instance is important here because the next
-    // undo step (clearing migration IDs) needs to advance the instance's
-    // generation number to succeed.
-    osagactx
+    // the saga previously generated. If this succeeds, or if it fails because
+    // the destination sled no longer knows about this instance, allow the rest
+    // of unwind to take care of cleaning up the migration IDs in the instance
+    // record. Otherwise the unwind has failed and manual intervention is
+    // needed.
+    match osagactx
         .nexus()
-        .instance_ensure_unregistered(
-            &opctx,
-            &authz_instance,
-            &dst_sled_id,
-            db_instance.runtime(),
-        )
+        .instance_ensure_unregistered(&opctx, &authz_instance, &dst_sled_id)
         .await
-        .map_err(ActionError::action_failed)?;
-
-    Ok(())
+    {
+        Ok(_) => Ok(()),
+        Err(InstanceStateChangeError::SledAgent(inner)) => {
+            if !inner.instance_unhealthy() {
+                Ok(())
+            } else {
+                Err(inner.0.into())
+            }
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn sim_instance_migrate(
@@ -454,7 +454,7 @@ async fn sim_instance_migrate(
     //
     // Possibly sled agent can help with this by using state or Propolis
     // generation numbers to filter out stale destruction requests.
-    osagactx
+    match osagactx
         .nexus()
         .instance_request_state(
             &opctx,
@@ -469,9 +469,30 @@ async fn sim_instance_migrate(
             ),
         )
         .await
-        .map_err(ActionError::action_failed)?;
+    {
+        Ok(_) => Ok(()),
+        // Failure to initiate migration to a specific target doesn't entail
+        // that the entire instance has failed, so handle errors by unwinding
+        // the saga without otherwise touching the instance's state.
+        Err(InstanceStateChangeError::SledAgent(inner)) => {
+            info!(osagactx.log(),
+                      "migration saga: sled agent failed to start migration";
+                      "instance_id" => %db_instance.id(),
+                      "error" => ?inner);
 
-    Ok(())
+            Err(ActionError::action_failed(
+                omicron_common::api::external::Error::from(inner),
+            ))
+        }
+        Err(InstanceStateChangeError::Other(inner)) => {
+            info!(osagactx.log(),
+                      "migration saga: internal error changing instance state";
+                      "instance_id" => %db_instance.id(),
+                      "error" => ?inner);
+
+            Err(ActionError::action_failed(inner))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -480,10 +501,10 @@ mod tests {
     use camino::Utf8Path;
     use dropshot::test_util::ClientTestContext;
     use nexus_test_interface::NexusServer;
-    use nexus_test_utils::{
-        resource_helpers::{create_project, object_create, populate_ip_pool},
-        start_sled_agent,
+    use nexus_test_utils::resource_helpers::{
+        create_default_ip_pool, create_project, object_create,
     };
+    use nexus_test_utils::start_sled_agent;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
         ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
@@ -499,7 +520,7 @@ mod tests {
     const INSTANCE_NAME: &str = "test-instance";
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
-        populate_ip_pool(&client, "default", None).await;
+        create_default_ip_pool(&client).await;
         let project = create_project(&client, PROJECT_NAME).await;
         project.identity.id
     }

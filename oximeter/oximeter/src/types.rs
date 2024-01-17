@@ -330,6 +330,11 @@ impl DatumType {
                 | DatumType::HistogramF64
         )
     }
+
+    /// Return `true` if this datum type is a histogram, and `false` otherwise.
+    pub const fn is_histogram(&self) -> bool {
+        matches!(self, DatumType::HistogramF64 | DatumType::HistogramI64)
+    }
 }
 
 impl std::fmt::Display for DatumType {
@@ -369,6 +374,7 @@ pub enum Datum {
     HistogramU64(histogram::Histogram<u64>),
     HistogramF32(histogram::Histogram<f32>),
     HistogramF64(histogram::Histogram<f64>),
+    Missing(MissingDatum),
 }
 
 impl Datum {
@@ -402,6 +408,7 @@ impl Datum {
             Datum::HistogramU64(_) => DatumType::HistogramU64,
             Datum::HistogramF32(_) => DatumType::HistogramF32,
             Datum::HistogramF64(_) => DatumType::HistogramF64,
+            Datum::Missing(ref inner) => inner.datum_type(),
         }
     }
 
@@ -440,6 +447,7 @@ impl Datum {
             Datum::HistogramU64(ref inner) => Some(inner.start_time()),
             Datum::HistogramF32(ref inner) => Some(inner.start_time()),
             Datum::HistogramF64(ref inner) => Some(inner.start_time()),
+            Datum::Missing(ref inner) => inner.start_time(),
         }
     }
 }
@@ -495,6 +503,60 @@ impl From<&str> for Datum {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
+pub struct MissingDatum {
+    datum_type: DatumType,
+    start_time: Option<DateTime<Utc>>,
+}
+
+impl MissingDatum {
+    pub fn datum_type(&self) -> DatumType {
+        self.datum_type
+    }
+
+    pub fn start_time(&self) -> Option<DateTime<Utc>> {
+        self.start_time
+    }
+
+    pub fn new(
+        datum_type: DatumType,
+        start_time: Option<DateTime<Utc>>,
+    ) -> Result<Self, MetricsError> {
+        // See https://github.com/oxidecomputer/omicron/issues/4551.
+        if datum_type == DatumType::Bytes {
+            return Err(MetricsError::DatumError(String::from(
+                "Missing samples from byte array types are not supported",
+            )));
+        }
+        if datum_type.is_cumulative() && start_time.is_none() {
+            return Err(MetricsError::MissingDatumRequiresStartTime {
+                datum_type,
+            });
+        }
+        if !datum_type.is_cumulative() && start_time.is_some() {
+            return Err(MetricsError::MissingDatumCannotHaveStartTime {
+                datum_type,
+            });
+        }
+        Ok(Self { datum_type, start_time })
+    }
+}
+
+impl From<MissingDatum> for Datum {
+    fn from(d: MissingDatum) -> Datum {
+        Datum::Missing(d)
+    }
+}
+
+impl<M: oximeter::Metric> From<&M> for MissingDatum {
+    fn from(metric: &M) -> Self {
+        MissingDatum {
+            datum_type: metric.datum_type(),
+            start_time: metric.start_time(),
+        }
+    }
+}
+
 /// A `Measurement` is a timestamped datum from a single metric
 #[derive(Clone, Debug, PartialEq, JsonSchema, Serialize, Deserialize)]
 pub struct Measurement {
@@ -514,6 +576,11 @@ impl Measurement {
     /// Construct a `Measurement` with the given timestamp.
     pub fn new<D: Into<Datum>>(timestamp: DateTime<Utc>, datum: D) -> Self {
         Self { timestamp, datum: datum.into() }
+    }
+
+    /// Return true if this measurement represents a missing datum.
+    pub fn is_missing(&self) -> bool {
+        matches!(self.datum, Datum::Missing(_))
     }
 
     /// Return the datum for this measurement
@@ -561,6 +628,14 @@ pub enum MetricsError {
     /// A field name is duplicated between the target and metric.
     #[error("Field '{name}' is duplicated between the target and metric")]
     DuplicateFieldName { name: String },
+
+    #[error("Missing datum of type {datum_type} requires a start time")]
+    MissingDatumRequiresStartTime { datum_type: DatumType },
+
+    #[error("Missing datum of type {datum_type} cannot have a start time")]
+    MissingDatumCannotHaveStartTime { datum_type: DatumType },
+    #[error("Invalid timeseries name")]
+    InvalidTimeseriesName,
 }
 
 impl From<MetricsError> for omicron_common::api::external::Error {
@@ -734,6 +809,29 @@ impl Sample {
         })
     }
 
+    /// Construct a new missing sample, recorded at the time of the supplied
+    /// timestamp.
+    pub fn new_missing_with_timestamp<T, M, D>(
+        timestamp: DateTime<Utc>,
+        target: &T,
+        metric: &M,
+    ) -> Result<Self, MetricsError>
+    where
+        T: traits::Target,
+        M: traits::Metric<Datum = D>,
+    {
+        let target_fields = FieldSet::from_target(target);
+        let metric_fields = FieldSet::from_metric(metric);
+        Self::verify_field_names(&target_fields, &metric_fields)?;
+        let datum = Datum::Missing(MissingDatum::from(metric));
+        Ok(Self {
+            timeseries_name: crate::timeseries_name(target, metric),
+            target: target_fields,
+            metric: metric_fields,
+            measurement: Measurement { timestamp, datum },
+        })
+    }
+
     /// Construct a new sample, created at the time the function is called.
     ///
     /// This materializes the data from the target and metric, and stores that information along
@@ -744,6 +842,18 @@ impl Sample {
         M: traits::Metric<Datum = D>,
     {
         Self::new_with_timestamp(Utc::now(), target, metric)
+    }
+
+    /// Construct a new sample with a missing measurement.
+    pub fn new_missing<T, M, D>(
+        target: &T,
+        metric: &M,
+    ) -> Result<Self, MetricsError>
+    where
+        T: traits::Target,
+        M: traits::Metric<Datum = D>,
+    {
+        Self::new_missing_with_timestamp(Utc::now(), target, metric)
     }
 
     /// Return the fields for this sample.
@@ -951,7 +1061,7 @@ mod tests {
     fn test_measurement() {
         let measurement = Measurement::new(chrono::Utc::now(), 0i64);
         assert_eq!(measurement.datum_type(), DatumType::I64);
-        assert_eq!(measurement.start_time(), None);
+        assert!(measurement.start_time().is_none());
 
         let datum = Cumulative::new(0i64);
         let measurement = Measurement::new(chrono::Utc::now(), datum);

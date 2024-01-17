@@ -4,6 +4,7 @@
 
 //! Sled agent implementation
 
+use crate::boot_disk_os_writer::BootDiskOsWriter;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkSetupError,
@@ -17,8 +18,8 @@ use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, ServiceEnsureBody, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
+    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
@@ -41,7 +42,7 @@ use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
-use omicron_common::api::external::Vni;
+use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
@@ -68,6 +69,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use illumos_utils::running_zone::ZoneBuilderFactory;
 #[cfg(not(test))]
 use illumos_utils::{dladm::Dladm, zone::Zones};
 #[cfg(test)]
@@ -157,7 +159,7 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         match err {
-            crate::sled_agent::Error::Instance(instance_manager_error) => {
+            Error::Instance(instance_manager_error) => {
                 match instance_manager_error {
                     crate::instance_manager::Error::Instance(
                         instance_error,
@@ -194,7 +196,7 @@ impl From<Error> for dropshot::HttpError {
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
-            crate::sled_agent::Error::ZoneBundle(ref inner) => match inner {
+            Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
                 }
@@ -209,6 +211,35 @@ impl From<Error> for dropshot::HttpError {
             },
             e => HttpError::for_internal_error(e.to_string()),
         }
+    }
+}
+
+/// Error returned by `SledAgent::inventory()`
+#[derive(thiserror::Error, Debug)]
+pub enum InventoryError {
+    // This error should be impossible because ByteCount supports values from
+    // [0, i64::MAX] and we don't have anything with that many bytes in the
+    // system.
+    #[error(transparent)]
+    BadByteCount(#[from] ByteCountRangeError),
+}
+
+impl From<InventoryError> for omicron_common::api::external::Error {
+    fn from(inventory_error: InventoryError) -> Self {
+        match inventory_error {
+            e @ InventoryError::BadByteCount(..) => {
+                omicron_common::api::external::Error::internal_error(&format!(
+                    "{:#}",
+                    e
+                ))
+            }
+        }
+    }
+}
+
+impl From<InventoryError> for dropshot::HttpError {
+    fn from(error: InventoryError) -> Self {
+        Self::from(omicron_common::api::external::Error::from(error))
     }
 }
 
@@ -263,6 +294,9 @@ struct SledAgentInner {
 
     // Object handling production of metrics for oximeter.
     metrics_manager: MetricsManager,
+
+    // Handle to the traffic manager for writing OS updates to our boot disks.
+    boot_disk_os_writer: BootDiskOsWriter,
 }
 
 impl SledAgentInner {
@@ -382,6 +416,7 @@ impl SledAgent {
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
+            ZoneBuilderFactory::default(),
         )?;
 
         // Configure the VMM reservoir as either a percentage of DRAM or as an
@@ -443,8 +478,11 @@ impl SledAgent {
                 })?;
 
             let early_network_config =
-                EarlyNetworkConfig::try_from(serialized_config)
-                    .map_err(|err| BackoffError::transient(err.to_string()))?;
+                EarlyNetworkConfig::deserialize_bootstore_config(
+                    &log,
+                    &serialized_config,
+                )
+                .map_err(|err| BackoffError::transient(err.to_string()))?;
 
             Ok(early_network_config.body.rack_network_config)
         };
@@ -505,7 +543,7 @@ impl SledAgent {
         // Nexus. This should not block progress here.
         let endpoint = ProducerEndpoint {
             id: request.body.id,
-            kind: Some(ProducerKind::SledAgent),
+            kind: ProducerKind::SledAgent,
             address: sled_address.into(),
             base_route: String::from("/metrics/collect"),
             interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
@@ -540,6 +578,7 @@ impl SledAgent {
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
                 metrics_manager,
+                boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
             }),
             log: log.clone(),
         };
@@ -553,12 +592,11 @@ impl SledAgent {
         Ok(sled_agent)
     }
 
-    /// Load services for which we're responsible; only meaningful to call
-    /// during a cold boot.
+    /// Load services for which we're responsible.
     ///
     /// Blocks until all services have started, retrying indefinitely on
     /// failure.
-    pub(crate) async fn cold_boot_load_services(&self) {
+    pub(crate) async fn load_services(&self) {
         info!(self.log, "Loading cold boot services");
         retry_notify(
             retry_policy_internal_service_aggressive(),
@@ -801,36 +839,40 @@ impl SledAgent {
         self.inner.zone_bundler.cleanup().await.map_err(Error::from)
     }
 
-    /// Ensures that particular services should be initialized.
-    ///
-    /// These services will be instantiated by this function, will be recorded
-    /// to a local file to ensure they start automatically on next boot.
-    pub async fn services_ensure(
+    /// List the Omicron zone configuration that's currently running
+    pub async fn omicron_zones_list(
         &self,
-        requested_services: ServiceEnsureBody,
-    ) -> Result<(), Error> {
-        let datasets: Vec<_> = requested_services
-            .services
-            .iter()
-            .filter_map(|service| service.dataset.clone())
-            .collect();
+    ) -> Result<OmicronZonesConfig, Error> {
+        Ok(self.inner.services.omicron_zones_list().await?)
+    }
 
+    /// Ensures that the specific set of Omicron zones are running as configured
+    /// (and that no other zones are running)
+    pub async fn omicron_zones_ensure(
+        &self,
+        requested_zones: OmicronZonesConfig,
+    ) -> Result<(), Error> {
         // TODO:
         // - If these are the set of filesystems, we should also consider
         // removing the ones which are not listed here.
         // - It's probably worth sending a bulk request to the storage system,
         // rather than requesting individual datasets.
-        for dataset in &datasets {
+        for zone in &requested_zones.zones {
+            let Some(dataset_name) = zone.dataset_name() else {
+                continue;
+            };
+
             // First, ensure the dataset exists
+            let dataset_id = zone.id;
             self.inner
                 .storage
-                .upsert_filesystem(dataset.id, dataset.name.clone())
+                .upsert_filesystem(dataset_id, dataset_name)
                 .await?;
         }
 
         self.inner
             .services
-            .ensure_all_services_persistent(requested_services)
+            .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
         Ok(())
     }
@@ -1035,6 +1077,45 @@ impl SledAgent {
     pub fn metrics_registry(&self) -> &ProducerRegistry {
         self.inner.metrics_manager.registry()
     }
+
+    pub(crate) fn storage(&self) -> &StorageHandle {
+        &self.inner.storage
+    }
+
+    pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
+        &self.inner.boot_disk_os_writer
+    }
+
+    /// Return basic information about ourselves: identity and status
+    ///
+    /// This is basically a GET version of the information we push to Nexus on
+    /// startup.
+    pub(crate) fn inventory(&self) -> Result<Inventory, InventoryError> {
+        let sled_id = self.inner.id;
+        let sled_agent_address = self.inner.sled_address();
+        let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let baseboard = self.inner.hardware.baseboard();
+        let usable_hardware_threads =
+            self.inner.hardware.online_processor_count();
+        let usable_physical_ram =
+            self.inner.hardware.usable_physical_ram_bytes();
+        let reservoir_size = self.inner.instances.reservoir_size();
+        let sled_role = if is_scrimlet {
+            crate::params::SledRole::Scrimlet
+        } else {
+            crate::params::SledRole::Gimlet
+        };
+
+        Ok(Inventory {
+            sled_id,
+            sled_agent_address,
+            sled_role,
+            baseboard,
+            usable_hardware_threads,
+            usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
+            reservoir_size,
+        })
+    }
 }
 
 async fn register_metric_producer_with_nexus(
@@ -1084,7 +1165,7 @@ pub enum AddSledError {
 }
 
 /// Add a sled to an initialized rack.
-pub async fn add_sled_to_initialized_rack(
+pub async fn sled_add(
     log: Logger,
     sled_id: Baseboard,
     request: StartSledAgentRequest,

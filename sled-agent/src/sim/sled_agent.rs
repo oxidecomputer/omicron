@@ -10,41 +10,42 @@ use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
-
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
     InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
+    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
+use anyhow::bail;
+use anyhow::Context;
+use dropshot::HttpServer;
 use futures::lock::Mutex;
-use omicron_common::api::external::{DiskState, Error, ResourceType};
+use illumos_utils::opte::params::{
+    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+};
+use nexus_client::types::PhysicalDiskKind;
+use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::api::external::{
+    ByteCount, DiskState, Error, Generation, ResourceType,
+};
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState,
 };
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
-use slog::Logger;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
-use uuid::Uuid;
-
-use std::collections::HashMap;
-use std::str::FromStr;
-
-use dropshot::HttpServer;
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
-use nexus_client::types::PhysicalDiskKind;
-use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use slog::Logger;
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::str::FromStr;
+use std::sync::Arc;
+use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -68,6 +69,9 @@ pub struct SledAgent {
     pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
+    config: Config,
+    fake_zones: Mutex<OmicronZonesConfig>,
+    instance_ensure_state_error: Mutex<Option<Error>>,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -159,6 +163,12 @@ impl SledAgent {
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
+            config: config.clone(),
+            fake_zones: Mutex::new(OmicronZonesConfig {
+                generation: Generation::new(),
+                zones: vec![],
+            }),
+            instance_ensure_state_error: Mutex::new(None),
         })
     }
 
@@ -343,15 +353,7 @@ impl SledAgent {
             updated_runtime: Some(instance.terminate()),
         };
 
-        // Poke the now-destroyed instance to force it to be removed from the
-        // collection.
-        //
-        // TODO: In the real sled agent, this happens inline without publishing
-        // any other state changes, whereas this call causes any pending state
-        // changes to be published. This can be fixed by adding a simulated
-        // object collection function to forcibly remove an object from a
-        // collection.
-        self.instances.sim_poke(instance_id, PokeMode::Drain).await;
+        self.instances.sim_force_remove(instance_id).await;
         Ok(response)
     }
 
@@ -361,6 +363,11 @@ impl SledAgent {
         instance_id: Uuid,
         state: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
+        if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
+        {
+            return Err(e.clone());
+        }
+
         let current =
             match self.instances.sim_get_cloned_object(&instance_id).await {
                 Ok(i) => i.current().clone(),
@@ -414,6 +421,10 @@ impl SledAgent {
         }
 
         Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+    }
+
+    pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
+        *self.instance_ensure_state_error.lock().await = error;
     }
 
     async fn detach_disks_from_instance(
@@ -660,5 +671,40 @@ impl SledAgent {
         ));
         *mock_lock = Some((srv, client));
         Ok(())
+    }
+
+    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+        let sled_agent_address = match addr {
+            SocketAddr::V4(_) => {
+                bail!("sled_agent_ip must be v6 for inventory")
+            }
+            SocketAddr::V6(v6) => v6,
+        };
+        Ok(Inventory {
+            sled_id: self.id,
+            sled_agent_address,
+            sled_role: SledRole::Gimlet,
+            baseboard: self.config.hardware.baseboard.clone(),
+            usable_hardware_threads: self.config.hardware.hardware_threads,
+            usable_physical_ram: ByteCount::try_from(
+                self.config.hardware.physical_ram,
+            )
+            .context("usable_physical_ram")?,
+            reservoir_size: ByteCount::try_from(
+                self.config.hardware.reservoir_ram,
+            )
+            .context("reservoir_size")?,
+        })
+    }
+
+    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
+        self.fake_zones.lock().await.clone()
+    }
+
+    pub async fn omicron_zones_ensure(
+        &self,
+        requested_zones: OmicronZonesConfig,
+    ) {
+        *self.fake_zones.lock().await = requested_zones;
     }
 }

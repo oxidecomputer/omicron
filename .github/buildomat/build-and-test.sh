@@ -4,10 +4,12 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+target_os=$1
+
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.59'
+NEXTEST_VERSION='0.9.67'
 
 cargo --version
 rustc --version
@@ -48,6 +50,13 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 #
 banner build
 export RUSTFLAGS="-D warnings"
+# When running on illumos we need to pass an additional runpath that is
+# usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
+# takes precedence. This path contains oxide specific libraries such as
+# libipcc.
+if [[ $target_os == "illumos" ]]; then
+	RUSTFLAGS="-D warnings -C link-arg=-R/usr/platform/oxide/lib/amd64"
+fi
 export RUSTDOCFLAGS="-D warnings"
 export TMPDIR=$TEST_TMPDIR
 export RUST_BACKTRACE=1

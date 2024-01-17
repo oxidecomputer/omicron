@@ -6,10 +6,16 @@ disk_bulk_write_import_stop              POST     /v1/disks/{disk}/bulk-write-st
 disk_create                              POST     /v1/disks
 disk_delete                              DELETE   /v1/disks/{disk}
 disk_finalize_import                     POST     /v1/disks/{disk}/finalize
-disk_import_blocks_from_url              POST     /v1/disks/{disk}/import
 disk_list                                GET      /v1/disks
 disk_metrics_list                        GET      /v1/disks/{disk}/metrics/{metric}
 disk_view                                GET      /v1/disks/{disk}
+
+API operations found with tag "floating-ips"
+OPERATION ID                             METHOD   URL PATH
+floating_ip_create                       POST     /v1/floating-ips
+floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
+floating_ip_list                         GET      /v1/floating-ips
+floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
 API operations found with tag "hidden"
 OPERATION ID                             METHOD   URL PATH
@@ -100,6 +106,7 @@ group_view                               GET      /v1/groups/{group_id}
 policy_update                            PUT      /v1/policy
 policy_view                              GET      /v1/policy
 user_list                                GET      /v1/users
+utilization_view                         GET      /v1/utilization
 
 API operations found with tag "snapshots"
 OPERATION ID                             METHOD   URL PATH
@@ -116,13 +123,15 @@ networking_switch_port_list              GET      /v1/system/hardware/switch-por
 physical_disk_list                       GET      /v1/system/hardware/disks
 rack_list                                GET      /v1/system/hardware/racks
 rack_view                                GET      /v1/system/hardware/racks/{rack_id}
+sled_add                                 POST     /v1/system/hardware/sleds
 sled_instance_list                       GET      /v1/system/hardware/sleds/{sled_id}/instances
 sled_list                                GET      /v1/system/hardware/sleds
+sled_list_uninitialized                  GET      /v1/system/hardware/sleds-uninitialized
 sled_physical_disk_list                  GET      /v1/system/hardware/sleds/{sled_id}/disks
+sled_set_provision_state                 PUT      /v1/system/hardware/sleds/{sled_id}/provision-state
 sled_view                                GET      /v1/system/hardware/sleds/{sled_id}
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
-uninitialized_sled_list                  GET      /v1/system/hardware/uninitialized-sleds
 
 API operations found with tag "system/metrics"
 OPERATION ID                             METHOD   URL PATH
@@ -140,6 +149,10 @@ ip_pool_service_range_add                POST     /v1/system/ip-pools-service/ra
 ip_pool_service_range_list               GET      /v1/system/ip-pools-service/ranges
 ip_pool_service_range_remove             POST     /v1/system/ip-pools-service/ranges/remove
 ip_pool_service_view                     GET      /v1/system/ip-pools-service
+ip_pool_silo_link                        POST     /v1/system/ip-pools/{pool}/silos
+ip_pool_silo_list                        GET      /v1/system/ip-pools/{pool}/silos
+ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/silos/{silo}
+ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
@@ -175,9 +188,14 @@ silo_identity_provider_list              GET      /v1/system/identity-providers
 silo_list                                GET      /v1/system/silos
 silo_policy_update                       PUT      /v1/system/silos/{silo}/policy
 silo_policy_view                         GET      /v1/system/silos/{silo}/policy
+silo_quotas_update                       PUT      /v1/system/silos/{silo}/quotas
+silo_quotas_view                         GET      /v1/system/silos/{silo}/quotas
 silo_user_list                           GET      /v1/system/users
 silo_user_view                           GET      /v1/system/users/{user_id}
+silo_utilization_list                    GET      /v1/system/utilization/silos
+silo_utilization_view                    GET      /v1/system/utilization/silos/{silo}
 silo_view                                GET      /v1/system/silos/{silo}
+system_quotas_list                       GET      /v1/system/silo-quotas
 user_builtin_list                        GET      /v1/system/users-builtin
 user_builtin_view                        GET      /v1/system/users-builtin/{user}
 

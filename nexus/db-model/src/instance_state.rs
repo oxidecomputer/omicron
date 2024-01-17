@@ -6,11 +6,12 @@ use super::impl_enum_wrapper;
 use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt;
 use std::io::Write;
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "instance_state"))]
+    #[diesel(postgres_type(name = "instance_state", schema = "public"))]
     pub struct InstanceStateEnum;
 
     #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
@@ -37,6 +38,12 @@ impl InstanceState {
 
     pub fn state(&self) -> &external::InstanceState {
         &self.0
+    }
+}
+
+impl fmt::Display for InstanceState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 

@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_port_geometry"))]
+    #[diesel(postgres_type(name = "switch_port_geometry", schema = "public"))]
     pub struct SwitchPortGeometryEnum;
 
     #[derive(
@@ -46,7 +46,7 @@ impl_enum_type!(
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_link_fec"))]
+    #[diesel(postgres_type(name = "switch_link_fec", schema = "public"))]
     pub struct SwitchLinkFecEnum;
 
     #[derive(
@@ -69,7 +69,7 @@ impl_enum_type!(
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_link_speed"))]
+    #[diesel(postgres_type(name = "switch_link_speed", schema = "public"))]
     pub struct SwitchLinkSpeedEnum;
 
     #[derive(
@@ -355,6 +355,7 @@ pub struct SwitchPortLinkConfig {
     pub mtu: SqlU16,
     pub fec: SwitchLinkFec,
     pub speed: SwitchLinkSpeed,
+    pub autoneg: bool,
 }
 
 impl SwitchPortLinkConfig {
@@ -365,6 +366,7 @@ impl SwitchPortLinkConfig {
         mtu: u16,
         fec: SwitchLinkFec,
         speed: SwitchLinkSpeed,
+        autoneg: bool,
     ) -> Self {
         Self {
             port_settings_id,
@@ -372,6 +374,7 @@ impl SwitchPortLinkConfig {
             link_name,
             fec,
             speed,
+            autoneg,
             mtu: mtu.into(),
         }
     }

@@ -496,17 +496,19 @@ async fn ssc_create_destination_volume_record(
 async fn ssc_create_destination_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
 
-    osagactx
-        .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            destination_volume_id,
-        )
-        .await?;
+    // This saga contains what is necessary to clean up the destination volume
+    // resources. It's safe here to perform a volume hard delete without
+    // decreasing the crucible resource count because the destination volume is
+    // guaranteed to never have read only resources that require that
+    // accounting.
+
+    info!(log, "hard deleting volume {}", destination_volume_id,);
 
     osagactx.datastore().volume_hard_delete(destination_volume_id).await?;
 
@@ -1396,16 +1398,21 @@ async fn ssc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
+    // `volume_create` will increase the resource count for read only resources
+    // in a volume, which there are guaranteed to be for snapshot volumes.
+    // decreasing crucible resources is necessary as an undo step. Do not call
+    // `volume_hard_delete` here: soft deleting volumes is necessary for
+    // `find_deleted_volume_regions` to work.
+
     info!(
         log,
         "calling decrease crucible resource count for volume {}", volume_id
     );
+
     osagactx
         .datastore()
         .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
         .await?;
-
-    osagactx.datastore().volume_hard_delete(volume_id).await?;
 
     Ok(())
 }
@@ -1547,7 +1554,6 @@ mod test {
 
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::shared::IpRange;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
@@ -1556,12 +1562,11 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_db_queries::db::DataStore;
+    use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params::InstanceDiskAttachment;
@@ -1573,7 +1578,6 @@ mod test {
     use omicron_common::api::external::NameOrId;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
-    use std::net::Ipv4Addr;
     use std::str::FromStr;
 
     #[test]
@@ -1778,8 +1782,10 @@ mod test {
     const DISK_NAME: &str = "disky-mcdiskface";
     const INSTANCE_NAME: &str = "base-instance";
 
-    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
+    async fn create_project_and_disk_and_pool(
+        client: &ClientTestContext,
+    ) -> Uuid {
+        create_default_ip_pool(&client).await;
         create_project(client, PROJECT_NAME).await;
         create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }
@@ -1826,7 +1832,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -2015,7 +2021,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
@@ -2032,24 +2038,6 @@ mod test {
         // As a concession to the test helper, make sure the disk is gone
         // before the first attempt to run the saga recreates it.
         delete_disk(client, PROJECT_NAME, DISK_NAME).await;
-
-        // The no-pantry variant of the test needs to see the disk attached to
-        // an instance. Set up an IP pool so that instances can be created
-        // against it.
-        if !use_the_pantry {
-            populate_ip_pool(
-                &client,
-                "default",
-                Some(
-                    IpRange::try_from((
-                        Ipv4Addr::new(10, 1, 0, 0),
-                        Ipv4Addr::new(10, 1, 255, 255),
-                    ))
-                    .unwrap(),
-                ),
-            )
-            .await;
-        }
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaSnapshotCreate,
@@ -2175,7 +2163,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -2284,7 +2272,7 @@ mod test {
 
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -2345,19 +2333,6 @@ mod test {
         assert!(output.is_err());
 
         // Attach the disk to an instance, then rerun the saga
-        populate_ip_pool(
-            &client,
-            "default",
-            Some(
-                IpRange::try_from((
-                    Ipv4Addr::new(10, 1, 0, 0),
-                    Ipv4Addr::new(10, 1, 255, 255),
-                ))
-                .unwrap(),
-            ),
-        )
-        .await;
-
         let instance_state = setup_test_instance(
             cptestctx,
             client,

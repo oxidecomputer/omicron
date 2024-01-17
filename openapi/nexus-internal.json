@@ -2568,7 +2568,58 @@
               "datum",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "datum": {
+                "$ref": "#/components/schemas/MissingDatum"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing"
+                ]
+              }
+            },
+            "required": [
+              "datum",
+              "type"
+            ]
           }
+        ]
+      },
+      "DatumType": {
+        "description": "The type of an individual datum of a metric.",
+        "type": "string",
+        "enum": [
+          "bool",
+          "i8",
+          "u8",
+          "i16",
+          "u16",
+          "i32",
+          "u32",
+          "i64",
+          "u64",
+          "f32",
+          "f64",
+          "string",
+          "bytes",
+          "cumulative_i64",
+          "cumulative_u64",
+          "cumulative_f32",
+          "cumulative_f64",
+          "histogram_i8",
+          "histogram_u8",
+          "histogram_i16",
+          "histogram_u16",
+          "histogram_i32",
+          "histogram_u32",
+          "histogram_i64",
+          "histogram_u64",
+          "histogram_f32",
+          "histogram_f64"
         ]
       },
       "DiskRuntimeState": {
@@ -4128,14 +4179,96 @@
               "content",
               "type"
             ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "datum_type": {
+                    "$ref": "#/components/schemas/DatumType"
+                  }
+                },
+                "required": [
+                  "datum_type"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_datum_requires_start_time"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "content": {
+                "type": "object",
+                "properties": {
+                  "datum_type": {
+                    "$ref": "#/components/schemas/DatumType"
+                  }
+                },
+                "required": [
+                  "datum_type"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "missing_datum_cannot_have_start_time"
+                ]
+              }
+            },
+            "required": [
+              "content",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "invalid_timeseries_name"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
           }
+        ]
+      },
+      "MissingDatum": {
+        "type": "object",
+        "properties": {
+          "datum_type": {
+            "$ref": "#/components/schemas/DatumType"
+          },
+          "start_time": {
+            "nullable": true,
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "datum_type"
         ]
       },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
         "type": "string",
-        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
       },
@@ -4240,6 +4373,11 @@
               "$ref": "#/components/schemas/IpNetwork"
             }
           },
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "default": false,
+            "type": "boolean"
+          },
           "bgp_peers": {
             "description": "BGP peers on this port",
             "type": "array",
@@ -4343,7 +4481,6 @@
             ]
           },
           "kind": {
-            "nullable": true,
             "description": "The kind of producer.",
             "allOf": [
               {
@@ -4356,7 +4493,8 @@
           "address",
           "base_route",
           "id",
-          "interval"
+          "interval",
+          "kind"
         ]
       },
       "ProducerKind": {
@@ -5440,7 +5578,7 @@
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
         "type": "string",
-        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
       },

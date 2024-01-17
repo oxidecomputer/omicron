@@ -259,7 +259,7 @@ impl Server {
             // we're responsible for, while continuing to handle hardware
             // notifications. This cannot fail: we retry indefinitely until
             // we're done loading services.
-            sled_agent.cold_boot_load_services().await;
+            sled_agent.load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
             SledAgentState::Bootstrapping(

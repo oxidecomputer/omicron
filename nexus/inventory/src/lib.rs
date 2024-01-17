@@ -20,8 +20,14 @@
 mod builder;
 mod collector;
 pub mod examples;
+mod sled_agent_enumerator;
 
 // only exposed for test code to construct collections
 pub use builder::CollectionBuilder;
+pub use builder::CollectorBug;
+pub use builder::InventoryError;
 
 pub use collector::Collector;
+
+pub use sled_agent_enumerator::SledAgentEnumerator;
+pub use sled_agent_enumerator::StaticSledAgentEnumerator;

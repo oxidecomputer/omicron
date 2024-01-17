@@ -1129,7 +1129,7 @@
     "/sp/{type}/{slot}/ipcc/installinator-image-id": {
       "put": {
         "summary": "Set the installinator image ID the sled should use for recovery.",
-        "description": "This value can be read by the host via IPCC; see the `ipcc-key-value` crate.",
+        "description": "This value can be read by the host via IPCC; see the `ipcc` crate.",
         "operationId": "sp_installinator_image_id_set",
         "parameters": [
           {

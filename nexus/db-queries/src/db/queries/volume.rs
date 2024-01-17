@@ -412,10 +412,11 @@ pub struct DecreaseCrucibleResourceCountAndSoftDeleteVolume {
 }
 
 impl DecreaseCrucibleResourceCountAndSoftDeleteVolume {
-    const UPDATED_REGION_SNAPSHOTS_TABLE: &str = "updated_region_snapshots";
-    const REGION_SNAPSHOTS_TO_CLEAN_UP_TABLE: &str =
+    const UPDATED_REGION_SNAPSHOTS_TABLE: &'static str =
+        "updated_region_snapshots";
+    const REGION_SNAPSHOTS_TO_CLEAN_UP_TABLE: &'static str =
         "region_snapshots_to_clean_up";
-    const UPDATED_VOLUME_TABLE: &str = "updated_volume";
+    const UPDATED_VOLUME_TABLE: &'static str = "updated_volume";
 
     pub fn new(volume_id: Uuid, snapshot_addrs: Vec<String>) -> Self {
         Self {

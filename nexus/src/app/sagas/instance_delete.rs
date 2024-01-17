@@ -8,6 +8,7 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -39,6 +40,9 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
+    INSTANCE_DELETE_NAT -> "no_result4" {
+        + sid_delete_nat
+    }
 }
 
 // instance delete saga: definition
@@ -57,6 +61,7 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(instance_delete_nat_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
@@ -110,6 +115,32 @@ async fn sid_delete_network_interfaces(
     Ok(())
 }
 
+async fn sid_delete_nat(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = params.authz_instance.id();
+    let osagactx = sagactx.user_data();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .nexus()
+        .instance_delete_dpd_config(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
 async fn sid_deallocate_external_ip(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -127,6 +158,11 @@ async fn sid_deallocate_external_ip(
         )
         .await
         .map_err(ActionError::action_failed)?;
+    osagactx
+        .datastore()
+        .detach_floating_ips_by_instance_id(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
@@ -142,9 +178,9 @@ mod test {
     use nexus_db_queries::{
         authn::saga::Serialized, context::OpContext, db, db::lookup::LookupPath,
     };
+    use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
@@ -163,7 +199,7 @@ mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        populate_ip_pool(&client, "default", None).await;
+        create_default_ip_pool(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
