@@ -7764,7 +7764,6 @@ dependencies = [
  "reqwest",
  "schemars",
  "serde",
- "sled-storage",
  "slog",
  "uuid",
 ]
