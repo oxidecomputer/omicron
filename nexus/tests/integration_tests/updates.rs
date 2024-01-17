@@ -85,6 +85,9 @@ async fn test_update_uninitialized() -> Result<()> {
         .context("repository fetch should have failed with 500 error")?;
     }
 
+    cptestctx.teardown().await;
+    logctx.cleanup_successful();
+
     Ok(())
 }
 

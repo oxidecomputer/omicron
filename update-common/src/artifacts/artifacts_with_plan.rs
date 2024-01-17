@@ -435,6 +435,8 @@ mod tests {
             "artifacts match"
         );
 
+        logctx.cleanup_successful();
+
         Ok(())
     }
 
