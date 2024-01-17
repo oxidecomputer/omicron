@@ -7,6 +7,7 @@
 //! See crate-level documentation for details.
 
 use crate::blueprint_builder::BlueprintBuilder;
+use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
@@ -51,7 +52,7 @@ impl<'a> Planner<'a> {
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
             // provision anything else.
-            if self.blueprint.sled_ensure_zone_internal_ntp(*sled_id)? {
+            if self.blueprint.sled_ensure_zone_ntp(*sled_id)? == Ensure::Added {
                 info!(
                     &self.log,
                     "found sled missing NTP zone (will add one)";
@@ -71,6 +72,7 @@ impl<'a> Planner<'a> {
                 if self
                     .blueprint
                     .sled_ensure_zone_crucible(*sled_id, zpool_name.clone())?
+                    == Ensure::Added
                 {
                     info!(
                         &self.log,
@@ -90,6 +92,7 @@ impl<'a> Planner<'a> {
                 // explicit here means we won't forget to do this when more code
                 // is added below.)
                 self.blueprint.comment(&format!("sled {}: add zones", sled_id));
+                continue;
             }
         }
 
@@ -158,7 +161,7 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint2.diff(&blueprint3);
-        println!("2 -> 3 (expect new NTP zone on new sled):\n{}", diff,);
+        println!("2 -> 3 (expect new NTP zone on new sled):\n{}", diff);
         let sleds = diff.sleds_added().collect::<Vec<_>>();
         let (sled_id, sled_zones) = sleds[0];
         // We have defined elsewhere that the first generation contains no

@@ -68,6 +68,24 @@ impl types::OmicronZoneType {
             types::OmicronZoneType::Oximeter { .. } => "oximeter",
         }
     }
+
+    /// Identifies whether this is an NTP zone
+    pub fn is_ntp(&self) -> bool {
+        match self {
+            types::OmicronZoneType::BoundaryNtp { .. }
+            | types::OmicronZoneType::InternalNtp { .. } => true,
+
+            types::OmicronZoneType::Clickhouse { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CockroachDb { .. }
+            | types::OmicronZoneType::Crucible { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::ExternalDns { .. }
+            | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Nexus { .. }
+            | types::OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
 }
 
 impl omicron_common::api::external::ClientError for types::Error {

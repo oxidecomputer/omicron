@@ -6,7 +6,8 @@
 
 use crate::ip_allocator::IpAllocator;
 use anyhow::anyhow;
-use internal_dns::DNS_ZONE;
+use internal_dns::config::Host;
+use internal_dns::config::ZoneVariant;
 use ipnet::IpAdd;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneConfig;
@@ -38,6 +39,16 @@ pub enum Error {
     OutOfAddresses { sled_id: Uuid },
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
+}
+
+/// Describes whether an idempotent "ensure" operation resulted in action taken
+/// or no action was necessary
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum Ensure {
+    /// action was taken
+    Added,
+    /// no action was necessary
+    NotNeeded,
 }
 
 /// Helper for assembling a blueprint
@@ -187,31 +198,28 @@ impl<'a> BlueprintBuilder<'a> {
     ///
     /// This is a short human-readable string summarizing the changes reflected
     /// in the blueprint.  This is only intended for debugging.
-    pub fn comment(&mut self, comment: &str) {
-        self.comments.push(comment.to_owned());
+    pub fn comment<S>(&mut self, comment: S)
+    where
+        String: From<S>,
+    {
+        self.comments.push(String::from(comment));
     }
 
-    pub fn sled_ensure_zone_internal_ntp(
+    pub fn sled_ensure_zone_ntp(
         &mut self,
         sled_id: Uuid,
-    ) -> Result<bool, Error> {
+    ) -> Result<Ensure, Error> {
         // If there's already an NTP zone on this sled, do nothing.
         let has_ntp = self
             .parent_blueprint
             .omicron_zones
             .get(&sled_id)
             .map(|found_zones| {
-                found_zones.zones.iter().any(|z| {
-                    matches!(
-                        z.zone_type,
-                        OmicronZoneType::BoundaryNtp { .. }
-                            | OmicronZoneType::InternalNtp { .. }
-                    )
-                })
+                found_zones.zones.iter().any(|z| z.zone_type.is_ntp())
             })
             .unwrap_or(false);
         if has_ntp {
-            return Ok(false);
+            return Ok(Ensure::NotNeeded);
         }
 
         let sled_info = self.sled_resources(sled_id)?;
@@ -239,7 +247,7 @@ impl<'a> BlueprintBuilder<'a> {
             .all_omicron_zones()
             .filter_map(|(_, z)| {
                 if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
-                    Some(format!("{}.host.{}", z.id, DNS_ZONE))
+                    Some(Host::for_zone(z.id, ZoneVariant::Other).fqdn())
                 } else {
                     None
                 }
@@ -258,14 +266,14 @@ impl<'a> BlueprintBuilder<'a> {
         };
 
         self.sled_add_zone(sled_id, zone)?;
-        Ok(true)
+        Ok(Ensure::Added)
     }
 
     pub fn sled_ensure_zone_crucible(
         &mut self,
         sled_id: Uuid,
         pool_name: ZpoolName,
-    ) -> Result<bool, Error> {
+    ) -> Result<Ensure, Error> {
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool = self
             .parent_blueprint
@@ -282,7 +290,7 @@ impl<'a> BlueprintBuilder<'a> {
             })
             .unwrap_or(false);
         if has_crucible_on_this_pool {
-            return Ok(false);
+            return Ok(Ensure::NotNeeded);
         }
 
         let sled_info = self.sled_resources(sled_id)?;
@@ -307,7 +315,7 @@ impl<'a> BlueprintBuilder<'a> {
             },
         };
         self.sled_add_zone(sled_id, zone)?;
-        Ok(true)
+        Ok(Ensure::Added)
     }
 
     fn sled_add_zone(
@@ -315,6 +323,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: Uuid,
         zone: OmicronZoneConfig,
     ) -> Result<(), Error> {
+        // Check the sled id and return an appropriate error if it's invalid.
         let _ = self.sled_resources(sled_id)?;
 
         if !self.zones_in_service.insert(zone.id) {
@@ -352,7 +361,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// Returns a newly-allocated underlay address suitable for use by Omicron
     /// zones
     fn sled_alloc_ip(&mut self, sled_id: Uuid) -> Result<Ipv6Addr, Error> {
-        let sled_info = self.sled_resources(sled_id)?;
+        let sled_subnet = self.sled_resources(sled_id)?.subnet;
 
         // Work around rust-lang/rust-clippy#11935 and related issues.
         // Clippy doesn't grok that we can't use
@@ -360,41 +369,40 @@ impl<'a> BlueprintBuilder<'a> {
         // borrow `self`, which we can't do because we already have an immutable
         // borrow of `self` by calling `entry()`.  Using `match` on the result
         // of `entry` has a similar problem.
-        #[allow(clippy::map_entry)]
-        if !self.sled_ip_allocators.contains_key(&sled_id) {
-            let sled_subnet = sled_info.subnet;
-            let sled_subnet_addr = sled_subnet.net().network();
-            let minimum = sled_subnet_addr
-                .saturating_add(u128::from(SLED_RESERVED_ADDRESSES));
-            let maximum = sled_subnet_addr
-                .saturating_add(u128::from(CP_SERVICES_RESERVED_ADDRESSES));
-            assert!(sled_subnet.net().contains(minimum));
-            assert!(sled_subnet.net().contains(maximum));
-            let mut allocator = IpAllocator::new(minimum, maximum);
+        let allocator =
+            self.sled_ip_allocators.entry(sled_id).or_insert_with(|| {
+                let sled_subnet_addr = sled_subnet.net().network();
+                let minimum = sled_subnet_addr
+                    .saturating_add(u128::from(SLED_RESERVED_ADDRESSES));
+                let maximum = sled_subnet_addr
+                    .saturating_add(u128::from(CP_SERVICES_RESERVED_ADDRESSES));
+                assert!(sled_subnet.net().contains(minimum));
+                assert!(sled_subnet.net().contains(maximum));
+                let mut allocator = IpAllocator::new(minimum, maximum);
 
-            // We shouldn't need to explicitly reserve the sled's global zone
-            // and switch addresses because they should be out of our range, but
-            // we do so just to be sure.
-            let sled_gz_addr = *get_sled_address(sled_subnet).ip();
-            assert!(sled_subnet.net().contains(sled_gz_addr));
-            assert!(minimum > sled_gz_addr);
-            assert!(maximum > sled_gz_addr);
-            let switch_zone_addr = get_switch_zone_address(sled_subnet);
-            assert!(sled_subnet.net().contains(switch_zone_addr));
-            assert!(minimum > switch_zone_addr);
-            assert!(maximum > switch_zone_addr);
+                // We shouldn't need to explicitly reserve the sled's global
+                // zone and switch addresses because they should be out of our
+                // range, but we do so just to be sure.
+                let sled_gz_addr = *get_sled_address(sled_subnet).ip();
+                assert!(sled_subnet.net().contains(sled_gz_addr));
+                assert!(minimum > sled_gz_addr);
+                assert!(maximum > sled_gz_addr);
+                let switch_zone_addr = get_switch_zone_address(sled_subnet);
+                assert!(sled_subnet.net().contains(switch_zone_addr));
+                assert!(minimum > switch_zone_addr);
+                assert!(maximum > switch_zone_addr);
 
-            // Record each of the sled's zones' underlay addresses as allocated.
-            if let Some(sled_zones) = self.omicron_zones.get(&sled_id) {
-                for z in &sled_zones.zones {
-                    allocator.reserve(z.underlay_address);
+                // Record each of the sled's zones' underlay addresses as
+                // allocated.
+                if let Some(sled_zones) = self.omicron_zones.get(&sled_id) {
+                    for z in &sled_zones.zones {
+                        allocator.reserve(z.underlay_address);
+                    }
                 }
-            }
 
-            self.sled_ip_allocators.insert(sled_id, allocator);
-        }
+                allocator
+            });
 
-        let allocator = self.sled_ip_allocators.get_mut(&sled_id).unwrap();
         allocator.alloc().ok_or_else(|| Error::OutOfAddresses { sled_id })
     }
 
@@ -592,7 +600,7 @@ pub mod test {
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
         // all these zones exist, we should see no change.
         for (sled_id, sled_resources) in &policy.sleds {
-            builder.sled_ensure_zone_internal_ntp(*sled_id).unwrap();
+            builder.sled_ensure_zone_ntp(*sled_id).unwrap();
             for pool_name in &sled_resources.zpools {
                 builder
                     .sled_ensure_zone_crucible(*sled_id, pool_name.clone())
@@ -615,7 +623,7 @@ pub mod test {
         let _ = policy_add_sled(&mut policy, new_sled_id);
         let mut builder =
             BlueprintBuilder::new_based_on(&blueprint2, &policy, "test_basic");
-        builder.sled_ensure_zone_internal_ntp(new_sled_id).unwrap();
+        builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         let new_sled_resources = policy.sleds.get(&new_sled_id).unwrap();
         for pool_name in &new_sled_resources.zpools {
             builder

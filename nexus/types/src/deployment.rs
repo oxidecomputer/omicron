@@ -353,7 +353,7 @@ impl<'a> OmicronZonesDiff<'a> {
                     )
                 })
                 .collect();
-            let b2zones: BTreeMap<Uuid, ZoneInfo> = b2sledzones
+            let mut b2zones: BTreeMap<Uuid, ZoneInfo> = b2sledzones
                 .zones
                 .iter()
                 .map(|zone| {
@@ -368,13 +368,12 @@ impl<'a> OmicronZonesDiff<'a> {
                     )
                 })
                 .collect();
-            let mut zones_added = vec![];
             let mut zones_removed = vec![];
             let mut zones_changed = vec![];
 
             // Now go through each zone and compare them.
             for (zone_id, b1z_info) in &b1zones {
-                if let Some(b2z_info) = b2zones.get(zone_id) {
+                if let Some(b2z_info) = b2zones.remove(zone_id) {
                     let changed_how = if b1z_info.zone != b2z_info.zone {
                         DiffZoneChangedHow::DetailsChanged
                     } else if b1z_info.in_service && !b2z_info.in_service {
@@ -394,14 +393,10 @@ impl<'a> OmicronZonesDiff<'a> {
                 }
             }
 
-            for (zone_id, b2z_info) in &b2zones {
-                if b1zones.contains_key(&zone_id) {
-                    // We handled this zone above.
-                    continue;
-                }
-
-                zones_added.push(b2z_info.zone)
-            }
+            // Since we removed common zones above, anything else exists only in
+            // b2 and was therefore added.
+            let zones_added =
+                b2zones.into_values().map(|b2z_info| b2z_info.zone).collect();
 
             (
                 sled_id,
