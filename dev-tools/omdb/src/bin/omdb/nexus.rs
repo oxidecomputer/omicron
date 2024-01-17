@@ -76,8 +76,8 @@ enum BlueprintsCommands {
     Delete(BlueprintIdArgs),
     /// Set the current target blueprint
     Target(BlueprintsTargetArgs),
-    /// Generate an initial blueprint from the current state
-    GenerateCurrent,
+    /// Generate an initial blueprint from a specific inventory collection
+    GenerateFromCollection(CollectionIdArgs),
     /// Generate a new blueprint
     Regenerate,
 }
@@ -94,6 +94,12 @@ struct BlueprintIdsArgs {
     blueprint1_id: Uuid,
     /// id of second blueprint
     blueprint2_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct CollectionIdArgs {
+    /// id of an inventory collection
+    collection_id: Uuid,
 }
 
 #[derive(Debug, Args)]
@@ -178,8 +184,11 @@ impl NexusArgs {
                 command: BlueprintsCommands::Regenerate,
             }) => cmd_nexus_blueprints_regenerate(&client).await,
             NexusCommands::Blueprints(BlueprintsArgs {
-                command: BlueprintsCommands::GenerateCurrent,
-            }) => cmd_nexus_blueprints_generate_current(&client).await,
+                command: BlueprintsCommands::GenerateFromCollection(args),
+            }) => {
+                cmd_nexus_blueprints_generate_from_collection(&client, args)
+                    .await
+            }
         }
     }
 }
@@ -885,14 +894,19 @@ async fn cmd_nexus_blueprints_target_set(
     Ok(())
 }
 
-async fn cmd_nexus_blueprints_generate_current(
+async fn cmd_nexus_blueprints_generate_from_collection(
     client: &nexus_client::Client,
+    args: &CollectionIdArgs,
 ) -> Result<(), anyhow::Error> {
     let blueprint = client
-        .blueprint_create_current()
+        .blueprint_generate_from_collection(
+            &nexus_client::types::CollectionId {
+                collection_id: args.collection_id,
+            },
+        )
         .await
-        .context("creating blueprint from current state")?;
-    eprintln!("created blueprint {} from current state", blueprint.id);
+        .context("creating blueprint from collection id")?;
+    eprintln!("created blueprint {} from collection id", blueprint.id);
     Ok(())
 }
 

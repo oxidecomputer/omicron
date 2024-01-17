@@ -244,10 +244,20 @@
         }
       }
     },
-    "/deployment/blueprints/current": {
+    "/deployment/blueprints/generate-from-collection": {
       "post": {
-        "summary": "Generates a new blueprint matching the latest inventory collection",
-        "operationId": "blueprint_create_current",
+        "summary": "Generates a new blueprint matching the specified inventory collection",
+        "operationId": "blueprint_generate_from_collection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionId"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -2204,6 +2214,18 @@
         "required": [
           "cert",
           "key"
+        ]
+      },
+      "CollectionId": {
+        "type": "object",
+        "properties": {
+          "collection_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "collection_id"
         ]
       },
       "Cumulativedouble": {

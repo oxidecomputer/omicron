@@ -83,7 +83,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_delete)?;
         api.register(blueprint_target_view)?;
         api.register(blueprint_target_set)?;
-        api.register(blueprint_create_current)?;
+        api.register(blueprint_generate_from_collection)?;
         api.register(blueprint_regenerate)?;
 
         Ok(())
@@ -751,19 +751,28 @@ async fn blueprint_target_set(
 
 // Generating blueprints
 
-/// Generates a new blueprint matching the latest inventory collection
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CollectionId {
+    collection_id: Uuid,
+}
+
+/// Generates a new blueprint matching the specified inventory collection
 #[endpoint {
     method = POST,
-    path = "/deployment/blueprints/current",
+    path = "/deployment/blueprints/generate-from-collection",
 }]
-async fn blueprint_create_current(
+async fn blueprint_generate_from_collection(
     rqctx: RequestContext<Arc<ServerContext>>,
+    params: TypedBody<CollectionId>,
 ) -> Result<HttpResponseOk<Blueprint>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
-        let result = nexus.blueprint_create_current(&opctx).await?;
+        let collection_id = params.into_inner().collection_id;
+        let result = nexus
+            .blueprint_generate_from_collection(&opctx, collection_id)
+            .await?;
         Ok(HttpResponseOk(result))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

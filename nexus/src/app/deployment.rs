@@ -18,7 +18,6 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
-use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::CreateResult;
@@ -72,7 +71,6 @@ impl Blueprints {
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
-    collection: Collection,
     policy: Policy,
     creator: String,
 }
@@ -202,12 +200,6 @@ impl super::Nexus {
     ) -> Result<PlanningContext, Error> {
         let creator = self.id.to_string();
         let datastore = self.datastore();
-        let collection = datastore
-            .inventory_get_latest_collection(opctx, SQL_LIMIT_INVENTORY)
-            .await?
-            .ok_or_else(|| {
-                Error::unavail("no recent inventory collection available")
-            })?;
 
         let sled_rows = {
             let mut all_sleds = Vec::new();
@@ -267,7 +259,7 @@ impl super::Nexus {
             })
             .collect();
 
-        Ok(PlanningContext { collection, creator, policy: Policy { sleds } })
+        Ok(PlanningContext { creator, policy: Policy { sleds } })
     }
 
     async fn blueprint_add(
@@ -284,20 +276,30 @@ impl super::Nexus {
         Ok(())
     }
 
-    pub async fn blueprint_create_current(
+    pub async fn blueprint_generate_from_collection(
         &self,
         opctx: &OpContext,
+        collection_id: Uuid,
     ) -> CreateResult<Blueprint> {
         opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let collection = self
+            .datastore()
+            .inventory_collection_read_all_or_nothing(
+                opctx,
+                collection_id,
+                SQL_LIMIT_INVENTORY,
+            )
+            .await?;
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let blueprint = BlueprintBuilder::build_initial_from_collection(
-            &planning_context.collection,
+            &collection,
             &planning_context.policy,
             &planning_context.creator,
         )
         .map_err(|error| {
             Error::internal_error(&format!(
-                "error generating initial blueprint from current state: {}",
+                "error generating initial blueprint from collection {}: {}",
+                collection_id,
                 InlineErrorChain::new(&error)
             ))
         })?;
