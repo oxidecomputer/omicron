@@ -36,13 +36,14 @@ pub struct CompositeControlPlaneArchiveBuilder<W: Write> {
 }
 
 impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
-    pub fn new(writer: W) -> Result<Self> {
+    pub fn new(writer: W, mtime_source: MtimeSource) -> Result<Self> {
         let metadata = oxide_metadata::MetadataBuilder::new(
             oxide_metadata::ArchiveType::ControlPlane,
         )
         .build()
         .context("error building oxide metadata")?;
-        let inner = CompositeTarballBuilder::new(writer, metadata)?;
+        let inner =
+            CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
         Ok(Self { inner })
     }
 
@@ -70,13 +71,14 @@ pub struct CompositeRotArchiveBuilder<W: Write> {
 }
 
 impl<W: Write> CompositeRotArchiveBuilder<W> {
-    pub fn new(writer: W) -> Result<Self> {
+    pub fn new(writer: W, mtime_source: MtimeSource) -> Result<Self> {
         let metadata = oxide_metadata::MetadataBuilder::new(
             oxide_metadata::ArchiveType::Rot,
         )
         .build()
         .context("error building oxide metadata")?;
-        let inner = CompositeTarballBuilder::new(writer, metadata)?;
+        let inner =
+            CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
         Ok(Self { inner })
     }
 
@@ -104,13 +106,14 @@ pub struct CompositeHostArchiveBuilder<W: Write> {
 }
 
 impl<W: Write> CompositeHostArchiveBuilder<W> {
-    pub fn new(writer: W) -> Result<Self> {
+    pub fn new(writer: W, mtime_source: MtimeSource) -> Result<Self> {
         let metadata = oxide_metadata::MetadataBuilder::new(
             oxide_metadata::ArchiveType::Os,
         )
         .build()
         .context("error building oxide metadata")?;
-        let inner = CompositeTarballBuilder::new(writer, metadata)?;
+        let inner =
+            CompositeTarballBuilder::new(writer, metadata, mtime_source)?;
         Ok(Self { inner })
     }
 
@@ -132,12 +135,16 @@ struct CompositeTarballBuilder<W: Write> {
 }
 
 impl<W: Write> CompositeTarballBuilder<W> {
-    fn new(writer: W, metadata: Metadata) -> Result<Self> {
+    fn new(
+        writer: W,
+        metadata: Metadata,
+        mtime_source: MtimeSource,
+    ) -> Result<Self> {
         let mut builder = tar::Builder::new(GzEncoder::new(
             BufWriter::new(writer),
             Compression::fast(),
         ));
-        metadata.append_to_tar(&mut builder)?;
+        metadata.append_to_tar(&mut builder, mtime_source)?;
         Ok(Self { builder })
     }
 
@@ -197,7 +204,7 @@ pub enum MtimeSource {
 }
 
 impl MtimeSource {
-    fn into_mtime(self) -> u64 {
+    pub(crate) fn into_mtime(self) -> u64 {
         use std::time::{SystemTime, UNIX_EPOCH};
 
         match self {

@@ -115,8 +115,18 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let mut builder =
-                            CompositeHostArchiveBuilder::new(Vec::new())?;
+                        let mtime_source =
+                            if phase_1.is_fake() && phase_2.is_fake() {
+                                // Ensure stability of fake artifacts.
+                                MtimeSource::Zero
+                            } else {
+                                MtimeSource::Now
+                            };
+
+                        let mut builder = CompositeHostArchiveBuilder::new(
+                            Vec::new(),
+                            mtime_source,
+                        )?;
                         phase_1.with_entry(
                             FakeDataAttributes::new(
                                 "fake-phase-1",
@@ -150,8 +160,18 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let mut builder =
-                            CompositeRotArchiveBuilder::new(Vec::new())?;
+                        let mtime_source =
+                            if archive_a.is_fake() && archive_b.is_fake() {
+                                // Ensure stability of fake artifacts.
+                                MtimeSource::Zero
+                            } else {
+                                MtimeSource::Now
+                            };
+
+                        let mut builder = CompositeRotArchiveBuilder::new(
+                            Vec::new(),
+                            mtime_source,
+                        )?;
                         archive_a.with_entry(
                             FakeDataAttributes::new(
                                 "fake-rot-archive-a",
@@ -179,9 +199,20 @@ impl ArtifactManifest {
                              used with artifact kind {kind:?}"
                         );
 
+                        // Ensure stability of fake artifacts.
+                        let mtime_source = if zones.iter().all(|z| z.is_fake())
+                        {
+                            MtimeSource::Zero
+                        } else {
+                            MtimeSource::Now
+                        };
+
                         let data = Vec::new();
                         let mut builder =
-                            CompositeControlPlaneArchiveBuilder::new(data)?;
+                            CompositeControlPlaneArchiveBuilder::new(
+                                data,
+                                mtime_source,
+                            )?;
 
                         for zone in zones {
                             zone.with_name_and_entry(|name, entry| {
@@ -362,6 +393,10 @@ pub enum DeserializedFileArtifactSource {
 }
 
 impl DeserializedFileArtifactSource {
+    fn is_fake(&self) -> bool {
+        matches!(self, DeserializedFileArtifactSource::Fake { .. })
+    }
+
     fn with_entry<F, T>(&self, fake_attr: FakeDataAttributes, f: F) -> Result<T>
     where
         F: FnOnce(CompositeEntry<'_>) -> Result<T>,
@@ -397,6 +432,10 @@ pub enum DeserializedControlPlaneZoneSource {
 }
 
 impl DeserializedControlPlaneZoneSource {
+    fn is_fake(&self) -> bool {
+        matches!(self, DeserializedControlPlaneZoneSource::Fake { .. })
+    }
+
     fn with_name_and_entry<F, T>(&self, f: F) -> Result<T>
     where
         F: FnOnce(&str, CompositeEntry<'_>) -> Result<T>,

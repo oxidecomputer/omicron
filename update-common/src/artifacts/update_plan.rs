@@ -877,7 +877,9 @@ mod tests {
         let phase1 = make_random_bytes();
         let phase2 = make_random_bytes();
 
-        let mut builder = CompositeHostArchiveBuilder::new(Vec::new()).unwrap();
+        let mut builder =
+            CompositeHostArchiveBuilder::new(Vec::new(), MtimeSource::Zero)
+                .unwrap();
         builder
             .append_phase_1(CompositeEntry {
                 data: &phase1,
@@ -912,7 +914,9 @@ mod tests {
         let archive_a = make_random_bytes();
         let archive_b = make_random_bytes();
 
-        let mut builder = CompositeRotArchiveBuilder::new(Vec::new()).unwrap();
+        let mut builder =
+            CompositeRotArchiveBuilder::new(Vec::new(), MtimeSource::Zero)
+                .unwrap();
         builder
             .append_archive_a(CompositeEntry {
                 data: &archive_a,
