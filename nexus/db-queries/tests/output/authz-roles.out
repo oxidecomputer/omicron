@@ -922,7 +922,7 @@ resource: DeviceAccessToken "a-device-access-token"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: SystemUpdate id "9c86d713-1bc2-4927-9892-ada3eb6f5f62"
+resource: TufRepo id "3c52d72f-cbf7-4951-a62f-a4154e74da87"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔
@@ -936,7 +936,7 @@ resource: SystemUpdate id "9c86d713-1bc2-4927-9892-ada3eb6f5f62"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: UpdateDeployment id "c617a035-7c42-49ff-a36a-5dfeee382832"
+resource: TufArtifact id "a v1.0.0 (b)"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔

@@ -157,8 +157,6 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         Zpool::init(),
         Service::init(),
         UserBuiltin::init(),
-        SystemUpdate::init(),
-        UpdateDeployment::init(),
     ];
 
     for init in generated_inits {

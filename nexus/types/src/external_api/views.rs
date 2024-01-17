@@ -13,7 +13,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
     ByteCount, Digest, IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName, SemverVersion, SimpleIdentity,
+    ObjectIdentity, RoleName, SimpleIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -557,65 +557,6 @@ pub struct DeviceAccessTokenGrant {
 #[serde(rename_all = "snake_case")]
 pub enum DeviceAccessTokenType {
     Bearer,
-}
-
-// SYSTEM UPDATES
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct VersionRange {
-    pub low: SemverVersion,
-    pub high: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum UpdateStatus {
-    Updating,
-    Steady,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct SystemVersion {
-    pub version_range: VersionRange,
-    pub status: UpdateStatus,
-    // TODO: time_released? time_last_applied? I got a fever and the only
-    // prescription is more timestamps
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdate {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ComponentUpdate {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-
-    pub component_type: shared::UpdateableComponentType,
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateableComponent {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-
-    pub device_id: String,
-    pub component_type: shared::UpdateableComponentType,
-    pub version: SemverVersion,
-    pub system_version: SemverVersion,
-    pub status: UpdateStatus,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateDeployment {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-    pub version: SemverVersion,
-    pub status: UpdateStatus,
 }
 
 // SYSTEM HEALTH

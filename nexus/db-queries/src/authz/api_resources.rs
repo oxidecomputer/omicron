@@ -1032,22 +1032,6 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "SystemUpdate",
-    parent = "Fleet",
-    primary_key = Uuid,
-    roles_allowed = false,
-    polar_snippet = FleetChild,
-}
-
-authz_resource! {
-    name = "UpdateDeployment",
-    parent = "Fleet",
-    primary_key = Uuid,
-    roles_allowed = false,
-    polar_snippet = FleetChild,
-}
-
-authz_resource! {
     name = "IpPool",
     parent = "Fleet",
     primary_key = Uuid,

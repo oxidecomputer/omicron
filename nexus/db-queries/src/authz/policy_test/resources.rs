@@ -139,22 +139,6 @@ pub async fn make_resources(
         LookupType::ByCompositeId(artifact_id_desc),
     ));
 
-    let system_update_id =
-        "9c86d713-1bc2-4927-9892-ada3eb6f5f62".parse().unwrap();
-    builder.new_resource(authz::SystemUpdate::new(
-        authz::FLEET,
-        system_update_id,
-        LookupType::ById(system_update_id),
-    ));
-
-    let update_deployment_id =
-        "c617a035-7c42-49ff-a36a-5dfeee382832".parse().unwrap();
-    builder.new_resource(authz::UpdateDeployment::new(
-        authz::FLEET,
-        update_deployment_id,
-        LookupType::ById(update_deployment_id),
-    ));
-
     let address_lot_id =
         "43259fdc-c5c0-4a21-8b1d-2f673ad00d93".parse().unwrap();
     builder.new_resource(authz::AddressLot::new(
