@@ -1795,22 +1795,22 @@ impl ServiceManager {
                 };
 
                 // Configure the Oximeter service.
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let address = SocketAddr::new(
                     IpAddr::V6(*underlay_address),
                     OXIMETER_PORT,
                 );
+
                 let listen_addr = &address.ip().to_string();
-                let listen_port = &address.port().to_string();
-                let id = &id.to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
 
                 let oximeter_config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
-                    .add_property("listen_addr", "astring", listen_addr)
-                    .add_property("listen_port", "astring", listen_port)
-                    .add_property("id", "astring", id);
+                    .add_property("id", "astring", &id.to_string())
+                    .add_property("address", "astring", &address.to_string());
                 let oximeter_service = ServiceBuilder::new("oxide/oximeter")
                     .add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1818,6 +1818,8 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
                     .add_service(oximeter_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
