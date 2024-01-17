@@ -17,8 +17,19 @@ use camino::Utf8Path;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::io::BufWriter;
-use std::io::Read;
 use std::io::Write;
+
+/// Represents a single entry in a composite artifact.
+///
+/// A composite artifact is a tarball containing multiple artifacts. This
+/// struct is intended for the insertion of one such entry into the artifact.
+///
+/// At the moment it only accepts byte slices, but it could be extended to
+/// support arbitrary readers in the future.
+pub struct CompositeEntry<'a> {
+    pub data: &'a [u8],
+    pub mtime_source: MtimeSource,
+}
 
 pub struct CompositeControlPlaneArchiveBuilder<W: Write> {
     inner: CompositeTarballBuilder<W>,
@@ -35,11 +46,10 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         Ok(Self { inner })
     }
 
-    pub fn append_zone<R: Read>(
+    pub fn append_zone(
         &mut self,
         name: &str,
-        size: usize,
-        data: R,
+        entry: CompositeEntry<'_>,
     ) -> Result<()> {
         let name_path = Utf8Path::new(name);
         if name_path.file_name() != Some(name) {
@@ -47,7 +57,7 @@ impl<W: Write> CompositeControlPlaneArchiveBuilder<W> {
         }
         let path =
             Utf8Path::new(CONTROL_PLANE_ARCHIVE_ZONE_DIRECTORY).join(name_path);
-        self.inner.append_file(path.as_str(), size, data)
+        self.inner.append_file(path.as_str(), entry)
     }
 
     pub fn finish(self) -> Result<W> {
@@ -70,20 +80,18 @@ impl<W: Write> CompositeRotArchiveBuilder<W> {
         Ok(Self { inner })
     }
 
-    pub fn append_archive_a<R: Read>(
+    pub fn append_archive_a(
         &mut self,
-        size: usize,
-        data: R,
+        entry: CompositeEntry<'_>,
     ) -> Result<()> {
-        self.inner.append_file(ROT_ARCHIVE_A_FILE_NAME, size, data)
+        self.inner.append_file(ROT_ARCHIVE_A_FILE_NAME, entry)
     }
 
-    pub fn append_archive_b<R: Read>(
+    pub fn append_archive_b(
         &mut self,
-        size: usize,
-        data: R,
+        entry: CompositeEntry<'_>,
     ) -> Result<()> {
-        self.inner.append_file(ROT_ARCHIVE_B_FILE_NAME, size, data)
+        self.inner.append_file(ROT_ARCHIVE_B_FILE_NAME, entry)
     }
 
     pub fn finish(self) -> Result<W> {
@@ -106,20 +114,12 @@ impl<W: Write> CompositeHostArchiveBuilder<W> {
         Ok(Self { inner })
     }
 
-    pub fn append_phase_1<R: Read>(
-        &mut self,
-        size: usize,
-        data: R,
-    ) -> Result<()> {
-        self.inner.append_file(HOST_PHASE_1_FILE_NAME, size, data)
+    pub fn append_phase_1(&mut self, entry: CompositeEntry<'_>) -> Result<()> {
+        self.inner.append_file(HOST_PHASE_1_FILE_NAME, entry)
     }
 
-    pub fn append_phase_2<R: Read>(
-        &mut self,
-        size: usize,
-        data: R,
-    ) -> Result<()> {
-        self.inner.append_file(HOST_PHASE_2_FILE_NAME, size, data)
+    pub fn append_phase_2(&mut self, entry: CompositeEntry<'_>) -> Result<()> {
+        self.inner.append_file(HOST_PHASE_2_FILE_NAME, entry)
     }
 
     pub fn finish(self) -> Result<W> {
@@ -141,15 +141,15 @@ impl<W: Write> CompositeTarballBuilder<W> {
         Ok(Self { builder })
     }
 
-    fn append_file<R: Read>(
+    fn append_file(
         &mut self,
         path: &str,
-        size: usize,
-        data: R,
+        entry: CompositeEntry<'_>,
     ) -> Result<()> {
-        let header = make_tar_header(path, size);
+        let header =
+            make_tar_header(path, entry.data.len(), entry.mtime_source);
         self.builder
-            .append(&header, data)
+            .append(&header, entry.data)
             .with_context(|| format!("error append {path:?}"))
     }
 
@@ -164,10 +164,12 @@ impl<W: Write> CompositeTarballBuilder<W> {
     }
 }
 
-fn make_tar_header(path: &str, size: usize) -> tar::Header {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let mtime = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+fn make_tar_header(
+    path: &str,
+    size: usize,
+    mtime_source: MtimeSource,
+) -> tar::Header {
+    let mtime = mtime_source.into_mtime();
 
     let mut header = tar::Header::new_ustar();
     header.set_username("root").unwrap();
@@ -182,4 +184,27 @@ fn make_tar_header(path: &str, size: usize) -> tar::Header {
     header.set_cksum();
 
     header
+}
+
+/// How to obtain the `mtime` field for a tar header.
+#[derive(Copy, Clone, Debug)]
+pub enum MtimeSource {
+    /// Use a fixed timestamp of zero seconds past the Unix epoch.
+    Zero,
+
+    /// Use the current time.
+    Now,
+}
+
+impl MtimeSource {
+    fn into_mtime(self) -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        match self {
+            Self::Zero => 0,
+            Self::Now => {
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+            }
+        }
+    }
 }

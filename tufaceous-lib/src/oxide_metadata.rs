@@ -10,10 +10,7 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
@@ -52,8 +49,9 @@ impl Metadata {
         let mut b = serde_json::to_vec(self)?;
         b.push(b'\n');
 
-        let mtime =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        // XXX This was changed from upstream to add oxide.json with a zero
+        // timestamp, to ensure stability of fake manifests.
+        let mtime = 0;
 
         let mut h = tar::Header::new_ustar();
         h.set_entry_type(tar::EntryType::Regular);

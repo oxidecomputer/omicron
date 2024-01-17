@@ -19,8 +19,10 @@ use crate::oxide_metadata;
 mod composite;
 
 pub use composite::CompositeControlPlaneArchiveBuilder;
+pub use composite::CompositeEntry;
 pub use composite::CompositeHostArchiveBuilder;
 pub use composite::CompositeRotArchiveBuilder;
+pub use composite::MtimeSource;
 
 /// The location a artifact will be obtained from.
 #[derive(Clone, Debug)]
