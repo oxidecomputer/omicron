@@ -116,15 +116,15 @@ setup_hint = """
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
 
-[package.oximeter-collector]
+[package.oximeter]
 service_name = "oximeter"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "oximeter-collector-svc.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz" ]
 output.type = "zone"
 
-[package.oximeter-collector-svc]
-service_name = "oximeter-svc"
+[package.oximeter-collector]
+service_name = "oximeter-collector"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
