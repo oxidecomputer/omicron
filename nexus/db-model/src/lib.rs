@@ -52,7 +52,9 @@ mod switch_port;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
+mod deployment;
 mod ipv4_nat_entry;
+mod omicron_zone_config;
 pub mod queries;
 mod quota;
 mod rack;

@@ -2954,8 +2954,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     -- service in them)
     primary_service_ip INET NOT NULL,
     primary_service_port INT4
-	CHECK (primary_service_port BETWEEN 0 AND 65535)
-	NOT NULL,
+        CHECK (primary_service_port BETWEEN 0 AND 65535)
+        NOT NULL,
 
     -- The remaining properties may be NULL for different kinds of zones.  The
     -- specific constraints are not enforced at the database layer, basically
@@ -2967,7 +2967,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     second_service_ip INET,
     second_service_port INT4
         CHECK (second_service_port IS NULL
-	    OR second_service_port BETWEEN 0 AND 65535),
+        OR second_service_port BETWEEN 0 AND 65535),
 
     -- Zones may have an associated dataset.  They're currently always on a U.2.
     -- The only thing we need to identify it here is the name of the zpool that
@@ -2995,9 +2995,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     -- Source NAT configuration (currently used for boundary NTP only)
     snat_ip INET,
     snat_first_port INT4
-	CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
+        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
     snat_last_port INT4
-	CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
     PRIMARY KEY (inv_collection_id, id)
 );
@@ -3014,6 +3014,149 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     slot INT2 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, id)
+);
+
+/*
+ * System policy and blueprints
+ *
+ * TODO docs
+ */
+
+-- list of all blueprints
+CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
+    id UUID PRIMARY KEY,
+
+    -- This is effectively a foreign key back to this table; however, it is
+    -- allowed to be NULL: the initial blueprint has no parent. Additionally,
+    -- it may be non-NULL but no longer reference a row in this table: once a
+    -- child blueprint has been created from a parent, it's possible for the
+    -- parent to be deleted. An open question is whether we should NULL out this
+    -- field on such a deletion; currently we do not, so we can always see that
+    -- there had been a particular parent even if it's now gone.
+    parent_blueprint_id UUID,
+
+    -- These fields are for debugging only.
+    time_created TIMESTAMPTZ NOT NULL,
+    creator TEXT NOT NULL,
+    comment TEXT NOT NULL
+);
+
+-- generation number for the OmicronZonesConfig for each sled in a blueprint
+CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
+    -- foreign key into `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a blueprint could refer to a sled that no longer exists,
+    -- particularly if the blueprint is older than the current target)
+    sled_id UUID NOT NULL,
+
+    -- OmicronZonesConfig generation for the zones on this sled in this
+    -- blueprint
+    generation INT8 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, sled_id)
+);
+
+-- description of omicron zones specified in a blueprint
+--
+-- this is currently identical to `inv_omicron_zone`, except that the foreign
+-- keys reference other blueprint tables intead of inventory tables. we expect
+-- their sameness to diverge over time as either inventory or blueprints (or
+-- both) grow context-specific properties
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
+    -- foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a blueprint could refer to a sled that no longer exists,
+    -- particularly if the blueprint is older than the current target)
+    sled_id UUID NOT NULL,
+
+    -- unique id for this zone
+    id UUID NOT NULL,
+    underlay_address INET NOT NULL,
+    zone_type omicron.public.zone_type NOT NULL,
+
+    -- SocketAddr of the "primary" service for this zone
+    -- (what this describes varies by zone type, but all zones have at least one
+    -- service in them)
+    primary_service_ip INET NOT NULL,
+    primary_service_port INT4
+        CHECK (primary_service_port BETWEEN 0 AND 65535)
+        NOT NULL,
+
+    -- The remaining properties may be NULL for different kinds of zones.  The
+    -- specific constraints are not enforced at the database layer, basically
+    -- because it's really complicated to do that and it's not obvious that it's
+    -- worthwhile.
+
+    -- Some zones have a second service.  Like the primary one, the meaning of
+    -- this is zone-type-dependent.
+    second_service_ip INET,
+    second_service_port INT4
+        CHECK (second_service_port IS NULL
+        OR second_service_port BETWEEN 0 AND 65535),
+
+    -- Zones may have an associated dataset.  They're currently always on a U.2.
+    -- The only thing we need to identify it here is the name of the zpool that
+    -- it's on.
+    dataset_zpool_name TEXT,
+
+    -- Zones with external IPs have an associated NIC and sockaddr for listening
+    -- (first is a foreign key into `bp_omicron_zone_nic`)
+    bp_nic_id UUID,
+
+    -- Properties for internal DNS servers
+    -- address attached to this zone from outside the sled's subnet
+    dns_gz_address INET,
+    dns_gz_address_index INT8,
+
+    -- Properties common to both kinds of NTP zones
+    ntp_ntp_servers TEXT[],
+    ntp_dns_servers INET[],
+    ntp_domain TEXT,
+
+    -- Properties specific to Nexus zones
+    nexus_external_tls BOOLEAN,
+    nexus_external_dns_servers INET ARRAY,
+
+    -- Source NAT configuration (currently used for boundary NTP only)
+    snat_ip INET,
+    snat_first_port INT4
+        CHECK (snat_first_port IS NULL OR snat_first_port BETWEEN 0 AND 65535),
+    snat_last_port INT4
+        CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
+
+    PRIMARY KEY (blueprint_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
+    blueprint_id UUID NOT NULL,
+    id UUID NOT NULL,
+    name TEXT NOT NULL,
+    ip INET NOT NULL,
+    mac INT8 NOT NULL,
+    subnet INET NOT NULL,
+    vni INT8 NOT NULL,
+    is_primary BOOLEAN NOT NULL,
+    slot INT2 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, id)
+);
+
+-- list of omicron zones that are considered NOT in-service for a blueprint
+--
+-- In Rust code, we generally want to deal with "zones in service", which means
+-- they should appear in DNS. However, almost all zones in almost all blueprints
+-- will be in service, so we can induce considerably less database work by
+-- storing the zones _not_ in service. Our DB wrapper layer handles this
+-- inversion, so the rest of our Rust code can ignore it.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zones_not_in_service (
+    blueprint_id UUID NOT NULL,
+    bp_omicron_zone_id UUID NOT NULL,
+
+    PRIMARY KEY (blueprint_id, bp_omicron_zone_id)
 );
 
 /*******************************************************************/
@@ -3196,7 +3339,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '27.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '28.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

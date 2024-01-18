@@ -16,6 +16,7 @@ pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
+pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
