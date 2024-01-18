@@ -21,7 +21,6 @@ use similar_asserts;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
-use std::path::PathBuf;
 use tokio::time::timeout;
 use tokio::time::Duration;
 use uuid::Uuid;
@@ -54,7 +53,7 @@ async fn test_setup<'a>(
         );
     let populate = false;
     builder.start_crdb(populate).await;
-    let schema_dir = PathBuf::from(SCHEMA_DIR);
+    let schema_dir = Utf8PathBuf::from(SCHEMA_DIR);
     builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
@@ -479,10 +478,14 @@ async fn nexus_applies_update_on_boot() {
     // Start Nexus. It should auto-format itself to the latest version,
     // upgrading through each intermediate update.
     //
+    // The timeout here is a bit longer than usual (120s vs 60s) because if
+    // lots of tests are running at the same time, there can be contention
+    // here.
+    //
     // NOTE: If this grows excessively, we could break it into several smaller
     // tests.
     assert!(
-        timeout(Duration::from_secs(60), builder.start_nexus_internal())
+        timeout(Duration::from_secs(120), builder.start_nexus_internal())
             .await
             .is_ok(),
         "Nexus should have started"
