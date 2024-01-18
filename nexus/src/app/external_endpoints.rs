@@ -429,16 +429,10 @@ impl TryFrom<Certificate> for TlsCertificate {
 
         // Assemble a rustls CertifiedKey with both the certificate and the key.
         let certified_key = {
-            // let private_key_der = private_key
-            //     .private_key_to_der()
-            //     .context("serializing private key to DER")?;
-            let mut xxx = std::io::Cursor::new(db_cert.key.clone());
-            let rustls_private_key = rustls_pemfile::private_key(&mut xxx)
+            let mut cursor = std::io::Cursor::new(db_cert.key.clone());
+            let rustls_private_key = rustls_pemfile::private_key(&mut cursor)
                 .expect("parsing private key PEM")
                 .expect("no private keys found");
-            // let rustls_private_key = rustls::pki_types::PrivateKeyDer::from(
-            //     rustls::pki_types::PrivatePkcs8KeyDer::from(private_key_der),
-            // );
             let rustls_signing_key =
                 rustls::crypto::ring::sign::any_supported_type(
                     &rustls_private_key,
