@@ -215,7 +215,9 @@ impl Zones {
                 dir.push(zone);
 
                 // We only add debug paths if the zones have primary paths
-                zones.get_mut(zone).map(|paths| paths.debug.push(dir));
+                if let Some(paths) = zones.get_mut(zone) {
+                    paths.debug.push(dir);
+                }
             }
         }
 
