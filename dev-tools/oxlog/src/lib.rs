@@ -424,15 +424,15 @@ mod tests {
                 "system-illumos-blah:default.log.0"
             )
         );
-        assert!(!oxide_smf_service_name_from_log_file_name(
+        assert!(oxide_smf_service_name_from_log_file_name(
             "not-oxide-blah:default.log"
         )
         .is_none());
-        assert!(!oxide_smf_service_name_from_log_file_name(
+        assert!(oxide_smf_service_name_from_log_file_name(
             "not-system-illumos-blah:default.log"
         )
         .is_none());
-        assert!(!oxide_smf_service_name_from_log_file_name(
+        assert!(oxide_smf_service_name_from_log_file_name(
             "system-blah:default.log"
         )
         .is_none());
