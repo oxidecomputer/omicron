@@ -119,14 +119,22 @@ setup_hint = """
 [package.oximeter-collector]
 service_name = "oximeter"
 only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "oximeter-collector-svc.tar.gz", "zone-network-setup.tar.gz" ]
+output.type = "zone"
+
+[package.oximeter-collector-svc]
+service_name = "oximeter-svc"
+only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
 source.rust.release = true
 source.paths = [
-    { from = "smf/oximeter/manifest.xml", to = "/var/svc/manifest/site/oximeter/manifest.xml" },
+    { from = "smf/oximeter", to = "/var/svc/manifest/site/oximeter" },
     { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
 ]
 output.type = "zone"
+output.intermediate_only = true
 
 [package.clickhouse]
 service_name = "clickhouse"
