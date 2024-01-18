@@ -153,6 +153,7 @@ impl Zones {
                 )],
             },
         );
+
         // Find the directories containing the primary and extra log files
         // for all zones on external storage pools.
         let pools = Pools::read()?;
@@ -221,6 +222,7 @@ impl Zones {
         Ok(Zones { zones })
     }
 
+    /// Return log files organized by service name
     pub fn zone_logs(
         &self,
         zone: &str,
@@ -246,6 +248,45 @@ impl Zones {
     }
 }
 
+const OX_SMF_PREFIXES: [&str; 2] = ["oxide-", "system-illumos-"];
+
+/// Return true if the provided file name appears to be a valid log file for an
+/// Oxide-managed SMF service.
+///
+/// Note that this operates on the _file name_. Any leading path components will
+/// cause this check to return `false`.
+pub fn is_oxide_smf_log_file(filename: impl AsRef<str>) -> bool {
+    // Log files are named by the SMF services, with the `/` in the FMRI
+    // translated to a `-`.
+    let filename = filename.as_ref();
+    OX_SMF_PREFIXES
+        .iter()
+        .any(|prefix| filename.starts_with(prefix) && filename.contains(".log"))
+}
+
+// Parse an oxide smf log file name and return the name of the underlying
+// service.
+//
+// If parsing fails for some reason, return `None`.
+pub fn oxide_smf_service_name_from_log_file_name(
+    filename: &str,
+) -> Option<&str> {
+    let Some((prefix, _suffix)) = filename.split_once(':') else {
+        // No ':' found
+        return None;
+    };
+
+    for ox_prefix in OX_SMF_PREFIXES {
+        if let Some(svc_name) = prefix.strip_prefix(ox_prefix) {
+            return Some(svc_name);
+        }
+    }
+
+    None
+}
+
+// Given a directory, find all oxide specific SMF service logs and return them
+// mapped to their inferred service name.
 fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
     let Ok(entries) = read_dir(dir.as_path()) else {
         return;
@@ -258,16 +299,19 @@ fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
         let Some(filename) = filename.to_str() else {
             continue;
         };
-        if filename.starts_with("oxide-") {
+
+        // Is this a log file we care about?
+        if is_oxide_smf_log_file(filename) {
             let mut path = dir.clone();
             path.push(filename);
             let mut logfile = LogFile::new(path);
-            // If we can't find the service name, then skip the log
-            let Some((prefix, _suffix)) = filename.split_once(':') else {
+
+            let Some(svc_name) =
+                oxide_smf_service_name_from_log_file_name(filename)
+            else {
                 continue;
             };
-            // We already look for this prefix above
-            let svc_name = prefix.strip_prefix("oxide-").unwrap().to_string();
+
             if let Ok(metadata) = entry.metadata() {
                 if metadata.len() == 0 {
                     // skip 0 size files
@@ -282,7 +326,7 @@ fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
             let is_current = filename.ends_with(".log");
 
             let svc_logs =
-                logs.entry(svc_name.clone()).or_insert(SvcLogs::default());
+                logs.entry(svc_name.to_string()).or_insert(SvcLogs::default());
 
             if is_current {
                 svc_logs.current = Some(logfile.clone());
@@ -293,6 +337,8 @@ fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
     }
 }
 
+// Load any logs in non-standard paths. We grab all logs in `dir` and
+// don't filter based on filename prefix as in `load_svc_logs`.
 fn load_extra_logs(
     dir: Utf8PathBuf,
     svc_name: &str,
@@ -302,13 +348,8 @@ fn load_extra_logs(
         return;
     };
 
-    // We only insert extra files if we have already collected
-    // related current and archived files.
-    // This should always be the case unless the files are
-    // for zones that no longer exist.
-    let Some(svc_logs) = logs.get_mut(svc_name) else {
-        return;
-    };
+    let svc_logs =
+        logs.entry(svc_name.to_string()).or_insert(SvcLogs::default());
 
     for entry in entries {
         let Ok(entry) = entry else {
@@ -333,5 +374,67 @@ fn load_extra_logs(
         }
 
         svc_logs.extra.push(logfile);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    pub use super::is_oxide_smf_log_file;
+    pub use super::oxide_smf_service_name_from_log_file_name;
+
+    #[test]
+    fn test_is_oxide_smf_log_file() {
+        assert!(is_oxide_smf_log_file("oxide-blah:default.log"));
+        assert!(is_oxide_smf_log_file("oxide-blah:default.log.0"));
+        assert!(is_oxide_smf_log_file("oxide-blah:default.log.1111"));
+        assert!(is_oxide_smf_log_file("system-illumos-blah:default.log"));
+        assert!(is_oxide_smf_log_file("system-illumos-blah:default.log.0"));
+        assert!(!is_oxide_smf_log_file("not-oxide-blah:default.log"));
+        assert!(!is_oxide_smf_log_file("not-system-illumos-blah:default.log"));
+        assert!(!is_oxide_smf_log_file("system-blah:default.log"));
+    }
+
+    #[test]
+    fn test_oxide_smf_service_name_from_log_file_name() {
+        assert_eq!(
+            Some("blah"),
+            oxide_smf_service_name_from_log_file_name("oxide-blah:default.log")
+        );
+        assert_eq!(
+            Some("blah"),
+            oxide_smf_service_name_from_log_file_name(
+                "oxide-blah:default.log.0"
+            )
+        );
+        assert_eq!(
+            Some("blah"),
+            oxide_smf_service_name_from_log_file_name(
+                "oxide-blah:default.log.1111"
+            )
+        );
+        assert_eq!(
+            Some("blah"),
+            oxide_smf_service_name_from_log_file_name(
+                "system-illumos-blah:default.log"
+            )
+        );
+        assert_eq!(
+            Some("blah"),
+            oxide_smf_service_name_from_log_file_name(
+                "system-illumos-blah:default.log.0"
+            )
+        );
+        assert!(!oxide_smf_service_name_from_log_file_name(
+            "not-oxide-blah:default.log"
+        )
+        .is_none());
+        assert!(!oxide_smf_service_name_from_log_file_name(
+            "not-system-illumos-blah:default.log"
+        )
+        .is_none());
+        assert!(!oxide_smf_service_name_from_log_file_name(
+            "system-blah:default.log"
+        )
+        .is_none());
     }
 }
