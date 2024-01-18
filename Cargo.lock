@@ -1906,7 +1906,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#b19a9a5d049f4433547f9f3b11d10a9483fc6acf"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#711a7490d81416731cfe0f9fef366ed5f266a0ee"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1927,7 +1927,7 @@ dependencies = [
  "paste",
  "percent-encoding",
  "proc-macro2",
- "rustls 0.21.9",
+ "rustls 0.22.2",
  "rustls-pemfile 2.0.0",
  "schemars",
  "serde",
@@ -1941,7 +1941,7 @@ dependencies = [
  "slog-json",
  "slog-term",
  "tokio",
- "tokio-rustls 0.24.1",
+ "tokio-rustls 0.25.0",
  "toml 0.8.8",
  "usdt",
  "uuid",
@@ -1952,7 +1952,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#b19a9a5d049f4433547f9f3b11d10a9483fc6acf"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#711a7490d81416731cfe0f9fef366ed5f266a0ee"
 dependencies = [
  "proc-macro2",
  "quote",
