@@ -625,3 +625,11 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
+
+[package.omicron-omdb]
+service_name = "omdb"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["omdb"]
+source.rust.release = true
+output.type = "tarball"
