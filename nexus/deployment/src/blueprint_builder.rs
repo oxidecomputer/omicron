@@ -362,13 +362,6 @@ impl<'a> BlueprintBuilder<'a> {
     /// zones
     fn sled_alloc_ip(&mut self, sled_id: Uuid) -> Result<Ipv6Addr, Error> {
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
-
-        // Work around rust-lang/rust-clippy#11935 and related issues.
-        // Clippy doesn't grok that we can't use
-        // `entry(&sled_id).or_insert_with(closure)` because `closure` would
-        // borrow `self`, which we can't do because we already have an immutable
-        // borrow of `self` by calling `entry()`.  Using `match` on the result
-        // of `entry` has a similar problem.
         let allocator =
             self.sled_ip_allocators.entry(sled_id).or_insert_with(|| {
                 let sled_subnet_addr = sled_subnet.net().network();
