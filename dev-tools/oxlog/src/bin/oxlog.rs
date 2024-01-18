@@ -4,8 +4,8 @@
 
 //! Tool for discovering oxide related logfiles on sleds
 
-use clap::{Parser, Subcommand};
-use oxlog::{LogFile, Zones};
+use clap::{Args, Parser, Subcommand};
+use oxlog::{Filter, LogFile, Zones};
 
 #[derive(Debug, Parser)]
 #[command(version)]
@@ -31,18 +31,25 @@ enum Commands {
         #[arg(short, long)]
         metadata: bool,
 
-        /// Print only the current log file
-        #[arg(short, long)]
-        current: bool,
-
-        /// Print only the archived log files
-        #[arg(short, long)]
-        archived: bool,
-
-        // Print only the extra log files
-        #[arg(short, long)]
-        extra: bool,
+        #[command(flatten)]
+        filter: FilterArgs,
     },
+}
+
+#[derive(Args, Debug)]
+#[group(required = true, multiple = true)]
+struct FilterArgs {
+    /// Print only the current log file
+    #[arg(short, long)]
+    current: bool,
+
+    /// Print only the archived log files
+    #[arg(short, long)]
+    archived: bool,
+
+    // Print only the extra log files
+    #[arg(short, long)]
+    extra: bool,
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -55,15 +62,13 @@ fn main() -> Result<(), anyhow::Error> {
             }
             Ok(())
         }
-        Commands::Logs {
-            zone,
-            service,
-            metadata,
-            current,
-            archived,
-            extra,
-        } => {
+        Commands::Logs { zone, service, metadata, filter } => {
             let zones = Zones::load()?;
+            let filter = Filter {
+                current: filter.current,
+                archived: filter.archived,
+                extra: filter.extra,
+            };
             let print_metadata = |f: &LogFile| {
                 println!(
                     "{}\t{}\t{}",
@@ -74,7 +79,7 @@ fn main() -> Result<(), anyhow::Error> {
                 );
             };
 
-            let logs = zones.zone_logs(&zone);
+            let logs = zones.zone_logs(&zone, filter);
             for (svc_name, mut svc_logs) in logs {
                 if let Some(service) = &service {
                     if svc_name != service.as_str() {
@@ -82,7 +87,7 @@ fn main() -> Result<(), anyhow::Error> {
                     }
                 }
                 svc_logs.archived.sort();
-                if current {
+                if filter.current {
                     if let Some(current) = &svc_logs.current {
                         if metadata {
                             print_metadata(current);
@@ -91,7 +96,7 @@ fn main() -> Result<(), anyhow::Error> {
                         }
                     }
                 }
-                if archived {
+                if filter.archived {
                     for f in &svc_logs.archived {
                         if metadata {
                             print_metadata(f);
@@ -100,7 +105,7 @@ fn main() -> Result<(), anyhow::Error> {
                         }
                     }
                 }
-                if extra {
+                if filter.extra {
                     for f in &svc_logs.extra {
                         if metadata {
                             print_metadata(f);

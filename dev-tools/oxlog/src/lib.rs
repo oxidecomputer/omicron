@@ -56,6 +56,19 @@ impl Pools {
     }
 }
 
+/// Filter which logs to search for in a given zone
+///
+/// Each field in the filter is additive.
+///
+/// The filter was added to the library and not just the CLI because in some
+/// cases searching for archived logs is pretty expensive.
+#[derive(Clone, Copy, Debug)]
+pub struct Filter {
+    pub current: bool,
+    pub archived: bool,
+    pub extra: bool,
+}
+
 /// Path and metadata about a logfile
 /// We use options for metadata as retrieval is fallible
 #[derive(Debug, Clone, Eq)]
@@ -208,17 +221,26 @@ impl Zones {
         Ok(Zones { zones })
     }
 
-    pub fn zone_logs(&self, zone: &str) -> BTreeMap<ServiceName, SvcLogs> {
+    pub fn zone_logs(
+        &self,
+        zone: &str,
+        filter: Filter,
+    ) -> BTreeMap<ServiceName, SvcLogs> {
         let mut output = BTreeMap::new();
         let Some(paths) = self.zones.get(zone) else {
             return BTreeMap::new();
         };
         load_svc_logs(paths.primary.clone(), &mut output);
-        for dir in paths.debug.clone() {
-            load_svc_logs(dir, &mut output);
+
+        if filter.archived {
+            for dir in paths.debug.clone() {
+                load_svc_logs(dir, &mut output);
+            }
         }
-        for (svc_name, dir) in paths.extra.clone() {
-            load_extra_logs(dir, svc_name, &mut output);
+        if filter.extra {
+            for (svc_name, dir) in paths.extra.clone() {
+                load_extra_logs(dir, svc_name, &mut output);
+            }
         }
         output
     }
