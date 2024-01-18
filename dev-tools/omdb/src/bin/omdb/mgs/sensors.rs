@@ -15,7 +15,7 @@ use gateway_client::types::SpType;
 use multimap::MultiMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Args)]
 pub(crate) struct SensorsArgs {
@@ -46,6 +46,10 @@ pub(crate) struct SensorsArgs {
     /// parseable output
     #[clap(long, short)]
     pub parseable: bool,
+
+    /// show latencies
+    #[clap(long)]
+    pub show_latencies: bool,
 
     /// restrict sensors by type of sensor
     #[clap(
@@ -192,8 +196,15 @@ pub(crate) struct SensorMetadata {
     pub end_time: Option<u64>,
 }
 
+struct SensorSpInfo {
+    info: Vec<(SpIdentifier, SpInfo)>,
+    time: u64,
+    latencies: Option<HashMap<SpIdentifier, Duration>>,
+}
+
 pub(crate) struct SensorValues {
     pub values: HashMap<SensorId, Option<f32>>,
+    pub latencies: Option<HashMap<SpIdentifier, Duration>>,
     pub time: u64,
 }
 
@@ -279,8 +290,9 @@ async fn sp_info(
 async fn sp_info_mgs(
     mgs_client: &gateway_client::Client,
     args: &SensorsArgs,
-) -> Result<(Vec<(SpIdentifier, SpInfo)>, u64), anyhow::Error> {
+) -> Result<SensorSpInfo, anyhow::Error> {
     let mut rval = vec![];
+    let mut latencies = HashMap::new();
 
     //
     // First, get all of the SPs that we can see via Ignition
@@ -330,14 +342,16 @@ async fn sp_info_mgs(
     for (sp_id, handle) in handles {
         match handle.await.unwrap() {
             Ok(info) => {
+                let l0 = info.timestamps[1].duration_since(info.timestamps[0]);
+                let l1 = info.timestamps[2].duration_since(info.timestamps[1]);
+
                 if args.verbose {
                     eprintln!(
-                        "mgs: latencies for {sp_id:?}: {:.1?} {:.1?}",
-                        info.timestamps[2].duration_since(info.timestamps[1]),
-                        info.timestamps[1].duration_since(info.timestamps[0])
+                        "mgs: latencies for {sp_id:?}: {l1:.1?} {l0:.1?}",
                     );
                 }
 
+                latencies.insert(sp_id, l0 + l1);
                 rval.push((sp_id, info));
             }
 
@@ -351,17 +365,18 @@ async fn sp_info_mgs(
         eprintln!("total discovery time {:?}", now.elapsed());
     }
 
-    Ok((
-        rval,
-        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH)?.as_secs(),
-    ))
+    Ok(SensorSpInfo {
+        info: rval,
+        time: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+        latencies: Some(latencies),
+    })
 }
 
 fn sp_info_csv<R: std::io::Read>(
     reader: &mut csv::Reader<R>,
     position: &mut csv::Position,
     args: &SensorsArgs,
-) -> Result<(Vec<(SpIdentifier, SpInfo)>, u64), anyhow::Error> {
+) -> Result<SensorSpInfo, anyhow::Error> {
     let mut sps = vec![];
     let headers = reader.headers()?;
 
@@ -522,7 +537,7 @@ fn sp_info_csv<R: std::io::Read>(
         }
     }
 
-    Ok((rval, time.unwrap()))
+    Ok(SensorSpInfo { info: rval, time: time.unwrap(), latencies: None })
 }
 
 pub(crate) async fn sensor_metadata<R: std::io::Read>(
@@ -550,7 +565,7 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
         None
     };
 
-    let (info, time) = match input {
+    let info = match input {
         SensorInput::MgsClient(ref mgs_client) => {
             sp_info_mgs(mgs_client, args).await?
         }
@@ -567,8 +582,9 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
     let mut work_by_sp = HashMap::new();
 
     let mut current = 0;
+    let time = info.time;
 
-    for (sp_id, info) in info {
+    for (sp_id, info) in info.info {
         let mut sp_work = vec![];
 
         for (device, sensors) in info.devices {
@@ -633,7 +649,7 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
                 },
             },
         },
-        SensorValues { values, time },
+        SensorValues { values, time, latencies: info.latencies },
     ))
 }
 
@@ -641,9 +657,11 @@ async fn sp_read_sensors(
     mgs_client: &gateway_client::Client,
     id: &SpIdentifier,
     metadata: &SensorMetadata,
-) -> Result<Vec<(SensorId, Option<f32>)>, anyhow::Error> {
+) -> Result<(Vec<(SensorId, Option<f32>)>, Duration), anyhow::Error> {
     let work = metadata.work_by_sp.get(id).unwrap();
     let mut rval = vec![];
+
+    let start = std::time::Instant::now();
 
     for (component, ids) in work.iter() {
         for (value, id) in mgs_client
@@ -669,7 +687,7 @@ async fn sp_read_sensors(
         }
     }
 
-    Ok(rval)
+    Ok((rval, std::time::Instant::now().duration_since(start)))
 }
 
 async fn sp_data_mgs(
@@ -677,6 +695,7 @@ async fn sp_data_mgs(
     metadata: &'static SensorMetadata,
 ) -> Result<SensorValues, anyhow::Error> {
     let mut values = HashMap::new();
+    let mut latencies = HashMap::new();
     let mut handles = vec![];
 
     for sp_id in metadata.sensors_by_sp.keys() {
@@ -687,11 +706,13 @@ async fn sp_data_mgs(
             sp_read_sensors(&mgs_client, &id, metadata).await
         });
 
-        handles.push(handle);
+        handles.push((id, handle));
     }
 
-    for handle in handles {
-        let rval = handle.await.unwrap()?;
+    for (id, handle) in handles {
+        let (rval, latency) = handle.await.unwrap()?;
+
+        latencies.insert(id, latency);
 
         for (id, value) in rval {
             values.insert(id, value);
@@ -700,9 +721,8 @@ async fn sp_data_mgs(
 
     Ok(SensorValues {
         values,
-        time: SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)?
-            .as_secs(),
+        latencies: Some(latencies),
+        time: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
     })
 }
 
@@ -770,7 +790,7 @@ fn sp_data_csv<R: std::io::Read + std::io::Seek>(
         }
     }
 
-    Ok(SensorValues { values, time: time.unwrap() })
+    Ok(SensorValues { values, latencies: None, time: time.unwrap() })
 }
 
 pub(crate) async fn sensor_data<R: std::io::Read + std::io::Seek>(
@@ -855,6 +875,14 @@ pub(crate) async fn cmd_mgs_sensors(
         }
     };
 
+    let print_latency = |now: u64| {
+        if !args.parseable {
+            print!("{:20} ", "LATENCY");
+        } else {
+            print!("{now},{},{}", "LATENCY", "latency");
+        }
+    };
+
     let mut wakeup =
         tokio::time::Instant::now() + tokio::time::Duration::from_millis(1000);
 
@@ -881,6 +909,22 @@ pub(crate) async fn cmd_mgs_sensors(
                 } else {
                     "-".to_string()
                 });
+            }
+
+            println!();
+        }
+
+        if args.show_latencies {
+            if let Some(latencies) = values.latencies {
+                print_latency(values.time);
+
+                for sp in &sps {
+                    print_value(if let Some(latency) = latencies.get(sp) {
+                        format!("{}ms", latency.as_millis())
+                    } else {
+                        "?".to_string()
+                    });
+                }
             }
 
             println!();

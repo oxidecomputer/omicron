@@ -32,8 +32,8 @@ use ratatui::{
 };
 
 use crate::mgs::sensors::{
-    sensor_data, sensor_metadata, SensorId, SensorInput,
-    SensorMetadata, SensorValues, SensorsArgs,
+    sensor_data, sensor_metadata, SensorId, SensorInput, SensorMetadata,
+    SensorValues, SensorsArgs,
 };
 use crate::mgs::sp_to_string;
 use clap::Args;
@@ -486,9 +486,7 @@ struct Dashboard {
 }
 
 impl Dashboard {
-    fn new(
-        metadata: &'static SensorMetadata,
-    ) -> Result<Dashboard> {
+    fn new(metadata: &'static SensorMetadata) -> Result<Dashboard> {
         let mut sps =
             metadata.sensors_by_sp.keys().map(|m| *m).collect::<Vec<_>>();
         let mut graphs = HashMap::new();
