@@ -84,7 +84,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
+    ) -> ListResultVec<(IpPool, IpPoolResource)> {
         use db::schema::ip_pool;
         use db::schema::ip_pool_resource;
 
@@ -108,13 +108,10 @@ impl DataStore {
             ),
         }
         .inner_join(ip_pool_resource::table)
-        .filter(
-            ip_pool_resource::resource_type
-                .eq(IpPoolResourceType::Silo)
-                .and(ip_pool_resource::resource_id.eq(silo_id)),
-        )
+        .filter(ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo))
+        .filter(ip_pool_resource::resource_id.eq(silo_id))
         .filter(ip_pool::time_deleted.is_null())
-        .select(db::model::IpPool::as_select())
+        .select(<(IpPool, IpPoolResource)>::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -961,7 +958,8 @@ mod test {
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 1);
-        assert_eq!(silo_pools[0].id(), pool1_for_silo.id());
+        assert_eq!(silo_pools[0].0.id(), pool1_for_silo.id());
+        assert_eq!(silo_pools[0].1.is_default, false);
 
         // linking an already linked silo errors due to PK conflict
         let err = datastore

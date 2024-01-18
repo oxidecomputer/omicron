@@ -1343,8 +1343,7 @@ async fn project_policy_update(
 async fn project_ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
-    // TODO: have this return SiloIpPool so it has is_default on it
-) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -1357,7 +1356,10 @@ async fn project_ip_pool_list(
             .current_silo_ip_pool_list(&opctx, &paginated_by)
             .await?
             .into_iter()
-            .map(IpPool::from)
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
             .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
@@ -1531,6 +1533,13 @@ async fn ip_pool_silo_list(
     // option would be to paginate by a composite key representing the (pool,
     // resource_type, resource)
     query_params: Query<PaginatedById>,
+    // TODO: this could just list views::Silo -- it's not like knowing silo_id
+    // and nothing else is particularly useful -- except we also want to say
+    // whether the pool is marked default on each silo. So one option would
+    // be  to do the same as we did with SiloIpPool -- include is_default on
+    // whatever the thing is. Still... all we'd have to do to make this usable
+    // in both places would be to make it { ...IpPool, silo_id, silo_name,
+    // is_default }
 ) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSilo>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {

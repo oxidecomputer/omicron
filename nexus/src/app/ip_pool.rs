@@ -78,7 +78,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
+    ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
         self.db_datastore.current_silo_ip_pool_list(opctx, pagparams).await
     }
 

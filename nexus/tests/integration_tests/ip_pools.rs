@@ -42,6 +42,7 @@ use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolSilo;
 use nexus_types::external_api::views::Silo;
+use nexus_types::external_api::views::SiloIpPool;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
@@ -933,12 +934,14 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
     );
     create_ip_pool(client, otherpool_name, Some(otherpool_range)).await;
 
-    let list =
-        objects_list_page_authz::<IpPool>(client, "/v1/ip-pools").await.items;
+    let list = objects_list_page_authz::<SiloIpPool>(client, "/v1/ip-pools")
+        .await
+        .items;
 
     // only mypool shows up because it's linked to my silo
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].identity.name.to_string(), mypool_name);
+    assert!(list[0].is_default);
 
     // fetch the pool directly too
     let url = format!("/v1/ip-pools/{}", mypool_name);
