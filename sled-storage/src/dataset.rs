@@ -18,7 +18,7 @@ use rand::distributions::{Alphanumeric, DistString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::DiskVariant;
-use slog::{info, Logger};
+use slog::{debug, info, Logger};
 use std::process::Stdio;
 use std::str::FromStr;
 use std::sync::OnceLock;
@@ -519,10 +519,10 @@ async fn find_all_unencrypted_datasets_directly_within_pool(
         };
         let encrypted = encryption != "off";
         if encrypted {
-            info!(log, "Found dataset, but it is already encrypted");
+            debug!(log, "Found dataset, but it is already encrypted");
             continue;
         }
-        info!(log, "Found dataset, and it isn't encrypted");
+        debug!(log, "Found dataset, and it isn't encrypted");
         if let Some(dataset) =
             dataset.strip_prefix(&format!("{pool_name}/")).map(String::from)
         {
@@ -735,7 +735,6 @@ async fn zfs_set(
     let mut command = tokio::process::Command::new(illumos_utils::zfs::ZFS);
     let cmd = command.arg("set");
     for property in properties {
-        cmd.arg("-o");
         cmd.arg(property);
     }
     cmd.arg(dataset);
