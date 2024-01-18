@@ -468,24 +468,45 @@ impl Zfs {
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
+        let [value] = Self::get_values(filesystem_name, &[name])?;
+        Ok(value)
+    }
+
+    pub fn get_values<const N: usize>(
+        filesystem_name: &str,
+        names: &[&str; N],
+    ) -> Result<[String; N], GetValueError> {
         let mut command = std::process::Command::new(PFEXEC);
-        let cmd =
-            command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
+        let cmd = command.args(&[ZFS, "get", "-Ho", "value"]);
+        for name in names {
+            cmd.arg(&name);
+        }
+        cmd.arg(filesystem_name);
         let output = execute(cmd).map_err(|err| GetValueError {
             filesystem: filesystem_name.to_string(),
-            name: name.to_string(),
+            name: format!("{:?}", names),
             err: err.into(),
         })?;
         let stdout = String::from_utf8_lossy(&output.stdout);
-        let value = stdout.trim();
-        if value == "-" {
-            return Err(GetValueError {
-                filesystem: filesystem_name.to_string(),
-                name: name.to_string(),
-                err: GetValueErrorRaw::MissingValue,
-            });
+        let values = stdout.trim();
+
+        const EMPTY_STRING: String = String::new();
+        let mut result: [String; N] = [EMPTY_STRING; N];
+        let mut i = 0;
+
+        for value in values.lines() {
+            let value = value.trim();
+            if value == "-" {
+                return Err(GetValueError {
+                    filesystem: filesystem_name.to_string(),
+                    name: names[i].to_string(),
+                    err: GetValueErrorRaw::MissingValue,
+                });
+            }
+            result[i] = value.to_string();
+            i += 1;
         }
-        Ok(value.to_string())
+        Ok(result)
     }
 
     /// List all extant snapshots.

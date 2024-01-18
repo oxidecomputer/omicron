@@ -199,6 +199,24 @@ pub enum Error {
     #[error("Failed to get address: {0}")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
+    #[error(
+        "Failed to launch zone {zone} because ZFS value cannot be accessed"
+    )]
+    GetZfsValue {
+        zone: String,
+        #[source]
+        source: illumos_utils::zfs::GetValueError,
+    },
+
+    #[error("Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})")]
+    DatasetNotReady {
+        zone: String,
+        dataset: String,
+        prop_name: String,
+        prop_value: String,
+        prop_value_expected: String,
+    },
+
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
 
@@ -2930,6 +2948,31 @@ impl ServiceManager {
             // Currently, the zone filesystem should be destroyed between
             // reboots, so it's fine to make this decision locally.
             let root = if let Some(dataset) = zone.dataset_name() {
+                // Check that the dataset is actually ready to be used.
+                let [zoned, canmount] = illumos_utils::zfs::Zfs::get_values(
+                    &dataset.full_name(),
+                    &["zoned", "canmount"],
+                )
+                .map_err(|err| Error::GetZfsValue {
+                    zone: zone.zone_name(),
+                    source: err,
+                })?;
+
+                let check_property = |name, actual, expected| {
+                    if actual != expected {
+                        return Err(Error::DatasetNotReady {
+                            zone: zone.zone_name(),
+                            dataset: dataset.full_name(),
+                            prop_name: String::from(name),
+                            prop_value: actual,
+                            prop_value_expected: String::from(expected),
+                        });
+                    }
+                    return Ok(());
+                };
+                check_property("zoned", zoned, "on")?;
+                check_property("canmount", canmount, "on")?;
+
                 // If the zone happens to already manage a dataset, then
                 // we co-locate the zone dataset on the same zpool.
                 //
