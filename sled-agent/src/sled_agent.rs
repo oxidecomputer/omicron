@@ -611,7 +611,7 @@ impl SledAgent {
                 warn!(
                     self.log,
                     "Failed to load services, will retry in {:?}", delay;
-                    "error" => %err,
+                    "error" => ?err,
                 );
             },
         )

@@ -141,7 +141,7 @@ pub enum DatasetKind {
 }
 
 impl DatasetKind {
-    fn dataset_should_be_encrypted(&self) -> bool {
+    pub fn dataset_should_be_encrypted(&self) -> bool {
         match self {
             // We encrypt all datasets except Crucible.
             //

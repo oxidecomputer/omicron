@@ -2949,14 +2949,15 @@ impl ServiceManager {
             // reboots, so it's fine to make this decision locally.
             let root = if let Some(dataset) = zone.dataset_name() {
                 // Check that the dataset is actually ready to be used.
-                let [zoned, canmount] = illumos_utils::zfs::Zfs::get_values(
-                    &dataset.full_name(),
-                    &["zoned", "canmount"],
-                )
-                .map_err(|err| Error::GetZfsValue {
-                    zone: zone.zone_name(),
-                    source: err,
-                })?;
+                let [zoned, canmount, encryption] =
+                    illumos_utils::zfs::Zfs::get_values(
+                        &dataset.full_name(),
+                        &["zoned", "canmount", "encryption"],
+                    )
+                    .map_err(|err| Error::GetZfsValue {
+                        zone: zone.zone_name(),
+                        source: err,
+                    })?;
 
                 let check_property = |name, actual, expected| {
                     if actual != expected {
@@ -2972,6 +2973,9 @@ impl ServiceManager {
                 };
                 check_property("zoned", zoned, "on")?;
                 check_property("canmount", canmount, "on")?;
+                if dataset.dataset().dataset_should_be_encrypted() {
+                    check_property("encryption", encryption, "aes-256-gcm")?;
+                }
 
                 // If the zone happens to already manage a dataset, then
                 // we co-locate the zone dataset on the same zpool.

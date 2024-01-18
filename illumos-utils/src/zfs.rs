@@ -108,12 +108,13 @@ enum GetValueErrorRaw {
     MissingValue,
 }
 
-/// Error returned by [`Zfs::get_oxide_value`].
+/// Error returned by [`Zfs::get_oxide_value`] or [`Zfs::get_value`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get value '{name}' from filesystem {filesystem}: {err}")]
+#[error("Failed to get value '{name}' from filesystem {filesystem}")]
 pub struct GetValueError {
     filesystem: String,
     name: String,
+    #[source]
     err: GetValueErrorRaw,
 }
 
@@ -476,13 +477,10 @@ impl Zfs {
         filesystem_name: &str,
         names: &[&str; N],
     ) -> Result<[String; N], GetValueError> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd = command.args(&[ZFS, "get", "-Ho", "value"]);
-        for name in names {
-            cmd.arg(&name);
-        }
-        cmd.arg(filesystem_name);
-        let output = execute(cmd).map_err(|err| GetValueError {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let all_names = names.into_iter().map(|n| *n).collect::<Vec<&str>>().join(",");
+        cmd.args(&[ZFS, "get", "-Ho", "value", &all_names, filesystem_name]);
+        let output = execute(&mut cmd).map_err(|err| GetValueError {
             filesystem: filesystem_name.to_string(),
             name: format!("{:?}", names),
             err: err.into(),
