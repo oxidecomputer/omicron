@@ -7,7 +7,7 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, ExternalIpCreate, InstanceCpuCount,
     InstanceCreate, InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
-    SshKeyCreate,
+    SshKeyCreate, DiskMetricName,
 };
 use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
@@ -198,6 +198,23 @@ async fn instance_launch() -> Result<()> {
         "string not seen on console\n{}",
         data
     );
+
+    // verify oximeter is doing its job
+    eprintln!("retrieving disk metric");
+    let now = chrono::Local::now();
+    let start = now - chrono::Duration::days(1);
+    let metrics = &ctx
+    .client
+    .disk_metrics_list()
+        .disk(disk_name.clone())
+        .metric(DiskMetricName::WriteBytes)
+        .limit(1)
+        .start_time(start)
+        .end_time(now)
+        .project(ctx.project_name.clone())
+        .send()
+        .await?;
+    ensure!(metrics.items.len() == 1, "a single metric should have been returned");
 
     // tear-down
     eprintln!("stopping instance");
