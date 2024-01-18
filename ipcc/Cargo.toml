@@ -1,5 +1,5 @@
 [package]
-name = "ipcc-key-value"
+name = "ipcc"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -12,6 +12,7 @@ serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+cfg-if.workspace = true
 
 [dev-dependencies]
 omicron-common = { workspace = true, features = ["testing"] }

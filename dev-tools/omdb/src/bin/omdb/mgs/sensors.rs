@@ -15,7 +15,7 @@ use gateway_client::types::SpType;
 use multimap::MultiMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 #[derive(Debug, Args)]
 pub(crate) struct SensorsArgs {
@@ -92,7 +92,7 @@ impl SensorsArgs {
         match sp.type_ {
             SpType::Sled => {
                 let matched = if self.sled.len() > 0 {
-                    self.sled.iter().find(|&&v| v == sp.slot).is_some()
+                    self.sled.iter().any(|&v| v == sp.slot)
                 } else {
                     true
                 };
@@ -187,6 +187,7 @@ pub(crate) struct SensorMetadata {
     pub sensors_by_sp: MultiMap<SpIdentifier, SensorId>,
     pub work_by_sp:
         HashMap<SpIdentifier, Vec<(DeviceIdentifier, Vec<SensorId>)>>,
+    #[allow(dead_code)]
     pub start_time: Option<u64>,
     pub end_time: Option<u64>,
 }
@@ -639,7 +640,7 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
 async fn sp_read_sensors(
     mgs_client: &gateway_client::Client,
     id: &SpIdentifier,
-    metadata: std::sync::Arc<&SensorMetadata>,
+    metadata: &SensorMetadata,
 ) -> Result<Vec<(SensorId, Option<f32>)>, anyhow::Error> {
     let work = metadata.work_by_sp.get(id).unwrap();
     let mut rval = vec![];
@@ -673,7 +674,7 @@ async fn sp_read_sensors(
 
 async fn sp_data_mgs(
     mgs_client: &gateway_client::Client,
-    metadata: std::sync::Arc<&'static SensorMetadata>,
+    metadata: &'static SensorMetadata,
 ) -> Result<SensorValues, anyhow::Error> {
     let mut values = HashMap::new();
     let mut handles = vec![];
@@ -681,7 +682,6 @@ async fn sp_data_mgs(
     for sp_id in metadata.sensors_by_sp.keys() {
         let mgs_client = mgs_client.clone();
         let id = *sp_id;
-        let metadata = metadata.clone();
 
         let handle = tokio::spawn(async move {
             sp_read_sensors(&mgs_client, &id, metadata).await
@@ -709,7 +709,7 @@ async fn sp_data_mgs(
 fn sp_data_csv<R: std::io::Read + std::io::Seek>(
     reader: &mut csv::Reader<R>,
     position: &mut csv::Position,
-    metadata: std::sync::Arc<&'static SensorMetadata>,
+    metadata: &'static SensorMetadata,
 ) -> Result<SensorValues, anyhow::Error> {
     let headers = reader.headers()?;
     let hlen = headers.len();
@@ -775,7 +775,7 @@ fn sp_data_csv<R: std::io::Read + std::io::Seek>(
 
 pub(crate) async fn sensor_data<R: std::io::Read + std::io::Seek>(
     input: &mut SensorInput<R>,
-    metadata: std::sync::Arc<&'static SensorMetadata>,
+    metadata: &'static SensorMetadata,
 ) -> Result<SensorValues, anyhow::Error> {
     match input {
         SensorInput::MgsClient(ref mgs_client) => {
@@ -814,7 +814,6 @@ pub(crate) async fn cmd_mgs_sensors(
     //
     let metadata = Box::leak(Box::new(metadata));
     let metadata: &_ = metadata;
-    let metadata = std::sync::Arc::new(metadata);
 
     let mut sensors = metadata.sensors_by_sensor.keys().collect::<Vec<_>>();
     sensors.sort();
@@ -896,7 +895,7 @@ pub(crate) async fn cmd_mgs_sensors(
             wakeup += tokio::time::Duration::from_millis(1000);
         }
 
-        values = sensor_data(&mut input, metadata.clone()).await?;
+        values = sensor_data(&mut input, metadata).await?;
 
         if args.input.is_some() && values.time == 0 {
             break;

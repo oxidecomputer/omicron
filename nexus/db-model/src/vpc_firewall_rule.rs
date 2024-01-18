@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_status"))]
+    #[diesel(postgres_type(name = "vpc_firewall_rule_status", schema = "public"))]
     pub struct VpcFirewallRuleStatusEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
@@ -34,7 +34,7 @@ NewtypeDeref! { () pub struct VpcFirewallRuleStatus(external::VpcFirewallRuleSta
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_direction"))]
+    #[diesel(postgres_type(name = "vpc_firewall_rule_direction", schema = "public"))]
     pub struct VpcFirewallRuleDirectionEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
@@ -49,7 +49,7 @@ NewtypeDeref! { () pub struct VpcFirewallRuleDirection(external::VpcFirewallRule
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_action"))]
+    #[diesel(postgres_type(name = "vpc_firewall_rule_action", schema = "public"))]
     pub struct VpcFirewallRuleActionEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]
@@ -64,7 +64,7 @@ NewtypeDeref! { () pub struct VpcFirewallRuleAction(external::VpcFirewallRuleAct
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "vpc_firewall_rule_protocol"))]
+    #[diesel(postgres_type(name = "vpc_firewall_rule_protocol", schema = "public"))]
     pub struct VpcFirewallRuleProtocolEnum;
 
     #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize)]

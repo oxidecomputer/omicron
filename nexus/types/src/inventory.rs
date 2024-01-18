@@ -9,19 +9,30 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::params::UninitializedSledId;
+use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
 use chrono::Utc;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+use omicron_common::api::external::ByteCount;
+pub use sled_agent_client::types::NetworkInterface;
+pub use sled_agent_client::types::NetworkInterfaceKind;
+pub use sled_agent_client::types::OmicronZoneConfig;
+pub use sled_agent_client::types::OmicronZoneDataset;
+pub use sled_agent_client::types::OmicronZoneType;
+pub use sled_agent_client::types::OmicronZonesConfig;
+pub use sled_agent_client::types::SledRole;
+pub use sled_agent_client::types::SourceNatConfig;
+pub use sled_agent_client::types::Vni;
+pub use sled_agent_client::types::ZpoolName;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use strum::EnumIter;
 use uuid::Uuid;
-
-use crate::external_api::params::UninitializedSledId;
-use crate::external_api::shared::Baseboard;
 
 /// Results of collecting hardware/software inventory from various Omicron
 /// components
@@ -89,6 +100,12 @@ pub struct Collection {
     /// table.
     pub rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
+
+    /// Sled Agent information, by *sled* id
+    pub sled_agents: BTreeMap<Uuid, SledAgent>,
+
+    /// Omicron zones found, by *sled* id
+    pub omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
 }
 
 impl Collection {
@@ -268,4 +285,31 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
         };
         (which, RotPage { data_base64: self.base64_data })
     }
+}
+
+/// Inventory reported by sled agent
+///
+/// This is a software notion of a sled, distinct from an underlying baseboard.
+/// A sled may be on a PC (in dev/test environments) and have no associated
+/// baseboard.  There might also be baseboards with no associated sled (if
+/// they have not been formally added to the control plane).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SledAgent {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub baseboard_id: Option<Arc<BaseboardId>>,
+    pub sled_agent_address: SocketAddrV6,
+    pub sled_role: SledRole,
+    pub usable_hardware_threads: u32,
+    pub usable_physical_ram: ByteCount,
+    pub reservoir_size: ByteCount,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OmicronZonesFound {
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub zones: OmicronZonesConfig,
 }

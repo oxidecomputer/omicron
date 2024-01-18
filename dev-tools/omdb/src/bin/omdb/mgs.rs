@@ -5,7 +5,7 @@
 //! Prototype code for collecting information from systems in the rack
 
 use crate::Omdb;
-use anyhow::{bail, Context};
+use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
 use futures::StreamExt;

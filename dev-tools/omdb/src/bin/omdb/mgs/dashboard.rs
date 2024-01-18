@@ -4,9 +4,8 @@
 
 //! Code for the MGS dashboard subcommand
 
-use anyhow::{anyhow, bail, Result};
-use chrono::{DateTime, Local, Offset, TimeZone};
-use clap::{CommandFactory, Parser};
+use anyhow::Result;
+use chrono::{Local, Offset, TimeZone};
 use crossterm::{
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode,
@@ -33,16 +32,15 @@ use ratatui::{
 };
 
 use crate::mgs::sensors::{
-    sensor_data, sensor_metadata, Sensor, SensorId, SensorInput,
+    sensor_data, sensor_metadata, SensorId, SensorInput,
     SensorMetadata, SensorValues, SensorsArgs,
 };
 use crate::mgs::sp_to_string;
 use clap::Args;
 use gateway_client::types::MeasurementKind;
 use gateway_client::types::SpIdentifier;
-use gateway_client::types::SpType;
 use multimap::MultiMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::time::{Duration, Instant, SystemTime};
@@ -72,7 +70,7 @@ impl StatefulList {
 
     fn previous(&mut self) {
         self.state.select(match self.state.selected() {
-            Some(ndx) if ndx == 0 => Some(self.n - 1),
+            Some(0) => Some(self.n - 1),
             Some(ndx) => Some(ndx - 1),
             None => Some(0),
         });
@@ -483,20 +481,14 @@ struct Dashboard {
     selected_kind: usize,
     sps: Vec<SpIdentifier>,
     selected_sp: usize,
-    sensor_to_graph: HashMap<SensorId, (SpIdentifier, MeasurementKind, usize)>,
-    last: Instant,
-    interval: u32,
-    outstanding: bool,
     status: String,
     time: u64,
 }
 
 impl Dashboard {
     fn new(
-        args: &DashboardArgs,
-        metadata: std::sync::Arc<&SensorMetadata>,
+        metadata: &'static SensorMetadata,
     ) -> Result<Dashboard> {
-        let mut sensor_to_graph = HashMap::new();
         let mut sps =
             metadata.sensors_by_sp.keys().map(|m| *m).collect::<Vec<_>>();
         let mut graphs = HashMap::new();
@@ -524,10 +516,6 @@ impl Dashboard {
             for k in keys {
                 let mut v = by_kind.remove(&k).unwrap();
                 v.sort();
-
-                for (ndx, (_, sid)) in v.iter().enumerate() {
-                    sensor_to_graph.insert(*sid, (sp, k, ndx));
-                }
 
                 let labels =
                     v.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>();
@@ -562,11 +550,7 @@ impl Dashboard {
             kinds,
             selected_kind: 0,
             sps,
-            sensor_to_graph,
             selected_sp: 0,
-            outstanding: true,
-            last: Instant::now(),
-            interval: 1000,
             status,
             time: secs()?,
         })
@@ -574,10 +558,6 @@ impl Dashboard {
 
     fn status(&self) -> Vec<(&str, &str)> {
         vec![("Status", &self.status)]
-    }
-
-    fn need_update(&mut self) -> Result<bool> {
-        Ok(true)
     }
 
     fn update_data(&mut self) {
@@ -834,9 +814,8 @@ pub(crate) async fn cmd_mgs_dashboard(
     //
     let metadata = Box::leak(Box::new(metadata));
     let metadata: &_ = metadata;
-    let metadata = std::sync::Arc::new(metadata);
 
-    let mut dashboard = Dashboard::new(&args, metadata.clone())?;
+    let mut dashboard = Dashboard::new(metadata)?;
     let mut last = values.time;
     let mut force = true;
     let mut update = true;
@@ -845,7 +824,7 @@ pub(crate) async fn cmd_mgs_dashboard(
 
     if args.sensors_args.input.is_some() && !args.simulate_realtime {
         loop {
-            let values = sensor_data(&mut input, metadata.clone()).await?;
+            let values = sensor_data(&mut input, metadata).await?;
 
             if values.time == 0 {
                 break;
@@ -885,7 +864,7 @@ pub(crate) async fn cmd_mgs_dashboard(
 
         if update && now != last {
             let kicked = Instant::now();
-            let f = sensor_data(&mut input, metadata.clone());
+            let f = sensor_data(&mut input, metadata);
             last = now;
 
             while Instant::now().duration_since(kicked).as_millis() < 800 {
@@ -949,8 +928,8 @@ fn draw_graph<B: Backend>(
         .split(parent);
 
     let latest = now as i64 - graph.offs as i64;
-    let earliest = Local.timestamp(latest - graph.width as i64, 0);
-    let latest = Local.timestamp(latest, 0);
+    let earliest = Local.timestamp_opt(latest - graph.width as i64, 0).unwrap();
+    let latest = Local.timestamp_opt(latest, 0).unwrap();
     let fmt = "%Y-%m-%d %H:%M:%S";
 
     let tz_offset = earliest.offset().fix().local_minus_utc();

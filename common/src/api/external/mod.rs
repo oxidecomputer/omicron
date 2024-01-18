@@ -525,7 +525,9 @@ impl JsonSchema for RoleName {
 // to serialize the value.
 //
 // TODO: custom JsonSchema and Deserialize impls to enforce i64::MAX limit
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
 pub struct ByteCount(u64);
 
 #[allow(non_upper_case_globals)]
@@ -737,6 +739,7 @@ pub enum ResourceType {
     LoopbackAddress,
     SwitchPortSettings,
     IpPool,
+    IpPoolResource,
     InstanceNetworkInterface,
     PhysicalDisk,
     Rack,
@@ -1916,7 +1919,7 @@ impl MacAddr {
     /// Iterate the MAC addresses in the system address range
     /// (used as an allocator in contexts where collisions are not expected and
     /// determinism is useful, like in the test suite)
-    pub fn iter_system() -> impl Iterator<Item = MacAddr> {
+    pub fn iter_system() -> impl Iterator<Item = MacAddr> + Send {
         ((Self::MAX_SYSTEM_RESV + 1)..=Self::MAX_SYSTEM_ADDR)
             .map(Self::from_i64)
     }

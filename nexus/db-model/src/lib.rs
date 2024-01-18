@@ -35,7 +35,7 @@ mod instance_state;
 mod inventory;
 mod ip_pool;
 mod ipv4net;
-mod ipv6;
+pub mod ipv6;
 mod ipv6net;
 mod l4_port_range;
 mod macaddr;
