@@ -20,7 +20,7 @@ use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::net::IpAddr;
 use tokio::time::timeout;
 use tokio::time::Duration;
 use uuid::Uuid;
@@ -53,7 +53,7 @@ async fn test_setup<'a>(
         );
     let populate = false;
     builder.start_crdb(populate).await;
-    let schema_dir = PathBuf::from(SCHEMA_DIR);
+    let schema_dir = Utf8PathBuf::from(SCHEMA_DIR);
     builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
@@ -192,6 +192,7 @@ enum AnySqlType {
     String(String),
     TextArray(Vec<String>),
     Uuid(Uuid),
+    Inet(IpAddr),
     // TODO: This isn't exhaustive, feel free to add more.
     //
     // These should only be necessary for rows where the database schema changes also choose to
@@ -231,6 +232,12 @@ impl From<String> for AnySqlType {
 impl From<Uuid> for AnySqlType {
     fn from(value: Uuid) -> Self {
         Self::Uuid(value)
+    }
+}
+
+impl From<IpAddr> for AnySqlType {
+    fn from(value: IpAddr) -> Self {
+        Self::Inet(value)
     }
 }
 
@@ -278,6 +285,9 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
             return Ok(AnySqlType::TextArray(Vec::<String>::from_sql(
                 ty, raw,
             )?));
+        }
+        if IpAddr::accepts(ty) {
+            return Ok(AnySqlType::Inet(IpAddr::from_sql(ty, raw)?));
         }
 
         use tokio_postgres::types::Kind;
@@ -468,10 +478,14 @@ async fn nexus_applies_update_on_boot() {
     // Start Nexus. It should auto-format itself to the latest version,
     // upgrading through each intermediate update.
     //
+    // The timeout here is a bit longer than usual (120s vs 60s) because if
+    // lots of tests are running at the same time, there can be contention
+    // here.
+    //
     // NOTE: If this grows excessively, we could break it into several smaller
     // tests.
     assert!(
-        timeout(Duration::from_secs(60), builder.start_nexus_internal())
+        timeout(Duration::from_secs(120), builder.start_nexus_internal())
             .await
             .is_ok(),
         "Nexus should have started"
@@ -941,6 +955,13 @@ const POOL1: Uuid = Uuid::from_u128(0x11116001_5c3d_4647_83b0_8f3515da7be1);
 const POOL2: Uuid = Uuid::from_u128(0x22226001_5c3d_4647_83b0_8f3515da7be1);
 const POOL3: Uuid = Uuid::from_u128(0x33336001_5c3d_4647_83b0_8f3515da7be1);
 
+// "513D" -> "Sled"
+const SLED1: Uuid = Uuid::from_u128(0x1111513d_5c3d_4647_83b0_8f3515da7be1);
+const SLED2: Uuid = Uuid::from_u128(0x2222513d_5c3d_4647_83b0_8f3515da7be1);
+
+// "7AC4" -> "Rack"
+const RACK1: Uuid = Uuid::from_u128(0x11117ac4_5c3d_4647_83b0_8f3515da7be1);
+
 fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async move {
         // Create two silos
@@ -1024,6 +1045,56 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
+fn before_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    // IP addresses were pulled off dogfood sled 16
+    Box::pin(async move {
+        // Create two sleds
+        client
+            .batch_execute(&format!(
+                "INSERT INTO sled
+            (id, time_created, time_modified, time_deleted, rcgen, rack_id,
+            is_scrimlet, serial_number, part_number, revision,
+            usable_hardware_threads, usable_physical_ram, reservoir_size, ip,
+            port, last_used_address, provision_state) VALUES
+
+          ('{SLED1}', now(), now(), NULL, 1, '{RACK1}', true, 'abcd', 'defg',
+             '1', 64, 12345678, 77, 'fd00:1122:3344:104::1', 12345,
+            'fd00:1122:3344:104::1ac', 'provisionable'),
+          ('{SLED2}', now(), now(), NULL, 1, '{RACK1}', false, 'zzzz', 'xxxx',
+             '2', 64, 12345678, 77,'fd00:1122:3344:107::1', 12345,
+            'fd00:1122:3344:107::d4', 'provisionable');
+        "
+            ))
+            .await
+            .expect("Failed to create sleds");
+    })
+}
+
+fn after_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
+        let rows = client
+            .query("SELECT last_used_address FROM sled ORDER BY id", &[])
+            .await
+            .expect("Failed to sled last_used_address");
+        let last_used_addresses = process_rows(&rows);
+
+        let expected_addr_1: IpAddr =
+            "fd00:1122:3344:104::ffff".parse().unwrap();
+        let expected_addr_2: IpAddr =
+            "fd00:1122:3344:107::ffff".parse().unwrap();
+
+        assert_eq!(
+            last_used_addresses[0].values,
+            vec![ColumnValue::new("last_used_address", expected_addr_1)]
+        );
+        assert_eq!(
+            last_used_addresses[1].values,
+            vec![ColumnValue::new("last_used_address", expected_addr_2)]
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1036,6 +1107,10 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion(semver::Version::parse("23.0.0").unwrap()),
         DataMigrationFns { before: Some(before_23_0_0), after: after_23_0_0 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("24.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_24_0_0), after: after_24_0_0 },
     );
 
     map

@@ -89,6 +89,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
+camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true

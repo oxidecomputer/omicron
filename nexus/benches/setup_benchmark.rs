@@ -28,8 +28,12 @@ async fn do_crdb_setup() {
 
 // Wraps exclusively the ClickhouseDB portion of setup/teardown.
 async fn do_clickhouse_setup() {
+    let cfg = nexus_test_utils::load_test_config();
+    let logctx = LogContext::new("clickhouse_setup", &cfg.pkg.log);
     let mut clickhouse =
-        dev::clickhouse::ClickHouseInstance::new_single_node(0).await.unwrap();
+        dev::clickhouse::ClickHouseInstance::new_single_node(&logctx, 0)
+            .await
+            .unwrap();
     clickhouse.cleanup().await.unwrap();
 }
 
