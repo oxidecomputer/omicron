@@ -99,8 +99,8 @@ pub struct SvcLogs {
     pub extra: Vec<LogFile>,
 }
 
-// These probably don't warrant newtypes. They are just to make the nested
-// maps in `Logs` a bit easier to read.
+// These probably don't warrant newtypes. They are just to make the
+// keys in maps a bit easier to read.
 type ZoneName = String;
 type ServiceName = String;
 
@@ -117,6 +117,8 @@ pub struct Zones {
 impl Zones {
     pub fn load() -> Result<Zones, anyhow::Error> {
         let mut zones = BTreeMap::new();
+
+        // Describe where to find logs for the global zone
         zones.insert(
             "global".to_string(),
             Paths {
@@ -125,17 +127,22 @@ impl Zones {
                 extra: vec![],
             },
         );
+
+        // Describe where to find logs for the switch zone
         zones.insert(
             "oxz_switch".to_string(),
             Paths {
                 primary: Utf8PathBuf::from("/zone/oxz_switch/root/var/svc/log"),
                 debug: vec![],
-                extra: vec![],
+                extra: vec![(
+                    "dendrite",
+                    "/zone/oxz_switch/root/var/dendrite".into(),
+                )],
             },
         );
+        // Find the directories containing the primary and extra log files
+        // for all zones on external storage pools.
         let pools = Pools::read()?;
-
-        // Load the primary and extra logs
         for uuid in &pools.external {
             let zones_path: Utf8PathBuf =
                 ["/pool/ext", &uuid.to_string(), "crypt/zone"].iter().collect();
@@ -152,14 +159,14 @@ impl Zones {
                     // not utf8
                     continue;
                 };
-                // Load the current logs
+                // Add the path to the current logs for the zone
                 let mut dir = zones_path.clone();
                 dir.push(zone);
                 dir.push("root/var/svc/log");
                 let mut paths =
                     Paths { primary: dir, debug: vec![], extra: vec![] };
 
-                // Load the extra logs
+                // Add the path to the extra logs for the zone
                 if zone.starts_with("oxz_cockroachdb") {
                     let mut dir = zones_path.clone();
                     dir.push(zone);
@@ -171,7 +178,7 @@ impl Zones {
             }
         }
 
-        // Load the debug logs
+        // Find the directories containing the debug log files
         for uuid in &pools.external {
             let zones_path: Utf8PathBuf =
                 ["/pool/ext", &uuid.to_string(), "crypt/debug"]

@@ -35,7 +35,7 @@ enum Commands {
         #[arg(short, long)]
         current: bool,
 
-        /// Print only the archive log files
+        /// Print only the archived log files
         #[arg(short, long)]
         archived: bool,
 
