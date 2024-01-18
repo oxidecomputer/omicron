@@ -50,7 +50,7 @@ oximeter.workspace = true
 oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
 propolis-client.workspace = true
-propolis-mock-server.workspace = true                               # Only used by the simulated sled agent
+propolis-mock-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
