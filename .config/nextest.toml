@@ -33,6 +33,11 @@ clickhouse-cluster = { max-threads = 1 }
 filter = 'package(oximeter-db) and test(replicated)'
 test-group = 'clickhouse-cluster'
 
+[[profile.default.overrides]]
+# These tests can time out under heavy contention.
+filter = 'binary_id(omicron-nexus::test_all) and test(::schema::)'
+threads-required = 4
+
 [[profile.ci.overrides]]
 filter = 'binary_id(omicron-nexus::test_all)'
 # As of 2023-01-08, the slowest test in test_all takes 196s on a Ryzen 7950X.
