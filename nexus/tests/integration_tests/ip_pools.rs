@@ -945,8 +945,9 @@ async fn test_ip_pool_list_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // fetch the pool directly too
     let url = format!("/v1/ip-pools/{}", mypool_name);
-    let pool: IpPool = object_get(client, &url).await;
+    let pool = object_get::<SiloIpPool>(client, &url).await;
     assert_eq!(pool.identity.name.as_str(), mypool_name);
+    assert!(pool.is_default);
 
     // fetching the other pool directly 404s
     let url = format!("/v1/ip-pools/{}", otherpool_name);

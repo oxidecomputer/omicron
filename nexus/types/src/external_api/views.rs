@@ -303,8 +303,7 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
 }
 
-/// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
-/// the pool can be allocated within that silo
+/// An IP pool in the context of a silo
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloIpPool {
     #[serde(flatten)]

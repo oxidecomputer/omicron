@@ -88,17 +88,16 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         pool: &'a NameOrId,
-    ) -> LookupResult<db::model::IpPool> {
+    ) -> LookupResult<(db::model::IpPool, db::model::IpPoolResource)> {
         let (authz_pool, pool) =
             self.ip_pool_lookup(opctx, pool)?.fetch().await?;
 
         // 404 if no link is found in the current silo
         let link = self.db_datastore.ip_pool_fetch_link(opctx, pool.id()).await;
-        if link.is_err() {
-            return Err(authz_pool.not_found());
+        match link {
+            Ok(link) => Ok((pool, link)),
+            Err(_) => Err(authz_pool.not_found()),
         }
-
-        Ok(pool)
     }
 
     /// List silos for a given pool

@@ -1379,14 +1379,18 @@ async fn project_ip_pool_list(
 async fn project_ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
-        let pool = nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
-        Ok(HttpResponseOk(IpPool::from(pool)))
+        let (pool, silo_link) =
+            nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
+        Ok(HttpResponseOk(views::SiloIpPool {
+            identity: pool.identity(),
+            is_default: silo_link.is_default,
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
