@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Context;
+use camino::Utf8PathBuf;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use http::header::HeaderName;
@@ -338,7 +339,10 @@ async fn test_assets(cptestctx: &ControlPlaneTestContext) {
 #[tokio::test]
 async fn test_absolute_static_dir() {
     let mut config = load_test_config();
-    config.pkg.console.static_dir = current_dir().unwrap().join("tests/static");
+    config.pkg.console.static_dir =
+        Utf8PathBuf::try_from(current_dir().unwrap())
+            .unwrap()
+            .join("tests/static");
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
         "test_absolute_static_dir",
         &mut config,
