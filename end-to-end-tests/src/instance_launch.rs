@@ -5,9 +5,9 @@ use anyhow::{ensure, Context as _, Result};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, ExternalIpCreate, InstanceCpuCount,
-    InstanceCreate, InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
-    SshKeyCreate, DiskMetricName,
+    ByteCount, DiskCreate, DiskMetricName, DiskSource, ExternalIpCreate,
+    InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment, SshKeyCreate,
 };
 use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
@@ -204,8 +204,8 @@ async fn instance_launch() -> Result<()> {
     let now = chrono::Local::now();
     let start = now - chrono::Duration::days(1);
     let metrics = &ctx
-    .client
-    .disk_metrics_list()
+        .client
+        .disk_metrics_list()
         .disk(disk_name.clone())
         .metric(DiskMetricName::WriteBytes)
         .limit(1)
@@ -214,7 +214,10 @@ async fn instance_launch() -> Result<()> {
         .project(ctx.project_name.clone())
         .send()
         .await?;
-    ensure!(metrics.items.len() == 1, "a single metric should have been returned");
+    ensure!(
+        metrics.items.len() == 1,
+        "a single metric should have been returned"
+    );
 
     // tear-down
     eprintln!("stopping instance");
