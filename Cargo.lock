@@ -5585,6 +5585,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap 4.4.3",
+ "omicron-workspace-hack",
  "uuid",
 ]
 
