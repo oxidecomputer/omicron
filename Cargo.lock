@@ -1906,7 +1906,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#711a7490d81416731cfe0f9fef366ed5f266a0ee"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#b19a9a5d049f4433547f9f3b11d10a9483fc6acf"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1927,7 +1927,7 @@ dependencies = [
  "paste",
  "percent-encoding",
  "proc-macro2",
- "rustls 0.22.2",
+ "rustls",
  "rustls-pemfile 2.0.0",
  "schemars",
  "serde",
@@ -1941,7 +1941,7 @@ dependencies = [
  "slog-json",
  "slog-term",
  "tokio",
- "tokio-rustls 0.25.0",
+ "tokio-rustls",
  "toml 0.8.8",
  "usdt",
  "uuid",
@@ -1952,7 +1952,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.9.1-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#711a7490d81416731cfe0f9fef366ed5f266a0ee"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#b19a9a5d049f4433547f9f3b11d10a9483fc6acf"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3068,26 +3068,11 @@ dependencies = [
  "futures-util",
  "http 0.2.11",
  "hyper",
- "rustls 0.21.9",
- "tokio",
- "tokio-rustls 0.24.1",
-]
-
-[[package]]
-name = "hyper-rustls"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "399c78f9338483cb7e630c8474b07268983c6bd5acee012e4211f9f7bb21b070"
-dependencies = [
- "futures-util",
- "http 0.2.11",
- "hyper",
  "log",
- "rustls 0.22.2",
+ "rustls",
  "rustls-native-certs",
- "rustls-pki-types",
  "tokio",
- "tokio-rustls 0.25.0",
+ "tokio-rustls",
 ]
 
 [[package]]
@@ -3492,9 +3477,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.8.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28b29a3cd74f0f4598934efe3aeba42bae0eb4680554128851ebbecb02af14e6"
+checksum = "8f518f335dce6725a761382244631d86cf0ccb2863413590b31338feb467f9c3"
 
 [[package]]
 name = "ipnetwork"
@@ -4084,6 +4069,7 @@ dependencies = [
  "chrono",
  "futures",
  "ipnetwork",
+ "nexus-types",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
@@ -4157,7 +4143,7 @@ dependencies = [
  "headers",
  "http 0.2.11",
  "hyper",
- "hyper-rustls 0.25.0",
+ "hyper-rustls",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
@@ -4187,7 +4173,7 @@ dependencies = [
  "rcgen",
  "ref-cast",
  "regex",
- "rustls 0.22.2",
+ "rustls",
  "samael",
  "serde",
  "serde_json",
@@ -4216,6 +4202,26 @@ dependencies = [
  "once_cell",
  "rand 0.8.5",
  "serde_json",
+]
+
+[[package]]
+name = "nexus-deployment"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "internal-dns",
+ "ipnet",
+ "ipnetwork",
+ "nexus-inventory",
+ "nexus-types",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "sled-agent-client",
+ "slog",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -4328,6 +4334,7 @@ dependencies = [
  "sled-agent-client",
  "steno",
  "strum",
+ "thiserror",
  "uuid",
 ]
 
@@ -4777,7 +4784,8 @@ dependencies = [
  "httptest",
  "hubtools",
  "hyper",
- "hyper-rustls 0.25.0",
+ "hyper-rustls",
+ "illumos-utils",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
@@ -4787,6 +4795,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
+ "nexus-deployment",
  "nexus-inventory",
  "nexus-test-interface",
  "nexus-test-utils",
@@ -4823,8 +4832,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring 0.17.7",
- "rustls 0.22.2",
- "rustls-pemfile 2.0.0",
+ "rustls",
  "samael",
  "schemars",
  "semver 1.0.21",
@@ -4837,6 +4845,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
+ "slog-error-chain",
  "slog-term",
  "sp-sim",
  "steno",
@@ -4889,6 +4898,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "slog",
+ "slog-error-chain",
  "strum",
  "subprocess",
  "tabled",
@@ -5066,7 +5076,7 @@ dependencies = [
  "regex",
  "reqwest",
  "ring 0.17.7",
- "rustls 0.22.2",
+ "rustls",
  "slog",
  "subprocess",
  "tar",
@@ -5126,6 +5136,7 @@ dependencies = [
  "hex",
  "hmac",
  "hyper",
+ "hyper-rustls",
  "indexmap 2.1.0",
  "inout",
  "ipnetwork",
@@ -6755,7 +6766,7 @@ dependencies = [
  "http 0.2.11",
  "http-body",
  "hyper",
- "hyper-rustls 0.24.2",
+ "hyper-rustls",
  "hyper-tls",
  "ipnet",
  "js-sys",
@@ -6765,7 +6776,7 @@ dependencies = [
  "once_cell",
  "percent-encoding",
  "pin-project-lite",
- "rustls 0.21.9",
+ "rustls",
  "rustls-pemfile 1.0.3",
  "serde",
  "serde_json",
@@ -6773,7 +6784,7 @@ dependencies = [
  "system-configuration",
  "tokio",
  "tokio-native-tls",
- "tokio-rustls 0.24.1",
+ "tokio-rustls",
  "tokio-util",
  "tower-service",
  "url",
@@ -7093,33 +7104,18 @@ checksum = "629648aced5775d558af50b2b4c7b02983a04b312126d45eeead26e7caa498b9"
 dependencies = [
  "log",
  "ring 0.17.7",
- "rustls-webpki 0.101.7",
+ "rustls-webpki",
  "sct",
 ]
 
 [[package]]
-name = "rustls"
-version = "0.22.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e87c9956bd9807afa1f77e0f7594af32566e830e088a5576d27c5b6f30f49d41"
-dependencies = [
- "log",
- "ring 0.17.7",
- "rustls-pki-types",
- "rustls-webpki 0.102.1",
- "subtle",
- "zeroize",
-]
-
-[[package]]
 name = "rustls-native-certs"
-version = "0.7.0"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f1fb85efa936c42c6d5fc28d2629bb51e4b2f4b8a5211e297d599cc5a093792"
+checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile 2.0.0",
- "rustls-pki-types",
+ "rustls-pemfile 1.0.3",
  "schannel",
  "security-framework",
 ]
@@ -7156,17 +7152,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
 dependencies = [
  "ring 0.17.7",
- "untrusted 0.9.0",
-]
-
-[[package]]
-name = "rustls-webpki"
-version = "0.102.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef4ca26037c909dedb327b48c3327d0ba91d3dd3c4e05dad328f210ffb68e95b"
-dependencies = [
- "ring 0.17.7",
- "rustls-pki-types",
  "untrusted 0.9.0",
 ]
 
@@ -8841,18 +8826,7 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c28327cf380ac148141087fbfb9de9d7bd4e84ab5d2c28fbc911d753de8a7081"
 dependencies = [
- "rustls 0.21.9",
- "tokio",
-]
-
-[[package]]
-name = "tokio-rustls"
-version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "775e0c0f0adb3a2f22a00c4745d728b479985fc15ee7ca6a2608388c5569860f"
-dependencies = [
- "rustls 0.22.2",
- "rustls-pki-types",
+ "rustls",
  "tokio",
 ]
 

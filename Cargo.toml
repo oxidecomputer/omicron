@@ -41,6 +41,7 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/deployment",
     "nexus/inventory",
     "nexus/test-interface",
     "nexus/test-utils-macros",
@@ -114,6 +115,7 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/deployment",
     "nexus/inventory",
     "nexus/types",
     "oximeter/collector",
@@ -228,6 +230,7 @@ installinator-artifact-client = { path = "clients/installinator-artifact-client"
 installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }
+ipnet = "2.9"
 ipnetwork = { version = "0.20", features = ["schemars"] }
 itertools = "0.12.0"
 key-manager = { path = "key-manager" }
@@ -244,6 +247,7 @@ nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
+nexus-deployment = { path = "nexus/deployment" }
 nexus-inventory = { path = "nexus/inventory" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
