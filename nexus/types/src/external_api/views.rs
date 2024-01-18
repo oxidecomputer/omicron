@@ -303,6 +303,22 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
 }
 
+/// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
+/// the pool can be allocated within that silo
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloIpPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
+    pub is_default: bool,
+}
+
+// TODO: rename IpPoolSilo or get rid of it somehow. we cannot have both
+// IpPoolSilo and SiloIpPool. come on
+
 /// A link between an IP pool and a silo that allows one to allocate IPs from
 /// the pool within the silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]

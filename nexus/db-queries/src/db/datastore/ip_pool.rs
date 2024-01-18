@@ -80,7 +80,7 @@ impl DataStore {
     }
 
     /// List IP pools linked to the current silo
-    pub async fn silo_ip_pools_list(
+    pub async fn current_silo_ip_pool_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
@@ -394,6 +394,34 @@ impl DataStore {
         .filter(ip_pool::time_deleted.is_null())
         .select(IpPoolResource::as_select())
         .load_async::<IpPoolResource>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns (IpPool, IpPoolResource) so we can know in the calling code
+    /// whether the pool is default for the silo
+    pub async fn silo_ip_pool_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<(IpPool, IpPoolResource)> {
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
+        paginated(
+            ip_pool_resource::table,
+            ip_pool_resource::ip_pool_id,
+            pagparams,
+        )
+        .inner_join(ip_pool::table)
+        .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
+        .filter(ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo))
+        .filter(ip_pool::time_deleted.is_null())
+        .select(<(IpPool, IpPoolResource)>::as_select())
+        .load_async::<(IpPool, IpPoolResource)>(
             &*self.pool_connection_authorized(opctx).await?,
         )
         .await
@@ -868,7 +896,7 @@ mod test {
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 0);
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .current_silo_ip_pool_list(&opctx, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -893,7 +921,7 @@ mod test {
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 1);
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .current_silo_ip_pool_list(&opctx, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -929,7 +957,7 @@ mod test {
 
         // now it shows up in the silo list
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .current_silo_ip_pool_list(&opctx, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 1);
@@ -998,7 +1026,7 @@ mod test {
 
         // and silo pools list is empty again
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .current_silo_ip_pool_list(&opctx, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);

@@ -74,12 +74,12 @@ impl super::Nexus {
     }
 
     /// List IP pools in current silo
-    pub(crate) async fn silo_ip_pools_list(
+    pub(crate) async fn current_silo_ip_pool_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::IpPool> {
-        self.db_datastore.silo_ip_pools_list(opctx, pagparams).await
+        self.db_datastore.current_silo_ip_pool_list(opctx, pagparams).await
     }
 
     // Look up pool by name or ID, but only return it if it's linked to the
@@ -101,6 +101,7 @@ impl super::Nexus {
         Ok(pool)
     }
 
+    /// List silos for a given pool
     pub(crate) async fn ip_pool_silo_list(
         &self,
         opctx: &OpContext,
@@ -110,6 +111,18 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
         self.db_datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
+    }
+
+    // List pools for a given silo
+    pub(crate) async fn silo_ip_pool_list(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Read).await?;
+        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
     pub(crate) async fn ip_pool_link_silo(
