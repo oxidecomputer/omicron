@@ -566,7 +566,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "xcvradm.tar.gz"
+  "xcvradm.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -588,7 +589,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "sp-sim-stub.tar.gz"
+  "sp-sim-stub.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -610,7 +612,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "sp-sim-softnpu.tar.gz"
+  "sp-sim-softnpu.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -632,4 +635,5 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["omdb"]
 source.rust.release = true
-output.type = "tarball"
+output.type = "zone"
+output.intermediate_only = true
