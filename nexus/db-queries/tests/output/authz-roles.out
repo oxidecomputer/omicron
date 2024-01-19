@@ -950,7 +950,6 @@ resource: Blueprint id "b9e923f6-caf3-4c83-96f9-8ffe8c627dd2"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: SystemUpdate id "9c86d713-1bc2-4927-9892-ada3eb6f5f62"
 resource: TufRepo id "3c52d72f-cbf7-4951-a62f-a4154e74da87"
 
   USER                             Q  R LC RP  M MP CC  D
