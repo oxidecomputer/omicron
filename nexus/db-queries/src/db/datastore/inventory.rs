@@ -1231,7 +1231,7 @@ impl DataStore {
 
     /// Attempt to read the given collection while limiting queries to `limit`
     /// records and returning nothing if `limit` is not large enough.
-    async fn inventory_collection_read_all_or_nothing(
+    pub async fn inventory_collection_read_all_or_nothing(
         &self,
         opctx: &OpContext,
         id: Uuid,
