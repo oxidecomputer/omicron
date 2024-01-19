@@ -556,9 +556,8 @@ impl Zfs {
 
         const EMPTY_STRING: String = String::new();
         let mut result: [String; N] = [EMPTY_STRING; N];
-        let mut i = 0;
 
-        for value in values.lines() {
+        for (i, value) in values.lines().enumerate() {
             let value = value.trim();
             if value == "-" {
                 return Err(GetValueError {
@@ -568,7 +567,6 @@ impl Zfs {
                 });
             }
             result[i] = value.to_string();
-            i += 1;
         }
         Ok(result)
     }
