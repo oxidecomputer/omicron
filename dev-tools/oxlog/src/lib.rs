@@ -78,6 +78,17 @@ pub struct LogFile {
     pub modified: Option<DateTime<Utc>>,
 }
 
+impl LogFile {
+    pub fn read_metadata(&mut self, entry: DirEntry) {
+        if let Ok(metadata) = entry.metadata() {
+            self.size = Some(metadata.len());
+            if let Ok(modified) = metadata.modified() {
+                self.modified = Some(modified.into());
+            }
+        }
+    }
+}
+
 impl PartialEq for LogFile {
     fn eq(&self, other: &Self) -> bool {
         self.path == other.path
@@ -311,18 +322,14 @@ fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
             let Some(svc_name) =
                 oxide_smf_service_name_from_log_file_name(filename)
             else {
+                // parsing failed
                 continue;
             };
 
-            if let Ok(metadata) = entry.metadata() {
-                if metadata.len() == 0 {
-                    // skip 0 size files
-                    continue;
-                }
-                logfile.size = Some(metadata.len());
-                if let Ok(modified) = metadata.modified() {
-                    logfile.modified = Some(modified.into());
-                }
+            logfile.read_metadata(entry);
+            if logfile.size == Some(0) {
+                // skip 0 size files
+                continue;
             }
 
             let is_current = filename.ends_with(".log");
@@ -364,17 +371,11 @@ fn load_extra_logs(
         let mut path = dir.clone();
         path.push(filename);
         let mut logfile = LogFile::new(path);
-        if let Ok(metadata) = entry.metadata() {
-            if metadata.len() == 0 {
-                // skip 0 size files
-                continue;
-            }
-            logfile.size = Some(metadata.len());
-            if let Ok(modified) = metadata.modified() {
-                logfile.modified = Some(modified.into());
-            }
+        logfile.read_metadata(entry);
+        if logfile.size == Some(0) {
+            // skip 0 size files
+            continue;
         }
-
         svc_logs.extra.push(logfile);
     }
 }
