@@ -773,7 +773,7 @@ async fn silo_view(
 async fn silo_ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SiloPath>,
-    query_params: Query<PaginatedById>,
+    query_params: Query<PaginatedByNameOrId>,
 ) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
@@ -783,10 +783,12 @@ async fn silo_ip_pool_list(
 
         let query = query_params.into_inner();
         let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
 
         let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         let pools = nexus
-            .silo_ip_pool_list(&opctx, &silo_lookup, &pag_params)
+            .silo_ip_pool_list(&opctx, &silo_lookup, &paginated_by)
             .await?
             .iter()
             .map(|(pool, silo_link)| views::SiloIpPool {
@@ -795,10 +797,10 @@ async fn silo_ip_pool_list(
             })
             .collect();
 
-        Ok(HttpResponseOk(ScanById::results_page(
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
             pools,
-            &|_, pool: &views::SiloIpPool| pool.identity.id,
+            &marker_for_name_or_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

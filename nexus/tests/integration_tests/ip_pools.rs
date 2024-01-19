@@ -262,6 +262,19 @@ async fn test_ip_pool_list_dedupe(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(ip_pools.len(), 2);
     assert_eq!(ip_pools[0].identity.id, pool1.id());
     assert_eq!(ip_pools[1].identity.id, pool2.id());
+
+    let silo1_pools = pools_for_silo(client, "silo1").await;
+    assert_eq!(silo1_pools.len(), 2);
+    assert_eq!(silo1_pools[0].id(), pool1.id());
+    assert_eq!(silo1_pools[1].id(), pool2.id());
+
+    let silo2_pools = pools_for_silo(client, "silo2").await;
+    assert_eq!(silo2_pools.len(), 1);
+    assert_eq!(silo2_pools[0].identity.name, "pool1");
+
+    let silo3_pools = pools_for_silo(client, "silo3").await;
+    assert_eq!(silo3_pools.len(), 1);
+    assert_eq!(silo3_pools[0].identity.name, "pool1");
 }
 
 /// The internal IP pool, defined by its association with the internal silo,
@@ -361,6 +374,10 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let assocs_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(assocs_p0.items.len(), 0);
 
+    let silo_name = cptestctx.silo_name.as_str();
+    let silo_pools = pools_for_silo(client, silo_name).await;
+    assert_eq!(silo_pools.len(), 0);
+
     // expect 404 on association if the specified silo doesn't exist
     let nonexistent_silo_id = Uuid::new_v4();
     let params = params::IpPoolSiloLink {
@@ -375,11 +392,14 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         StatusCode::NOT_FOUND,
     )
     .await;
+    let not_found =
+        format!("not found: silo with id \"{nonexistent_silo_id}\"");
+    assert_eq!(error.message, not_found);
 
-    assert_eq!(
-        error.message,
-        format!("not found: silo with id \"{nonexistent_silo_id}\"")
-    );
+    // pools for silo also 404s on nonexistent silo
+    let url = format!("/v1/system/silos/{}/ip-pools", nonexistent_silo_id);
+    let error = object_get_error(client, &url, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, not_found);
 
     // associate by name with silo that exists
     let silo = NameOrId::Name(cptestctx.silo_name.clone());
@@ -408,6 +428,11 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(assocs_p0.items.len(), 1);
     assert_eq!(assocs_p0.items[0], silo_link);
 
+    let silo_pools = pools_for_silo(client, silo_name).await;
+    assert_eq!(silo_pools.len(), 1);
+    assert_eq!(silo_pools[0].identity.id, p0.identity.id);
+    assert_eq!(silo_pools[0].is_default, false);
+
     // associate same silo to other pool by ID instead of name
     let link_params = params::IpPoolSiloLink {
         silo: NameOrId::Id(silo_id),
@@ -422,6 +447,13 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         silos_p1.items[0],
         IpPoolSilo { ip_pool_id: p1.identity.id, is_default: true, silo_id }
     );
+
+    let silo_pools = pools_for_silo(client, silo_name).await;
+    assert_eq!(silo_pools.len(), 2);
+    assert_eq!(silo_pools[0].id(), p0.id());
+    assert_eq!(silo_pools[0].is_default, false);
+    assert_eq!(silo_pools[1].id(), p1.id());
+    assert_eq!(silo_pools[1].is_default, true);
 
     // creating a third pool and trying to link it as default: true should fail
     create_pool(client, "p2").await;
@@ -447,12 +479,18 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         "IP Pool cannot be deleted while it is linked to a silo",
     );
 
-    // unlink silo (doesn't matter that it's a default)
+    // unlink p1 from silo (doesn't matter that it's a default)
     let url = format!("/v1/system/ip-pools/p1/silos/{}", cptestctx.silo_name);
     object_delete(client, &url).await;
 
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 0);
+
+    // after unlinking p1, only p0 is left
+    let silo_pools = pools_for_silo(client, silo_name).await;
+    assert_eq!(silo_pools.len(), 1);
+    assert_eq!(silo_pools[0].identity.id, p0.identity.id);
+    assert_eq!(silo_pools[0].is_default, false);
 
     // now we can delete the pool too
     object_delete(client, "/v1/system/ip-pools/p1").await;
@@ -590,10 +628,18 @@ fn get_names(pools: Vec<IpPool>) -> Vec<String> {
 
 async fn silos_for_pool(
     client: &ClientTestContext,
-    id: &str,
+    pool: &str,
 ) -> ResultsPage<IpPoolSilo> {
-    let url = format!("/v1/system/ip-pools/{}/silos", id);
+    let url = format!("/v1/system/ip-pools/{}/silos", pool);
     objects_list_page_authz::<IpPoolSilo>(client, &url).await
+}
+
+async fn pools_for_silo(
+    client: &ClientTestContext,
+    silo: &str,
+) -> Vec<SiloIpPool> {
+    let url = format!("/v1/system/silos/{}/ip-pools", silo);
+    objects_list_page_authz::<SiloIpPool>(client, &url).await.items
 }
 
 async fn create_pool(client: &ClientTestContext, name: &str) -> IpPool {

@@ -403,17 +403,22 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_silo: &authz::Silo,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<(IpPool, IpPoolResource)> {
         use db::schema::ip_pool;
         use db::schema::ip_pool_resource;
 
-        paginated(
-            ip_pool_resource::table,
-            ip_pool_resource::ip_pool_id,
-            pagparams,
-        )
-        .inner_join(ip_pool::table)
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(ip_pool::table, ip_pool::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                ip_pool::table,
+                ip_pool::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .inner_join(ip_pool_resource::table)
         .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
         .filter(ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo))
         .filter(ip_pool::time_deleted.is_null())

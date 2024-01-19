@@ -117,7 +117,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         silo_lookup: &lookup::Silo<'_>,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
