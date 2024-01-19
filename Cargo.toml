@@ -368,7 +368,7 @@ supports-color = "2.1.0"
 swrite = "0.1.0"
 libsw = { version = "3.3.1", features = ["tokio"] }
 syn = { version = "2.0" }
-tabled = "0.14"
+tabled = "0.15"
 tar = "0.4"
 tempdir = "0.3"
 tempfile = "3.8"
