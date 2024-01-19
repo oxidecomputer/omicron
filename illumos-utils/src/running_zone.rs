@@ -14,6 +14,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
+pub use oxlog::is_oxide_smf_log_file;
 use slog::{error, info, o, warn, Logger};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
@@ -1411,24 +1412,8 @@ pub fn is_oxide_smf_service(fmri: impl AsRef<str>) -> bool {
     SMF_SERVICE_PREFIXES.iter().any(|prefix| fmri.starts_with(prefix))
 }
 
-/// Return true if the provided file name appears to be a valid log file for an
-/// Oxide-managed SMF service.
-///
-/// Note that this operates on the _file name_. Any leading path components will
-/// cause this check to return `false`.
-pub fn is_oxide_smf_log_file(filename: impl AsRef<str>) -> bool {
-    // Log files are named by the SMF services, with the `/` in the FMRI
-    // translated to a `-`.
-    const PREFIXES: [&str; 2] = ["oxide-", "system-illumos-"];
-    let filename = filename.as_ref();
-    PREFIXES
-        .iter()
-        .any(|prefix| filename.starts_with(prefix) && filename.contains(".log"))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::is_oxide_smf_log_file;
     use super::is_oxide_smf_service;
 
     #[test]
@@ -1437,16 +1422,5 @@ mod tests {
         assert!(is_oxide_smf_service("svc:/system/illumos/blah:default"));
         assert!(!is_oxide_smf_service("svc:/system/blah:default"));
         assert!(!is_oxide_smf_service("svc:/not/oxide/blah:default"));
-    }
-
-    #[test]
-    fn test_is_oxide_smf_log_file() {
-        assert!(is_oxide_smf_log_file("oxide-blah:default.log"));
-        assert!(is_oxide_smf_log_file("oxide-blah:default.log.0"));
-        assert!(is_oxide_smf_log_file("oxide-blah:default.log.1111"));
-        assert!(is_oxide_smf_log_file("system-illumos-blah:default.log"));
-        assert!(is_oxide_smf_log_file("system-illumos-blah:default.log.0"));
-        assert!(!is_oxide_smf_log_file("not-oxide-blah:default.log"));
-        assert!(!is_oxide_smf_log_file("not-system-illumos-blah:default.log"));
     }
 }

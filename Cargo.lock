@@ -3197,6 +3197,7 @@ dependencies = [
  "omicron-workspace-hack",
  "opte-ioctl",
  "oxide-vpc",
+ "oxlog",
  "regress",
  "schemars",
  "serde",
