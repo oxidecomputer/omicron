@@ -18,6 +18,7 @@ use std::net::Ipv4Addr;
     Clone,
     Copy,
     Debug,
+    Eq,
     PartialEq,
     AsExpression,
     FromSqlRow,

@@ -19,6 +19,7 @@ use std::net::Ipv6Addr;
     Clone,
     Copy,
     Debug,
+    Eq,
     PartialEq,
     AsExpression,
     FromSqlRow,

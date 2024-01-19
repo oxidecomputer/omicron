@@ -3251,6 +3251,21 @@ CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
 
 ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS autoneg BOOL NOT NULL DEFAULT false;
 
+CREATE INDEX IF NOT EXISTS ipv4_nat_lookup_by_vni ON omicron.public.ipv4_nat_entry (
+  vni
+)
+STORING (
+  external_address,
+  first_port,
+  last_port,
+  sled_address,
+  mac,
+  version_added,
+  version_removed,
+  time_created,
+  time_deleted
+);
+
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
@@ -3258,7 +3273,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '23.0.1', NULL)
+    ( TRUE, NOW(), NOW(), '24.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

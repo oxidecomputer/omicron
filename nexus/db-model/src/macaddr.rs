@@ -9,7 +9,7 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external;
 
-#[derive(Clone, Copy, Debug, PartialEq, AsExpression, FromSqlRow)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, AsExpression, FromSqlRow)]
 #[diesel(sql_type = sql_types::BigInt)]
 pub struct MacAddr(pub external::MacAddr);
 
