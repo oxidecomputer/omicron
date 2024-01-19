@@ -465,46 +465,13 @@ impl Zfs {
         Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
     }
 
+    /// Calls "zfs get" with a single value
     pub fn get_value(
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
         let [value] = Self::get_values(filesystem_name, &[name])?;
         Ok(value)
-    }
-
-    pub fn get_values<const N: usize>(
-        filesystem_name: &str,
-        names: &[&str; N],
-    ) -> Result<[String; N], GetValueError> {
-        let mut cmd = std::process::Command::new(PFEXEC);
-        let all_names = names.into_iter().map(|n| *n).collect::<Vec<&str>>().join(",");
-        cmd.args(&[ZFS, "get", "-Ho", "value", &all_names, filesystem_name]);
-        let output = execute(&mut cmd).map_err(|err| GetValueError {
-            filesystem: filesystem_name.to_string(),
-            name: format!("{:?}", names),
-            err: err.into(),
-        })?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let values = stdout.trim();
-
-        const EMPTY_STRING: String = String::new();
-        let mut result: [String; N] = [EMPTY_STRING; N];
-        let mut i = 0;
-
-        for value in values.lines() {
-            let value = value.trim();
-            if value == "-" {
-                return Err(GetValueError {
-                    filesystem: filesystem_name.to_string(),
-                    name: names[i].to_string(),
-                    err: GetValueErrorRaw::MissingValue,
-                });
-            }
-            result[i] = value.to_string();
-            i += 1;
-        }
-        Ok(result)
     }
 
     /// List all extant snapshots.
@@ -565,6 +532,45 @@ impl Zfs {
             snap_name: snap_name.to_string(),
             err,
         })
+    }
+}
+
+// These methods don't work with mockall, so they exist in a separate impl block
+impl Zfs {
+    /// Calls "zfs get" to acquire multiple values
+    pub fn get_values<const N: usize>(
+        filesystem_name: &str,
+        names: &[&str; N],
+    ) -> Result<[String; N], GetValueError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let all_names =
+            names.into_iter().map(|n| *n).collect::<Vec<&str>>().join(",");
+        cmd.args(&[ZFS, "get", "-Ho", "value", &all_names, filesystem_name]);
+        let output = execute(&mut cmd).map_err(|err| GetValueError {
+            filesystem: filesystem_name.to_string(),
+            name: format!("{:?}", names),
+            err: err.into(),
+        })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let values = stdout.trim();
+
+        const EMPTY_STRING: String = String::new();
+        let mut result: [String; N] = [EMPTY_STRING; N];
+        let mut i = 0;
+
+        for value in values.lines() {
+            let value = value.trim();
+            if value == "-" {
+                return Err(GetValueError {
+                    filesystem: filesystem_name.to_string(),
+                    name: names[i].to_string(),
+                    err: GetValueErrorRaw::MissingValue,
+                });
+            }
+            result[i] = value.to_string();
+            i += 1;
+        }
+        Ok(result)
     }
 }
 
