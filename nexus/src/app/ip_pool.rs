@@ -20,6 +20,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -79,7 +80,15 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
-        self.db_datastore.current_silo_ip_pool_list(opctx, pagparams).await
+        let authz_silo =
+            opctx.authn.silo_required().internal_context("listing IP pools")?;
+
+        // From the developer user's point of view, we treat IP pools linked to
+        // their silo as silo resources, so they can list them if they can list
+        // silo children
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
     // Look up pool by name or ID, but only return it if it's linked to the
@@ -109,6 +118,10 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
+
+        // check ability to list silos in general
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         self.db_datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
     }
 
@@ -121,6 +134,10 @@ impl super::Nexus {
     ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Read).await?;
+        // check ability to list pools in general
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
         self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
