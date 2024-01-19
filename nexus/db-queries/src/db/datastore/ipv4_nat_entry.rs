@@ -79,8 +79,7 @@ impl DataStore {
     /// Method for synchronizing service zone nat.
     /// Expects a complete set of service zone nat entries.
     /// Soft-deletes db entries that are not present in `nat_entries` parameter.
-    /// Creates missing entries in an idempotent fashion.
-    // TODO add unit test
+    /// Creates missing entries idempotently
     pub async fn ipv4_nat_sync_service_zones(
         &self,
         opctx: &OpContext,
@@ -643,6 +642,106 @@ mod test {
             datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
             4
         );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Test our ability to reconcile a set of service zone nat entries
+    #[tokio::test]
+    async fn ipv4_nat_sync_service_zones() {
+        let logctx = dev::test_setup_log("ipv4_nat_sync_service_zones");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // We should not have any NAT entries at this moment
+        let initial_state =
+            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+
+        assert!(initial_state.is_empty());
+        assert_eq!(
+            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
+            0
+        );
+
+        // create two nat entries:
+        // 1. an entry should be deleted during the next sync
+        // 2. an entry that should be kept during the next sync
+
+        let external_address = external::Ipv4Net(
+            ipnetwork::Ipv4Network::try_from("10.0.0.100").unwrap(),
+        );
+
+        let sled_address = external::Ipv6Net(
+            ipnetwork::Ipv6Network::try_from("fd00:1122:3344:104::1").unwrap(),
+        );
+
+        // Add a nat entry.
+        let nat1 = Ipv4NatValues {
+            external_address: external_address.into(),
+            first_port: 0.into(),
+            last_port: 999.into(),
+            sled_address: sled_address.into(),
+            vni: Vni(external::Vni::SERVICES_VNI),
+            mac: MacAddr(
+                external::MacAddr::from_str("A8:40:25:F5:EB:2A").unwrap(),
+            ),
+        };
+
+        let nat2 = Ipv4NatValues {
+            first_port: 1000.into(),
+            last_port: 1999.into(),
+            ..nat1
+        };
+
+        datastore.ensure_ipv4_nat_entry(&opctx, nat1.clone()).await.unwrap();
+        datastore.ensure_ipv4_nat_entry(&opctx, nat2.clone()).await.unwrap();
+
+        let db_entries =
+            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+
+        assert_eq!(db_entries.len(), 2);
+
+        // sync two nat entries:
+        // 1. a nat entry that already exists
+        // 2. a nat entry that does not already exist
+
+        let nat3 = Ipv4NatValues {
+            first_port: 2000.into(),
+            last_port: 2999.into(),
+            ..nat2
+        };
+
+        datastore
+            .ipv4_nat_sync_service_zones(&opctx, &[nat2.clone(), nat3.clone()])
+            .await
+            .unwrap();
+
+        // we should have three nat entries in the db
+        // 1. the old one that was deleted during the last sync
+        // 2. the old one that "survived" the last sync
+        // 3. a new one that was added during the last sync
+        let db_entries =
+            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+
+        assert_eq!(db_entries.len(), 3);
+
+        // nat2 and nat3 should not be soft deleted
+        for request in [nat2, nat3] {
+            assert!(db_entries.iter().any(|entry| {
+                entry.first_port == request.first_port
+                    && entry.last_port == request.last_port
+                    && entry.time_deleted.is_none()
+            }));
+        }
+
+        // nat1 should be soft deleted
+        assert!(db_entries.iter().any(|entry| {
+            entry.first_port == nat1.first_port
+                && entry.last_port == nat1.last_port
+                && entry.time_deleted.is_some()
+                && entry.version_removed.is_some()
+        }));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
