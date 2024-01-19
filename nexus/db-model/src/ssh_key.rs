@@ -47,3 +47,10 @@ impl From<SshKey> for views::SshKey {
         }
     }
 }
+
+#[dervice(Clone, Debug, Insertable, Queryable, Selectable)]
+#[diesel(table_name = instance_ssh_key)]
+pub struct InstanceSshKey {
+    pub instance_id: Uuid,
+    pub ssh_key_id: Uuid,
+}

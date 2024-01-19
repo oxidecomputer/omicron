@@ -113,6 +113,76 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    // Associate a list of SSH public keys with an instance. This happens
+    // during the instance create saga and does not fail if the the ssh keys
+    // have been deleted as a race condition.
+    pub async fn ssh_keys_batch_assign(
+        &self,
+        opctx: &OpContext,
+        authz_user: &authz::SiloUser,
+        instance_id: Uuid,
+        keys: &Option<Vec<Uuid>>,
+    ) -> ListResultVec<SshKey> {
+        opctx.authorize(authz::Action::ListChildren, authz_user).await?;
+
+        let instance_ssh_keys: Vec<db::model::InstanceSshKey> = match keys {
+            // If the keys are None, use the fallback behavior of assigning all the users keys
+            None => {
+                use db::schema::ssh_key::dsl;
+                dsl::ssh_key
+                    .filter(dsl::silo_user_id.eq(authz_user.id()))
+                    .filter(dsl::time_deleted.is_null())
+                    .select(dsl::id)
+                    .get_results_async(
+                        &*self.pool_connection_authorized(opctx).await?,
+                    )
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?
+                    .iter()
+                    .map(|key| db::model::InstanceSshKey {
+                        instance_id,
+                        ssh_key_id: *key,
+                    })
+                    .collect()
+            }
+            // If the keys are Some and empty, opt out of assigning any ssh keys
+            Some(vec) if vec.is_empty() => return Ok(vec![]),
+            // If the keys are Some and not-empty, assign the given keys
+            Some(vec) => vec
+                .iter()
+                .map(|key| db::model::InstanceSshKey {
+                    instance_id,
+                    ssh_key_id: *key,
+                })
+                .collect(),
+        };
+
+        use db::schema::instance_ssh_key::dsl;
+
+        diesel::insert_into(dsl::instance_ssh_key)
+            .values(instance_ssh_keys)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(result)
+    }
+
+    pub async fn instance_ssh_keys_delete(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> DeleteResult {
+        use db::schema::instance_ssh_key::dsl;
+        diesel::delete(dsl::instance_ssh_key)
+            .filter(dsl::instance_id.eq(instance_id))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+    }
+
     pub async fn ssh_keys_list(
         &self,
         opctx: &OpContext,

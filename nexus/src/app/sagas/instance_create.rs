@@ -78,6 +78,10 @@ declare_saga_actions! {
         + sic_create_instance_record
         - sic_delete_instance_record
     }
+    ASSOCIATE_SSH_KEYS -> "output" {
+        + sic_associate_ssh_keys
+        - sic_associate_ssh_keys_undo
+    }
     CREATE_NETWORK_INTERFACE -> "output" {
         + sic_create_network_interface
         - sic_create_network_interface_undo
@@ -127,6 +131,8 @@ impl NexusSaga for SagaInstanceCreate {
         ));
 
         builder.append(create_instance_record_action());
+
+        builder.append(associate_ssh_keys_action());
 
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
@@ -236,6 +242,17 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
+        // let subsaga_name = SagaName::new("instance-associate-ssh-keys");
+        // let mut sagabuilder = DagBuilder::new(subsaga_name);
+        // subsaga_builder.append(Node::action("output", "AssociateSshKeys", ASSOCIATE_SSH_KEYS.as_ref(),
+        // ));
+        // subsaga_append(
+        //     "ssh_keys".into(),
+        //     subsaga_builder.build()?,
+        //     &mut builder,
+        //     params.clone(),
+        //     0,
+        // )?;
         // Appends the disk create saga as a subsaga directly to the instance
         // create builder.
         for (i, disk) in params.create_params.disks.iter().enumerate() {
@@ -287,6 +304,46 @@ impl NexusSaga for SagaInstanceCreate {
         builder.append(move_to_stopped_action());
         Ok(builder.build()?)
     }
+}
+
+async fn sic_associate_ssh_keys(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params::<Params>()?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    datastore
+        .ssh_keys_batch_assign(
+            &opctx,
+            authz_user,
+            instance_id,
+            &saga_params.create_params.ssh_keys,
+        )
+        .await?;
+    Ok(())
+}
+
+async fn sic_associate_ssh_keys_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params::<Params>()?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    datastore.instance_ssh_keys_delete(&opctx, instance_id).await?;
+    Ok(())
 }
 
 /// Create a network interface for an instance, using the parameters at index
