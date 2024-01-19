@@ -6,6 +6,7 @@ use super::ExtractedArtifactDataHandle;
 use super::UpdatePlan;
 use super::UpdatePlanBuilder;
 use crate::errors::RepositoryError;
+use anyhow::anyhow;
 use camino_tempfile::Utf8TempDir;
 use debug_ignore::DebugIgnore;
 use omicron_common::update::ArtifactHash;
@@ -55,10 +56,29 @@ impl ArtifactsWithPlan {
         log: &Logger,
     ) -> Result<Self, RepositoryError>
     where
-        T: io::Read + io::Seek,
+        T: io::Read + io::Seek + Send + 'static,
     {
         // Create a temporary directory to hold the extracted TUF repository.
-        let dir = unzip_into_tempdir(zip_data, log)?;
+        let dir = {
+            let log = log.clone();
+            tokio::task::spawn_blocking(move || {
+                // This is an expensive synchronous method, so run it on the
+                // blocking thread pool.
+                //
+                // TODO: at the moment we don't restrict the size of the
+                // extracted contents or its memory usage, making it
+                // susceptible to zip bombs and other related attacks.
+                // https://github.com/zip-rs/zip/issues/228. We need to think
+                // about this at some point.
+                unzip_into_tempdir(zip_data, &log)
+            })
+            .await
+            .map_err(|join_error| {
+                RepositoryError::Extract(
+                    anyhow!(join_error).context("unzip_into_tempdir panicked"),
+                )
+            })??
+        };
 
         // Time is unavailable during initial setup, so ignore expiration. Even
         // if time were available, we might want to be able to load older
