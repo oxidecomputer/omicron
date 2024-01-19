@@ -44,8 +44,6 @@ instance_disk_detach                     POST     /v1/instances/{instance}/disks
 instance_disk_list                       GET      /v1/instances/{instance}/disks
 instance_ephemeral_ip_attach             POST     /v1/instances/{instance}/external-ips/ephemeral
 instance_ephemeral_ip_detach             DELETE   /v1/instances/{instance}/external-ips/ephemeral
-instance_external_ip_attach              POST     /v1/instances/{instance}/external-ips/attach
-instance_external_ip_detach              POST     /v1/instances/{instance}/external-ips/detach
 instance_external_ip_list                GET      /v1/instances/{instance}/external-ips
 instance_list                            GET      /v1/instances
 instance_migrate                         POST     /v1/instances/{instance}/migrate

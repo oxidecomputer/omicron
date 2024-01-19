@@ -56,18 +56,25 @@ pub fn get_floating_ips_url(project_name: &str) -> String {
     format!("/v1/floating-ips?project={project_name}")
 }
 
-pub fn attach_instance_external_ip_url(
+pub fn instance_ephemeral_ip_url(
     instance_name: &str,
     project_name: &str,
 ) -> String {
-    format!("/v1/instances/{instance_name}/external-ips/attach?project={project_name}")
+    format!("/v1/instances/{instance_name}/external-ips/ephemeral?project={project_name}")
 }
 
-pub fn detach_instance_external_ip_url(
-    instance_name: &str,
+pub fn attach_floating_ip_url(
+    floating_ip_name: &str,
     project_name: &str,
 ) -> String {
-    format!("/v1/instances/{instance_name}/external-ips/detach?project={project_name}")
+    format!("/v1/floating-ips/{floating_ip_name}/attach?project={project_name}")
+}
+
+pub fn detach_floating_ip_url(
+    floating_ip_name: &str,
+    project_name: &str,
+) -> String {
+    format!("/v1/floating-ips/{floating_ip_name}/detach?project={project_name}")
 }
 
 pub fn get_floating_ip_by_name_url(
@@ -448,20 +455,12 @@ async fn test_floating_ip_create_attachment(
     assert_eq!(fetched_fip.instance_id, Some(instance.identity.id));
 
     // Try to delete the floating IP, which should fail.
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::DELETE,
-            &get_floating_ip_by_id_url(&fip.identity.id),
-        )
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
+    let error = object_delete_error(
+        client,
+        &get_floating_ip_by_id_url(&fip.identity.id),
+        StatusCode::BAD_REQUEST,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
+    .await;
     assert_eq!(
         error.message,
         format!("Floating IP cannot be deleted while attached to an instance"),
@@ -577,18 +576,11 @@ async fn test_external_ip_live_attach_detach(
     let mut recorded_ephs = vec![];
     for (instance, fip) in instances.iter().zip(&fips) {
         let instance_name = instance.identity.name.as_str();
-        let eph_resp = external_ip_attach(
+        let eph_resp = ephemeral_ip_attach(client, instance_name, None).await;
+        let fip_resp = floating_ip_attach(
             client,
             instance_name,
-            &params::ExternalIpCreate::Ephemeral { pool: None },
-        )
-        .await;
-        let fip_resp = external_ip_attach(
-            client,
-            instance_name,
-            &params::ExternalIpCreate::Floating {
-                floating_ip: fip.identity.name.clone().into(),
-            },
+            fip.identity.name.as_str(),
         )
         .await;
 
@@ -604,51 +596,30 @@ async fn test_external_ip_live_attach_detach(
         assert!(eip_list
             .iter()
             .any(|v| matches!(v, views::ExternalIp::Floating(..))
-                && v.ip() == fip_resp.ip()));
-        assert_eq!(fip.ip, fip_resp.ip());
+                && v.ip() == fip_resp.ip));
+        assert_eq!(fip.ip, fip_resp.ip);
 
         // Check for idempotency: repeat requests should return same values.
-        let eph_resp_2 = external_ip_attach(
+        let eph_resp_2 = ephemeral_ip_attach(client, instance_name, None).await;
+        let fip_resp_2 = floating_ip_attach(
             client,
             instance_name,
-            &params::ExternalIpCreate::Ephemeral { pool: None },
-        )
-        .await;
-        let fip_resp_2 = external_ip_attach(
-            client,
-            instance_name,
-            &params::ExternalIpCreate::Floating {
-                floating_ip: fip.identity.name.clone().into(),
-            },
+            fip.identity.name.as_str(),
         )
         .await;
 
         assert_eq!(eph_resp, eph_resp_2);
-        assert_eq!(fip_resp.ip(), fip_resp_2.ip());
-        assert_eq!(fip_resp.kind(), fip_resp_2.kind());
+        assert_eq!(fip_resp.ip, fip_resp_2.ip);
 
         recorded_ephs.push(eph_resp);
     }
 
     // Detach a floating IP and ephemeral IP from each instance.
-    for ((instance, fip), eph_ip) in
-        instances.iter().zip(&fips).zip(&recorded_ephs)
-    {
+    for (instance, fip) in instances.iter().zip(&fips) {
         let instance_name = instance.identity.name.as_str();
-        let eph_resp = external_ip_detach(
-            client,
-            instance_name,
-            &params::ExternalIpDetach::Ephemeral,
-        )
-        .await;
-        let fip_resp = external_ip_detach(
-            client,
-            instance_name,
-            &params::ExternalIpDetach::Floating {
-                floating_ip: fip.identity.name.clone().into(),
-            },
-        )
-        .await;
+        ephemeral_ip_detach(client, instance_name).await;
+        let fip_resp =
+            floating_ip_detach(client, fip.identity.name.as_str()).await;
 
         // Verify both are removed, and that their bodies match the known FIP/EIP combo.
         let eip_list =
@@ -656,34 +627,17 @@ async fn test_external_ip_live_attach_detach(
                 .await;
 
         assert_eq!(eip_list.len(), 0);
-        assert_eq!(fip.ip, fip_resp.ip());
-        assert_eq!(eph_ip, &eph_resp);
+        assert_eq!(fip.ip, fip_resp.ip);
 
         // Check for idempotency: repeat requests should return same values for FIP,
         // but in ephemeral case there is no currently known IP so we return an error.
-        let fip_resp_2 = external_ip_detach(
-            client,
-            instance_name,
-            &params::ExternalIpDetach::Floating {
-                floating_ip: fip.identity.name.clone().into(),
-            },
-        )
-        .await;
-        assert_eq!(fip_resp.ip(), fip_resp_2.ip());
-        assert_eq!(fip_resp.kind(), fip_resp_2.kind());
+        let fip_resp_2 =
+            floating_ip_detach(client, fip.identity.name.as_str()).await;
+        assert_eq!(fip_resp.ip, fip_resp_2.ip);
 
-        let url = detach_instance_external_ip_url(instance_name, PROJECT_NAME);
-        let error: HttpErrorResponseBody = NexusRequest::new(
-            RequestBuilder::new(client, Method::POST, &url)
-                .body(Some(&params::ExternalIpDetach::Ephemeral))
-                .expect_status(Some(StatusCode::BAD_REQUEST)),
-        )
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap()
-        .parsed_body()
-        .unwrap();
+        let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
+        let error =
+            object_delete_error(client, &url, StatusCode::BAD_REQUEST).await;
         assert_eq!(
             error.message,
             "instance does not have an ephemeral IP attached".to_string()
@@ -731,11 +685,13 @@ async fn test_external_ip_attach_detach_fail_if_in_use_by_other(
     }
 
     // Attach in-use FIP to *other* instance should fail.
-    let url = attach_instance_external_ip_url(INSTANCE_NAMES[0], PROJECT_NAME);
+    let url =
+        attach_floating_ip_url(fips[1].identity.name.as_str(), PROJECT_NAME);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&params::ExternalIpCreate::Floating {
-                floating_ip: fips[1].identity.name.clone().into(),
+            .body(Some(&params::FloatingIpAttach {
+                kind: params::FloatingIpParentKind::Instance,
+                parent: INSTANCE_NAMES[0].parse::<Name>().unwrap().into(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -746,26 +702,6 @@ async fn test_external_ip_attach_detach_fail_if_in_use_by_other(
     .parsed_body()
     .unwrap();
     assert_eq!(error.message, "floating IP cannot be attached to one instance while still attached to another".to_string());
-
-    // Detach in-use FIP from *other* instance should fail.
-    let url = detach_instance_external_ip_url(INSTANCE_NAMES[0], PROJECT_NAME);
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&params::ExternalIpDetach::Floating {
-                floating_ip: fips[1].identity.name.clone().into(),
-            }))
-            .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        "floating IP is not attached to the target instance".to_string()
-    );
 }
 
 #[nexus_test]
@@ -805,11 +741,12 @@ async fn test_external_ip_attach_fails_after_maximum(
     .await;
 
     // Attempt to attach the final FIP should fail.
-    let url = attach_instance_external_ip_url(instance_name, PROJECT_NAME);
+    let url = attach_floating_ip_url(fip_name_slice[32], PROJECT_NAME);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&params::ExternalIpCreate::Floating {
-                floating_ip: fip_name_slice[32].parse::<Name>().unwrap().into(),
+            .body(Some(&params::FloatingIpAttach {
+                kind: params::FloatingIpParentKind::Instance,
+                parent: instance_name.parse::<Name>().unwrap().into(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -826,9 +763,10 @@ async fn test_external_ip_attach_fails_after_maximum(
     );
 
     // Attempt to attach an ephemeral IP should fail.
+    let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(&params::ExternalIpCreate::Ephemeral { pool: None }))
+            .body(Some(&params::EphemeralIpCreate { pool: None }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -871,18 +809,16 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
     // Attach a new EIP from other-pool to both instances.
     // This should succeed for the first, and fail for the second
     // due to pool exhaustion.
-    let eph_resp = external_ip_attach(
+    let eph_resp = ephemeral_ip_attach(
         client,
         INSTANCE_NAMES[0],
-        &params::ExternalIpCreate::Ephemeral {
-            pool: Some(pool_name.clone().into()),
-        },
+        Some(pool_name.as_str()),
     )
     .await;
     assert_eq!(eph_resp.ip(), other_pool_range.first_address());
     assert_eq!(eph_resp.ip(), other_pool_range.last_address());
 
-    let url = attach_instance_external_ip_url(INSTANCE_NAMES[1], PROJECT_NAME);
+    let url = instance_ephemeral_ip_url(INSTANCE_NAMES[1], PROJECT_NAME);
     let error: HttpErrorResponseBody = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(Some(&params::ExternalIpCreate::Ephemeral {
@@ -903,12 +839,10 @@ async fn test_external_ip_attach_ephemeral_at_pool_exhaustion(
 
     // Idempotent re-add to the first instance should succeed even if
     // an internal attempt to alloc a new EIP would fail.
-    let eph_resp_2 = external_ip_attach(
+    let eph_resp_2 = ephemeral_ip_attach(
         client,
         INSTANCE_NAMES[0],
-        &params::ExternalIpCreate::Ephemeral {
-            pool: Some(pool_name.clone().into()),
-        },
+        Some(pool_name.as_str()),
     )
     .await;
     assert_eq!(eph_resp_2, eph_resp);
@@ -967,15 +901,17 @@ async fn instance_for_external_ips(
     .await
 }
 
-async fn external_ip_attach(
+async fn ephemeral_ip_attach(
     client: &ClientTestContext,
     instance_name: &str,
-    eip: &params::ExternalIpCreate,
+    pool_name: Option<&str>,
 ) -> views::ExternalIp {
-    let url = attach_instance_external_ip_url(instance_name, PROJECT_NAME);
+    let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(eip))
+            .body(Some(&params::EphemeralIpCreate {
+                pool: pool_name.map(|v| v.parse::<Name>().unwrap().into()),
+            }))
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -986,15 +922,40 @@ async fn external_ip_attach(
     .unwrap()
 }
 
-async fn external_ip_detach(
+async fn ephemeral_ip_detach(client: &ClientTestContext, instance_name: &str) {
+    let url = instance_ephemeral_ip_url(instance_name, PROJECT_NAME);
+    object_delete(client, &url).await;
+}
+
+async fn floating_ip_attach(
     client: &ClientTestContext,
     instance_name: &str,
-    eip: &params::ExternalIpDetach,
-) -> views::ExternalIp {
-    let url = detach_instance_external_ip_url(instance_name, PROJECT_NAME);
+    floating_ip_name: &str,
+) -> views::FloatingIp {
+    let url = attach_floating_ip_url(floating_ip_name, PROJECT_NAME);
     NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
-            .body(Some(eip))
+            .body(Some(&params::FloatingIpAttach {
+                kind: params::FloatingIpParentKind::Instance,
+                parent: instance_name.parse::<Name>().unwrap().into(),
+            }))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap()
+}
+
+async fn floating_ip_detach(
+    client: &ClientTestContext,
+    floating_ip_name: &str,
+) -> views::FloatingIp {
+    let url = detach_floating_ip_url(floating_ip_name, PROJECT_NAME);
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
             .expect_status(Some(StatusCode::ACCEPTED)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
