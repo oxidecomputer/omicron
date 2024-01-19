@@ -930,7 +930,7 @@
           {
             "in": "path",
             "name": "floating_ip",
-            "description": "Name or ID of the Floating IP",
+            "description": "Name or ID of the floating IP",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -974,7 +974,7 @@
           {
             "in": "path",
             "name": "floating_ip",
-            "description": "Name or ID of the Floating IP",
+            "description": "Name or ID of the floating IP",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -992,6 +992,108 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/floating-ips/{floating_ip}/attach": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Attach a floating IP to an instance or other resource",
+        "operationId": "floating_ip_attach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FloatingIpAttach"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/floating-ips/{floating_ip}/detach": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Detach a floating IP from an instance or other resource",
+        "operationId": "floating_ip_detach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -11379,6 +11481,32 @@
           "time_modified"
         ]
       },
+      "FloatingIpAttach": {
+        "description": "Parameters for attaching a floating IP address to another resource",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The type of `parent`'s resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FloatingIpParentKind"
+              }
+            ]
+          },
+          "parent": {
+            "description": "Name or ID of the resource that this resource should be attached to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "parent"
+        ]
+      },
       "FloatingIpCreate": {
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
@@ -11408,6 +11536,13 @@
         "required": [
           "description",
           "name"
+        ]
+      },
+      "FloatingIpParentKind": {
+        "description": "The type of resource that a floating IP is attached to",
+        "type": "string",
+        "enum": [
+          "instance"
         ]
       },
       "FloatingIpResultsPage": {

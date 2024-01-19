@@ -12,8 +12,8 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
-    ByteCount, Digest, IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName, SemverVersion, SimpleIdentity,
+    ByteCount, Digest, Error, IdentityMetadata, InstanceState, Ipv4Net,
+    Ipv6Net, Name, ObjectIdentity, RoleName, SemverVersion, SimpleIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -369,6 +369,19 @@ pub struct FloatingIp {
 impl From<FloatingIp> for ExternalIp {
     fn from(value: FloatingIp) -> Self {
         ExternalIp::Floating(value)
+    }
+}
+
+impl TryFrom<ExternalIp> for FloatingIp {
+    type Error = Error;
+
+    fn try_from(value: ExternalIp) -> Result<Self, Self::Error> {
+        match value {
+            ExternalIp::Ephemeral { .. } => Err(Error::internal_error(
+                "tried to convert an ephemeral IP into a floating IP",
+            )),
+            ExternalIp::Floating(v) => Ok(v),
+        }
     }
 }
 

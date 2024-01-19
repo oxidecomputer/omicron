@@ -71,7 +71,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
-path_param!(FloatingIpPath, floating_ip, "Floating IP");
+path_param!(FloatingIpPath, floating_ip, "floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
 path_param!(ImagePath, image, "image");
@@ -885,6 +885,23 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+}
+
+/// The type of resource that a floating IP is attached to
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FloatingIpParentKind {
+    Instance,
+}
+
+/// Parameters for attaching a floating IP address to another resource
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpAttach {
+    /// Name or ID of the resource that this resource should be attached to
+    pub parent: NameOrId,
+
+    /// The type of `parent`'s resource
+    pub kind: FloatingIpParentKind,
 }
 
 // INSTANCES
