@@ -517,7 +517,16 @@ async fn find_all_unencrypted_datasets_directly_within_pool(
         let Some(encryption) = iter.next() else {
             continue;
         };
-        let encrypted = encryption != "off";
+
+        // We don't bother checking HOW the dataset is encrypted, just that it
+        // IS encrypted somehow. The sled agent is slightly more opinionated, as
+        // it looks for "aes-256-gcm" explicitly, but we currently don't plan on
+        // providing support for migrating between encryption schemes
+        // automatically.
+        let encrypted = match encryption {
+            "off" | "-" => false,
+            _ => true,
+        };
         if encrypted {
             debug!(log, "Found dataset, but it is already encrypted");
             continue;
