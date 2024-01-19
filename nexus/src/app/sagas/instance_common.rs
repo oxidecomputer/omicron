@@ -131,9 +131,9 @@ pub async fn destroy_vmm_record(
     Ok(())
 }
 
-/// Allocates a new IPv6 address for a service that will run on the supplied
-/// sled.
-pub(super) async fn allocate_sled_ipv6(
+/// Allocates a new IPv6 address for a propolis instance that will run on the
+/// supplied sled.
+pub(super) async fn allocate_vmm_ipv6(
     opctx: &OpContext,
     datastore: &DataStore,
     sled_uuid: Uuid,

@@ -83,7 +83,7 @@ pub enum ZoneVariant {
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
-enum Host {
+pub enum Host {
     /// Used to construct an AAAA record for a sled.
     Sled(Uuid),
 
@@ -92,6 +92,10 @@ enum Host {
 }
 
 impl Host {
+    pub fn for_zone(id: Uuid, variant: ZoneVariant) -> Host {
+        Host::Zone { id, variant }
+    }
+
     /// Returns the DNS name for this host, ignoring the zone part of the DNS
     /// name
     pub(crate) fn dns_name(&self) -> String {
@@ -104,6 +108,12 @@ impl Host {
                 format!("{}.host", id)
             }
         }
+    }
+
+    /// Returns the full-qualified DNS name, including the zone name of the
+    /// control plane's internal DNS zone
+    pub fn fqdn(&self) -> String {
+        format!("{}.{}", self.dns_name(), DNS_ZONE)
     }
 }
 
@@ -168,8 +178,12 @@ pub struct Zone {
 }
 
 impl Zone {
+    pub(crate) fn to_host(&self) -> Host {
+        Host::Zone { id: self.id, variant: self.variant }
+    }
+
     pub(crate) fn dns_name(&self) -> String {
-        Host::Zone { id: self.id, variant: self.variant }.dns_name()
+        self.to_host().dns_name()
     }
 }
 
@@ -393,7 +407,7 @@ impl DnsConfigBuilder {
                             prio: 0,
                             weight: 0,
                             port,
-                            target: format!("{}.{}", zone.dns_name(), DNS_ZONE),
+                            target: zone.to_host().fqdn(),
                         })
                     })
                     .collect();
@@ -412,11 +426,7 @@ impl DnsConfigBuilder {
                             prio: 0,
                             weight: 0,
                             port,
-                            target: format!(
-                                "{}.{}",
-                                Host::Sled(sled.0).dns_name(),
-                                DNS_ZONE
-                            ),
+                            target: Host::Sled(sled.0).fqdn(),
                         })
                     })
                     .collect();
