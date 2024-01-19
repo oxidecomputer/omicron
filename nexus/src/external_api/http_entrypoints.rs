@@ -1546,7 +1546,7 @@ async fn ip_pool_silo_list(
     // whatever the thing is. Still... all we'd have to do to make this usable
     // in both places would be to make it { ...IpPool, silo_id, silo_name,
     // is_default }
-) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSilo>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSiloLink>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1568,7 +1568,7 @@ async fn ip_pool_silo_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             assocs,
-            &|_, x: &views::IpPoolSilo| x.silo_id,
+            &|_, x: &views::IpPoolSiloLink| x.silo_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1583,8 +1583,8 @@ async fn ip_pool_silo_list(
 async fn ip_pool_silo_link(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    resource_assoc: TypedBody<params::IpPoolSiloLink>,
-) -> Result<HttpResponseCreated<views::IpPoolSilo>, HttpError> {
+    resource_assoc: TypedBody<params::IpPoolLinkSilo>,
+) -> Result<HttpResponseCreated<views::IpPoolSiloLink>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1638,7 +1638,7 @@ async fn ip_pool_silo_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolSiloPath>,
     update: TypedBody<params::IpPoolSiloUpdate>,
-) -> Result<HttpResponseOk<views::IpPoolSilo>, HttpError> {
+) -> Result<HttpResponseOk<views::IpPoolSiloLink>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;

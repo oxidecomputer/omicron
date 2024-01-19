@@ -128,7 +128,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        silo_link: &params::IpPoolSiloLink,
+        silo_link: &params::IpPoolLinkSilo,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;

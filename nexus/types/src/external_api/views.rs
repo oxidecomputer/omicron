@@ -315,13 +315,10 @@ pub struct SiloIpPool {
     pub is_default: bool,
 }
 
-// TODO: rename IpPoolSilo or get rid of it somehow. we cannot have both
-// IpPoolSilo and SiloIpPool. come on
-
 /// A link between an IP pool and a silo that allows one to allocate IPs from
 /// the pool within the silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct IpPoolSilo {
+pub struct IpPoolSiloLink {
     pub ip_pool_id: Uuid,
     pub silo_id: Uuid,
     /// When a pool is the default for a silo, floating IPs and instance

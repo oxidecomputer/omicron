@@ -855,7 +855,7 @@ pub struct IpPoolSiloPath {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolSiloLink {
+pub struct IpPoolLinkSilo {
     pub silo: NameOrId,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.

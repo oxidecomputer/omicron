@@ -97,7 +97,7 @@ pub struct IpPoolResource {
     pub is_default: bool,
 }
 
-impl From<IpPoolResource> for views::IpPoolSilo {
+impl From<IpPoolResource> for views::IpPoolSiloLink {
     fn from(assoc: IpPoolResource) -> Self {
         Self {
             ip_pool_id: assoc.ip_pool_id,

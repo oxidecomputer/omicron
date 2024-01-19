@@ -5039,7 +5039,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPoolSiloResultsPage"
+                  "$ref": "#/components/schemas/IpPoolSiloLinkResultsPage"
                 }
               }
             }
@@ -5076,7 +5076,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IpPoolSiloLink"
+                "$ref": "#/components/schemas/IpPoolLinkSilo"
               }
             }
           },
@@ -5088,7 +5088,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPoolSilo"
+                  "$ref": "#/components/schemas/IpPoolSiloLink"
                 }
               }
             }
@@ -5144,7 +5144,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPoolSilo"
+                  "$ref": "#/components/schemas/IpPoolSiloLink"
                 }
               }
             }
@@ -6684,7 +6684,7 @@
             "in": "query",
             "name": "sort_by",
             "schema": {
-              "$ref": "#/components/schemas/IdSortMode"
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
@@ -12565,6 +12565,22 @@
           "name"
         ]
       },
+      "IpPoolLinkSilo": {
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "type": "boolean"
+          },
+          "silo": {
+            "$ref": "#/components/schemas/NameOrId"
+          }
+        },
+        "required": [
+          "is_default",
+          "silo"
+        ]
+      },
       "IpPoolRange": {
         "type": "object",
         "properties": {
@@ -12633,7 +12649,7 @@
           "items"
         ]
       },
-      "IpPoolSilo": {
+      "IpPoolSiloLink": {
         "description": "A link between an IP pool and a silo that allows one to allocate IPs from the pool within the silo",
         "type": "object",
         "properties": {
@@ -12656,23 +12672,7 @@
           "silo_id"
         ]
       },
-      "IpPoolSiloLink": {
-        "type": "object",
-        "properties": {
-          "is_default": {
-            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
-            "type": "boolean"
-          },
-          "silo": {
-            "$ref": "#/components/schemas/NameOrId"
-          }
-        },
-        "required": [
-          "is_default",
-          "silo"
-        ]
-      },
-      "IpPoolSiloResultsPage": {
+      "IpPoolSiloLinkResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -12680,7 +12680,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpPoolSilo"
+              "$ref": "#/components/schemas/IpPoolSiloLink"
             }
           },
           "next_page": {
