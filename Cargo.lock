@@ -5222,8 +5222,6 @@ dependencies = [
 [[package]]
 name = "omicron-zone-package"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdfd257b7067e7a6aa9fba896a89b0f625bac7660213bb830db36e543bd3cdb8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5237,6 +5235,7 @@ dependencies = [
  "semver 1.0.21",
  "serde",
  "serde_derive",
+ "serde_json",
  "tar",
  "tempfile",
  "thiserror",

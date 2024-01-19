@@ -446,6 +446,11 @@ async fn get_package(
         }
         PackageSource::Local { .. } | PackageSource::Composite { .. } => {
             progress.set_message("bundle package".into());
+
+            // TODO:
+            // - track inputs (name, digest)
+            // - track outputs (name, digest)
+
             package
                 .create_with_progress_for_target(&progress, &target, package_name, &output_directory)
                 .await
