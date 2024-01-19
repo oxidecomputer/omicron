@@ -405,10 +405,13 @@ impl DatabaseString for ProjectRole {
 
 #[cfg(test)]
 mod tests {
+    use crate::RequestAddressError;
+
     use super::VpcSubnet;
     use ipnetwork::Ipv4Network;
     use ipnetwork::Ipv6Network;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IpNet;
     use omicron_common::api::external::Ipv4Net;
     use omicron_common::api::external::Ipv6Net;
     use std::net::IpAddr;
@@ -513,18 +516,37 @@ mod tests {
     #[test]
     fn test_ip_subnet_check_requestable_address() {
         let subnet = super::Ipv4Net(Ipv4Net("192.168.0.0/16".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.0.10".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.1.0".parse().unwrap()));
-        assert!(!subnet.check_requestable_addr("192.168.0.0".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.0.255".parse().unwrap()));
-        assert!(
-            !subnet.check_requestable_addr("192.168.255.255".parse().unwrap())
+        subnet.check_requestable_addr("192.168.0.10".parse().unwrap()).unwrap();
+        subnet.check_requestable_addr("192.168.1.0".parse().unwrap()).unwrap();
+        let addr = "192.178.0.10".parse().unwrap();
+        assert_eq!(
+            subnet.check_requestable_addr(addr),
+            Err(RequestAddressError::OutsideSubnet(
+                addr.into(),
+                IpNet::from(subnet.0).into()
+            ))
+        );
+        assert_eq!(
+            subnet.check_requestable_addr("192.168.0.0".parse().unwrap()),
+            Err(RequestAddressError::Reserved)
+        );
+
+        subnet
+            .check_requestable_addr("192.168.0.255".parse().unwrap())
+            .unwrap();
+
+        assert_eq!(
+            subnet.check_requestable_addr("192.168.255.255".parse().unwrap()),
+            Err(RequestAddressError::Broadcast)
         );
 
         let subnet = super::Ipv6Net(Ipv6Net("fd00::/64".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("fd00::a".parse().unwrap()));
-        assert!(!subnet.check_requestable_addr("fd00::1".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("fd00::1:1".parse().unwrap()));
+        subnet.check_requestable_addr("fd00::a".parse().unwrap()).unwrap();
+        assert_eq!(
+            subnet.check_requestable_addr("fd00::1".parse().unwrap()),
+            Err(RequestAddressError::Reserved)
+        );
+        subnet.check_requestable_addr("fd00::1:1".parse().unwrap()).unwrap();
     }
 
     /// Does some basic smoke checks on an impl of `DatabaseString`

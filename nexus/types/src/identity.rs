@@ -43,7 +43,7 @@ pub trait Resource {
 
 /// Identity-related metadata that's included in "asset" public API objects
 /// (which generally have no name or description)
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct AssetIdentityMetadata {
     /// unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,

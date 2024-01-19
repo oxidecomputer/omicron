@@ -719,6 +719,7 @@ pub enum ResourceType {
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,
+    Blueprint,
     Fleet,
     Silo,
     SiloUser,

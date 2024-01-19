@@ -22,6 +22,11 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     replace = {
+        // It's kind of unfortunate to pull in such a complex and unstable type
+        // as "blueprint" this way, but we have really useful functionality
+        // (e.g., diff'ing) that's implemented on our local type.
+        Blueprint = nexus_types::deployment::Blueprint,
+        Generation = omicron_common::api::external::Generation,
         Ipv4Network = ipnetwork::Ipv4Network,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
@@ -91,7 +96,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     ) -> Self {
         Self {
             dst_propolis_id: s.dst_propolis_id,
-            gen: s.gen.into(),
+            gen: s.gen,
             migration_id: s.migration_id,
             propolis_id: s.propolis_id,
             time_updated: s.time_updated,
@@ -103,11 +108,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
     for types::VmmRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::VmmRuntimeState) -> Self {
-        Self {
-            gen: s.gen.into(),
-            state: s.state.into(),
-            time_updated: s.time_updated,
-        }
+        Self { gen: s.gen, state: s.state.into(), time_updated: s.time_updated }
     }
 }
 
@@ -145,19 +146,13 @@ impl From<omicron_common::api::external::InstanceState>
     }
 }
 
-impl From<omicron_common::api::external::Generation> for types::Generation {
-    fn from(s: omicron_common::api::external::Generation) -> Self {
-        Self(i64::from(&s) as u64)
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
     for types::DiskRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }

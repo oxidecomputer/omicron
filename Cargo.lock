@@ -3477,9 +3477,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.8.0"
+version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28b29a3cd74f0f4598934efe3aeba42bae0eb4680554128851ebbecb02af14e6"
+checksum = "8f518f335dce6725a761382244631d86cf0ccb2863413590b31338feb467f9c3"
 
 [[package]]
 name = "ipnetwork"
@@ -4069,6 +4069,7 @@ dependencies = [
  "chrono",
  "futures",
  "ipnetwork",
+ "nexus-types",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
@@ -4205,6 +4206,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-deployment"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "internal-dns",
+ "ipnet",
+ "ipnetwork",
+ "nexus-inventory",
+ "nexus-types",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "sled-agent-client",
+ "slog",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
@@ -4315,6 +4336,7 @@ dependencies = [
  "sled-agent-client",
  "steno",
  "strum",
+ "thiserror",
  "uuid",
 ]
 
@@ -4766,6 +4788,7 @@ dependencies = [
  "hubtools",
  "hyper",
  "hyper-rustls",
+ "illumos-utils",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
@@ -4775,6 +4798,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
+ "nexus-deployment",
  "nexus-inventory",
  "nexus-test-interface",
  "nexus-test-utils",
@@ -4824,6 +4848,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
+ "slog-error-chain",
  "slog-term",
  "sp-sim",
  "steno",
@@ -4879,6 +4904,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "slog",
+ "slog-error-chain",
  "strum",
  "subprocess",
  "tabled",

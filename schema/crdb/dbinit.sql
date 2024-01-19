@@ -1970,7 +1970,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
     -- targets.json (and validated at extract time).
     sha256 STRING(64) NOT NULL,
     -- The length of the artifact, in bytes.
-    artifact_size INT NOT NULL,
+    artifact_size INT8 NOT NULL,
 
     PRIMARY KEY (name, version, kind)
 );

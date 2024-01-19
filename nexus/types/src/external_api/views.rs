@@ -428,7 +428,7 @@ pub struct Switch {
 ///
 /// Physical disks reside in a particular sled and are used to store both
 /// Instance Disk data as well as internal metadata.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PhysicalDisk {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,

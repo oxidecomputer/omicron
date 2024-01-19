@@ -66,6 +66,7 @@ pub async fn make_resources(
     // Global resources
     builder.new_resource(authz::DATABASE);
     builder.new_resource_with_users(authz::FLEET).await;
+    builder.new_resource(authz::BLUEPRINT_CONFIG);
     builder.new_resource(authz::CONSOLE_SESSION_LIST);
     builder.new_resource(authz::DNS_CONFIG);
     builder.new_resource(authz::DEVICE_AUTH_REQUEST_LIST);
@@ -118,6 +119,13 @@ pub async fn make_resources(
         authz::FLEET,
         device_access_token.clone(),
         LookupType::ByName(device_access_token),
+    ));
+
+    let blueprint_id = "b9e923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
+    builder.new_resource(authz::Blueprint::new(
+        authz::FLEET,
+        blueprint_id,
+        LookupType::ById(blueprint_id),
     ));
 
     let tuf_repo_id = "3c52d72f-cbf7-4951-a62f-a4154e74da87".parse().unwrap();

@@ -152,8 +152,6 @@ impl<'a> UpdatePlanBuilder<'a> {
     }
 
     /// Adds an artifact with these contents to the by_id and by_hash maps.
-    ///
-    /// Returns the length of the artifact.
     pub async fn add_artifact(
         &mut self,
         artifact_id: ArtifactId,

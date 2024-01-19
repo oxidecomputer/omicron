@@ -5176,7 +5176,6 @@ async fn system_update_put_repository(
     query: Query<params::UpdatesPutRepositoryParams>,
     body: StreamingBody,
 ) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError> {
-    // TODO: need to increase request size limit for this endpoint
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {

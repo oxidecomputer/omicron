@@ -88,6 +88,9 @@ id_path_param!(GroupPath, group_id, "group");
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
 
+// Internal API parameters
+id_path_param!(BlueprintPath, blueprint_id, "blueprint");
+
 pub struct SledSelector {
     /// ID of the sled
     pub sled: Uuid,

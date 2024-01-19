@@ -207,7 +207,6 @@ async fn insert_impl(
         // the SHA256 hash and length matches if an existing artifact matches.
 
         let mut filter_dsl = dsl::tuf_artifact.into_boxed();
-        // XXX: Why can't this work with borrowed values?
         for artifact in desc.artifacts.clone() {
             filter_dsl = filter_dsl.or_filter(
                 dsl::name
@@ -289,7 +288,6 @@ async fn insert_impl(
         use db::schema::tuf_repo_artifact::dsl;
 
         let mut values = Vec::new();
-        // XXX: Why can't this work with borrowed values?
         for artifact in desc.artifacts.clone() {
             slog::debug!(
                 log,
