@@ -14,7 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     make_filler_text, ArtifactSource, CompositeControlPlaneArchiveBuilder,
-    CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
+    CompositeEntry, CompositeHostArchiveBuilder, CompositeRotArchiveBuilder,
+    MtimeSource,
 };
 
 static FAKE_MANIFEST_TOML: &str =
@@ -114,29 +115,33 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let mut builder =
-                            CompositeHostArchiveBuilder::new(Vec::new())?;
-                        phase_1.with_data(
+                        let mtime_source =
+                            if phase_1.is_fake() && phase_2.is_fake() {
+                                // Ensure stability of fake artifacts.
+                                MtimeSource::Zero
+                            } else {
+                                MtimeSource::Now
+                            };
+
+                        let mut builder = CompositeHostArchiveBuilder::new(
+                            Vec::new(),
+                            mtime_source,
+                        )?;
+                        phase_1.with_entry(
                             FakeDataAttributes::new(
                                 "fake-phase-1",
                                 kind,
                                 &data.version,
                             ),
-                            |buf| {
-                                builder
-                                    .append_phase_1(buf.len(), buf.as_slice())
-                            },
+                            |entry| builder.append_phase_1(entry),
                         )?;
-                        phase_2.with_data(
+                        phase_2.with_entry(
                             FakeDataAttributes::new(
                                 "fake-phase-2",
                                 kind,
                                 &data.version,
                             ),
-                            |buf| {
-                                builder
-                                    .append_phase_2(buf.len(), buf.as_slice())
-                            },
+                            |entry| builder.append_phase_2(entry),
                         )?;
                         ArtifactSource::Memory(builder.finish()?.into())
                     }
@@ -155,29 +160,33 @@ impl ArtifactManifest {
                              artifact kind {kind:?}"
                         );
 
-                        let mut builder =
-                            CompositeRotArchiveBuilder::new(Vec::new())?;
-                        archive_a.with_data(
+                        let mtime_source =
+                            if archive_a.is_fake() && archive_b.is_fake() {
+                                // Ensure stability of fake artifacts.
+                                MtimeSource::Zero
+                            } else {
+                                MtimeSource::Now
+                            };
+
+                        let mut builder = CompositeRotArchiveBuilder::new(
+                            Vec::new(),
+                            mtime_source,
+                        )?;
+                        archive_a.with_entry(
                             FakeDataAttributes::new(
                                 "fake-rot-archive-a",
                                 kind,
                                 &data.version,
                             ),
-                            |buf| {
-                                builder
-                                    .append_archive_a(buf.len(), buf.as_slice())
-                            },
+                            |entry| builder.append_archive_a(entry),
                         )?;
-                        archive_b.with_data(
+                        archive_b.with_entry(
                             FakeDataAttributes::new(
                                 "fake-rot-archive-b",
                                 kind,
                                 &data.version,
                             ),
-                            |buf| {
-                                builder
-                                    .append_archive_b(buf.len(), buf.as_slice())
-                            },
+                            |entry| builder.append_archive_b(entry),
                         )?;
                         ArtifactSource::Memory(builder.finish()?.into())
                     }
@@ -190,17 +199,24 @@ impl ArtifactManifest {
                              used with artifact kind {kind:?}"
                         );
 
+                        // Ensure stability of fake artifacts.
+                        let mtime_source = if zones.iter().all(|z| z.is_fake())
+                        {
+                            MtimeSource::Zero
+                        } else {
+                            MtimeSource::Now
+                        };
+
                         let data = Vec::new();
                         let mut builder =
-                            CompositeControlPlaneArchiveBuilder::new(data)?;
+                            CompositeControlPlaneArchiveBuilder::new(
+                                data,
+                                mtime_source,
+                            )?;
 
                         for zone in zones {
-                            zone.with_name_and_data(|name, data| {
-                                builder.append_zone(
-                                    name,
-                                    data.len(),
-                                    data.as_slice(),
-                                )
+                            zone.with_name_and_entry(|name, entry| {
+                                builder.append_zone(name, entry)
                             })?;
                         }
                         ArtifactSource::Memory(builder.finish()?.into())
@@ -377,20 +393,28 @@ pub enum DeserializedFileArtifactSource {
 }
 
 impl DeserializedFileArtifactSource {
-    fn with_data<F, T>(&self, fake_attr: FakeDataAttributes, f: F) -> Result<T>
+    fn is_fake(&self) -> bool {
+        matches!(self, DeserializedFileArtifactSource::Fake { .. })
+    }
+
+    fn with_entry<F, T>(&self, fake_attr: FakeDataAttributes, f: F) -> Result<T>
     where
-        F: FnOnce(Vec<u8>) -> Result<T>,
+        F: FnOnce(CompositeEntry<'_>) -> Result<T>,
     {
-        let data = match self {
+        let (data, mtime_source) = match self {
             DeserializedFileArtifactSource::File { path } => {
-                std::fs::read(path)
-                    .with_context(|| format!("failed to read {path}"))?
+                let data = std::fs::read(path)
+                    .with_context(|| format!("failed to read {path}"))?;
+                // For now, always use the current time as the source. (Maybe
+                // change this to use the mtime on disk in the future?)
+                (data, MtimeSource::Now)
             }
             DeserializedFileArtifactSource::Fake { size } => {
-                fake_attr.make_data(*size as usize)
+                (fake_attr.make_data(*size as usize), MtimeSource::Zero)
             }
         };
-        f(data)
+        let entry = CompositeEntry { data: &data, mtime_source };
+        f(entry)
     }
 }
 
@@ -408,25 +432,32 @@ pub enum DeserializedControlPlaneZoneSource {
 }
 
 impl DeserializedControlPlaneZoneSource {
-    fn with_name_and_data<F, T>(&self, f: F) -> Result<T>
+    fn is_fake(&self) -> bool {
+        matches!(self, DeserializedControlPlaneZoneSource::Fake { .. })
+    }
+
+    fn with_name_and_entry<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(&str, Vec<u8>) -> Result<T>,
+        F: FnOnce(&str, CompositeEntry<'_>) -> Result<T>,
     {
-        let (name, data) = match self {
+        let (name, data, mtime_source) = match self {
             DeserializedControlPlaneZoneSource::File { path } => {
                 let data = std::fs::read(path)
                     .with_context(|| format!("failed to read {path}"))?;
                 let name = path.file_name().with_context(|| {
                     format!("zone path missing file name: {path}")
                 })?;
-                (name, data)
+                // For now, always use the current time as the source. (Maybe
+                // change this to use the mtime on disk in the future?)
+                (name, data, MtimeSource::Now)
             }
             DeserializedControlPlaneZoneSource::Fake { name, size } => {
                 let data = make_filler_text(*size as usize);
-                (name.as_str(), data)
+                (name.as_str(), data, MtimeSource::Zero)
             }
         };
-        f(name, data)
+        let entry = CompositeEntry { data: &data, mtime_source };
+        f(name, entry)
     }
 }
 
