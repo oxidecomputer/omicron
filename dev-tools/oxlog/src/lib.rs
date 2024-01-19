@@ -245,7 +245,12 @@ impl Zones {
         let Some(paths) = self.zones.get(zone) else {
             return BTreeMap::new();
         };
-        load_svc_logs(paths.primary.clone(), &mut output);
+        // Some rotated files exist in `paths.primary` that we track as
+        // 'archived'. These files have not yet been migrated into the debug
+        // directory.
+        if filter.current || filter.archived {
+            load_svc_logs(paths.primary.clone(), &mut output);
+        }
 
         if filter.archived {
             for dir in paths.debug.clone() {
