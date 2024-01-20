@@ -1183,6 +1183,25 @@ impl super::Nexus {
         let ssh_keys: Vec<String> =
             ssh_keys.map(|ssh_key| ssh_key.public_key).collect();
 
+        // Construct instance metadata used to track its statistics.
+        //
+        // This requires another fetch on the silo and project, to extract their
+        // IDs.
+        let (.., db_project) = self
+            .project_lookup(
+                opctx,
+                params::ProjectSelector {
+                    project: NameOrId::Id(db_instance.project_id),
+                },
+            )?
+            .fetch()
+            .await?;
+        let (_, db_silo) = self.current_silo_lookup(opctx)?.fetch().await?;
+        let metadata = sled_agent_client::types::InstanceMetadata {
+            silo_id: db_silo.id(),
+            project_id: db_project.id(),
+        };
+
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
         // not the newest one, that's fine.  That might just mean the sled agent
@@ -1226,6 +1245,7 @@ impl super::Nexus {
                         initial_vmm.propolis_port.into(),
                     )
                     .to_string(),
+                    metadata,
                 },
             )
             .await
