@@ -279,6 +279,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_delete)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
+        api.register(silo_ip_pool_list)?;
 
         api.register(silo_utilization_view)?;
         api.register(silo_utilization_list)?;
@@ -741,7 +742,7 @@ async fn silo_create(
 
 /// Fetch a silo
 ///
-/// Fetch a silo by name.
+/// Fetch a silo by name or ID.
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}",
@@ -759,6 +760,48 @@ async fn silo_view(
         let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         let (.., silo) = silo_lookup.fetch().await?;
         Ok(HttpResponseOk(silo.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List IP pools available within silo
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silos/{silo}/ip-pools",
+    tags = ["system/silos"],
+}]
+async fn silo_ip_pool_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+        let pools = nexus
+            .silo_ip_pool_list(&opctx, &silo_lookup, &paginated_by)
+            .await?
+            .iter()
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1302,7 +1345,7 @@ async fn project_policy_update(
 async fn project_ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -1312,10 +1355,13 @@ async fn project_ip_pool_list(
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let pools = nexus
-            .silo_ip_pools_list(&opctx, &paginated_by)
+            .current_silo_ip_pool_list(&opctx, &paginated_by)
             .await?
             .into_iter()
-            .map(IpPool::from)
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
             .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
@@ -1335,14 +1381,18 @@ async fn project_ip_pool_list(
 async fn project_ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
-        let pool = nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
-        Ok(HttpResponseOk(IpPool::from(pool)))
+        let (pool, silo_link) =
+            nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
+        Ok(HttpResponseOk(views::SiloIpPool {
+            identity: pool.identity(),
+            is_default: silo_link.is_default,
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1489,7 +1539,14 @@ async fn ip_pool_silo_list(
     // option would be to paginate by a composite key representing the (pool,
     // resource_type, resource)
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSilo>>, HttpError> {
+    // TODO: this could just list views::Silo -- it's not like knowing silo_id
+    // and nothing else is particularly useful -- except we also want to say
+    // whether the pool is marked default on each silo. So one option would
+    // be  to do the same as we did with SiloIpPool -- include is_default on
+    // whatever the thing is. Still... all we'd have to do to make this usable
+    // in both places would be to make it { ...IpPool, silo_id, silo_name,
+    // is_default }
+) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSiloLink>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1511,7 +1568,7 @@ async fn ip_pool_silo_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             assocs,
-            &|_, x: &views::IpPoolSilo| x.silo_id,
+            &|_, x: &views::IpPoolSiloLink| x.silo_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1526,8 +1583,8 @@ async fn ip_pool_silo_list(
 async fn ip_pool_silo_link(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    resource_assoc: TypedBody<params::IpPoolSiloLink>,
-) -> Result<HttpResponseCreated<views::IpPoolSilo>, HttpError> {
+    resource_assoc: TypedBody<params::IpPoolLinkSilo>,
+) -> Result<HttpResponseCreated<views::IpPoolSiloLink>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1581,7 +1638,7 @@ async fn ip_pool_silo_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolSiloPath>,
     update: TypedBody<params::IpPoolSiloUpdate>,
-) -> Result<HttpResponseOk<views::IpPoolSilo>, HttpError> {
+) -> Result<HttpResponseOk<views::IpPoolSiloLink>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
