@@ -1920,7 +1920,7 @@ dependencies = [
  "futures",
  "hostname",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "indexmap 2.1.0",
  "multer",
  "openapiv3",
@@ -2091,7 +2091,7 @@ dependencies = [
  "base64",
  "chrono",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -2920,6 +2920,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-body"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cac85db508abc24a2e48553ba12a996e87244a0395ce011e62b37158745d643"
+dependencies = [
+ "bytes",
+ "http 1.0.0",
+]
+
+[[package]]
 name = "http-range"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2949,7 +2959,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "log",
  "once_cell",
  "regex",
@@ -3036,7 +3046,7 @@ dependencies = [
  "futures-util",
  "h2",
  "http 0.2.11",
- "http-body",
+ "http-body 0.4.5",
  "httparse",
  "httpdate",
  "itoa",
@@ -3049,6 +3059,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb5aa53871fc917b1a9ed87b683a5d86db645e23acb32c2e0785a353e522fb75"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http 1.0.0",
+ "http-body 1.0.0",
+ "httparse",
+ "itoa",
+ "pin-project-lite",
+ "tokio",
+ "want",
+]
+
+[[package]]
 name = "hyper-rustls"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3056,7 +3084,7 @@ checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "rustls 0.21.9",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -3064,19 +3092,21 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.25.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "399c78f9338483cb7e630c8474b07268983c6bd5acee012e4211f9f7bb21b070"
+checksum = "a0bea761b46ae2b24eb4aef630d8d1c398157b6fc29e6350ecf090a0b70c952c"
 dependencies = [
  "futures-util",
- "http 0.2.11",
- "hyper",
+ "http 1.0.0",
+ "hyper 1.1.0",
+ "hyper-util",
  "log",
  "rustls 0.22.2",
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.25.0",
+ "tower-service",
 ]
 
 [[package]]
@@ -3089,7 +3119,7 @@ dependencies = [
  "http 0.2.11",
  "http-range",
  "httpdate",
- "hyper",
+ "hyper 0.14.27",
  "mime_guess",
  "percent-encoding",
  "rand 0.8.5",
@@ -3105,10 +3135,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
 dependencies = [
  "bytes",
- "hyper",
+ "hyper 0.14.27",
  "native-tls",
  "tokio",
  "tokio-native-tls",
+]
+
+[[package]]
+name = "hyper-util"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdea9aac0dbe5a9240d68cfd9501e2db94222c6dc06843e06640b9e07f0fdc67"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http 1.0.0",
+ "http-body 1.0.0",
+ "hyper 1.1.0",
+ "pin-project-lite",
+ "socket2 0.5.5",
+ "tokio",
+ "tower",
+ "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -3352,7 +3402,7 @@ dependencies = [
  "clap 4.4.3",
  "dropshot",
  "expectorate",
- "hyper",
+ "hyper 0.14.27",
  "installinator-common",
  "omicron-common",
  "omicron-test-utils",
@@ -3408,7 +3458,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -4146,8 +4196,8 @@ dependencies = [
  "gateway-client",
  "headers",
  "http 0.2.11",
- "hyper",
- "hyper-rustls 0.25.0",
+ "hyper 0.14.27",
+ "hyper-rustls 0.26.0",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
@@ -4285,7 +4335,7 @@ dependencies = [
  "gateway-test-utils",
  "headers",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "internal-dns",
  "nexus-db-queries",
  "nexus-test-interface",
@@ -4726,7 +4776,7 @@ dependencies = [
  "gateway-test-utils",
  "hex",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "illumos-utils",
  "ipcc",
  "omicron-common",
@@ -4787,8 +4837,8 @@ dependencies = [
  "http 0.2.11",
  "httptest",
  "hubtools",
- "hyper",
- "hyper-rustls 0.25.0",
+ "hyper 0.14.27",
+ "hyper-rustls 0.26.0",
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
@@ -5001,7 +5051,7 @@ dependencies = [
  "guppy",
  "hex",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "hyper-staticfile",
  "illumos-utils",
  "installinator-common",
@@ -5140,7 +5190,7 @@ dependencies = [
  "hashbrown 0.13.2",
  "hex",
  "hmac",
- "hyper",
+ "hyper 0.14.27",
  "indexmap 2.1.0",
  "inout",
  "ipnetwork",
@@ -5181,6 +5231,7 @@ dependencies = [
  "similar",
  "slog",
  "snafu",
+ "socket2 0.5.5",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -5408,7 +5459,7 @@ dependencies = [
  "chrono",
  "futures",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "omicron-workspace-hack",
  "progenitor",
  "rand 0.8.5",
@@ -5482,7 +5533,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "internal-dns",
  "nexus-client",
  "nexus-types",
@@ -6333,7 +6384,7 @@ dependencies = [
  "clap 4.4.3",
  "dropshot",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "progenitor",
  "propolis_types",
  "rand 0.8.5",
@@ -6768,8 +6819,8 @@ dependencies = [
  "futures-util",
  "h2",
  "http 0.2.11",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.27",
  "hyper-rustls 0.24.2",
  "hyper-tls",
  "ipnet",
@@ -9030,6 +9081,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "tower"
+version = "0.4.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "pin-project",
+ "pin-project-lite",
+ "tokio",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tower-layer"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c20c8dbed6283a09604c3e69b4b7eeb54e298b8a600d4d5ecb5ad39de609f1d0"
+
+[[package]]
 name = "tower-service"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9914,7 +9987,7 @@ dependencies = [
  "hex",
  "http 0.2.11",
  "hubtools",
- "hyper",
+ "hyper 0.14.27",
  "illumos-utils",
  "installinator",
  "installinator-artifact-client",
