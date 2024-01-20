@@ -7838,6 +7838,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if",
  "derive_more",
+ "futures",
  "glob",
  "illumos-utils",
  "key-manager",
