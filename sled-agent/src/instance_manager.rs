@@ -6,7 +6,9 @@
 
 use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
+use crate::metrics::MetricsManager;
 use crate::nexus::NexusClientWithResolver;
+use crate::params::InstanceMetadata;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
@@ -77,6 +79,7 @@ struct InstanceManagerInternal {
     port_manager: PortManager,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
+    metrics_manager: MetricsManager,
     zone_builder_factory: ZoneBuilderFactory,
 }
 
@@ -86,6 +89,7 @@ pub(crate) struct InstanceManagerServices {
     pub port_manager: PortManager,
     pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
+    pub metrics_manager: MetricsManager,
     pub zone_builder_factory: ZoneBuilderFactory,
 }
 
@@ -96,6 +100,7 @@ pub struct InstanceManager {
 
 impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
         nexus_client: NexusClientWithResolver,
@@ -103,6 +108,7 @@ impl InstanceManager {
         port_manager: PortManager,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
+        metrics_manager: MetricsManager,
         zone_builder_factory: ZoneBuilderFactory,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
@@ -117,6 +123,7 @@ impl InstanceManager {
                 port_manager,
                 storage,
                 zone_bundler,
+                metrics_manager,
                 zone_builder_factory,
             }),
         })
@@ -215,6 +222,7 @@ impl InstanceManager {
     /// (instance ID, Propolis ID) pair multiple times, but will fail if the
     /// instance is registered with a Propolis ID different from the one the
     /// caller supplied.
+    #[allow(clippy::too_many_arguments)]
     pub async fn ensure_registered(
         &self,
         instance_id: Uuid,
@@ -223,6 +231,7 @@ impl InstanceManager {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         info!(
             &self.inner.log,
@@ -233,6 +242,7 @@ impl InstanceManager {
             "instance_runtime" => ?instance_runtime,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
+            "metadata" => ?metadata,
         );
 
         let instance = {
@@ -271,6 +281,7 @@ impl InstanceManager {
                     port_manager: self.inner.port_manager.clone(),
                     storage: self.inner.storage.clone(),
                     zone_bundler: self.inner.zone_bundler.clone(),
+                    metrics_manager: self.inner.metrics_manager.clone(),
                     zone_builder_factory: self
                         .inner
                         .zone_builder_factory
@@ -291,6 +302,7 @@ impl InstanceManager {
                     ticket,
                     state,
                     services,
+                    metadata,
                 )?;
                 let instance_clone = instance.clone();
                 let _old =

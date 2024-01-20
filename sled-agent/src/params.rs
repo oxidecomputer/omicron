@@ -81,6 +81,13 @@ pub struct InstanceHardware {
     pub cloud_init_bytes: Option<String>,
 }
 
+/// Metadata used to track statistics about an instance.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InstanceMetadata {
+    pub silo_id: Uuid,
+    pub project_id: Uuid,
+}
+
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -102,6 +109,9 @@ pub struct InstanceEnsureBody {
 
     /// The address at which this VMM should serve a Propolis server API.
     pub propolis_addr: SocketAddr,
+
+    /// Metadata used to track instance statistics.
+    pub metadata: InstanceMetadata,
 }
 
 /// The body of a request to move a previously-ensured instance into a specific

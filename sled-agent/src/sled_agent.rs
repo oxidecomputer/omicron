@@ -16,10 +16,11 @@ use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
-    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    DiskStateRequested, InstanceHardware, InstanceMetadata,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
+    ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
@@ -393,6 +394,55 @@ impl SledAgent {
         let underlay_nics = underlay::find_nics(&config.data_links)?;
         illumos_utils::opte::initialize_xde_driver(&log, &underlay_nics)?;
 
+        // Start collecting metric data.
+        //
+        // First, we're creating a shareable type for managing the metrics
+        // themselves early on, so that we can pass it to other components of
+        // the sled agent that need it.
+        //
+        // Then we'll start tracking physical links and register as a producer
+        // with Nexus in the background.
+        let metrics_manager = MetricsManager::new(
+            request.body.id,
+            request.body.rack_id,
+            long_running_task_handles.hardware_manager.baseboard(),
+            log.new(o!("component" => "MetricsManager")),
+        )?;
+
+        // Start tracking the underlay physical links.
+        for nic in underlay::find_nics(&config.data_links)? {
+            let link_name = nic.interface();
+            if let Err(e) = metrics_manager
+                .track_physical_link(
+                    link_name,
+                    crate::metrics::LINK_SAMPLE_INTERVAL,
+                )
+                .await
+            {
+                error!(
+                    log,
+                    "failed to start tracking physical link metrics";
+                    "link_name" => link_name,
+                    "error" => ?e,
+                );
+            }
+        }
+
+        // Spawn a task in the background to register our metric producer with
+        // Nexus. This should not block progress here.
+        let endpoint = ProducerEndpoint {
+            id: request.body.id,
+            kind: ProducerKind::SledAgent,
+            address: sled_address.into(),
+            base_route: String::from("/metrics/collect"),
+            interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
+        };
+        tokio::task::spawn(register_metric_producer_with_nexus(
+            log.clone(),
+            nexus_client.clone(),
+            endpoint,
+        ));
+
         // Create the PortManager to manage all the OPTE ports on the sled.
         let port_manager = PortManager::new(
             parent_log.new(o!("component" => "PortManager")),
@@ -416,6 +466,7 @@ impl SledAgent {
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
+            metrics_manager.clone(),
             ZoneBuilderFactory::default(),
         )?;
 
@@ -512,47 +563,6 @@ impl SledAgent {
             request.body.rack_id,
             rack_network_config.clone(),
         )?;
-
-        let mut metrics_manager = MetricsManager::new(
-            request.body.id,
-            request.body.rack_id,
-            long_running_task_handles.hardware_manager.baseboard(),
-            log.new(o!("component" => "MetricsManager")),
-        )?;
-
-        // Start tracking the underlay physical links.
-        for nic in underlay::find_nics(&config.data_links)? {
-            let link_name = nic.interface();
-            if let Err(e) = metrics_manager
-                .track_physical_link(
-                    link_name,
-                    crate::metrics::LINK_SAMPLE_INTERVAL,
-                )
-                .await
-            {
-                error!(
-                    log,
-                    "failed to start tracking physical link metrics";
-                    "link_name" => link_name,
-                    "error" => ?e,
-                );
-            }
-        }
-
-        // Spawn a task in the background to register our metric producer with
-        // Nexus. This should not block progress here.
-        let endpoint = ProducerEndpoint {
-            id: request.body.id,
-            kind: ProducerKind::SledAgent,
-            address: sled_address.into(),
-            base_route: String::from("/metrics/collect"),
-            interval: crate::metrics::METRIC_COLLECTION_INTERVAL,
-        };
-        tokio::task::spawn(register_metric_producer_with_nexus(
-            log.clone(),
-            nexus_client.clone(),
-            endpoint,
-        ));
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
@@ -909,6 +919,7 @@ impl SledAgent {
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
+    #[allow(clippy::too_many_arguments)]
     pub async fn instance_ensure_registered(
         &self,
         instance_id: Uuid,
@@ -917,6 +928,7 @@ impl SledAgent {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
@@ -927,6 +939,7 @@ impl SledAgent {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                metadata,
             )
             .await
             .map_err(|e| Error::Instance(e))

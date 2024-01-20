@@ -89,6 +89,7 @@ use std::time::Duration;
 
 pub mod link;
 mod sampler;
+pub mod virtual_machine;
 
 pub use sampler::CollectionDetails;
 pub use sampler::ExpirationBehavior;

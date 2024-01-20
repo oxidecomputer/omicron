@@ -9,11 +9,14 @@ use crate::common::instance::{
     PublishedVmmState,
 };
 use crate::instance_manager::{InstanceManagerServices, InstanceTicket};
+use crate::metrics::Error as MetricsError;
+use crate::metrics::MetricsManager;
+use crate::metrics::INSTANCE_SAMPLE_INTERVAL;
 use crate::nexus::NexusClientWithResolver;
 use crate::params::ZoneBundleCause;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{
-    InstanceHardware, InstanceMigrationSourceParams,
+    InstanceHardware, InstanceMetadata, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
 };
 use crate::profile::*;
@@ -108,6 +111,9 @@ pub enum Error {
 
     #[error("I/O error")]
     Io(#[from] std::io::Error),
+
+    #[error("Failed to track instance metrics")]
+    Metrics(#[source] MetricsError),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -233,8 +239,14 @@ struct InstanceInner {
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
 
+    // Object used to start / stop collection of instance-related metrics.
+    metrics_manager: MetricsManager,
+
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
+
+    // Metadata used to track statistics for this instance.
+    metadata: InstanceMetadata,
 }
 
 impl InstanceInner {
@@ -369,6 +381,10 @@ impl InstanceInner {
         // state to Nexus. This ensures that the instance is actually gone from
         // the sled when Nexus receives the state update saying it's actually
         // destroyed.
+        //
+        // In addition, we'll start or stop collecting metrics soley on the
+        // basis of whether the instance is terminated. All other states imply
+        // we start (or continue) to collect instance metrics.
         match action {
             Some(InstanceAction::Destroy) => {
                 info!(self.log, "terminating VMM that has exited";
@@ -377,7 +393,17 @@ impl InstanceInner {
                 self.terminate().await?;
                 Ok(Reaction::Terminate)
             }
-            None => Ok(Reaction::Continue),
+            None => {
+                self.metrics_manager
+                    .track_instance(
+                        &self.id(),
+                        &self.metadata,
+                        INSTANCE_SAMPLE_INTERVAL,
+                    )
+                    .await
+                    .map_err(Error::Metrics)?;
+                Ok(Reaction::Continue)
+            }
         }
     }
 
@@ -539,6 +565,18 @@ impl InstanceInner {
             );
         }
 
+        // Stop tracking instance-related metrics.
+        if let Err(e) =
+            self.metrics_manager.stop_tracking_instance(self.id()).await
+        {
+            error!(
+                self.log,
+                "Failed to stop tracking instance metrics";
+                "instance_id" => %self.id(),
+                "error" => ?e,
+            );
+        }
+
         // Ensure that no zone exists. This succeeds even if no zone was ever
         // created.
         // NOTE: we call`Zones::halt_and_remove_logged` directly instead of
@@ -598,6 +636,7 @@ impl Instance {
         ticket: InstanceTicket,
         state: InstanceInitialState,
         services: InstanceManagerServices,
+        metadata: InstanceMetadata,
     ) -> Result<Self, Error> {
         info!(log, "initializing new Instance";
               "instance_id" => %id,
@@ -617,6 +656,7 @@ impl Instance {
             port_manager,
             storage,
             zone_bundler,
+            metrics_manager,
             zone_builder_factory,
         } = services;
 
@@ -688,7 +728,9 @@ impl Instance {
             storage,
             zone_builder_factory,
             zone_bundler,
+            metrics_manager,
             instance_ticket: ticket,
+            metadata,
         };
 
         let inner = Arc::new(Mutex::new(instance));

@@ -1135,6 +1135,21 @@ impl super::Nexus {
             .map(|ssh_key| ssh_key.public_key)
             .collect::<Vec<String>>();
 
+        // Construct instance metadata used to track its statistics.
+        //
+        // This current means fetching the current silo ID, since we have all
+        // the other metadata already.
+        let silo_id = self
+            .current_silo_lookup(opctx)?
+            .lookup_for(authz::Action::Read)
+            .await?
+            .0
+            .id();
+        let metadata = sled_agent_client::types::InstanceMetadata {
+            silo_id,
+            project_id: db_instance.project_id,
+        };
+
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
         // not the newest one, that's fine.  That might just mean the sled agent
@@ -1178,6 +1193,7 @@ impl super::Nexus {
                         PROPOLIS_PORT,
                     )
                     .to_string(),
+                    metadata,
                 },
             )
             .await
