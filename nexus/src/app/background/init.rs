@@ -177,8 +177,7 @@ impl BackgroundTasks {
                 String::from(
                     "ensures service zone nat records are recorded in NAT RPW table",
                 ),
-                // TODO create separate config for this task
-                config.nat_cleanup.period_secs,
+                config.sync_service_zone_nat.period_secs,
                 Box::new(ServiceZoneNatTracker::new(
                     datastore.clone(),
                     dpd_clients.clone(),

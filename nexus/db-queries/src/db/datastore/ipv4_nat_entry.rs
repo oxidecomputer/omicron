@@ -80,16 +80,17 @@ impl DataStore {
     /// Expects a complete set of service zone nat entries.
     /// Soft-deletes db entries that are not present in `nat_entries` parameter.
     /// Creates missing entries idempotently
+    /// returns the number of records added
     pub async fn ipv4_nat_sync_service_zones(
         &self,
         opctx: &OpContext,
         nat_entries: &[Ipv4NatValues],
-    ) -> CreateResult<()> {
+    ) -> CreateResult<usize> {
         use db::schema::ipv4_nat_entry::dsl;
 
         let vni = nexus_db_model::Vni(Vni::SERVICES_VNI);
 
-        // find all nat entries with a VNI of 100
+        // find all nat entries with the services vni
         let result: Vec<Ipv4NatEntry> = dsl::ipv4_nat_entry
             .filter(dsl::vni.eq(vni))
             .select(Ipv4NatEntry::as_select())
@@ -98,22 +99,27 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         // determine what to keep and what to delete
-        let (_keep, delete): (Vec<_>, Vec<_>) =
-            result.iter().partition(|db_entry| {
-                let values = Ipv4NatValues {
-                    external_address: db_entry.external_address,
-                    first_port: db_entry.first_port,
-                    last_port: db_entry.last_port,
-                    sled_address: db_entry.sled_address,
-                    vni: db_entry.vni,
-                    mac: db_entry.mac,
-                };
+        let mut keep: Vec<_> = vec![];
+        let mut delete: Vec<_> = vec![];
 
-                nat_entries.contains(&values)
-            });
+        for db_entry in result.iter() {
+            let values = Ipv4NatValues {
+                external_address: db_entry.external_address,
+                first_port: db_entry.first_port,
+                last_port: db_entry.last_port,
+                sled_address: db_entry.sled_address,
+                vni: db_entry.vni,
+                mac: db_entry.mac,
+            };
+
+            if nat_entries.contains(&values) {
+                keep.push(values);
+            } else {
+                delete.push(db_entry)
+            }
+        }
 
         // delete entries that are not present in requested entries
-        // can we batch these updates (soft deletions)?
         for entry in delete {
             if let Err(e) = self.ipv4_nat_delete(opctx, entry).await {
                 error!(
@@ -125,10 +131,13 @@ impl DataStore {
             }
         }
 
+        // optimization: only attempt to add what is missing
+        let add = nat_entries.iter().filter(|entry| !keep.contains(entry));
+
+        let mut count = 0;
+
         // insert nat_entries
-        // do we need to batch these inserts? Currently leverage the idempotent
-        // insert logic in our ensure method
-        for entry in nat_entries {
+        for entry in add {
             if let Err(e) =
                 self.ensure_ipv4_nat_entry(opctx, entry.clone()).await
             {
@@ -138,10 +147,12 @@ impl DataStore {
                     "error" => ?e,
                     "entry" => ?entry,
                 );
+                continue;
             }
+            count += 1;
         }
 
-        Ok(())
+        Ok(count)
     }
 
     pub async fn ipv4_nat_delete(
