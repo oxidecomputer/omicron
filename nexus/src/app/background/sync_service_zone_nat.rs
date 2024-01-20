@@ -192,11 +192,15 @@ impl BackgroundTask for ServiceZoneNatTracker {
                 }
             }
 
-            // TODO: correctness
-            // Is it ever correct to attempt to reconcile against an empty collection of nat entries?
-            // Even if there are truly no service zone nat entries that should be present (impossible, really,
-            // because this workflow doesn't run if Nexus is down), what is the harm in letting the old
-            // entries stay until we have at least one new entry
+            if ipv4_nat_values.is_empty() {
+                warn!(
+                    &log,
+                    "no ipv4 nat values to reconcile";
+                );
+                return json!({
+                    "error": "no service zone ipv4 nat values to reconcile"
+                });
+            }
 
             // reconcile service zone nat entries
             let result = self.datastore.ipv4_nat_sync_service_zones(opctx, &ipv4_nat_values).await;
