@@ -11,6 +11,7 @@
 //   omicron#2184, omicron#2414.
 
 use anyhow::anyhow;
+use camino::Utf8PathBuf;
 use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -18,7 +19,6 @@ use omicron_nexus::run_openapi_external;
 use omicron_nexus::run_openapi_internal;
 use omicron_nexus::run_server;
 use omicron_nexus::Config;
-use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[clap(name = "nexus", about = "See README.adoc for more information")]
@@ -41,7 +41,7 @@ struct Args {
     openapi_internal: bool,
 
     #[clap(name = "CONFIG_FILE_PATH", action)]
-    config_file_path: Option<PathBuf>,
+    config_file_path: Option<Utf8PathBuf>,
 }
 
 #[tokio::main]

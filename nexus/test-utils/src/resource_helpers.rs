@@ -246,9 +246,9 @@ pub async fn link_ip_pool(
     is_default: bool,
 ) {
     let link =
-        params::IpPoolSiloLink { silo: NameOrId::Id(*silo_id), is_default };
+        params::IpPoolLinkSilo { silo: NameOrId::Id(*silo_id), is_default };
     let url = format!("/v1/system/ip-pools/{pool_name}/silos");
-    object_create::<params::IpPoolSiloLink, views::IpPoolSilo>(
+    object_create::<params::IpPoolLinkSilo, views::IpPoolSiloLink>(
         client, &url, &link,
     )
     .await;
