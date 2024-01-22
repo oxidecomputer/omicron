@@ -199,6 +199,24 @@ pub enum Error {
     #[error("Failed to get address: {0}")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
+    #[error(
+        "Failed to launch zone {zone} because ZFS value cannot be accessed"
+    )]
+    GetZfsValue {
+        zone: String,
+        #[source]
+        source: illumos_utils::zfs::GetValueError,
+    },
+
+    #[error("Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})")]
+    DatasetNotReady {
+        zone: String,
+        dataset: String,
+        prop_name: String,
+        prop_value: String,
+        prop_value_expected: String,
+    },
+
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
 
@@ -1474,7 +1492,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(zone_config) => zone_config
                 .zone
                 .dataset_name()
-                .map(|n| zone::Dataset { name: n.full() })
+                .map(|n| zone::Dataset { name: n.full_name() })
                 .into_iter()
                 .collect(),
             ZoneArgs::Switch(_) => vec![],
@@ -1711,7 +1729,7 @@ impl ServiceManager {
                     dataset.pool_name.clone(),
                     DatasetKind::Crucible,
                 )
-                .full();
+                .full_name();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
@@ -2930,6 +2948,35 @@ impl ServiceManager {
             // Currently, the zone filesystem should be destroyed between
             // reboots, so it's fine to make this decision locally.
             let root = if let Some(dataset) = zone.dataset_name() {
+                // Check that the dataset is actually ready to be used.
+                let [zoned, canmount, encryption] =
+                    illumos_utils::zfs::Zfs::get_values(
+                        &dataset.full_name(),
+                        &["zoned", "canmount", "encryption"],
+                    )
+                    .map_err(|err| Error::GetZfsValue {
+                        zone: zone.zone_name(),
+                        source: err,
+                    })?;
+
+                let check_property = |name, actual, expected| {
+                    if actual != expected {
+                        return Err(Error::DatasetNotReady {
+                            zone: zone.zone_name(),
+                            dataset: dataset.full_name(),
+                            prop_name: String::from(name),
+                            prop_value: actual,
+                            prop_value_expected: String::from(expected),
+                        });
+                    }
+                    return Ok(());
+                };
+                check_property("zoned", zoned, "on")?;
+                check_property("canmount", canmount, "on")?;
+                if dataset.dataset().dataset_should_be_encrypted() {
+                    check_property("encryption", encryption, "aes-256-gcm")?;
+                }
+
                 // If the zone happens to already manage a dataset, then
                 // we co-locate the zone dataset on the same zpool.
                 //
