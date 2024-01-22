@@ -151,8 +151,8 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 first_port: snat_cfg.first_port.into(),
                                 last_port: snat_cfg.last_port.into(),
                                 sled_address: sled_address.into(),
-                                vni: nexus_db_model::Vni(nic.vni.into()),
-                                mac: nexus_db_model::MacAddr(nic.mac.into()),
+                                vni: nexus_db_model::Vni(nic.vni),
+                                mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
                             // Append ipv4 nat entry
@@ -183,8 +183,8 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 first_port: MIN_PORT.into(),
                                 last_port: MAX_PORT.into(),
                                 sled_address: sled_address.into(),
-                                vni: nexus_db_model::Vni(nic.vni.into()),
-                                mac: nexus_db_model::MacAddr(nic.mac.into()),
+                                vni: nexus_db_model::Vni(nic.vni),
+                                mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
                             // Append ipv4 nat entry
@@ -229,8 +229,8 @@ impl BackgroundTask for ServiceZoneNatTracker {
                                 first_port: MIN_PORT.into(),
                                 last_port: MAX_PORT.into(),
                                 sled_address: sled_address.into(),
-                                vni: nexus_db_model::Vni(nic.vni.into()),
-                                mac: nexus_db_model::MacAddr(nic.mac.into()),
+                                vni: nexus_db_model::Vni(nic.vni),
+                                mac: nexus_db_model::MacAddr(nic.mac),
                             };
 
                             // Append ipv4 nat entry
