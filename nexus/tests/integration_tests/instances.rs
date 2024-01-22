@@ -608,12 +608,7 @@ async fn test_instance_start_creates_networking_state(
         // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
         // itself.
         if agent.id != sled_id {
-            assert_sled_v2p_mappings(
-                agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
+            assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
         } else {
             assert!(agent.v2p_mappings.lock().await.is_empty());
         }
@@ -807,12 +802,8 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // all mappings explicitly (without skipping the instance's current
         // sled) this bifurcation should be removed.
         if sled_agent.id != original_sled_id {
-            assert_sled_v2p_mappings(
-                sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
+            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
+                .await;
         } else {
             assert!(sled_agent.v2p_mappings.lock().await.is_empty());
         }
@@ -860,12 +851,8 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // agent will have updated any mappings there. Remove this bifurcation
         // when Nexus programs all mappings explicitly.
         if sled_agent.id != dst_sled_id {
-            assert_sled_v2p_mappings(
-                sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
+            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
+                .await;
         }
     }
 }
@@ -3670,7 +3657,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 
     // make pool2 default and create instance with default pool. check that it now it comes from pool2
-    let _: views::IpPoolSilo = object_put(
+    let _: views::IpPoolSiloLink = object_put(
         client,
         &format!("/v1/system/ip-pools/pool2/silos/{}", DEFAULT_SILO.id()),
         &params::IpPoolSiloUpdate { is_default: true },
@@ -3801,11 +3788,11 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
 
     // associate the pool with a different silo and we should get the same
     // error on instance create
-    let params = params::IpPoolSiloLink {
+    let params = params::IpPoolLinkSilo {
         silo: NameOrId::Name(cptestctx.silo_name.clone()),
         is_default: false,
     };
-    let _: views::IpPoolSilo =
+    let _: views::IpPoolSiloLink =
         object_create(client, "/v1/system/ip-pools/orphan-pool/silos", &params)
             .await;
 
@@ -4248,12 +4235,8 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
         // itself.
         if sled_agent.id != sled_id {
-            assert_sled_v2p_mappings(
-                sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
+            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
+                .await;
         } else {
             assert!(sled_agent.v2p_mappings.lock().await.is_empty());
         }

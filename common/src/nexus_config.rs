@@ -11,6 +11,7 @@ use crate::api::internal::shared::SwitchLocation;
 use super::address::{Ipv6Subnet, RACK_PREFIX};
 use super::postgres_config::PostgresConfigWithUrl;
 use anyhow::anyhow;
+use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use schemars::JsonSchema;
@@ -24,13 +25,12 @@ use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
 use std::time::Duration;
 use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct LoadError {
-    pub path: PathBuf,
+    pub path: Utf8PathBuf,
     pub kind: LoadErrorKind,
 }
 
@@ -54,14 +54,14 @@ pub enum LoadErrorKind {
     InvalidTunable(InvalidTunable),
 }
 
-impl From<(PathBuf, std::io::Error)> for LoadError {
-    fn from((path, err): (PathBuf, std::io::Error)) -> Self {
+impl From<(Utf8PathBuf, std::io::Error)> for LoadError {
+    fn from((path, err): (Utf8PathBuf, std::io::Error)) -> Self {
         LoadError { path, kind: LoadErrorKind::Io(err) }
     }
 }
 
-impl From<(PathBuf, toml::de::Error)> for LoadError {
-    fn from((path, err): (PathBuf, toml::de::Error)) -> Self {
+impl From<(Utf8PathBuf, toml::de::Error)> for LoadError {
+    fn from((path, err): (Utf8PathBuf, toml::de::Error)) -> Self {
         LoadError { path, kind: LoadErrorKind::Parse(err) }
     }
 }
@@ -72,18 +72,13 @@ impl fmt::Display for LoadError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match &self.kind {
             LoadErrorKind::Io(e) => {
-                write!(f, "read \"{}\": {}", self.path.display(), e)
+                write!(f, "read \"{}\": {}", self.path, e)
             }
             LoadErrorKind::Parse(e) => {
-                write!(f, "parse \"{}\": {}", self.path.display(), e.message())
+                write!(f, "parse \"{}\": {}", self.path, e.message())
             }
             LoadErrorKind::InvalidTunable(inner) => {
-                write!(
-                    f,
-                    "invalid tunable \"{}\": {}",
-                    self.path.display(),
-                    inner,
-                )
+                write!(f, "invalid tunable \"{}\": {}", self.path, inner)
             }
         }
     }
@@ -170,7 +165,7 @@ impl DeploymentConfig {
     ///
     /// This config object can then be used to create a new `Nexus`.
     /// The format is described in the README.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, LoadError> {
+    pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, LoadError> {
         let path = path.as_ref();
         let file_contents = std::fs::read_to_string(path)
             .map_err(|e| (path.to_path_buf(), e))?;
@@ -207,7 +202,7 @@ pub struct AuthnConfig {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ConsoleConfig {
-    pub static_dir: PathBuf,
+    pub static_dir: Utf8PathBuf,
     /// how long a session can be idle before expiring
     pub session_idle_timeout_minutes: u32,
     /// how long a session can exist before expiring
@@ -217,7 +212,7 @@ pub struct ConsoleConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct UpdatesConfig {
     /// Trusted root.json role for the TUF updates repository.
-    pub trusted_root: PathBuf,
+    pub trusted_root: Utf8PathBuf,
     /// Default base URL for the TUF repository.
     pub default_base_url: String,
 }
@@ -225,7 +220,7 @@ pub struct UpdatesConfig {
 /// Options to tweak database schema changes.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct SchemaConfig {
-    pub schema_dir: PathBuf,
+    pub schema_dir: Utf8PathBuf,
 }
 
 /// Optional configuration for the timeseries database.
@@ -474,7 +469,7 @@ impl Config {
     ///
     /// This config object can then be used to create a new `Nexus`.
     /// The format is described in the README.
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, LoadError> {
+    pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, LoadError> {
         let path = path.as_ref();
         let file_contents = std::fs::read_to_string(path)
             .map_err(|e| (path.to_path_buf(), e))?;
@@ -535,6 +530,7 @@ mod test {
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
     use crate::nexus_config::SyncServiceZoneNatConfig;
+    use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
@@ -543,21 +539,18 @@ mod test {
     use std::collections::HashMap;
     use std::fs;
     use std::net::{Ipv6Addr, SocketAddr};
-    use std::path::Path;
-    use std::path::PathBuf;
     use std::str::FromStr;
     use std::time::Duration;
 
     /// Generates a temporary filesystem path unique for the given label.
-    fn temp_path(label: &str) -> PathBuf {
+    fn temp_path(label: &str) -> Utf8PathBuf {
         let arg0str = std::env::args().next().expect("expected process arg0");
-        let arg0 = Path::new(&arg0str)
+        let arg0 = Utf8Path::new(&arg0str)
             .file_name()
-            .expect("expected arg0 filename")
-            .to_str()
-            .expect("expected arg0 filename to be valid Unicode");
+            .expect("expected arg0 filename");
         let pid = std::process::id();
-        let mut pathbuf = std::env::temp_dir();
+        let mut pathbuf = Utf8PathBuf::try_from(std::env::temp_dir())
+            .expect("expected temp dir to be valid UTF-8");
         pathbuf.push(format!("{}.{}.{}", arg0, pid, label));
         pathbuf
     }
@@ -570,7 +563,7 @@ mod test {
     fn read_config(label: &str, contents: &str) -> Result<Config, LoadError> {
         let pathbuf = temp_path(label);
         let path = pathbuf.as_path();
-        eprintln!("writing test config {}", path.display());
+        eprintln!("writing test config {}", path);
         fs::write(path, contents).expect("write to tempfile failed");
 
         let result = Config::from_file(path);
@@ -583,7 +576,7 @@ mod test {
 
     #[test]
     fn test_config_nonexistent() {
-        let error = Config::from_file(Path::new("/nonexistent"))
+        let error = Config::from_file(Utf8Path::new("/nonexistent"))
             .expect_err("expected config to fail from /nonexistent");
         let expected = std::io::Error::from_raw_os_error(libc::ENOENT);
         assert_eq!(error, expected);
@@ -746,7 +739,7 @@ mod test {
                         address: Some("[::1]:8123".parse().unwrap())
                     },
                     updates: Some(UpdatesConfig {
-                        trusted_root: PathBuf::from("/path/to/root.json"),
+                        trusted_root: Utf8PathBuf::from("/path/to/root.json"),
                         default_base_url: "http://example.invalid/".into(),
                     }),
                     schema: None,

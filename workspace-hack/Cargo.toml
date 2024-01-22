@@ -27,12 +27,13 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.4.3", features = ["derive", "env", "wrap_help"] }
-clap_builder = { version = "4.4.2", default-features = false, features = ["color", "env", "std", "suggestions", "usage", "wrap_help"] }
-console = { version = "0.15.7" }
+clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.4.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+console = { version = "0.15.8" }
 const-oid = { version = "0.9.5", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.15" }
 crossbeam-utils = { version = "0.8.16" }
+crossterm = { version = "0.27.0", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 der = { version = "0.7.8", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 diesel = { version = "2.1.4", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
@@ -62,7 +63,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.151", features = ["extra_traits"] }
+libc = { version = "0.2.152", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.6.3" }
@@ -76,7 +77,7 @@ pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] 
 petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
-predicates = { version = "3.0.4" }
+predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.74" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
@@ -87,7 +88,7 @@ reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.17.7", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.21", features = ["serde"] }
-serde = { version = "1.0.194", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.195", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.111", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
@@ -130,12 +131,13 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.4.3", features = ["derive", "env", "wrap_help"] }
-clap_builder = { version = "4.4.2", default-features = false, features = ["color", "env", "std", "suggestions", "usage", "wrap_help"] }
-console = { version = "0.15.7" }
+clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.4.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+console = { version = "0.15.8" }
 const-oid = { version = "0.9.5", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.15" }
 crossbeam-utils = { version = "0.8.16" }
+crossterm = { version = "0.27.0", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 der = { version = "0.7.8", default-features = false, features = ["derive", "flagset", "oid", "pem", "std"] }
 diesel = { version = "2.1.4", features = ["chrono", "i-implement-a-third-party-backend-and-opt-into-breaking-changes", "network-address", "postgres", "r2d2", "serde_json", "uuid"] }
@@ -165,7 +167,7 @@ ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.4.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.151", features = ["extra_traits"] }
+libc = { version = "0.2.152", features = ["extra_traits"] }
 log = { version = "0.4.20", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.6.3" }
@@ -179,7 +181,7 @@ pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] 
 petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
-predicates = { version = "3.0.4" }
+predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.74" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
@@ -190,7 +192,7 @@ reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.17.7", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.21", features = ["serde"] }
-serde = { version = "1.0.194", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.195", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.111", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
@@ -222,67 +224,59 @@ zip = { version = "0.6.6", default-features = false, features = ["bzip2", "defla
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-hyper-rustls = { version = "0.24.2" }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-hyper-rustls = { version = "0.24.2" }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
-hyper-rustls = { version = "0.24.2" }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
-hyper-rustls = { version = "0.24.2" }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
-hyper-rustls = { version = "0.24.2" }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
-hyper-rustls = { version = "0.24.2" }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-unknown-illumos.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
-hyper-rustls = { version = "0.24.2" }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 toml_datetime = { version = "0.6.5", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
-hyper-rustls = { version = "0.24.2" }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 toml_datetime = { version = "0.6.5", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 

@@ -15,6 +15,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::net::Ipv6Addr;
 
+use crate::RequestAddressError;
+
 #[derive(
     Clone,
     Copy,
@@ -84,13 +86,25 @@ impl Ipv6Net {
     }
 
     /// Check if an address is a valid user-requestable address for this subnet
-    pub fn check_requestable_addr(&self, addr: Ipv6Addr) -> bool {
+    pub fn check_requestable_addr(
+        &self,
+        addr: Ipv6Addr,
+    ) -> Result<(), RequestAddressError> {
+        if !self.contains(addr) {
+            return Err(RequestAddressError::OutsideSubnet(
+                addr.into(),
+                self.0 .0.into(),
+            ));
+        }
         // Only the first N addresses are reserved
-        self.contains(addr)
-            && self
-                .iter()
-                .take(NUM_INITIAL_RESERVED_IP_ADDRESSES)
-                .all(|this| this != addr)
+        if self
+            .iter()
+            .take(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .any(|this| this == addr)
+        {
+            return Err(RequestAddressError::Reserved);
+        }
+        Ok(())
     }
 }
 

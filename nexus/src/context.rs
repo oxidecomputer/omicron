@@ -10,6 +10,7 @@ use authn::external::session_cookie::HttpAuthnSessionCookie;
 use authn::external::spoof::HttpAuthnSpoof;
 use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
+use camino::Utf8PathBuf;
 use chrono::Duration;
 use internal_dns::ServiceName;
 use nexus_db_queries::authn::external::session_cookie::SessionStore;
@@ -24,7 +25,6 @@ use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
 use std::env;
-use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -60,7 +60,7 @@ pub(crate) struct ConsoleConfig {
     /// how long a session can exist before expiring
     pub session_absolute_timeout: Duration,
     /// directory containing static file to serve
-    pub static_dir: Option<PathBuf>,
+    pub static_dir: Option<Utf8PathBuf>,
 }
 
 impl ServerContext {
@@ -119,14 +119,33 @@ impl ServerContext {
         let static_dir = if config.pkg.console.static_dir.is_absolute() {
             Some(config.pkg.console.static_dir.to_owned())
         } else {
-            env::current_dir()
-                .map(|root| root.join(&config.pkg.console.static_dir))
-                .ok()
+            match env::current_dir() {
+                Ok(root) => {
+                    match Utf8PathBuf::try_from(root) {
+                        Ok(root) => {
+                            Some(root.join(&config.pkg.console.static_dir))
+                        }
+                        Err(err) => {
+                            error!(log, "Failed to convert current directory to UTF-8, \
+                                         setting assets dir to None: {}", err);
+                            None
+                        }
+                    }
+                }
+                Err(error) => {
+                    error!(
+                        log,
+                        "Failed to get current directory, \
+                         setting assets dir to None: {}",
+                        error
+                    );
+                    None
+                }
+            }
         };
 
         // We don't want to fail outright yet, but we do want to try to make
-        // problems slightly easier to debug. The only way it's None is if
-        // current_dir() fails.
+        // problems slightly easier to debug.
         if static_dir.is_none() {
             error!(log, "No assets directory configured. All console page and asset requests will 404.");
         }

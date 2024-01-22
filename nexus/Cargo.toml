@@ -30,6 +30,7 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+illumos-utils.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
@@ -63,6 +64,7 @@ sled-agent-client.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
+slog-error-chain.workspace = true
 slog-term.workspace = true
 steno.workspace = true
 tempfile.workspace = true
@@ -76,6 +78,7 @@ uuid.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-deployment.workspace = true
 nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
@@ -84,10 +87,12 @@ oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
 rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
+camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true

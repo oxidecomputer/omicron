@@ -101,10 +101,10 @@ async fn test_physical_disk_create_list_delete(
     let sleds_url = "/v1/system/hardware/sleds";
     assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 1);
 
-    // Verify that there are no disks.
+    // The test framework may set up some disks initially.
     let disks_url =
         format!("/v1/system/hardware/sleds/{SLED_AGENT_UUID}/disks");
-    assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
+    let disks_initial = physical_disks_list(&external_client, &disks_url).await;
 
     // Insert a new disk using the internal API, observe it in the external API
     let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
@@ -118,14 +118,22 @@ async fn test_physical_disk_create_list_delete(
     )
     .await;
     let disks = physical_disks_list(&external_client, &disks_url).await;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].vendor, "v");
-    assert_eq!(disks[0].serial, "s");
-    assert_eq!(disks[0].model, "m");
+    assert_eq!(disks.len(), disks_initial.len() + 1);
+    let _new_disk = disks
+        .iter()
+        .find(|found_disk| {
+            found_disk.vendor == "v"
+                && found_disk.serial == "s"
+                && found_disk.model == "m"
+        })
+        .expect("did not find the new disk");
 
     // Delete that disk using the internal API, observe it in the external API
     delete_physical_disk(&internal_client, "v", "s", "m", sled_id).await;
-    assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
+    assert_eq!(
+        physical_disks_list(&external_client, &disks_url).await,
+        disks_initial
+    );
 }
 
 #[nexus_test]
