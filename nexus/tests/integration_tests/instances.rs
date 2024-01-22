@@ -3744,6 +3744,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool_name: Some("pool1".parse().unwrap()),
         }],
+        ssh_keys: None,
         disks: vec![],
         start: true,
     };
@@ -3808,6 +3809,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool_name: Some("orphan-pool".parse().unwrap()),
         }],
+        ssh_keys: None,
         disks: vec![],
         start: true,
     };
@@ -3868,6 +3870,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool_name: None, // <--- the only important thing here
         }],
+        ssh_keys: None,
         disks: vec![],
         start: true,
     };

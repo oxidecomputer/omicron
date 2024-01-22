@@ -335,7 +335,7 @@ impl super::Nexus {
                     .ssh_keys_batch_lookup(opctx, &authz_user, keys)
                     .await?
                     .iter()
-                    .map(|id| NameOrId::Id(id.clone()))
+                    .map(|id| NameOrId::Id(*id))
                     .collect::<Vec<NameOrId>>(),
             ),
             None => None,
