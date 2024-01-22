@@ -577,6 +577,61 @@ impl AuthorizedResource for Inventory {
     }
 }
 
+/// Synthetic resource used for modeling access to deployment configuration
+/// data (e.g., blueprints and policy)
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeploymentConfig;
+pub const DEPLOYMENT_CONFIG: DeploymentConfig = DeploymentConfig {};
+
+impl oso::PolarClass for DeploymentConfig {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        // Roles are not directly attached to DeploymentConfig
+        oso::Class::builder()
+            .with_equality_check()
+            .add_method(
+                "has_role",
+                |_: &DeploymentConfig,
+                 _actor: AuthenticatedActor,
+                 _role: String| { false },
+            )
+            .add_attribute_getter("fleet", |_| FLEET)
+    }
+}
+
+impl AuthorizedResource for DeploymentConfig {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
+
 /// Synthetic resource describing the list of Certificates associated with a
 /// Silo
 #[derive(Clone, Debug, Eq, PartialEq)]

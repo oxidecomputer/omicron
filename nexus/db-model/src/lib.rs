@@ -116,6 +116,7 @@ pub use console_session::*;
 pub use dataset::*;
 pub use dataset_kind::*;
 pub use db_metadata::*;
+pub use deployment::*;
 pub use device_auth::*;
 pub use digest::*;
 pub use disk::*;

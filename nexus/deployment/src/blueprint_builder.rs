@@ -9,6 +9,7 @@ use anyhow::anyhow;
 use internal_dns::config::Host;
 use internal_dns::config::ZoneVariant;
 use ipnet::IpAdd;
+use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
@@ -125,10 +126,10 @@ impl<'a> BlueprintBuilder<'a> {
             collection.all_omicron_zones().map(|z| z.id).collect();
         Ok(Blueprint {
             id: Uuid::new_v4(),
-            omicron_zones: omicron_zones,
+            omicron_zones,
             zones_in_service,
             parent_blueprint_id: None,
-            time_created: chrono::Utc::now(),
+            time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("from collection {}", collection.id),
         })
@@ -185,10 +186,10 @@ impl<'a> BlueprintBuilder<'a> {
             .collect();
         Blueprint {
             id: Uuid::new_v4(),
-            omicron_zones: omicron_zones,
+            omicron_zones,
             zones_in_service: self.zones_in_service,
             parent_blueprint_id: Some(self.parent_blueprint.id),
-            time_created: chrono::Utc::now(),
+            time_created: now_db_precision(),
             creator: self.creator,
             comment: self.comments.join(", "),
         }

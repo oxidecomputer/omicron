@@ -6,7 +6,7 @@
 //! database
 
 use crate::inventory::ZoneType;
-use crate::omicron_zone_config::{OmicronZoneNic, OmicronZone};
+use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
     blueprint, bp_omicron_zone, bp_omicron_zone_nic,
     bp_omicron_zones_not_in_service, bp_sled_omicron_zones,
@@ -27,6 +27,18 @@ pub struct Blueprint {
     pub comment: String,
 }
 
+impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
+    fn from(bp: &'_ nexus_types::deployment::Blueprint) -> Self {
+        Self {
+            id: bp.id,
+            parent_blueprint_id: bp.parent_blueprint_id,
+            time_created: bp.time_created,
+            creator: bp.creator.clone(),
+            comment: bp.comment.clone(),
+        }
+    }
+}
+
 /// See [`nexus_types::deployment::OmicronZonesConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_sled_omicron_zones)]
@@ -34,6 +46,20 @@ pub struct BpSledOmicronZones {
     pub blueprint_id: Uuid,
     pub sled_id: Uuid,
     pub generation: Generation,
+}
+
+impl BpSledOmicronZones {
+    pub fn new(
+        blueprint_id: Uuid,
+        sled_id: Uuid,
+        zones_config: &nexus_types::deployment::OmicronZonesConfig,
+    ) -> Self {
+        Self {
+            blueprint_id,
+            sled_id,
+            generation: Generation(zones_config.generation),
+        }
+    }
 }
 
 /// See [`nexus_types::deployment::OmicronZoneConfig`].
@@ -188,6 +214,6 @@ impl BpOmicronZoneNic {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_omicron_zones_not_in_service)]
 pub struct BpOmicronZoneNotInService {
-    blueprint_id: Uuid,
-    bp_omicron_zone_id: Uuid,
+    pub blueprint_id: Uuid,
+    pub bp_omicron_zone_id: Uuid,
 }
