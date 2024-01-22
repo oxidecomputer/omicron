@@ -117,14 +117,14 @@ setup_hint = """
 """
 
 [package.oximeter]
-service_name = "oximeter"
+service_name = "oximeter-composite"
 only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz" ]
 output.type = "zone"
 
 [package.oximeter-collector]
-service_name = "oximeter-collector"
+service_name = "oximeter"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
