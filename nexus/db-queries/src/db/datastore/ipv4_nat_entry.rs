@@ -20,6 +20,9 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::Vni;
 
 impl DataStore {
+    /// Currently used to ensure that a NAT entry exists for an Instance.
+    /// This SHOULD NOT be directly used to create service zone nat entries,
+    /// as they are updated via a background task.
     pub async fn ensure_ipv4_nat_entry(
         &self,
         opctx: &OpContext,
@@ -76,10 +79,12 @@ impl DataStore {
         Ok(())
     }
 
-    /// Method for synchronizing service zone nat.
+    /// Method for synchronizing service zone nat, called by `ServiceZoneNatTracker`
+    /// background task.
     /// Expects a complete set of service zone nat entries.
     /// Soft-deletes db entries that are not present in `nat_entries` parameter.
-    /// Creates missing entries idempotently
+    /// Creates missing entries idempotently.
+    ///
     /// returns the number of records added
     pub async fn ipv4_nat_sync_service_zones(
         &self,
