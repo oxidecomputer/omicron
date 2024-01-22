@@ -26,6 +26,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
@@ -122,7 +123,7 @@ impl DataStore {
         authz_user: &authz::SiloUser,
         instance_id: Uuid,
         keys: &Option<Vec<Uuid>>,
-    ) -> ListResultVec<SshKey> {
+    ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::ListChildren, authz_user).await?;
 
         let instance_ssh_keys: Vec<db::model::InstanceSshKey> = match keys {
@@ -148,7 +149,7 @@ impl DataStore {
                     .collect()
             }
             // If the keys are Some and empty, opt out of assigning any ssh keys
-            Some(vec) if vec.is_empty() => return Ok(vec![]),
+            Some(vec) if vec.is_empty() => return Ok(()),
             // If the keys are Some and not-empty, assign the given keys
             Some(vec) => vec
                 .iter()
@@ -167,7 +168,7 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(result)
+        Ok(())
     }
 
     pub async fn instance_ssh_keys_delete(
@@ -181,6 +182,7 @@ impl DataStore {
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        Ok(())
     }
 
     pub async fn ssh_keys_list(

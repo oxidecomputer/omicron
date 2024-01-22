@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::schema::instance_ssh_key;
 use crate::schema::ssh_key;
 use db_macros::Resource;
 use nexus_types::external_api::params;
@@ -48,7 +49,7 @@ impl From<SshKey> for views::SshKey {
     }
 }
 
-#[dervice(Clone, Debug, Insertable, Queryable, Selectable)]
+#[derive(Clone, Debug, Insertable, Queryable, Selectable)]
 #[diesel(table_name = instance_ssh_key)]
 pub struct InstanceSshKey {
     pub instance_id: Uuid,
