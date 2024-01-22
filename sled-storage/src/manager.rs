@@ -823,7 +823,7 @@ mod tests {
             manager.run().await;
         });
 
-        // Queue up a disks, as we haven't told the `StorageManager` that
+        // Queue up a disk, as we haven't told the `StorageManager` that
         // the `KeyManager` is ready yet.
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
@@ -861,7 +861,7 @@ mod tests {
         // Spawn the key_manager so that it will respond to requests for encryption keys
         tokio::spawn(async move { key_manager.run().await });
 
-        // Queue up a disks, as we haven't told the `StorageManager` that
+        // Queue up a disk, as we haven't told the `StorageManager` that
         // the `KeyManager` is ready yet.
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
