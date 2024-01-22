@@ -80,6 +80,8 @@ pub static DEMO_SILO_NAME: Lazy<Name> =
     Lazy::new(|| "demo-silo".parse().unwrap());
 pub static DEMO_SILO_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/silos/{}", *DEMO_SILO_NAME));
+pub static DEMO_SILO_IP_POOLS_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/ip-pools", *DEMO_SILO_URL));
 pub static DEMO_SILO_POLICY_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/silos/{}/policy", *DEMO_SILO_NAME));
 pub static DEMO_SILO_QUOTAS_URL: Lazy<String> =
@@ -627,8 +629,8 @@ pub static DEMO_IP_POOL_UPDATE: Lazy<params::IpPoolUpdate> =
     });
 pub static DEMO_IP_POOL_SILOS_URL: Lazy<String> =
     Lazy::new(|| format!("{}/silos", *DEMO_IP_POOL_URL));
-pub static DEMO_IP_POOL_SILOS_BODY: Lazy<params::IpPoolSiloLink> =
-    Lazy::new(|| params::IpPoolSiloLink {
+pub static DEMO_IP_POOL_SILOS_BODY: Lazy<params::IpPoolLinkSilo> =
+    Lazy::new(|| params::IpPoolLinkSilo {
         silo: NameOrId::Id(DEFAULT_SILO.identity().id),
         is_default: true, // necessary for demo instance create to go through
     });
@@ -1048,7 +1050,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         // IP Pool endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get
@@ -1058,7 +1060,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         // IP Pool ranges endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get
@@ -1068,7 +1070,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         // IP Pool ranges/add endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_ADD_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
@@ -1080,7 +1082,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         // IP Pool ranges/delete endpoint (Oxide services)
         VerifyEndpoint {
             url: &DEMO_IP_POOL_SERVICE_RANGES_DEL_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Post(
@@ -1108,6 +1110,14 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+            ],
+        },
+        VerifyEndpoint {
+            url: &DEMO_SILO_IP_POOLS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
         VerifyEndpoint {

@@ -859,6 +859,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use rand::{distributions::Standard, thread_rng, Rng};
     use sha2::{Digest, Sha256};
+    use tufaceous_lib::{CompositeEntry, MtimeSource};
 
     fn make_random_bytes() -> Vec<u8> {
         thread_rng().sample_iter(Standard).take(128).collect()
@@ -876,9 +877,21 @@ mod tests {
         let phase1 = make_random_bytes();
         let phase2 = make_random_bytes();
 
-        let mut builder = CompositeHostArchiveBuilder::new(Vec::new()).unwrap();
-        builder.append_phase_1(phase1.len(), phase1.as_slice()).unwrap();
-        builder.append_phase_2(phase2.len(), phase2.as_slice()).unwrap();
+        let mut builder =
+            CompositeHostArchiveBuilder::new(Vec::new(), MtimeSource::Zero)
+                .unwrap();
+        builder
+            .append_phase_1(CompositeEntry {
+                data: &phase1,
+                mtime_source: MtimeSource::Zero,
+            })
+            .unwrap();
+        builder
+            .append_phase_2(CompositeEntry {
+                data: &phase2,
+                mtime_source: MtimeSource::Zero,
+            })
+            .unwrap();
 
         let tarball = builder.finish().unwrap();
 
@@ -901,12 +914,20 @@ mod tests {
         let archive_a = make_random_bytes();
         let archive_b = make_random_bytes();
 
-        let mut builder = CompositeRotArchiveBuilder::new(Vec::new()).unwrap();
+        let mut builder =
+            CompositeRotArchiveBuilder::new(Vec::new(), MtimeSource::Zero)
+                .unwrap();
         builder
-            .append_archive_a(archive_a.len(), archive_a.as_slice())
+            .append_archive_a(CompositeEntry {
+                data: &archive_a,
+                mtime_source: MtimeSource::Zero,
+            })
             .unwrap();
         builder
-            .append_archive_b(archive_b.len(), archive_b.as_slice())
+            .append_archive_b(CompositeEntry {
+                data: &archive_b,
+                mtime_source: MtimeSource::Zero,
+            })
             .unwrap();
 
         let tarball = builder.finish().unwrap();

@@ -702,7 +702,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 dns_servers,
                 domain,
                 ntp_servers,
-                snat_cfg: snat_cfg.into(),
+                snat_cfg,
                 nic: nic.into(),
             },
             OmicronZoneType::Clickhouse { address, dataset } => {
