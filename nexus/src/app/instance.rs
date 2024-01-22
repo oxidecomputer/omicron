@@ -9,6 +9,7 @@ use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_MEMORY_BYTES_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
+use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
@@ -339,6 +340,14 @@ impl super::Nexus {
             ),
             None => None,
         };
+        if let Some(ssh_keys) = &ssh_keys {
+            if ssh_keys.len() > MAX_SSH_KEYS_PER_INSTANCE {
+                return Err(Error::invalid_request(format!(
+                    "cannot attach more than {} ssh keys to the instance",
+                    MAX_SSH_KEYS_PER_INSTANCE
+                )));
+            }
+        }
 
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
