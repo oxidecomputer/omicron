@@ -440,7 +440,13 @@ impl StorageManager {
                     Ok(AddDiskResult::DiskAlreadyInserted) => {
                         self.queued_u2_drives.remove(&raw_disk);
                     }
-                    Ok(AddDiskResult::DiskQueued) => (),
+                    Ok(AddDiskResult::DiskQueued) => {
+                        error!(
+                            self.log,
+                            "Disks cannot be queued by `StorageResources::insert`";
+                            "disk_id" => ?raw_disk.identity()
+                        );
+                    }
                 },
                 Err(err @ DiskError::Dataset(DatasetError::KeyManager(_))) => {
                     warn!(
