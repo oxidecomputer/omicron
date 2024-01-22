@@ -171,6 +171,25 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn instance_ssh_keys_list(
+        &self,
+        opctx: &OpContext,
+        instance_id: Uuid,
+    ) -> ListResultVec<SshKey> {
+        use db::schema::instance_ssh_key::dsl;
+        dsl::instance_ssh_key
+            .filter(dsl::instance_id.eq(instance_id))
+            .inner_join(
+                db::schema::ssh_key::table
+                    .on(dsl::ssh_key_id.eq(db::schema::ssh_key::dsl::id)),
+            )
+            .filter(db::schema::ssh_key::dsl::time_deleted.is_null())
+            .select(SshKey::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn instance_ssh_keys_delete(
         &self,
         opctx: &OpContext,

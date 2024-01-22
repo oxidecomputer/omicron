@@ -59,8 +59,6 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
 
-const MAX_KEYS_PER_INSTANCE: u32 = 8;
-
 type SledAgentClientError =
     sled_agent_client::Error<sled_agent_client::types::Error>;
 
@@ -1001,7 +999,6 @@ impl super::Nexus {
         initial_vmm: &db::model::Vmm,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        let params = sagactx.saga_params::<Params>()?;
 
         // Gather disk information and turn that into DiskRequests
         let disks = self
@@ -1132,35 +1129,14 @@ impl super::Nexus {
             vec![]
         };
 
-        // Gather the SSH public keys of the actor make the request so
-        // that they may be injected into the new image via cloud-init.
-        // TODO-security: this should be replaced with a lookup based on
-        // on `SiloUser` role assignments once those are in place.
-        let actor = opctx.authn.actor_required().internal_context(
-            "loading current user's ssh keys for new Instance",
-        )?;
-        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(actor.actor_id())
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-
         let ssh_keys = self
             .db_datastore
-            .ssh_keys_batch_fetch(opctx, &authz_user, params.ssh_keys)
+            .instance_ssh_keys_list(opctx, authz_instance.id())
             .await?
             .into_iter();
 
-        // Returning the intersection of a users ssh_keys and the
-        // keys that were included in the instance create API request
-        let ssh_keys: Vec<String> = ssh_keys
-            .filter(|ssh_key| {
-                let id_str = ssh_key.id().to_string();
-                let name_str = ssh_key.name().to_string();
-                checked_keys.contains(&id_str)
-                    || checked_keys.contains(&name_str)
-            })
-            .map(|ssh_key| ssh_key.public_key)
-            .collect();
+        let ssh_keys: Vec<String> =
+            ssh_keys.map(|ssh_key| ssh_key.public_key).collect();
 
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is

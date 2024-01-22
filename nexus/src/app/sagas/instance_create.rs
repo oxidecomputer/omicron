@@ -17,10 +17,10 @@ use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicEr
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::Deserialize;
 use serde::Serialize;
@@ -319,20 +319,48 @@ async fn sic_associate_ssh_keys(
     );
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
+    // Gather the SSH public keys of the actor make the request so
+    // that they may be injected into the new image via cloud-init.
+    // TODO-security: this should be replaced with a lookup based on
+    // on `SiloUser` role assignments once those are in place.
+    let actor = opctx
+        .authn
+        .actor_required()
+        .internal_context("loading current user's ssh keys for new Instance")
+        .map_err(ActionError::action_failed)?;
+
+    let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+        .silo_user_id(actor.actor_id())
+        .lookup_for(authz::Action::ListChildren)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     datastore
         .ssh_keys_batch_assign(
             &opctx,
-            authz_user,
+            &authz_user,
             instance_id,
-            &saga_params.create_params.ssh_keys,
+            &saga_params.create_params.ssh_keys.map(|k| {
+                // Before the instance_create saga is kicked off all entries
+                // in `ssh_keys` are validated and converted to `Uuids`.
+                k.iter()
+                    .filter_map(|n| match n {
+                        omicron_common::api::external::NameOrId::Id(id) => {
+                            Some(*id)
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            }),
         )
-        .await?;
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
 async fn sic_associate_ssh_keys_undo(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let saga_params = sagactx.saga_params::<Params>()?;
@@ -342,7 +370,10 @@ async fn sic_associate_ssh_keys_undo(
         &saga_params.serialized_authn,
     );
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
-    datastore.instance_ssh_keys_delete(&opctx, instance_id).await?;
+    datastore
+        .instance_ssh_keys_delete(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
