@@ -391,7 +391,7 @@ impl StorageManager {
     // and wait for the next retry window to re-call this method. If we hit a
     // permanent error we log it, but we continue inserting queued disks.
     //
-    // Return true if updates should be sent to watchers, false otherwise
+    // Return true if updates should be sent to watchers, false otherwise.
     async fn add_queued_disks(&mut self) -> bool {
         info!(
             self.log,
@@ -582,7 +582,7 @@ impl StorageManager {
         for raw_disk in raw_disks {
             let disk_id = raw_disk.identity().clone();
             match raw_disk.variant() {
-                DiskVariant::M2 => match self.add_disk(raw_disk).await {
+                DiskVariant::M2 => match self.add_m2_disk(raw_disk).await {
                     Ok(AddDiskResult::DiskInserted) => should_update = true,
                     Ok(_) => (),
                     Err(err) => {
@@ -600,7 +600,7 @@ impl StorageManager {
         }
 
         // Add the newly queued U.2 drives unless we are not ready. If we are
-        // not ready, the storage manager will try again later.
+        // not ready the storage manager will try again later.
         if self.state == StorageManagerState::Normal {
             should_update = should_update | self.add_queued_disks().await;
         }
