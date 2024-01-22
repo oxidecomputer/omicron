@@ -574,19 +574,35 @@ impl StorageManager {
             }
         }
 
+        // We want to add all U.2 disks concurrently rather than sequentially.
+        // Instead of directly calling `self.add_disk` in a loop or duplicating
+        // the logic in `add_queued_disks`, we queue up all the U.2 disks to
+        // add and then call `add_queued_disks` directly if the storage key
+        // manager is ready.
         for raw_disk in raw_disks {
             let disk_id = raw_disk.identity().clone();
-            match self.add_disk(raw_disk).await {
-                Ok(AddDiskResult::DiskInserted) => should_update = true,
-                Ok(_) => (),
-                Err(err) => {
-                    warn!(
-                        self.log,
-                        "Failed to add disk to storage resources: {err}";
-                        "disk_id" => ?disk_id
-                    );
+            match raw_disk.variant() {
+                DiskVariant::M2 => match self.add_disk(raw_disk).await {
+                    Ok(AddDiskResult::DiskInserted) => should_update = true,
+                    Ok(_) => (),
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "Failed to add disk to storage resources: {err}";
+                            "disk_id" => ?disk_id
+                        );
+                    }
+                },
+                DiskVariant::U2 => {
+                    let _ = self.queued_u2_drives.insert(raw_disk);
                 }
             }
+        }
+
+        // Add the newly queued U.2 drives unless we are not ready. If we are
+        // not ready, the storage manager will try again later.
+        if self.state == StorageManagerState::Normal {
+            should_update = should_update | self.add_queued_disks().await;
         }
 
         should_update
