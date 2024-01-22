@@ -18,9 +18,11 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [features]
-default = ["http-instruments", "kstat"]
+default = ["http-instruments", "datalink", "virtual-machine"]
 http-instruments = ["http"]
-kstat = ["kstat-rs"]
+datalink = ["dep:kstat-rs"]
+virtual-machine = ["dep:kstat-rs"]
+
 
 [dev-dependencies]
 rand.workspace = true

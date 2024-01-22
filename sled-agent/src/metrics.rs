@@ -217,6 +217,7 @@ impl MetricsManager {
         &self,
         instance_id: &Uuid,
         metadata: &InstanceMetadata,
+        _n_vcpus: u32,
         interval: Duration,
     ) -> Result<(), Error> {
         let vm = virtual_machine::VirtualMachine {
@@ -303,6 +304,7 @@ impl MetricsManager {
         &self,
         _instance_id: &Uuid,
         _metadata: &InstanceMetadata,
+        _n_vcpus: u32,
         _interval: Duration,
     ) -> Result<(), Error> {
         Err(Error::Kstat(anyhow!(

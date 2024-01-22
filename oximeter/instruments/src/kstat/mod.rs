@@ -87,8 +87,10 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::time::Duration;
 
+#[cfg(feature = "datalink")]
 pub mod link;
 mod sampler;
+#[cfg(feature = "virtual-machine")]
 pub mod virtual_machine;
 
 pub use sampler::CollectionDetails;

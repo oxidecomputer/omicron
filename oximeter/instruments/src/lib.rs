@@ -9,5 +9,8 @@
 #[cfg(feature = "http-instruments")]
 pub mod http;
 
-#[cfg(all(feature = "kstat", target_os = "illumos"))]
+#[cfg(all(
+    any(feature = "link", feature = "virtual-machine"),
+    target_os = "illumos"
+))]
 pub mod kstat;

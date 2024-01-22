@@ -9,7 +9,6 @@ use crate::common::instance::{
     PublishedVmmState,
 };
 use crate::instance_manager::{InstanceManagerServices, InstanceTicket};
-use crate::metrics::Error as MetricsError;
 use crate::metrics::MetricsManager;
 use crate::metrics::INSTANCE_SAMPLE_INTERVAL;
 use crate::nexus::NexusClientWithResolver;
@@ -111,9 +110,6 @@ pub enum Error {
 
     #[error("I/O error")]
     Io(#[from] std::io::Error),
-
-    #[error("Failed to track instance metrics")]
-    Metrics(#[source] MetricsError),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -239,7 +235,7 @@ struct InstanceInner {
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
 
-    // Object used to start / stop collection of instance-related metrics.
+    // Data used to start / stop collection of instance-related metrics.
     metrics_manager: MetricsManager,
 
     // Object representing membership in the "instance manager".
@@ -394,14 +390,35 @@ impl InstanceInner {
                 Ok(Reaction::Terminate)
             }
             None => {
-                self.metrics_manager
+                // TODO-robustness: If we fail to register the actual kstats for
+                // this instance, we should produce missing samples, rather than
+                // nothing at all.
+                //
+                // See https://github.com/oxidecomputer/omicron/issues/4863.
+                //
+                // TODO(ben) -- need to do this once, or ignore duplicate target
+                // error, not every time we get a state update from propolis.
+                //
+                // TODO(ben) -- need to take number of vcpus. It looks like
+                // Propolis and the kernel hypervisor currently creates a kstat
+                // for all _possible_ vcpus, even those that don't exist?
+                if let Err(e) = self
+                    .metrics_manager
                     .track_instance(
                         &self.id(),
                         &self.metadata,
+                        self.properties.vcpus.into(),
                         INSTANCE_SAMPLE_INTERVAL,
                     )
                     .await
-                    .map_err(Error::Metrics)?;
+                {
+                    error!(
+                        self.log,
+                        "failed to track instance metrics, \
+                        no samples will be produced";
+                        "error" => ?e,
+                    );
+                }
                 Ok(Reaction::Continue)
             }
         }
