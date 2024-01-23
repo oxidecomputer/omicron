@@ -17,6 +17,7 @@ use crate::db::error::TransactionError;
 use crate::db::fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};
 use crate::db::identity::Resource;
 use crate::db::model::CollectionTypeProvisioned;
+use crate::db::model::IpPoolResourceType;
 use crate::db::model::Name;
 use crate::db::model::Silo;
 use crate::db::model::VirtualProvisioningCollection;
@@ -546,6 +547,23 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         debug!(opctx.log, "deleted {} silo IdPs for silo {}", updated_rows, id);
+
+        // delete IP pool links (not IP pools, just the links)
+        use db::schema::ip_pool_resource;
+
+        let updated_rows = diesel::delete(ip_pool_resource::table)
+            .filter(ip_pool_resource::resource_id.eq(id))
+            .filter(
+                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
+            )
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        debug!(
+            opctx.log,
+            "deleted {} IP pool links for silo {}", updated_rows, id
+        );
 
         Ok(())
     }
