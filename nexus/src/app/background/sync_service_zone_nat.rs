@@ -27,7 +27,7 @@ const MIN_NTP_COUNT: usize = 1;
 
 // Minumum number of nexus zones that should be present in a valid
 // set of service zone nat configurations.
-const MIN_NEXUS_COUNT: usize = 3;
+const MIN_NEXUS_COUNT: usize = 1;
 
 // Minumum number of external DNS zones that should be present in a valid
 // set of service zone nat configurations.
