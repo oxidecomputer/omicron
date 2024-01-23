@@ -945,6 +945,11 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query! {
+    zpool,
+    physical_disk
+}
+
 table! {
     dataset (id) {
         id -> Uuid,

@@ -40,6 +40,7 @@ use sqlparser::ast::BinaryOperator;
 use sqlparser::ast::Cte;
 use sqlparser::ast::Distinct;
 use sqlparser::ast::Expr;
+use sqlparser::ast::GroupByExpr;
 use sqlparser::ast::Ident;
 use sqlparser::ast::Join;
 use sqlparser::ast::JoinConstraint;
@@ -554,7 +555,7 @@ impl RestrictedQuery {
             from: vec![cte_from],
             lateral_views: vec![],
             selection: None,
-            group_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],
@@ -601,9 +602,11 @@ impl RestrictedQuery {
             body: Box::new(SetExpr::Select(Box::new(select))),
             order_by: vec![],
             limit: None,
+            limit_by: vec![],
             offset: None,
             fetch: None,
             locks: vec![],
+            for_clause: None,
         })
     }
 
@@ -633,6 +636,8 @@ impl RestrictedQuery {
                 alias: None,
                 args: None,
                 with_hints: vec![],
+                version: None,
+                partitions: vec![],
             },
             joins: vec![],
         };
@@ -678,7 +683,7 @@ impl RestrictedQuery {
             from: vec![from],
             lateral_views: vec![],
             selection,
-            group_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],
@@ -714,6 +719,8 @@ impl RestrictedQuery {
                 alias: None,
                 args: None,
                 with_hints: vec![],
+                version: None,
+                partitions: vec![],
             },
             joins: vec![],
         };
@@ -746,7 +753,7 @@ impl RestrictedQuery {
             from: vec![from],
             lateral_views: vec![],
             selection,
-            group_by: vec![],
+            group_by: GroupByExpr::Expressions(vec![]),
             cluster_by: vec![],
             distribute_by: vec![],
             sort_by: vec![],

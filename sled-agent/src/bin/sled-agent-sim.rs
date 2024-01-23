@@ -122,6 +122,7 @@ async fn do_run() -> Result<(), CmdError> {
             args.sim_mode,
             Some(args.nexus_addr),
             Some(tmp.path()),
+            None,
         )
     };
 

@@ -199,6 +199,24 @@ pub enum Error {
     #[error("Failed to get address: {0}")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
+    #[error(
+        "Failed to launch zone {zone} because ZFS value cannot be accessed"
+    )]
+    GetZfsValue {
+        zone: String,
+        #[source]
+        source: illumos_utils::zfs::GetValueError,
+    },
+
+    #[error("Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})")]
+    DatasetNotReady {
+        zone: String,
+        dataset: String,
+        prop_name: String,
+        prop_value: String,
+        prop_value_expected: String,
+    },
+
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
 
@@ -1474,7 +1492,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(zone_config) => zone_config
                 .zone
                 .dataset_name()
-                .map(|n| zone::Dataset { name: n.full() })
+                .map(|n| zone::Dataset { name: n.full_name() })
                 .into_iter()
                 .collect(),
             ZoneArgs::Switch(_) => vec![],
@@ -1711,7 +1729,7 @@ impl ServiceManager {
                     dataset.pool_name.clone(),
                     DatasetKind::Crucible,
                 )
-                .full();
+                .full_name();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
@@ -2887,12 +2905,9 @@ impl ServiceManager {
         }
 
         // Create zones that should be running
-        let all_u2_roots = self
-            .inner
-            .storage
-            .get_latest_resources()
-            .await
-            .all_u2_mountpoints(ZONE_DATASET);
+        let storage = self.inner.storage.get_latest_resources().await;
+        let all_u2_pools = storage.all_u2_zpools();
+
         let mut new_zones = Vec::new();
         for zone in zones_to_be_added {
             // Check if we think the zone should already be running
@@ -2926,17 +2941,70 @@ impl ServiceManager {
                 }
             }
 
-            // For each new zone request, we pick an arbitrary U.2 to store
-            // the zone filesystem. Note: This isn't known to Nexus right now,
-            // so it's a local-to-sled decision.
+            // For each new zone request, we pick a U.2 to store the zone
+            // filesystem. Note: This isn't known to Nexus right now, so it's a
+            // local-to-sled decision.
             //
-            // This is (currently) intentional, as the zone filesystem should
-            // be destroyed between reboots.
-            let mut rng = rand::thread_rng();
-            let root = all_u2_roots
-                .choose(&mut rng)
-                .ok_or_else(|| Error::U2NotFound)?
-                .clone();
+            // Currently, the zone filesystem should be destroyed between
+            // reboots, so it's fine to make this decision locally.
+            let root = if let Some(dataset) = zone.dataset_name() {
+                // Check that the dataset is actually ready to be used.
+                let [zoned, canmount, encryption] =
+                    illumos_utils::zfs::Zfs::get_values(
+                        &dataset.full_name(),
+                        &["zoned", "canmount", "encryption"],
+                    )
+                    .map_err(|err| Error::GetZfsValue {
+                        zone: zone.zone_name(),
+                        source: err,
+                    })?;
+
+                let check_property = |name, actual, expected| {
+                    if actual != expected {
+                        return Err(Error::DatasetNotReady {
+                            zone: zone.zone_name(),
+                            dataset: dataset.full_name(),
+                            prop_name: String::from(name),
+                            prop_value: actual,
+                            prop_value_expected: String::from(expected),
+                        });
+                    }
+                    return Ok(());
+                };
+                check_property("zoned", zoned, "on")?;
+                check_property("canmount", canmount, "on")?;
+                if dataset.dataset().dataset_should_be_encrypted() {
+                    check_property("encryption", encryption, "aes-256-gcm")?;
+                }
+
+                // If the zone happens to already manage a dataset, then
+                // we co-locate the zone dataset on the same zpool.
+                //
+                // This slightly reduces the underlying fault domain for the
+                // service.
+                let data_pool = dataset.pool();
+                if !all_u2_pools.contains(&data_pool) {
+                    warn!(
+                        log,
+                        "zone dataset requested on a zpool which doesn't exist";
+                        "zone" => &name,
+                        "zpool" => %data_pool
+                    );
+                    return Err(Error::MissingDevice {
+                        device: format!("zpool: {data_pool}"),
+                    });
+                }
+                data_pool.dataset_mountpoint(ZONE_DATASET)
+            } else {
+                // If the zone it not coupled to other datsets, we pick one
+                // arbitrarily.
+                let mut rng = rand::thread_rng();
+                all_u2_pools
+                    .choose(&mut rng)
+                    .map(|pool| pool.dataset_mountpoint(ZONE_DATASET))
+                    .ok_or_else(|| Error::U2NotFound)?
+                    .clone()
+            };
 
             new_zones.push(OmicronZoneConfigLocal { zone: zone.clone(), root });
         }

@@ -40,8 +40,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
@@ -53,7 +53,6 @@ use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
-use sled_agent_client::types::SourceNatConfig;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -1119,7 +1118,7 @@ impl super::Nexus {
         // matter which one we use because all NICs must be in the
         // same VPC; see the check in project_create_instance.)
         let firewall_rules = if let Some(nic) = nics.first() {
-            let vni = Vni::try_from(nic.vni.0)?;
+            let vni = nic.vni;
             let vpc = self
                 .db_datastore
                 .resolve_vni_to_vpc(opctx, db::model::Vni(vni))

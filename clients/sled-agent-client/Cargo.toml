@@ -15,6 +15,5 @@ reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
-sled-storage.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
