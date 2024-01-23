@@ -224,38 +224,21 @@ impl DataStore {
         use db::schema::ip_pool_resource;
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         // Verify there are no IP ranges still in this pool
         let range = ip_pool_range::dsl::ip_pool_range
             .filter(ip_pool_range::dsl::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::dsl::time_deleted.is_null())
             .select(ip_pool_range::dsl::id)
             .limit(1)
-            .first_async::<Uuid>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .first_async::<Uuid>(&*conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if range.is_some() {
             return Err(Error::invalid_request(
                 "IP Pool cannot be deleted while it contains IP ranges",
-            ));
-        }
-
-        // Verify there are no linked silos
-        let silo_link = ip_pool_resource::table
-            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
-            .select(ip_pool_resource::resource_id)
-            .limit(1)
-            .first_async::<Uuid>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        if silo_link.is_some() {
-            return Err(Error::invalid_request(
-                "IP Pool cannot be deleted while it is linked to a silo",
             ));
         }
 
@@ -268,7 +251,7 @@ impl DataStore {
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -282,6 +265,18 @@ impl DataStore {
                 "deletion failed due to concurrent modification",
             ));
         }
+
+        // Rather than treating outstanding links as a blocker for pool delete,
+        // just delete them. If we've gotten this far, we know there are no
+        // ranges in the pool, which means it can't be in use.
+
+        // delete any links from this pool to any other resources (silos)
+        diesel::delete(ip_pool_resource::table)
+            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
