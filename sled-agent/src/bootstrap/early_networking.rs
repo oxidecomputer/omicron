@@ -6,21 +6,24 @@
 
 use anyhow::{anyhow, Context};
 use bootstore::schemes::v0 as bootstore;
-use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use dpd_client::types::{Ipv6Entry, RouteSettingsV6};
+use ddm_admin_client::DdmError;
+use dpd_client::types::Ipv6Entry;
 use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
+    LinkCreate, LinkId, LinkSettings, PortId, PortSettings,
 };
 use dpd_client::Client as DpdClient;
 use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
-use ipnetwork::{IpNetwork, Ipv6Network};
-use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, Prefix4};
+use ipnetwork::Ipv6Network;
+use mg_admin_client::types::{
+    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, Prefix4, StaticRoute4,
+    StaticRoute4List,
+};
 use mg_admin_client::Client as MgdClient;
-use omicron_common::address::{Ipv6Subnet, MGD_PORT, MGS_PORT};
-use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
+use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::api::internal::shared::{
     BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
     RackNetworkConfigV1, SwitchLocation, UplinkConfig,
@@ -453,13 +456,6 @@ impl<'a> EarlyNetworkSetup<'a> {
                     "unable to apply uplink port configuration: {e}"
                 ))
             })?;
-
-            info!(self.log, "advertising boundary services loopback address");
-
-            let ddmd_addr =
-                SocketAddrV6::new(switch_zone_underlay_ip, DDMD_PORT, 0, 0);
-            let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
-            ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
         }
 
         let mgd = MgdClient::new(
@@ -548,6 +544,32 @@ impl<'a> EarlyNetworkSetup<'a> {
             }
         }
 
+        // Iterate through ports and apply static routing config.
+        let mut rq = AddStaticRoute4Request {
+            routes: StaticRoute4List { list: Vec::new() },
+        };
+        for port in &our_ports {
+            for r in &port.routes {
+                let nexthop = match r.nexthop {
+                    IpAddr::V4(v4) => v4,
+                    IpAddr::V6(_) => continue,
+                };
+                let prefix = match r.destination.ip() {
+                    IpAddr::V4(v4) => {
+                        Prefix4 { value: v4, length: r.destination.prefix() }
+                    }
+                    IpAddr::V6(_) => continue,
+                };
+                let sr = StaticRoute4 { nexthop, prefix };
+                rq.routes.list.push(sr);
+            }
+        }
+        mgd.inner.static_add_v4_route(&rq).await.map_err(|e| {
+            EarlyNetworkSetupError::BgpConfigurationError(format!(
+                "static routing configuration failed: {e}",
+            ))
+        })?;
+
         Ok(our_ports)
     }
 
@@ -599,25 +621,6 @@ impl<'a> EarlyNetworkSetup<'a> {
                 e
             ))
         })?;
-
-        for r in &port_config.routes {
-            if let (IpNetwork::V4(dst), IpAddr::V4(nexthop)) =
-                (r.destination, r.nexthop)
-            {
-                dpd_port_settings.v4_routes.insert(
-                    dst.to_string(),
-                    vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
-                );
-            }
-            if let (IpNetwork::V6(dst), IpAddr::V6(nexthop)) =
-                (r.destination, r.nexthop)
-            {
-                dpd_port_settings.v6_routes.insert(
-                    dst.to_string(),
-                    vec![RouteSettingsV6 { link_id: link_id.0, nexthop }],
-                );
-            }
-        }
 
         Ok((ipv6_entry, dpd_port_settings, port_id))
     }

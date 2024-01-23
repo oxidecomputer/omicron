@@ -4,7 +4,6 @@
 
 //! Manager for all OPTE ports on a Helios system
 
-use crate::opte::default_boundary_services;
 use crate::opte::opte_firewall_rules;
 use crate::opte::params::DeleteVirtualNetworkInterfaceHost;
 use crate::opte::params::SetVirtualNetworkInterfaceHost;
@@ -110,7 +109,6 @@ impl PortManager {
         let subnet = IpNetwork::from(nic.subnet);
         let vpc_subnet = IpCidr::from(subnet);
         let gateway = Gateway::from_subnet(&subnet);
-        let boundary_services = default_boundary_services();
 
         // Describe the external IP addresses for this port.
         macro_rules! ip_cfg {
@@ -219,7 +217,6 @@ impl PortManager {
             gateway_mac: MacAddr::from(gateway.mac.into_array()),
             vni,
             phys_ip: self.inner.underlay_ip.into(),
-            boundary_services,
         };
 
         // Create the xde device.
