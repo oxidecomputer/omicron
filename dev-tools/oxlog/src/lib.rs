@@ -7,15 +7,14 @@
 //! All data is based off of reading the filesystem
 
 use anyhow::Context;
-use camino::Utf8PathBuf;
+use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use std::collections::BTreeMap;
-use std::fs::{read_dir, DirEntry};
 use std::io;
 use uuid::Uuid;
 
 /// Return a UUID if the `DirEntry` contains a directory that parses into a UUID.
-fn get_uuid_dir(result: io::Result<DirEntry>) -> Option<Uuid> {
+fn get_uuid_dir(result: io::Result<Utf8DirEntry>) -> Option<Uuid> {
     let Ok(entry) = result else {
         return None;
     };
@@ -26,10 +25,7 @@ fn get_uuid_dir(result: io::Result<DirEntry>) -> Option<Uuid> {
         return None;
     }
     let file_name = entry.file_name();
-    let Some(s) = file_name.to_str() else {
-        return None;
-    };
-    if let Ok(uuid) = s.parse() {
+    if let Ok(uuid) = file_name.parse() {
         Some(uuid)
     } else {
         None
@@ -44,11 +40,13 @@ pub struct Pools {
 
 impl Pools {
     pub fn read() -> anyhow::Result<Pools> {
-        let internal = read_dir("/pool/int/")
+        let internal = Utf8Path::new("/pool/int/")
+            .read_dir_utf8()
             .context("Failed to read /pool/int")?
             .filter_map(get_uuid_dir)
             .collect();
-        let external = read_dir("/pool/ext/")
+        let external = Utf8Path::new("/pool/ext/")
+            .read_dir_utf8()
             .context("Failed to read /pool/ext")?
             .filter_map(get_uuid_dir)
             .collect();
@@ -89,7 +87,7 @@ pub struct LogFile {
 }
 
 impl LogFile {
-    pub fn read_metadata(&mut self, entry: DirEntry) {
+    pub fn read_metadata(&mut self, entry: &Utf8DirEntry) {
         if let Ok(metadata) = entry.metadata() {
             self.size = Some(metadata.len());
             if let Ok(modified) = metadata.modified() {
@@ -196,7 +194,7 @@ impl Zones {
             let zones_path: Utf8PathBuf =
                 ["/pool/ext", &uuid.to_string(), "crypt/zone"].iter().collect();
             // Find the zones on the given pool
-            let Ok(entries) = read_dir(zones_path.as_path()) else {
+            let Ok(entries) = zones_path.read_dir_utf8() else {
                 continue;
             };
             for entry in entries {
@@ -204,10 +202,7 @@ impl Zones {
                     continue;
                 };
                 let zone = zone_entry.file_name();
-                let Some(zone) = zone.to_str() else {
-                    // not utf8
-                    continue;
-                };
+
                 // Add the path to the current logs for the zone
                 let mut dir = zones_path.clone();
                 dir.push(zone);
@@ -234,7 +229,7 @@ impl Zones {
                     .iter()
                     .collect();
             // Find the zones on the given pool
-            let Ok(entries) = read_dir(zones_path.as_path()) else {
+            let Ok(entries) = zones_path.read_dir_utf8() else {
                 continue;
             };
             for entry in entries {
@@ -242,10 +237,6 @@ impl Zones {
                     continue;
                 };
                 let zone = zone_entry.file_name();
-                let Some(zone) = zone.to_str() else {
-                    // not utf8
-                    continue;
-                };
                 let mut dir = zones_path.clone();
                 dir.push(zone);
 
@@ -330,7 +321,7 @@ pub fn oxide_smf_service_name_from_log_file_name(
 // Given a directory, find all oxide specific SMF service logs and return them
 // mapped to their inferred service name.
 fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
-    let Ok(entries) = read_dir(dir.as_path()) else {
+    let Ok(entries) = dir.read_dir_utf8() else {
         return;
     };
     for entry in entries {
@@ -338,9 +329,6 @@ fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
             continue;
         };
         let filename = entry.file_name();
-        let Some(filename) = filename.to_str() else {
-            continue;
-        };
 
         // Is this a log file we care about?
         if is_oxide_smf_log_file(filename) {
@@ -355,7 +343,7 @@ fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
                 continue;
             };
 
-            logfile.read_metadata(entry);
+            logfile.read_metadata(&entry);
             if logfile.size == Some(0) {
                 // skip 0 size files
                 continue;
@@ -382,7 +370,7 @@ fn load_extra_logs(
     svc_name: &str,
     logs: &mut BTreeMap<ServiceName, SvcLogs>,
 ) {
-    let Ok(entries) = read_dir(dir.as_path()) else {
+    let Ok(entries) = dir.read_dir_utf8() else {
         return;
     };
 
@@ -394,13 +382,10 @@ fn load_extra_logs(
             continue;
         };
         let filename = entry.file_name();
-        let Some(filename) = filename.to_str() else {
-            continue;
-        };
         let mut path = dir.clone();
         path.push(filename);
         let mut logfile = LogFile::new(path);
-        logfile.read_metadata(entry);
+        logfile.read_metadata(&entry);
         if logfile.size == Some(0) {
             // skip 0 size files
             continue;
