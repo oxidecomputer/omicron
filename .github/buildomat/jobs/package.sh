@@ -117,7 +117,7 @@ zones=(
   out/internal-dns.tar.gz
   out/omicron-nexus.tar.gz
   out/omicron-nexus-single-sled.tar.gz
-  out/oximeter-composite.tar.gz
+  out/oximeter.tar.gz
   out/propolis-server.tar.gz
   out/switch-*.tar.gz
   out/ntp.tar.gz
