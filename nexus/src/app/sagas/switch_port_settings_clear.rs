@@ -179,7 +179,7 @@ async fn spa_undo_clear_switch_port_settings(
     let log = sagactx.user_data().log();
 
     let port_id: PortId = PortId::from_str(&params.port_name)
-        .map_err(|e| external::Error::internal_error(e))?;
+        .map_err(|e| external::Error::internal_error(e.to_string().as_str()))?;
 
     let orig_port_settings_id = sagactx
         .lookup::<Option<Uuid>>("original_switch_port_settings_id")

@@ -523,6 +523,7 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
             // our version constraints (i.e. that the call was to a newer
             // service with an incompatible response).
             progenitor::progenitor_client::Error::InvalidResponsePayload(
+                _bytes,
                 ee,
             ) => Error::internal_error(&format!(
                 "InvalidResponsePayload: {}",
@@ -538,6 +539,12 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
                     "UnexpectedResponse: status code {}",
                     r.status(),
                 ))
+            }
+            progenitor::progenitor_client::Error::InvalidUpgrade(e) => {
+                Error::internal_error(&format!("InvalidUpgrade: {e}",))
+            }
+            progenitor::progenitor_client::Error::ResponseBodyError(_) => {
+                Error::internal_error(&format!("ResponseBodyError: {e}",))
             }
         }
     }
