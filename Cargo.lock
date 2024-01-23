@@ -2740,6 +2740,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hash32"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2791,9 +2800,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db04bc24a18b9ea980628ecf00e6c0264f3c1426dac36c00cb49b6fbad8b0743"
 dependencies = [
  "atomic-polyfill",
- "hash32",
+ "hash32 0.2.1",
  "rustc_version 0.4.0",
  "spin 0.9.8",
+ "stable_deref_trait",
+]
+
+[[package]]
+name = "heapless"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
+dependencies = [
+ "hash32 0.3.1",
  "stable_deref_trait",
 ]
 
@@ -3174,7 +3193,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 
 [[package]]
 name = "illumos-utils"
@@ -3582,7 +3601,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "quote",
  "syn 2.0.46",
@@ -5323,7 +5342,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "cfg-if",
  "dyn-clone",
@@ -5332,26 +5351,26 @@ dependencies = [
  "opte-api",
  "postcard",
  "serde",
- "smoltcp 0.10.0",
+ "smoltcp 0.11.0",
  "version_check",
 ]
 
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
  "postcard",
  "serde",
- "smoltcp 0.10.0",
+ "smoltcp 0.11.0",
 ]
 
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "libc",
  "libnet",
@@ -5425,12 +5444,12 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "illumos-sys-hdrs",
  "opte",
  "serde",
- "smoltcp 0.10.0",
+ "smoltcp 0.11.0",
  "zerocopy 0.7.31",
 ]
 
@@ -8019,21 +8038,21 @@ dependencies = [
  "bitflags 1.3.2",
  "byteorder",
  "cfg-if",
- "heapless",
+ "heapless 0.7.16",
  "managed",
 ]
 
 [[package]]
 name = "smoltcp"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d2e3a36ac8fea7b94e666dfa3871063d6e0a5c9d5d4fec9a1a6b7b6760f0229"
+checksum = "5a1a996951e50b5971a2c8c0fa05a381480d70a933064245c4a223ddc87ccc97"
 dependencies = [
  "bitflags 1.3.2",
  "byteorder",
  "cfg-if",
  "defmt",
- "heapless",
+ "heapless 0.8.0",
  "managed",
 ]
 
