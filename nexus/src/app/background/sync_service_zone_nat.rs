@@ -21,6 +21,18 @@ use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+// Minumum number of boundary NTP zones that should be present in a valid
+// set of service zone nat configurations.
+const MIN_NTP_COUNT: usize = 2;
+
+// Minumum number of nexus zones that should be present in a valid
+// set of service zone nat configurations.
+const MIN_NEXUS_COUNT: usize = 3;
+
+// Minumum number of external DNS zones that should be present in a valid
+// set of service zone nat configurations.
+const MIN_EXTERNAL_DNS_COUNT: usize = 1;
+
 /// Background task that ensures service zones have nat entries
 /// persisted in the NAT RPW table
 pub struct ServiceZoneNatTracker {
@@ -93,6 +105,9 @@ impl BackgroundTask for ServiceZoneNatTracker {
             };
 
             let mut ipv4_nat_values: Vec<Ipv4NatValues> = vec![];
+            let mut ntp_count = 0;
+            let mut nexus_count = 0;
+            let mut dns_count = 0;
 
             for (sled_id, zones_found) in collection.omicron_zones {
                 let (_, sled) = match LookupPath::new(opctx, &self.datastore)
@@ -121,6 +136,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
                     zones_found.zones;
                 let zones: Vec<sled_agent_client::types::OmicronZoneConfig> =
                     zones_config.zones;
+
                 for zone in zones {
                     let zone_type: OmicronZoneType = zone.zone_type;
                     match zone_type {
@@ -157,6 +173,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                             // Append ipv4 nat entry
                             ipv4_nat_values.push(nat_value);
+                            ntp_count += 1;
                         }
                         OmicronZoneType::Nexus { nic, external_ip, .. } => {
                             let external_ip = match external_ip {
@@ -189,6 +206,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                             // Append ipv4 nat entry
                             ipv4_nat_values.push(nat_value);
+                            nexus_count += 1;
                         },
                         OmicronZoneType::ExternalDns { nic, dns_address, .. } => {
                             let socket_addr: SocketAddr = match dns_address.parse() {
@@ -235,6 +253,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                             // Append ipv4 nat entry
                             ipv4_nat_values.push(nat_value);
+                            dns_count += 1;
                         },
                         // we explictly list all cases instead of using a wildcard,
                         // that way if someone adds a new type to OmicronZoneType that
@@ -262,6 +281,38 @@ impl BackgroundTask for ServiceZoneNatTracker {
                 );
                 return json!({
                     "error": "nexus is running but no service zone nat values could be generated from inventory"
+                });
+            }
+
+            if dns_count < MIN_EXTERNAL_DNS_COUNT {
+                error!(
+                    &log,
+                    "generated config for fewer than the minimum allowed number of dns zones";
+                );
+                return json!({
+                    "error": "generated config for fewer than the minimum allowed number of dns zones"
+                });
+            }
+
+            if ntp_count < MIN_NTP_COUNT {
+                error!(
+                    &log,
+                    "generated config for fewer than the minimum allowed number of ntp zones";
+                );
+                return json!({
+                    "error": "generated config for fewer than the minimum allowed number of ntp zones"
+
+                });
+            }
+
+            if nexus_count < MIN_NEXUS_COUNT {
+                error!(
+                    &log,
+                    "generated config for fewer than the minimum allowed number of nexus zones";
+                );
+                return json!({
+                    "error": "generated config for fewer than the minimum allowed number of nexus zones"
+
                 });
             }
 
