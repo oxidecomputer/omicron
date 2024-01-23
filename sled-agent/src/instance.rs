@@ -236,6 +236,7 @@ struct InstanceInner {
     zone_bundler: ZoneBundler,
 
     // Data used to start / stop collection of instance-related metrics.
+    tracking_instance_metrics: bool,
     metrics_manager: MetricsManager,
 
     // Object representing membership in the "instance manager".
@@ -398,26 +399,26 @@ impl InstanceInner {
                 //
                 // TODO(ben) -- need to do this once, or ignore duplicate target
                 // error, not every time we get a state update from propolis.
-                //
-                // TODO(ben) -- need to take number of vcpus. It looks like
-                // Propolis and the kernel hypervisor currently creates a kstat
-                // for all _possible_ vcpus, even those that don't exist?
-                if let Err(e) = self
-                    .metrics_manager
-                    .track_instance(
-                        &self.id(),
-                        &self.metadata,
-                        self.properties.vcpus.into(),
-                        INSTANCE_SAMPLE_INTERVAL,
-                    )
-                    .await
-                {
-                    error!(
-                        self.log,
-                        "failed to track instance metrics, \
-                        no samples will be produced";
-                        "error" => ?e,
-                    );
+                if !self.tracking_instance_metrics {
+                    if let Err(e) = self
+                        .metrics_manager
+                        .track_instance(
+                            &self.id(),
+                            &self.metadata,
+                            self.properties.vcpus.into(),
+                            INSTANCE_SAMPLE_INTERVAL,
+                        )
+                        .await
+                    {
+                        error!(
+                            self.log,
+                            "failed to track instance metrics, \
+                            no samples will be produced";
+                            "error" => ?e,
+                        );
+                    } else {
+                        self.tracking_instance_metrics = true;
+                    }
                 }
                 Ok(Reaction::Continue)
             }
@@ -745,6 +746,7 @@ impl Instance {
             storage,
             zone_builder_factory,
             zone_bundler,
+            tracking_instance_metrics: false,
             metrics_manager,
             instance_ticket: ticket,
             metadata,

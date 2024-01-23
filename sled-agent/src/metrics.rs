@@ -217,13 +217,14 @@ impl MetricsManager {
         &self,
         instance_id: &Uuid,
         metadata: &InstanceMetadata,
-        _n_vcpus: u32,
+        n_vcpus: u32,
         interval: Duration,
     ) -> Result<(), Error> {
         let vm = virtual_machine::VirtualMachine {
             silo_id: metadata.silo_id,
             project_id: metadata.project_id,
             instance_id: *instance_id,
+            n_vcpus,
         };
         let details = CollectionDetails::never(interval);
         let id = self

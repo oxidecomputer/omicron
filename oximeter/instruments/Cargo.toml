@@ -23,7 +23,6 @@ http-instruments = ["http"]
 datalink = ["dep:kstat-rs"]
 virtual-machine = ["dep:kstat-rs"]
 
-
 [dev-dependencies]
 rand.workspace = true
 slog-async.workspace = true
