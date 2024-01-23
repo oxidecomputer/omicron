@@ -3266,6 +3266,7 @@ dependencies = [
  "omicron-workspace-hack",
  "opte-ioctl",
  "oxide-vpc",
+ "oxlog",
  "regress",
  "schemars",
  "serde",
@@ -5177,6 +5178,7 @@ dependencies = [
  "bstr 1.6.0",
  "byteorder",
  "bytes",
+ "camino",
  "chrono",
  "cipher",
  "clap 4.4.3",
@@ -5673,6 +5675,18 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "oxlog"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap 4.4.3",
+ "omicron-workspace-hack",
  "uuid",
 ]
 
