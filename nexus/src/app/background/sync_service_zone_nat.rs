@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 // Minumum number of boundary NTP zones that should be present in a valid
 // set of service zone nat configurations.
-const MIN_NTP_COUNT: usize = 2;
+const MIN_NTP_COUNT: usize = 1;
 
 // Minumum number of nexus zones that should be present in a valid
 // set of service zone nat configurations.
