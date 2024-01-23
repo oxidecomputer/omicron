@@ -2598,4 +2598,32 @@ async fn test_silo_delete_cleans_up_ip_pool_links(
     assert_eq!(pools.items.len(), 2);
     assert_eq!(pools.items[0].identity.name, "pool1");
     assert_eq!(pools.items[1].identity.name, "pool2");
+
+    // nothing prevents us from deleting the pools (except the child ranges --
+    // we do have to remove those)
+
+    let url = "/v1/system/ip-pools/pool1/ranges/remove";
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, url)
+            .body(Some(&range1))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to delete IP range from a pool");
+
+    let url = "/v1/system/ip-pools/pool2/ranges/remove";
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, url)
+            .body(Some(&range2))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to delete IP range from a pool");
+
+    object_delete(client, "/v1/system/ip-pools/pool1").await;
+    object_delete(client, "/v1/system/ip-pools/pool2").await;
 }

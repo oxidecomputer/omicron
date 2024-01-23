@@ -270,7 +270,7 @@ impl DataStore {
         // just delete them. If we've gotten this far, we know there are no
         // ranges in the pool, which means it can't be in use.
 
-        // delete IP pool link
+        // delete any links from this pool to any other resources (silos)
         diesel::delete(ip_pool_resource::table)
             .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
             .execute_async(&*conn)
