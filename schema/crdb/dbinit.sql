@@ -958,7 +958,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     ncpus INT NOT NULL,
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL,
-    boot_on_fault BOOL NOT NULL DEFAULT false,
+    boot_on_fault BOOL NOT NULL DEFAULT false
 );
 
 -- Names for instances within a project should be unique
