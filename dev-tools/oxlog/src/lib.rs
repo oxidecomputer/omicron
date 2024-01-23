@@ -64,8 +64,18 @@ impl Pools {
 /// cases searching for archived logs is pretty expensive.
 #[derive(Clone, Copy, Debug)]
 pub struct Filter {
+    /// The current logfile for a service.
+    /// e.g. `/var/svc/log/oxide-sled-agent:default.log`
     pub current: bool,
+
+    /// Any rotated log files in the default service directory or archived to
+    /// a debug directory. e.g. `/var/svc/log/oxide-sled-agent:default.log.0`
+    /// or `/pool/ext/021afd19-2f87-4def-9284-ab7add1dd6ae/crypt/debug/global/oxide-sled-agent:default.log.1697509861`
     pub archived: bool,
+
+    /// Any files of special interest for a given service that don't reside in
+    /// standard paths or don't follow the naming conventions of SMF service
+    /// files. e.g. `/pool/ext/e12f29b8-1ab8-431e-bc96-1c1298947980/crypt/zone/oxz_cockroachdb_8bbea076-ff60-4330-8302-383e18140ef3/root/data/logs/cockroach.log`
     pub extra: bool,
 }
 
@@ -116,10 +126,18 @@ impl LogFile {
 /// All oxide logs for a given service in a given zone
 #[derive(Debug, Clone, Default)]
 pub struct SvcLogs {
+    /// The current logfile for a service.
+    /// e.g. `/var/svc/log/oxide-sled-agent:default.log`
     pub current: Option<LogFile>,
+
+    /// Any rotated log files in the default service directory or archived to
+    /// a debug directory. e.g. `/var/svc/log/oxide-sled-agent:default.log.0`
+    /// or `/pool/ext/021afd19-2f87-4def-9284-ab7add1dd6ae/crypt/debug/global/oxide-sled-agent:default.log.1697509861`
     pub archived: Vec<LogFile>,
 
-    // Logs in non-standard places and logs that aren't necessarily oxide logs
+    /// Any files of special interest for a given service that don't reside in
+    /// standard paths or don't follow the naming conventions of SMF service
+    /// files. e.g. `/pool/ext/e12f29b8-1ab8-431e-bc96-1c1298947980/crypt/zone/oxz_cockroachdb_8bbea076-ff60-4330-8302-383e18140ef3/root/data/logs/cockroach.log`
     pub extra: Vec<LogFile>,
 }
 
@@ -129,8 +147,14 @@ type ZoneName = String;
 type ServiceName = String;
 
 pub struct Paths {
+    /// Links to the location of current and rotated log files for a given service
     pub primary: Utf8PathBuf,
+
+    /// Links to debug directories containing archived log files
     pub debug: Vec<Utf8PathBuf>,
+
+    /// Links to directories containing extra files such as cockroachdb logs
+    /// that reside outside our SMF log and debug service log paths.
     pub extra: Vec<(&'static str, Utf8PathBuf)>,
 }
 
