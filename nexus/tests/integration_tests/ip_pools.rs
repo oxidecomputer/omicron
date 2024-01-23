@@ -275,6 +275,32 @@ async fn test_ip_pool_list_dedupe(cptestctx: &ControlPlaneTestContext) {
     let silo3_pools = pools_for_silo(client, "silo3").await;
     assert_eq!(silo3_pools.len(), 1);
     assert_eq!(silo3_pools[0].identity.name, "pool1");
+
+    // this is a great spot to check that deleting a pool cleans up the links!
+
+    // first we have to delete the range, otherwise delete will fail
+    let url = "/v1/system/ip-pools/pool1/ranges/remove";
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, url)
+            .body(Some(&range1))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to delete IP range from a pool");
+
+    object_delete(client, "/v1/system/ip-pools/pool1").await;
+
+    let silo1_pools = pools_for_silo(client, "silo1").await;
+    assert_eq!(silo1_pools.len(), 1);
+    assert_eq!(silo1_pools[0].id(), pool2.id());
+
+    let silo2_pools = pools_for_silo(client, "silo2").await;
+    assert_eq!(silo2_pools.len(), 0);
+
+    let silo3_pools = pools_for_silo(client, "silo3").await;
+    assert_eq!(silo3_pools.len(), 0);
 }
 
 /// The internal IP pool, defined by its association with the internal silo,
@@ -473,18 +499,6 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
     assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
-
-    // pool delete fails because it is linked to a silo
-    let error = object_delete_error(
-        client,
-        "/v1/system/ip-pools/p1",
-        StatusCode::BAD_REQUEST,
-    )
-    .await;
-    assert_eq!(
-        error.message,
-        "IP Pool cannot be deleted while it is linked to a silo",
-    );
 
     // unlink p1 from silo (doesn't matter that it's a default)
     let url = format!("/v1/system/ip-pools/p1/silos/{}", cptestctx.silo_name);
