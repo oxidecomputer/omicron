@@ -116,7 +116,7 @@ setup_hint = """
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
 
-[package.oximeter]
+[package.oximeter-composite]
 service_name = "oximeter-composite"
 only_for_targets.image = "standard"
 source.type = "composite"
