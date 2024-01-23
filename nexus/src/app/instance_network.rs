@@ -136,9 +136,9 @@ impl super::Nexus {
                     let nic_id = nic.id;
                     let mapping = SetVirtualNetworkInterfaceHost {
                         virtual_ip: nic.ip,
-                        virtual_mac: nic.mac.clone(),
+                        virtual_mac: nic.mac,
                         physical_host_ip,
-                        vni: nic.vni.clone(),
+                        vni: nic.vni,
                     };
 
                     let log = self.log.clone();
@@ -225,7 +225,7 @@ impl super::Nexus {
                     let nic_id = nic.id;
                     let mapping = DeleteVirtualNetworkInterfaceHost {
                         virtual_ip: nic.ip,
-                        vni: nic.vni.clone(),
+                        vni: nic.vni,
                     };
 
                     let log = self.log.clone();
@@ -404,7 +404,7 @@ impl super::Nexus {
                     first_port: target_ip.first_port,
                     last_port: target_ip.last_port,
                     sled_address: sled_address.into(),
-                    vni: DbVni(network_interface.vni.clone().into()),
+                    vni: DbVni(network_interface.vni),
                     mac: nexus_db_model::MacAddr(
                         omicron_common::api::external::MacAddr(mac_address),
                     ),

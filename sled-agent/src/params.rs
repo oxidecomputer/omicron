@@ -10,6 +10,7 @@ pub use illumos_utils::opte::params::DhcpConfig;
 pub use illumos_utils::opte::params::VpcFirewallRule;
 pub use illumos_utils::opte::params::VpcFirewallRulesEnsureBody;
 use illumos_utils::zpool::ZpoolName;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, InstanceProperties, InstanceRuntimeState,
@@ -20,6 +21,7 @@ use omicron_common::api::internal::shared::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_hardware::Baseboard;
 pub use sled_hardware::DendriteAsic;
 use sled_storage::dataset::DatasetKind;
 use sled_storage::dataset::DatasetName;
@@ -296,7 +298,7 @@ pub struct OmicronZonesConfig {
 impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
     fn from(local: OmicronZonesConfig) -> Self {
         Self {
-            generation: local.generation.into(),
+            generation: local.generation,
             zones: local.zones.into_iter().map(|s| s.into()).collect(),
         }
     }
@@ -700,7 +702,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 dns_servers,
                 domain,
                 ntp_servers,
-                snat_cfg: snat_cfg.into(),
+                snat_cfg,
                 nic: nic.into(),
             },
             OmicronZoneType::Clickhouse { address, dataset } => {
@@ -805,16 +807,6 @@ pub struct TimeSync {
     pub correction: f64,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum SledRole {
-    /// The sled is a general compute sled.
-    Gimlet,
-    /// The sled is attached to the network switch, and has additional
-    /// responsibilities.
-    Scrimlet,
-}
-
 /// Parameters used to update the zone bundle cleanup context.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct CleanupContextUpdate {
@@ -824,4 +816,21 @@ pub struct CleanupContextUpdate {
     pub priority: Option<PriorityOrder>,
     /// The new limit on the underlying dataset quota allowed for bundles.
     pub storage_limit: Option<u8>,
+}
+
+// Our SledRole and Baseboard types do not have to be identical to the Nexus
+// ones, but they generally should be, and this avoids duplication.  If it
+// becomes easier to maintain a separate copy, we should do that.
+pub type SledRole = nexus_client::types::SledRole;
+
+/// Identity and basic status information about this sled agent
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct Inventory {
+    pub sled_id: Uuid,
+    pub sled_agent_address: SocketAddrV6,
+    pub sled_role: SledRole,
+    pub baseboard: Baseboard,
+    pub usable_hardware_threads: u32,
+    pub usable_physical_ram: ByteCount,
+    pub reservoir_size: ByteCount,
 }

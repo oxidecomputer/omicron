@@ -16,6 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 steno.workspace = true
 strum.workspace = true
+thiserror.workspace = true
 uuid.workspace = true
 
 api_identity.workspace = true
@@ -24,3 +25,4 @@ gateway-client.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
+sled-agent-client.workspace = true

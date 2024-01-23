@@ -833,6 +833,8 @@ mod tests {
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::LogContext;
+    use nexus_db_model::IpPoolResource;
+    use nexus_db_model::IpPoolResourceType;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::IpRange;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
@@ -870,34 +872,34 @@ mod tests {
             Self { logctx, opctx, db, db_datastore }
         }
 
+        /// Create pool, associate with current silo
         async fn create_ip_pool(
             &self,
             name: &str,
             range: IpRange,
             is_default: bool,
         ) {
+            let pool = IpPool::new(&IdentityMetadataCreateParams {
+                name: String::from(name).parse().unwrap(),
+                description: format!("ip pool {}", name),
+            });
+
+            self.db_datastore
+                .ip_pool_create(&self.opctx, pool.clone())
+                .await
+                .expect("Failed to create IP pool");
+
             let silo_id = self.opctx.authn.silo_required().unwrap().id();
-            let pool = IpPool::new(
-                &IdentityMetadataCreateParams {
-                    name: String::from(name).parse().unwrap(),
-                    description: format!("ip pool {}", name),
-                },
-                Some(silo_id),
+            let association = IpPoolResource {
+                resource_id: silo_id,
+                resource_type: IpPoolResourceType::Silo,
+                ip_pool_id: pool.id(),
                 is_default,
-            );
-
-            let conn = self
-                .db_datastore
-                .pool_connection_authorized(&self.opctx)
+            };
+            self.db_datastore
+                .ip_pool_link_silo(&self.opctx, association)
                 .await
-                .unwrap();
-
-            use crate::db::schema::ip_pool::dsl as ip_pool_dsl;
-            diesel::insert_into(ip_pool_dsl::ip_pool)
-                .values(pool.clone())
-                .execute_async(&*conn)
-                .await
-                .expect("Failed to create IP Pool");
+                .expect("Failed to associate IP pool with silo");
 
             self.initialize_ip_pool(name, range).await;
         }
@@ -936,7 +938,7 @@ mod tests {
         }
 
         async fn default_pool_id(&self) -> Uuid {
-            let pool = self
+            let (.., pool) = self
                 .db_datastore
                 .ip_pools_fetch_default(&self.opctx)
                 .await
@@ -960,7 +962,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
         for first_port in
             (0..super::MAX_PORT).step_by(NUM_SOURCE_NAT_PORTS.into())
         {
@@ -1015,7 +1017,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 1),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
 
         // Allocate an Ephemeral IP, which should take the entire port range of
         // the only address in the pool.
@@ -1098,7 +1100,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
 
         // TODO-completeness: Implementing Iterator for IpRange would be nice.
         let addresses = [
@@ -1199,7 +1201,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
 
         let instance_id = Uuid::new_v4();
         let id = Uuid::new_v4();
@@ -1659,7 +1661,7 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", range).await;
+        context.create_ip_pool("default", range, true).await;
 
         // Create one SNAT IP address.
         let instance_id = Uuid::new_v4();
@@ -1721,13 +1723,13 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", first_range).await;
+        context.create_ip_pool("default", first_range, true).await;
         let second_range = IpRange::try_from((
             Ipv4Addr::new(10, 0, 0, 4),
             Ipv4Addr::new(10, 0, 0, 6),
         ))
         .unwrap();
-        context.create_ip_pool("p1", second_range, /*default*/ false).await;
+        context.create_ip_pool("p1", second_range, false).await;
 
         // Allocating an address on an instance in the second pool should be
         // respected, even though there are IPs available in the first.
@@ -1765,12 +1767,12 @@ mod tests {
             Ipv4Addr::new(10, 0, 0, 3),
         ))
         .unwrap();
-        context.initialize_ip_pool("default", first_range).await;
+        context.create_ip_pool("default", first_range, true).await;
         let first_address = Ipv4Addr::new(10, 0, 0, 4);
         let last_address = Ipv4Addr::new(10, 0, 0, 6);
         let second_range =
             IpRange::try_from((first_address, last_address)).unwrap();
-        context.create_ip_pool("p1", second_range, /* default */ false).await;
+        context.create_ip_pool("p1", second_range, false).await;
 
         // Allocate all available addresses in the second pool.
         let instance_id = Uuid::new_v4();

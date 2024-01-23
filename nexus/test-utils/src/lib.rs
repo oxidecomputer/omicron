@@ -14,6 +14,8 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
 use dropshot::HandlerTaskMode;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use gateway_test_utils::setup::GatewayTestContext;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
@@ -39,7 +41,7 @@ use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
-use slog::{debug, o, Logger};
+use slog::{debug, error, o, Logger};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -51,6 +53,9 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
+pub use sim::TEST_HARDWARE_THREADS;
+pub use sim::TEST_RESERVOIR_RAM;
+
 pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
@@ -61,13 +66,6 @@ pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const RACK_SUBNET: &str = "fd00:1122:3344:01::/56";
-
-/// The reported amount of hardware threads for an emulated sled agent.
-pub const TEST_HARDWARE_THREADS: u32 = 16;
-/// The reported amount of physical RAM for an emulated sled agent.
-pub const TEST_PHYSICAL_RAM: u64 = 32 * (1 << 30);
-/// The reported amount of VMM reservoir RAM for an emulated sled agent.
-pub const TEST_RESERVOIR_RAM: u64 = 16 * (1 << 30);
 
 /// Password for the user created by the test suite
 ///
@@ -162,7 +160,7 @@ struct RackInitRequestBuilder {
     services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
     datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
     internal_dns_config: internal_dns::DnsConfigBuilder,
-    mac_addrs: Box<dyn Iterator<Item = MacAddr>>,
+    mac_addrs: Box<dyn Iterator<Item = MacAddr> + Send>,
 }
 
 impl RackInitRequestBuilder {
@@ -258,10 +256,17 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_dns_zone_name: Option<String>,
     pub external_dns: Option<dns_server::TransientServer>,
     pub internal_dns: Option<dns_server::TransientServer>,
+    dns_config: Option<DnsConfigParams>,
 
     pub silo_name: Option<Name>,
     pub user_name: Option<UserId>,
 }
+
+type StepInitFn<'a, N> = Box<
+    dyn for<'b> FnOnce(
+        &'b mut ControlPlaneTestContextBuilder<'a, N>,
+    ) -> BoxFuture<'b, ()>,
+>;
 
 impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub fn new(
@@ -294,8 +299,34 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             external_dns_zone_name: None,
             external_dns: None,
             internal_dns: None,
+            dns_config: None,
             silo_name: None,
             user_name: None,
+        }
+    }
+
+    pub async fn init_with_steps(
+        &mut self,
+        steps: Vec<(&str, StepInitFn<'a, N>)>,
+        timeout: Duration,
+    ) {
+        let log = self.logctx.log.new(o!("component" => "init_with_steps"));
+        for (step_name, step) in steps {
+            debug!(log, "Running step {step_name}");
+            let step_fut = step(self);
+            match tokio::time::timeout(timeout, step_fut).await {
+                Ok(()) => {}
+                Err(_) => {
+                    error!(
+                        log,
+                        "Timed out after {timeout:?} \
+                         while running step {step_name}, failing test"
+                    );
+                    panic!(
+                        "Timed out after {timeout:?} while running step {step_name}",
+                    );
+                }
+            }
         }
     }
 
@@ -356,10 +387,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub async fn start_clickhouse(&mut self) {
         let log = &self.logctx.log;
         debug!(log, "Starting Clickhouse");
-        let clickhouse =
-            dev::clickhouse::ClickHouseInstance::new_single_node(0)
-                .await
-                .unwrap();
+        let clickhouse = dev::clickhouse::ClickHouseInstance::new_single_node(
+            &self.logctx,
+            0,
+        )
+        .await
+        .unwrap();
         let port = clickhouse.port();
 
         let zpool_id = Uuid::new_v4();
@@ -585,7 +618,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.nexus_internal_addr = Some(nexus_internal_addr);
     }
 
-    pub async fn populate_internal_dns(&mut self) -> DnsConfigParams {
+    pub async fn populate_internal_dns(&mut self) {
         let log = &self.logctx.log;
         debug!(log, "Populating Internal DNS");
 
@@ -608,17 +641,20 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         dns_config_client.dns_config_put(&dns_config).await.expect(
             "Failed to send initial DNS records to internal DNS server",
         );
-        dns_config
+        self.dns_config = Some(dns_config);
     }
 
     // Perform RSS handoff
     pub async fn start_nexus_external(
         &mut self,
-        dns_config: DnsConfigParams,
         tls_certificates: Vec<Certificate>,
     ) {
         let log = &self.logctx.log;
         debug!(log, "Starting Nexus (external API)");
+
+        let dns_config = self.dns_config.clone().expect(
+            "populate_internal_dns must be called before start_nexus_external",
+        );
 
         // Create a recovery silo
         let external_dns_zone_name =
@@ -960,29 +996,101 @@ async fn setup_with_config_impl<N: NexusServer>(
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
 ) -> ControlPlaneTestContext<N> {
-    builder.start_crdb_impl(populate).await;
-    builder.start_clickhouse().await;
-    builder.start_gateway().await;
-    builder.start_dendrite(SwitchLocation::Switch0).await;
-    builder.start_dendrite(SwitchLocation::Switch1).await;
-    builder.start_mgd(SwitchLocation::Switch0).await;
-    builder.start_mgd(SwitchLocation::Switch1).await;
-    builder.start_internal_dns().await;
-    builder.start_external_dns().await;
-    builder.start_nexus_internal().await;
-    builder.start_sled(sim_mode).await;
-    builder.start_crucible_pantry().await;
-    builder.scrimlet_dns_setup().await;
-
-    // Give Nexus necessary information to find the Crucible Pantry
-    let dns_config = builder.populate_internal_dns().await;
+    const STEP_TIMEOUT: Duration = Duration::from_secs(60);
 
     builder
-        .start_nexus_external(dns_config, initial_cert.into_iter().collect())
+        .init_with_steps(
+            vec![
+                (
+                    "start_crdb",
+                    Box::new(|builder| {
+                        builder.start_crdb_impl(populate).boxed()
+                    }),
+                ),
+                (
+                    "start_clickhouse",
+                    Box::new(|builder| builder.start_clickhouse().boxed()),
+                ),
+                (
+                    "start_gateway",
+                    Box::new(|builder| builder.start_gateway().boxed()),
+                ),
+                (
+                    "start_dendrite_switch0",
+                    Box::new(|builder| {
+                        builder.start_dendrite(SwitchLocation::Switch0).boxed()
+                    }),
+                ),
+                (
+                    "start_dendrite_switch1",
+                    Box::new(|builder| {
+                        builder.start_dendrite(SwitchLocation::Switch1).boxed()
+                    }),
+                ),
+                (
+                    "start_mgd_switch0",
+                    Box::new(|builder| {
+                        builder.start_mgd(SwitchLocation::Switch0).boxed()
+                    }),
+                ),
+                (
+                    "start_mgd_switch1",
+                    Box::new(|builder| {
+                        builder.start_mgd(SwitchLocation::Switch1).boxed()
+                    }),
+                ),
+                (
+                    "start_internal_dns",
+                    Box::new(|builder| builder.start_internal_dns().boxed()),
+                ),
+                (
+                    "start_external_dns",
+                    Box::new(|builder| builder.start_external_dns().boxed()),
+                ),
+                (
+                    "start_nexus_internal",
+                    Box::new(|builder| builder.start_nexus_internal().boxed()),
+                ),
+                (
+                    "start_sled",
+                    Box::new(move |builder| {
+                        builder.start_sled(sim_mode).boxed()
+                    }),
+                ),
+                (
+                    "start_crucible_pantry",
+                    Box::new(|builder| builder.start_crucible_pantry().boxed()),
+                ),
+                (
+                    "scrimlet_dns_setup",
+                    Box::new(|builder| builder.scrimlet_dns_setup().boxed()),
+                ),
+                (
+                    "populate_internal_dns",
+                    Box::new(|builder| builder.populate_internal_dns().boxed()),
+                ),
+                (
+                    "start_nexus_external",
+                    Box::new(|builder| {
+                        builder
+                            .start_nexus_external(
+                                initial_cert.into_iter().collect(),
+                            )
+                            .boxed()
+                    }),
+                ),
+                (
+                    "start_oximeter",
+                    Box::new(|builder| builder.start_oximeter().boxed()),
+                ),
+                (
+                    "start_producer_server",
+                    Box::new(|builder| builder.start_producer_server().boxed()),
+                ),
+            ],
+            STEP_TIMEOUT,
+        )
         .await;
-
-    builder.start_oximeter().await;
-    builder.start_producer_server().await;
 
     builder.build()
 }
@@ -994,32 +1102,16 @@ pub async fn start_sled_agent(
     update_directory: &Utf8Path,
     sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
-    let config = sim::Config {
+    let config = sim::Config::for_testing(
         id,
         sim_mode,
-        nexus_address,
-        dropshot: ConfigDropshot {
-            bind_address: SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0),
-            request_body_max_bytes: 1024 * 1024,
-            default_handler_task_mode: HandlerTaskMode::Detached,
-        },
-        // TODO-cleanup this is unused
-        log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Debug },
-        storage: sim::ConfigStorage {
-            zpools: vec![],
-            ip: IpAddr::from(Ipv6Addr::LOCALHOST),
-        },
-        updates: sim::ConfigUpdates {
-            zone_artifact_path: update_directory.to_path_buf(),
-        },
-        hardware: sim::ConfigHardware {
-            hardware_threads: TEST_HARDWARE_THREADS,
-            physical_ram: TEST_PHYSICAL_RAM,
-            reservoir_ram: TEST_RESERVOIR_RAM,
-        },
-    };
-    let server =
-        sim::Server::start(&config, &log).await.map_err(|e| e.to_string())?;
+        Some(nexus_address),
+        Some(update_directory),
+        None,
+    );
+    let server = sim::Server::start(&config, &log, true)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(server)
 }
 

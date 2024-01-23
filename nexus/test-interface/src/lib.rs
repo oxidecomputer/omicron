@@ -38,8 +38,8 @@ use std::net::{SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 #[async_trait]
-pub trait NexusServer {
-    type InternalServer;
+pub trait NexusServer: Send + Sync + 'static {
+    type InternalServer: Send + Sync + 'static;
 
     async fn start_internal(
         config: &Config,

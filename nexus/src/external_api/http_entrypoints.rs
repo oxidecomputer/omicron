@@ -6,13 +6,10 @@
 
 use super::{
     console_api, device_auth, params,
-    params::ProjectSelector,
-    shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
-        Sled, SledInstance, Snapshot, SshKey, Switch, User, UserBuiltin, Vpc,
-        VpcRouter, VpcSubnet,
+        PhysicalDisk, Project, Rack, Role, Silo, SiloUtilization, Sled,
+        Snapshot, SshKey, User, UserBuiltin, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -40,15 +37,13 @@ use dropshot::{
 use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::AssetIdentityMetadata;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_db_queries::{
-    authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
-};
+use nexus_types::external_api::views::SiloQuotas;
 use nexus_types::external_api::views::Utilization;
+use nexus_types::identity::AssetIdentityMetadata;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -124,6 +119,10 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
+        api.register(ip_pool_silo_list)?;
+        api.register(ip_pool_silo_link)?;
+        api.register(ip_pool_silo_unlink)?;
+        api.register(ip_pool_silo_update)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
@@ -228,7 +227,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(switch_list)?;
         api.register(switch_view)?;
         api.register(sled_list_uninitialized)?;
-        api.register(add_sled_to_initialized_rack)?;
+        api.register(sled_add)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -280,6 +279,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_delete)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
+        api.register(silo_ip_pool_list)?;
 
         api.register(silo_utilization_view)?;
         api.register(silo_utilization_list)?;
@@ -742,7 +742,7 @@ async fn silo_create(
 
 /// Fetch a silo
 ///
-/// Fetch a silo by name.
+/// Fetch a silo by name or ID.
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}",
@@ -760,6 +760,48 @@ async fn silo_view(
         let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         let (.., silo) = silo_lookup.fetch().await?;
         Ok(HttpResponseOk(silo.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List IP pools available within silo
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silos/{silo}/ip-pools",
+    tags = ["system/silos"],
+}]
+async fn silo_ip_pool_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+        let pools = nexus
+            .silo_ip_pool_list(&opctx, &silo_lookup, &paginated_by)
+            .await?
+            .iter()
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1294,7 +1336,7 @@ async fn project_policy_update(
 
 // IP Pools
 
-/// List all IP Pools that can be used by a given project.
+/// List all IP pools
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools",
@@ -1302,14 +1344,8 @@ async fn project_policy_update(
 }]
 async fn project_ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
-) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
-    // Per https://github.com/oxidecomputer/omicron/issues/2148
-    // This is currently the same list as /v1/system/ip-pools, that is to say,
-    // IP pools that are *available to* a given project, those being ones that
-    // are not the internal pools for Oxide service usage. This may change
-    // in the future as the scoping of pools is further developed, but for now,
-    // this is literally a near-duplicate of `ip_pool_list`:
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -1318,13 +1354,14 @@ async fn project_ip_pool_list(
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_lookup =
-            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
         let pools = nexus
-            .project_ip_pools_list(&opctx, &project_lookup, &paginated_by)
+            .current_silo_ip_pool_list(&opctx, &paginated_by)
             .await?
             .into_iter()
-            .map(IpPool::from)
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
             .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
@@ -1344,29 +1381,18 @@ async fn project_ip_pool_list(
 async fn project_ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    project: Query<params::OptionalProjectSelector>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
-        let project_lookup = if let Some(project) = project.into_inner().project
-        {
-            Some(nexus.project_lookup(&opctx, ProjectSelector { project })?)
-        } else {
-            None
-        };
-        let (authz_pool, pool) = nexus
-            .project_ip_pool_lookup(&opctx, &pool_selector, &project_lookup)?
-            .fetch()
-            .await?;
-        // TODO(2148): once we've actualy implemented filtering to pools belonging to
-        // the specified project, we can remove this internal check.
-        if pool.silo_id == Some(*INTERNAL_SILO_ID) {
-            return Err(authz_pool.not_found().into());
-        }
-        Ok(HttpResponseOk(IpPool::from(pool)))
+        let (pool, silo_link) =
+            nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
+        Ok(HttpResponseOk(views::SiloIpPool {
+            identity: pool.identity(),
+            is_default: silo_link.is_default,
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1445,6 +1471,8 @@ async fn ip_pool_view(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
+        // We do not prevent the service pool from being fetched by name or ID
+        // like we do for update, delete, associate.
         let (.., pool) =
             nexus.ip_pool_lookup(&opctx, &pool_selector)?.fetch().await?;
         Ok(HttpResponseOk(IpPool::from(pool)))
@@ -1452,7 +1480,7 @@ async fn ip_pool_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an IP Pool
+/// Delete an IP pool
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}",
@@ -1474,7 +1502,7 @@ async fn ip_pool_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update an IP Pool
+/// Update an IP pool
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}",
@@ -1494,6 +1522,135 @@ async fn ip_pool_update(
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         let pool = nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
         Ok(HttpResponseOk(pool.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List an IP pool's linked silos
+#[endpoint {
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}/silos",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_silo_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    // paginating by resource_id because they're unique per pool. most robust
+    // option would be to paginate by a composite key representing the (pool,
+    // resource_type, resource)
+    query_params: Query<PaginatedById>,
+    // TODO: this could just list views::Silo -- it's not like knowing silo_id
+    // and nothing else is particularly useful -- except we also want to say
+    // whether the pool is marked default on each silo. So one option would
+    // be  to do the same as we did with SiloIpPool -- include is_default on
+    // whatever the thing is. Still... all we'd have to do to make this usable
+    // in both places would be to make it { ...IpPool, silo_id, silo_name,
+    // is_default }
+) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSiloLink>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+
+        let path = path_params.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+
+        let assocs = nexus
+            .ip_pool_silo_list(&opctx, &pool_lookup, &pag_params)
+            .await?
+            .into_iter()
+            .map(|assoc| assoc.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            assocs,
+            &|_, x: &views::IpPoolSiloLink| x.silo_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Make an IP pool available within a silo
+#[endpoint {
+    method = POST,
+    path = "/v1/system/ip-pools/{pool}/silos",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_silo_link(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    resource_assoc: TypedBody<params::IpPoolLinkSilo>,
+) -> Result<HttpResponseCreated<views::IpPoolSiloLink>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let resource_assoc = resource_assoc.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let assoc = nexus
+            .ip_pool_link_silo(&opctx, &pool_lookup, &resource_assoc)
+            .await?;
+        Ok(HttpResponseCreated(assoc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Unlink an IP pool from a silo
+///
+/// Will fail if there are any outstanding IPs allocated in the silo.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_silo_unlink(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolSiloPath>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+        nexus.ip_pool_unlink_silo(&opctx, &pool_lookup, &silo_lookup).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Make an IP pool default or not-default for a silo
+///
+/// When a pool is made default for a silo, any existing default will remain
+/// linked to the silo, but will no longer be the default.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_silo_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolSiloPath>,
+    update: TypedBody<params::IpPoolSiloUpdate>,
+) -> Result<HttpResponseOk<views::IpPoolSiloLink>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let update = update.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+        let assoc = nexus
+            .ip_pool_silo_update(&opctx, &pool_lookup, &silo_lookup, &update)
+            .await?;
+        Ok(HttpResponseOk(assoc.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1701,7 +1858,7 @@ async fn ip_pool_service_range_remove(
 
 // Floating IP Addresses
 
-/// List all Floating IPs
+/// List all floating IPs
 #[endpoint {
     method = GET,
     path = "/v1/floating-ips",
@@ -1733,7 +1890,7 @@ async fn floating_ip_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a Floating IP
+/// Create a floating IP
 #[endpoint {
     method = POST,
     path = "/v1/floating-ips",
@@ -1759,7 +1916,7 @@ async fn floating_ip_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a Floating IP
+/// Delete a floating IP
 #[endpoint {
     method = DELETE,
     path = "/v1/floating-ips/{floating_ip}",
@@ -4659,8 +4816,16 @@ async fn rack_view(
 }]
 async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
+    query: Query<PaginationParams<EmptyScanParams, String>>,
+) -> Result<HttpResponseOk<ResultsPage<shared::UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
+    // We don't actually support real pagination
+    let pag_params = query.into_inner();
+    if let dropshot::WhichPage::Next(last_seen) = &pag_params.page {
+        return Err(
+            Error::invalid_value(last_seen.clone(), "bad page token").into()
+        );
+    }
     let handler = async {
         let nexus = &apictx.nexus;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -4681,15 +4846,15 @@ async fn sled_list_uninitialized(
     path = "/v1/system/hardware/sleds/",
     tags = ["system/hardware"]
 }]
-async fn add_sled_to_initialized_rack(
+async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
-    sled: TypedBody<UninitializedSled>,
+    sled: TypedBody<params::UninitializedSledId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.add_sled_to_initialized_rack(&opctx, sled.into_inner()).await?;
+        nexus.sled_add(&opctx, sled.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4749,7 +4914,7 @@ async fn sled_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set the sled's provision state.
+/// Set the sled's provision state
 #[endpoint {
     method = PUT,
     path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
@@ -4797,7 +4962,7 @@ async fn sled_instance_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SledPath>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<SledInstance>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::SledInstance>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -4818,7 +4983,7 @@ async fn sled_instance_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             sled_instances,
-            &|_, sled_instance: &SledInstance| sled_instance.identity.id,
+            &|_, sled_instance: &views::SledInstance| sled_instance.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4867,7 +5032,7 @@ async fn physical_disk_list(
 async fn switch_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Switch>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::Switch>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -4882,7 +5047,7 @@ async fn switch_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             switches,
-            &|_, switch: &Switch| switch.identity.id,
+            &|_, switch: &views::Switch| switch.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4897,7 +5062,7 @@ async fn switch_list(
 async fn switch_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SwitchPath>,
-) -> Result<HttpResponseOk<Switch>, HttpError> {
+) -> Result<HttpResponseOk<views::Switch>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;

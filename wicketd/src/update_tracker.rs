@@ -4,8 +4,6 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use crate::artifacts::ArtifactIdData;
-use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
 use crate::http_entrypoints::ClearUpdateStateResponse;
@@ -65,6 +63,8 @@ use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
+use update_common::artifacts::ArtifactIdData;
+use update_common::artifacts::UpdatePlan;
 use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;

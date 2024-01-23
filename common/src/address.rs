@@ -9,6 +9,7 @@
 
 use crate::api::external::{self, Error, Ipv4Net, Ipv6Net};
 use ipnetwork::{Ipv4Network, Ipv6Network};
+use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
@@ -76,65 +77,78 @@ pub const NTP_PORT: u16 = 123;
 // that situation (which may be as soon as allocating ephemeral IPs).
 pub const NUM_SOURCE_NAT_PORTS: u16 = 1 << 14;
 
-lazy_static::lazy_static! {
-    // Services that require external connectivity are given an OPTE port
-    // with a "Service VNIC" record. Like a "Guest VNIC", a service is
-    // placed within a VPC (a built-in services VPC), along with a VPC subnet.
-    // But unlike guest instances which are created at runtime by Nexus, these
-    // services are created by RSS early on. So, we have some fixed values
-    // used to bootstrap service OPTE ports. Each service kind uses a distinct
-    // VPC subnet which RSS will allocate addresses from for those services.
-    // The specific values aren't deployment-specific as they are virtualized
-    // within OPTE.
+// Services that require external connectivity are given an OPTE port
+// with a "Service VNIC" record. Like a "Guest VNIC", a service is
+// placed within a VPC (a built-in services VPC), along with a VPC subnet.
+// But unlike guest instances which are created at runtime by Nexus, these
+// services are created by RSS early on. So, we have some fixed values
+// used to bootstrap service OPTE ports. Each service kind uses a distinct
+// VPC subnet which RSS will allocate addresses from for those services.
+// The specific values aren't deployment-specific as they are virtualized
+// within OPTE.
 
-    /// The IPv6 prefix assigned to the built-in services VPC.
-    // The specific prefix here was randomly chosen from the expected VPC
-    // prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
-    // Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
-    // /64's within this prefix.
-    pub static ref SERVICE_VPC_IPV6_PREFIX: Ipv6Net = Ipv6Net(
+/// The IPv6 prefix assigned to the built-in services VPC.
+// The specific prefix here was randomly chosen from the expected VPC
+// prefix range (`fd00::/48`). See `random_vpc_ipv6_prefix`.
+// Furthermore, all the below *_OPTE_IPV6_SUBNET constants are
+// /64's within this prefix.
+pub static SERVICE_VPC_IPV6_PREFIX: Lazy<Ipv6Net> = Lazy::new(|| {
+    Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 0, 0, 0, 0, 0),
             Ipv6Net::VPC_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
+        )
+        .unwrap(),
+    )
+});
 
-    /// The IPv4 subnet for External DNS OPTE ports.
-    pub static ref DNS_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap());
+/// The IPv4 subnet for External DNS OPTE ports.
+pub static DNS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
+    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 1, 0), 24).unwrap())
+});
 
-    /// The IPv6 subnet for External DNS OPTE ports.
-    pub static ref DNS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+/// The IPv6 subnet for External DNS OPTE ports.
+pub static DNS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+    Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 1, 0, 0, 0, 0),
             Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
+        )
+        .unwrap(),
+    )
+});
 
-    /// The IPv4 subnet for Nexus OPTE ports.
-    pub static ref NEXUS_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap());
+/// The IPv4 subnet for Nexus OPTE ports.
+pub static NEXUS_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
+    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 2, 0), 24).unwrap())
+});
 
-    /// The IPv6 subnet for Nexus OPTE ports.
-    pub static ref NEXUS_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+/// The IPv6 subnet for Nexus OPTE ports.
+pub static NEXUS_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+    Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 2, 0, 0, 0, 0),
             Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
+        )
+        .unwrap(),
+    )
+});
 
-    /// The IPv4 subnet for Boundary NTP OPTE ports.
-    pub static ref NTP_OPTE_IPV4_SUBNET: Ipv4Net =
-        Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap());
+/// The IPv4 subnet for Boundary NTP OPTE ports.
+pub static NTP_OPTE_IPV4_SUBNET: Lazy<Ipv4Net> = Lazy::new(|| {
+    Ipv4Net(Ipv4Network::new(Ipv4Addr::new(172, 30, 3, 0), 24).unwrap())
+});
 
-    /// The IPv6 subnet for Boundary NTP OPTE ports.
-    pub static ref NTP_OPTE_IPV6_SUBNET: Ipv6Net = Ipv6Net(
+/// The IPv6 subnet for Boundary NTP OPTE ports.
+pub static NTP_OPTE_IPV6_SUBNET: Lazy<Ipv6Net> = Lazy::new(|| {
+    Ipv6Net(
         Ipv6Network::new(
             Ipv6Addr::new(0xfd77, 0xe9d2, 0x9cd9, 3, 0, 0, 0, 0),
             Ipv6Net::VPC_SUBNET_IPV6_PREFIX_LENGTH,
-        ).unwrap(),
-    );
-}
+        )
+        .unwrap(),
+    )
+});
 
 // Anycast is a mechanism in which a single IP address is shared by multiple
 // devices, and the destination is located based on routing distance.
@@ -150,6 +164,18 @@ const GZ_ADDRESS_INDEX: usize = 2;
 
 /// The maximum number of addresses per sled reserved for RSS.
 pub const RSS_RESERVED_ADDRESSES: u16 = 32;
+
+// The maximum number of addresses per sled reserved for control plane services.
+pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
+
+// Number of addresses reserved (by the Nexus deployment planner) for allocation
+// by the sled itself.  This is currently used for the first two addresses of
+// the sled subnet, which are used for the sled global zone and the switch zone,
+// if any.  Note that RSS does not honor this yet (in fact, per the above
+// RSS_RESERVED_ADDRESSES, it will _only_ choose from this range).  And
+// historically, systems did not have this reservation at all.  So it's not safe
+// to assume that addresses in this subnet are available.
+pub const SLED_RESERVED_ADDRESSES: u16 = 32;
 
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
@@ -260,6 +286,19 @@ impl ReservedRackSubnet {
             })
             .collect()
     }
+}
+
+/// Return the list of DNS servers for the rack, given any address in the AZ
+/// subnet
+pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
+    let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(addr);
+    let reserved_rack_subnet = ReservedRackSubnet::new(az_subnet);
+    let dns_subnets =
+        &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
+    dns_subnets
+        .iter()
+        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().ip()))
+        .collect()
 }
 
 const SLED_AGENT_ADDRESS_INDEX: usize = 1;

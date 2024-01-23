@@ -151,6 +151,16 @@ impl Disk {
             key_requester,
         )
         .await?;
+
+        if matches!(disk.variant(), DiskVariant::U2) {
+            dataset::ensure_zpool_datasets_are_encrypted(
+                log,
+                disk.zpool_name(),
+            )
+            .await
+            .map_err(|err| crate::dataset::DatasetError::from(err))?;
+        }
+
         Ok(disk)
     }
 

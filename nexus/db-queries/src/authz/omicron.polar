@@ -365,6 +365,24 @@ resource DnsConfig {
 has_relation(fleet: Fleet, "parent_fleet", dns_config: DnsConfig)
 	if dns_config.fleet = fleet;
 
+# Describes the policy for accessing blueprints
+resource BlueprintConfig {
+	permissions = [
+	    "list_children", # list blueprints
+	    "create_child",  # create blueprint
+	    "read",          # read the current target
+	    "modify",        # change the current target
+	];
+
+	relations = { parent_fleet: Fleet };
+	"create_child" if "admin" on "parent_fleet";
+	"modify" if "admin" on "parent_fleet";
+	"list_children" if "viewer" on "parent_fleet";
+	"read" if "viewer" on "parent_fleet";
+}
+has_relation(fleet: Fleet, "parent_fleet", list: BlueprintConfig)
+	if list.fleet = fleet;
+
 # Describes the policy for reading and modifying low-level inventory
 resource Inventory {
 	permissions = [ "read", "modify" ];

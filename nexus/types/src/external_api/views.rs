@@ -295,11 +295,35 @@ pub struct VpcRouter {
 
 // IP POOLS
 
+/// A collection of IP ranges. If a pool is linked to a silo, IP addresses from
+/// the pool can be allocated within that silo
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPool {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    pub silo_id: Option<Uuid>,
+}
+
+/// An IP pool in the context of a silo
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloIpPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
+    pub is_default: bool,
+}
+
+/// A link between an IP pool and a silo that allows one to allocate IPs from
+/// the pool within the silo
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct IpPoolSiloLink {
+    pub ip_pool_id: Uuid,
+    pub silo_id: Uuid,
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
     pub is_default: bool,
 }
 
@@ -416,7 +440,7 @@ pub struct Switch {
 ///
 /// Physical disks reside in a particular sled and are used to store both
 /// Instance Disk data as well as internal metadata.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PhysicalDisk {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,

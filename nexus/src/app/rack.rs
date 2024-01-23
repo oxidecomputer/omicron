@@ -27,10 +27,11 @@ use nexus_types::external_api::params::BgpAnnounceSetCreate;
 use nexus_types::external_api::params::BgpAnnouncementCreate;
 use nexus_types::external_api::params::BgpConfigCreate;
 use nexus_types::external_api::params::BgpPeer;
-use nexus_types::external_api::params::LinkConfig;
-use nexus_types::external_api::params::LldpServiceConfig;
+use nexus_types::external_api::params::LinkConfigCreate;
+use nexus_types::external_api::params::LldpServiceConfigCreate;
 use nexus_types::external_api::params::RouteConfig;
-use nexus_types::external_api::params::SwitchPortConfig;
+use nexus_types::external_api::params::SwitchPortConfigCreate;
+use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::params::{
     AddressLotCreate, BgpPeerConfig, LoopbackAddressCreate, Route, SiloCreate,
     SwitchPortSettingsCreate,
@@ -51,6 +52,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::EarlyNetworkConfigBody;
@@ -68,6 +70,19 @@ use std::net::Ipv4Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
+
+// A limit for querying the last inventory collection
+//
+// We set a limit of 200 here to give us some breathing room when
+// querying for cabooses and RoT pages, each of which is "4 per SP/RoT",
+// which in a single fully populated rack works out to (32 sleds + 2
+// switches + 1 psc) * 4 = 140.
+//
+// This feels bad and probably needs more thought; see
+// https://github.com/oxidecomputer/omicron/issues/4621 where this limit
+// being too low bit us, and it will link to a more general followup
+// issue.
+const INVENTORY_COLLECTION_LIMIT: u32 = 200;
 
 impl super::Nexus {
     pub(crate) async fn racks_list(
@@ -572,7 +587,7 @@ impl super::Nexus {
                     description: "initial uplink configuration".to_string(),
                 };
 
-                let port_config = SwitchPortConfig {
+                let port_config = SwitchPortConfigCreate {
                     geometry: nexus_types::external_api::params::SwitchPortGeometry::Qsfp28x1,
                 };
 
@@ -638,9 +653,9 @@ impl super::Nexus {
                     .bgp_peers
                     .insert("phy0".to_string(), BgpPeerConfig { peers });
 
-                let link = LinkConfig {
+                let link = LinkConfigCreate {
                     mtu: 1500, //TODO https://github.com/oxidecomputer/omicron/issues/2274
-                    lldp: LldpServiceConfig {
+                    lldp: LldpServiceConfigCreate {
                         enabled: false,
                         lldp_config: None,
                     },
@@ -872,17 +887,7 @@ impl super::Nexus {
     ) -> ListResultVec<UninitializedSled> {
         debug!(self.log, "Getting latest collection");
         // Grab the SPs from the last collection
-        //
-        // We set a limit of 200 here to give us some breathing room when
-        // querying for cabooses and RoT pages, each of which is "4 per SP/RoT",
-        // which in a single fully populated rack works out to (32 sleds + 2
-        // switches + 1 psc) * 4 = 140.
-        //
-        // This feels bad and probably needs more thought; see
-        // https://github.com/oxidecomputer/omicron/issues/4621 where this limit
-        // being too low bit us, and it will link to a more general followup
-        // issue.
-        let limit = NonZeroU32::new(200).unwrap();
+        let limit = NonZeroU32::new(INVENTORY_COLLECTION_LIMIT).unwrap();
         let collection = self
             .db_datastore
             .inventory_get_latest_collection(opctx, limit)
@@ -933,16 +938,18 @@ impl super::Nexus {
     }
 
     /// Add a sled to an intialized rack
-    pub(crate) async fn add_sled_to_initialized_rack(
+    pub(crate) async fn sled_add(
         &self,
         opctx: &OpContext,
-        sled: UninitializedSled,
+        sled: UninitializedSledId,
     ) -> Result<(), Error> {
-        let baseboard_id = sled.baseboard.clone().into();
-        let hw_baseboard_id =
-            self.db_datastore.find_hw_baseboard_id(opctx, baseboard_id).await?;
+        let baseboard_id = sled.clone().into();
+        let hw_baseboard_id = self
+            .db_datastore
+            .find_hw_baseboard_id(opctx, &baseboard_id)
+            .await?;
 
-        let subnet = self.db_datastore.rack_subnet(opctx, sled.rack_id).await?;
+        let subnet = self.db_datastore.rack_subnet(opctx, self.rack_id).await?;
         let rack_subnet =
             Ipv6Subnet::<RACK_PREFIX>::from(rack_subnet(Some(subnet))?);
 
@@ -950,16 +957,39 @@ impl super::Nexus {
             .db_datastore
             .allocate_sled_underlay_subnet_octets(
                 opctx,
-                sled.rack_id,
+                self.rack_id,
                 hw_baseboard_id,
             )
             .await?;
 
+        // Grab the SPs from the last collection
+        let limit = NonZeroU32::new(INVENTORY_COLLECTION_LIMIT).unwrap();
+        let collection = self
+            .db_datastore
+            .inventory_get_latest_collection(opctx, limit)
+            .await?;
+
+        // If there isn't a collection, we don't know about the sled
+        let Some(collection) = collection else {
+            return Err(Error::unavail("no inventory data available"));
+        };
+
+        // Find the revision
+        let Some(sp) = collection.sps.get(&baseboard_id) else {
+            return Err(Error::ObjectNotFound {
+                type_name: ResourceType::Sled,
+                lookup_type:
+                    omicron_common::api::external::LookupType::ByCompositeId(
+                        format!("{sled:?}"),
+                    ),
+            });
+        };
+
         // Convert the baseboard as necessary
         let baseboard = sled_agent_client::types::Baseboard::Gimlet {
-            identifier: sled.baseboard.serial.clone(),
-            model: sled.baseboard.part.clone(),
-            revision: sled.baseboard.revision,
+            identifier: sled.serial.clone(),
+            model: sled.part.clone(),
+            revision: sp.baseboard_revision.into(),
         };
 
         // Make the call to sled-agent
@@ -985,13 +1015,11 @@ impl super::Nexus {
             },
         };
         let sa = self.get_any_sled_agent(opctx).await?;
-        sa.add_sled_to_initialized_rack(&req).await.map_err(|e| {
-            Error::InternalError {
-                internal_message: format!(
-                    "failed to add sled with baseboard {:?} to rack {}: {e}",
-                    sled.baseboard, allocation.rack_id
-                ),
-            }
+        sa.sled_add(&req).await.map_err(|e| Error::InternalError {
+            internal_message: format!(
+                "failed to add sled with baseboard {:?} to rack {}: {e}",
+                sled, allocation.rack_id
+            ),
         })?;
 
         Ok(())

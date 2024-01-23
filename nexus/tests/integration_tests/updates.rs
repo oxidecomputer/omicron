@@ -8,6 +8,7 @@
 // - tests around target names and artifact names that contain dangerous paths like `../`
 
 use async_trait::async_trait;
+use camino_tempfile::Utf8TempDir;
 use chrono::{Duration, Utc};
 use dropshot::test_util::LogContext;
 use dropshot::{
@@ -51,17 +52,13 @@ async fn test_update_end_to_end() {
     // build the TUF repo
     let rng = SystemRandom::new();
     let tuf_repo = new_tuf_repo(&rng).await;
-    slog::info!(
-        logctx.log,
-        "TUF repo created at {}",
-        tuf_repo.path().display()
-    );
+    slog::info!(logctx.log, "TUF repo created at {}", tuf_repo.path());
 
     // serve it over HTTP
     let dropshot_config = Default::default();
     let mut api = ApiDescription::new();
     api.register(static_content).unwrap();
-    let context = FileServerContext { base: tuf_repo.path().to_owned() };
+    let context = FileServerContext { base: tuf_repo.path().to_owned().into() };
     let server =
         HttpServerStarter::new(&dropshot_config, api, context, &logctx.log)
             .unwrap()
@@ -143,7 +140,7 @@ async fn static_content(
 
 const TARGET_CONTENTS: &[u8] = b"hello world".as_slice();
 
-async fn new_tuf_repo(rng: &(dyn SecureRandom + Sync)) -> TempDir {
+async fn new_tuf_repo(rng: &(dyn SecureRandom + Sync)) -> Utf8TempDir {
     let version =
         NonZeroU64::new(Utc::now().timestamp().try_into().unwrap()).unwrap();
     let expires = Utc::now() + Duration::minutes(5);
@@ -217,7 +214,7 @@ async fn new_tuf_repo(rng: &(dyn SecureRandom + Sync)) -> TempDir {
 
     let signed_repo = editor.sign(&signing_keys).await.unwrap();
 
-    let repo = TempDir::new().unwrap();
+    let repo = Utf8TempDir::new().unwrap();
     signed_repo.write(repo.path().join("metadata")).await.unwrap();
     signed_repo
         .copy_targets(

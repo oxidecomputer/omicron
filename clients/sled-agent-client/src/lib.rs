@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 progenitor::generate_api!(
     spec = "../../openapi/sled-agent.json",
-    derives = [ schemars::JsonSchema ],
+    derives = [ schemars::JsonSchema, PartialEq ],
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -25,14 +25,68 @@ progenitor::generate_api!(
     //TODO trade the manual transformations later in this file for the
     //     replace directives below?
     replace = {
-        //Ipv4Network = ipnetwork::Ipv4Network,
+        ByteCount = omicron_common::api::external::ByteCount,
+        Generation = omicron_common::api::external::Generation,
+        MacAddr = omicron_common::api::external::MacAddr,
+        Name = omicron_common::api::external::Name,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         Ipv6Network = ipnetwork::Ipv6Network,
         IpNetwork = ipnetwork::IpNetwork,
         PortFec = omicron_common::api::internal::shared::PortFec,
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
+        SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
+        Vni = omicron_common::api::external::Vni,
     }
 );
+
+// We cannot easily configure progenitor to derive `Eq` on all the client-
+// generated types because some have floats and other types that can't impl
+// `Eq`.  We impl it explicitly for a few types on which we need it.
+impl Eq for types::OmicronZonesConfig {}
+impl Eq for types::OmicronZoneConfig {}
+impl Eq for types::OmicronZoneType {}
+impl Eq for types::OmicronZoneDataset {}
+
+impl types::OmicronZoneType {
+    /// Human-readable label describing what kind of zone this is
+    ///
+    /// This is just use for testing and reporting.
+    pub fn label(&self) -> impl std::fmt::Display {
+        match self {
+            types::OmicronZoneType::BoundaryNtp { .. } => "boundary_ntp",
+            types::OmicronZoneType::Clickhouse { .. } => "clickhouse",
+            types::OmicronZoneType::ClickhouseKeeper { .. } => {
+                "clickhouse_keeper"
+            }
+            types::OmicronZoneType::CockroachDb { .. } => "cockroach_db",
+            types::OmicronZoneType::Crucible { .. } => "crucible",
+            types::OmicronZoneType::CruciblePantry { .. } => "crucible_pantry",
+            types::OmicronZoneType::ExternalDns { .. } => "external_dns",
+            types::OmicronZoneType::InternalDns { .. } => "internal_dns",
+            types::OmicronZoneType::InternalNtp { .. } => "internal_ntp",
+            types::OmicronZoneType::Nexus { .. } => "nexus",
+            types::OmicronZoneType::Oximeter { .. } => "oximeter",
+        }
+    }
+
+    /// Identifies whether this is an NTP zone
+    pub fn is_ntp(&self) -> bool {
+        match self {
+            types::OmicronZoneType::BoundaryNtp { .. }
+            | types::OmicronZoneType::InternalNtp { .. } => true,
+
+            types::OmicronZoneType::Clickhouse { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CockroachDb { .. }
+            | types::OmicronZoneType::Crucible { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::ExternalDns { .. }
+            | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Nexus { .. }
+            | types::OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+}
 
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
@@ -50,7 +104,7 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
             propolis_id: s.propolis_id,
             dst_propolis_id: s.dst_propolis_id,
             migration_id: s.migration_id,
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -84,18 +138,6 @@ impl From<omicron_common::api::external::InstanceCpuCount>
     }
 }
 
-impl From<omicron_common::api::external::ByteCount> for types::ByteCount {
-    fn from(s: omicron_common::api::external::ByteCount) -> Self {
-        Self(s.to_bytes())
-    }
-}
-
-impl From<omicron_common::api::external::Generation> for types::Generation {
-    fn from(s: omicron_common::api::external::Generation) -> Self {
-        Self(i64::from(&s) as u64)
-    }
-}
-
 impl From<types::InstanceRuntimeState>
     for omicron_common::api::internal::nexus::InstanceRuntimeState
 {
@@ -104,7 +146,7 @@ impl From<types::InstanceRuntimeState>
             propolis_id: s.propolis_id,
             dst_propolis_id: s.dst_propolis_id,
             migration_id: s.migration_id,
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -114,11 +156,7 @@ impl From<types::VmmRuntimeState>
     for omicron_common::api::internal::nexus::VmmRuntimeState
 {
     fn from(s: types::VmmRuntimeState) -> Self {
-        Self {
-            state: s.state.into(),
-            gen: s.gen.into(),
-            time_updated: s.time_updated,
-        }
+        Self { state: s.state.into(), gen: s.gen, time_updated: s.time_updated }
     }
 }
 
@@ -162,25 +200,13 @@ impl From<types::InstanceCpuCount>
     }
 }
 
-impl From<types::ByteCount> for omicron_common::api::external::ByteCount {
-    fn from(s: types::ByteCount) -> Self {
-        Self::try_from(s.0).unwrap_or_else(|e| panic!("{}: {}", s.0, e))
-    }
-}
-
-impl From<types::Generation> for omicron_common::api::external::Generation {
-    fn from(s: types::Generation) -> Self {
-        Self::try_from(s.0 as i64).unwrap()
-    }
-}
-
 impl From<omicron_common::api::internal::nexus::DiskRuntimeState>
     for types::DiskRuntimeState
 {
     fn from(s: omicron_common::api::internal::nexus::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -212,7 +238,7 @@ impl From<types::DiskRuntimeState>
     fn from(s: types::DiskRuntimeState) -> Self {
         Self {
             disk_state: s.disk_state.into(),
-            gen: s.gen.into(),
+            gen: s.gen,
             time_updated: s.time_updated,
         }
     }
@@ -235,32 +261,6 @@ impl From<types::DiskState> for omicron_common::api::external::DiskState {
             Destroyed => Self::Destroyed,
             Faulted => Self::Faulted,
         }
-    }
-}
-
-impl From<&omicron_common::api::external::Name> for types::Name {
-    fn from(s: &omicron_common::api::external::Name) -> Self {
-        Self::try_from(<&str>::from(s))
-            .unwrap_or_else(|e| panic!("{}: {}", s, e))
-    }
-}
-
-impl From<omicron_common::api::external::Vni> for types::Vni {
-    fn from(v: omicron_common::api::external::Vni) -> Self {
-        Self(u32::from(v))
-    }
-}
-
-impl From<types::Vni> for omicron_common::api::external::Vni {
-    fn from(s: types::Vni) -> Self {
-        Self::try_from(s.0).unwrap()
-    }
-}
-
-impl From<omicron_common::api::external::MacAddr> for types::MacAddr {
-    fn from(s: omicron_common::api::external::MacAddr) -> Self {
-        Self::try_from(s.0.to_string())
-            .unwrap_or_else(|e| panic!("{}: {}", s.0, e))
     }
 }
 
@@ -292,6 +292,12 @@ impl From<ipnetwork::Ipv4Network> for types::Ipv4Net {
     }
 }
 
+impl From<types::Ipv4Net> for ipnetwork::Ipv4Network {
+    fn from(n: types::Ipv4Net) -> Self {
+        n.parse().unwrap()
+    }
+}
+
 impl From<ipnetwork::Ipv4Network> for types::Ipv4Network {
     fn from(n: ipnetwork::Ipv4Network) -> Self {
         Self::try_from(n.to_string()).unwrap_or_else(|e| panic!("{}: {}", n, e))
@@ -304,12 +310,27 @@ impl From<ipnetwork::Ipv6Network> for types::Ipv6Net {
     }
 }
 
+impl From<types::Ipv6Net> for ipnetwork::Ipv6Network {
+    fn from(n: types::Ipv6Net) -> Self {
+        n.parse().unwrap()
+    }
+}
+
 impl From<ipnetwork::IpNetwork> for types::IpNet {
     fn from(n: ipnetwork::IpNetwork) -> Self {
         use ipnetwork::IpNetwork;
         match n {
             IpNetwork::V4(v4) => Self::V4(v4.into()),
             IpNetwork::V6(v6) => Self::V6(v6.into()),
+        }
+    }
+}
+
+impl From<types::IpNet> for ipnetwork::IpNetwork {
+    fn from(n: types::IpNet) -> Self {
+        match n {
+            types::IpNet::V4(v4) => ipnetwork::IpNetwork::V4(v4.into()),
+            types::IpNet::V6(v6) => ipnetwork::IpNetwork::V6(v6.into()),
         }
     }
 }
@@ -399,7 +420,7 @@ impl From<omicron_common::api::internal::nexus::HostIdentifier>
         use omicron_common::api::internal::nexus::HostIdentifier::*;
         match s {
             Ip(net) => Self::Ip(net.into()),
-            Vpc(vni) => Self::Vpc(vni.into()),
+            Vpc(vni) => Self::Vpc(vni),
         }
     }
 }
@@ -478,22 +499,14 @@ impl From<omicron_common::api::internal::shared::NetworkInterface>
         Self {
             id: s.id,
             kind: s.kind.into(),
-            name: (&s.name).into(),
+            name: s.name,
             ip: s.ip,
-            mac: s.mac.into(),
+            mac: s.mac,
             subnet: s.subnet.into(),
-            vni: s.vni.into(),
+            vni: s.vni,
             primary: s.primary,
             slot: s.slot,
         }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::SourceNatConfig>
-    for types::SourceNatConfig
-{
-    fn from(s: omicron_common::api::internal::shared::SourceNatConfig) -> Self {
-        Self { ip: s.ip, first_port: s.first_port, last_port: s.last_port }
     }
 }
 
