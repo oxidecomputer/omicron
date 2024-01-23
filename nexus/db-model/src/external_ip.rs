@@ -100,7 +100,9 @@ pub struct FloatingIp {
     pub project_id: Uuid,
 }
 
-impl From<ExternalIp> for sled_agent_client::types::SourceNatConfig {
+impl From<ExternalIp>
+    for omicron_common::api::internal::shared::SourceNatConfig
+{
     fn from(eip: ExternalIp) -> Self {
         Self {
             ip: eip.ip.ip(),

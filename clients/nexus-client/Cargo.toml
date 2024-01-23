@@ -8,6 +8,7 @@ license = "MPL-2.0"
 chrono.workspace = true
 futures.workspace = true
 ipnetwork.workspace = true
+nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 progenitor.workspace = true

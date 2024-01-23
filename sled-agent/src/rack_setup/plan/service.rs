@@ -10,7 +10,8 @@ use crate::rack_setup::config::SetupServiceConfig as Config;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
-use internal_dns::{ServiceName, DNS_ZONE};
+use internal_dns::config::{Host, ZoneVariant};
+use internal_dns::ServiceName;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY,
@@ -659,7 +660,8 @@ impl Plan {
             let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
 
             let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
-                boundary_ntp_servers.push(format!("{}.host.{}", id, DNS_ZONE));
+                boundary_ntp_servers
+                    .push(Host::for_zone(id, ZoneVariant::Other).fqdn());
                 let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;
                 (
                     OmicronZoneType::BoundaryNtp {

@@ -356,6 +356,7 @@ source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
+  { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -574,7 +575,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "xcvradm.tar.gz"
+  "xcvradm.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -596,7 +598,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "sp-sim-stub.tar.gz"
+  "sp-sim-stub.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -618,7 +621,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "sp-sim-softnpu.tar.gz"
+  "sp-sim-softnpu.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -631,5 +635,14 @@ source.rust.release = true
 source.paths = [
     { from = "smf/zone-network-setup/manifest.xml", to = "/var/svc/manifest/site/zone-network-setup/manifest.xml" },
 ]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.omicron-omdb]
+service_name = "omdb"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["omdb"]
+source.rust.release = true
 output.type = "zone"
 output.intermediate_only = true

@@ -41,6 +41,7 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/deployment",
     "nexus/inventory",
     "nexus/test-interface",
     "nexus/test-utils-macros",
@@ -114,6 +115,7 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/deployment",
     "nexus/inventory",
     "nexus/types",
     "oximeter/collector",
@@ -217,7 +219,7 @@ httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "0.14"
-hyper-rustls = "0.24.2"
+hyper-rustls = "0.25.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
 indexmap = "2.1.0"
@@ -228,6 +230,7 @@ installinator-artifact-client = { path = "clients/installinator-artifact-client"
 installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }
+ipnet = "2.9"
 ipnetwork = { version = "0.20", features = ["schemars"] }
 itertools = "0.12.0"
 key-manager = { path = "key-manager" }
@@ -244,6 +247,7 @@ nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
+nexus-deployment = { path = "nexus/deployment" }
 nexus-inventory = { path = "nexus/inventory" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
@@ -263,7 +267,7 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.10.1"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "dd2b7b0306d3f01fa09170b8884d402209e49244", features = [ "api", "std" ] }
 once_cell = "1.19.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.0.0"
@@ -271,7 +275,7 @@ openapiv3 = "2.0.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.5"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "dd2b7b0306d3f01fa09170b8884d402209e49244" }
 oso = "0.27"
 owo-colors = "3.5.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -290,7 +294,7 @@ percent-encoding = "2.3.1"
 pem = "3.0"
 petgraph = "0.6.4"
 postgres-protocol = "0.6.6"
-predicates = "3.0.4"
+predicates = "3.1.0"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
 prettyplease = "0.2.16"
@@ -306,7 +310,7 @@ rand = "0.8.5"
 ratatui = "0.23.0"
 rayon = "1.8"
 rcgen = "0.12.0"
-reedline = "0.22.0"
+reedline = "0.28.0"
 ref-cast = "1.0"
 regex = "1.10.2"
 regress = "0.7.1"
@@ -315,7 +319,8 @@ ring = "0.17.7"
 rpassword = "7.3.1"
 rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
-rustls = "0.21.9"
+rustls = "0.22.2"
+rustls-pemfile = "2.0.0"
 rustyline = "12.0.0"
 samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
 schemars = "0.8.16"
@@ -351,7 +356,7 @@ sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-sqlparser = { version = "0.36.1", features = [ "visitor" ] }
+sqlparser = { version = "0.41.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
@@ -366,7 +371,7 @@ syn = { version = "2.0" }
 tabled = "0.14"
 tar = "0.4"
 tempdir = "0.3"
-tempfile = "3.8"
+tempfile = "3.9"
 term = "0.7"
 termios = "0.3"
 textwrap = "0.16.0"
@@ -385,7 +390,7 @@ trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
 trust-dns-server = "0.22"
-trybuild = "1.0.88"
+trybuild = "1.0.89"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 unicode-width = "0.1.11"
