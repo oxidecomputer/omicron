@@ -982,8 +982,10 @@ fn test_reject_unsigned_saml_response() {
 // * Some XML libraries return "user@example.com.evil.com". This is safe,
 //   because the text after the comment hasn't been dropped. This is the behavior
 //   with quick-xml 0.30, and the one that we're testing here.
-// * Some XML libraries reject the XML document as invalid. This is also safe,
-//   and was the behavior with quick-xml 0.23.
+// * Some XML libraries are unable to deserialize the document. This is also
+//   safe (and not particularly problematic because typically SAML responses
+//   aren't going to contain comments), and was the behavior with quick-xml
+//   0.23.
 //
 // See:
 // https://duo.com/blog/duo-finds-saml-vulnerabilities-affecting-multiple-implementations
