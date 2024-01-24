@@ -247,7 +247,7 @@ async fn test_instances_create_reboot_halt(
                 memory: instance.memory,
                 hostname: instance.hostname.clone(),
                 user_data: vec![],
-                ssh_keys: Some(Vec::new()),
+                ssh_keys: None,
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
@@ -1217,7 +1217,7 @@ async fn test_instances_create_stopped_start(
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: String::from("the_host"),
             user_data: vec![],
-            ssh_keys: Some(Vec::new()),
+            ssh_keys: None,
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
@@ -1385,7 +1385,7 @@ async fn test_instance_using_image_from_other_project_fails(
                 memory: ByteCount::from_gibibytes_u32(1),
                 hostname: "stolen".into(),
                 user_data: vec![],
-                ssh_keys: Some(Vec::new()),
+                ssh_keys: None,
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
@@ -1460,7 +1460,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("inst"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: interface_params.clone(),
         external_ips: vec![],
         disks: vec![],
@@ -1488,7 +1488,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("inst2"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
@@ -1577,7 +1577,7 @@ async fn test_instance_with_single_explicit_ip_address(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
@@ -1691,7 +1691,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
@@ -1805,7 +1805,7 @@ async fn test_instance_create_delete_network_interface(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
@@ -2046,7 +2046,7 @@ async fn test_instance_update_network_interfaces(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
@@ -2439,7 +2439,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nic-test"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
@@ -2505,7 +2505,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![params::InstanceDiskAttachment::Attach(
@@ -2565,7 +2565,7 @@ async fn test_instance_create_attach_disks(
         memory: ByteCount::from_gibibytes_u32(3),
         hostname: String::from("nfs"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![
@@ -2662,7 +2662,7 @@ async fn test_instance_create_attach_disks_undo(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![
@@ -2747,7 +2747,7 @@ async fn test_attach_eight_disks_to_instance(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..8)
@@ -2828,7 +2828,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..9)
@@ -2923,7 +2923,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..8)
@@ -3007,7 +3007,7 @@ async fn test_disks_detached_when_instance_destroyed(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfs"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..8)
@@ -3098,7 +3098,7 @@ async fn test_disks_detached_when_instance_destroyed(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("nfsv2"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..8)
@@ -3160,7 +3160,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
@@ -3210,7 +3210,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
@@ -3260,7 +3260,7 @@ async fn test_instances_memory_greater_than_max_size(
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
@@ -3371,7 +3371,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             memory: ByteCount::from_gibibytes_u32(1),
             hostname: config.0.to_string(),
             user_data: vec![],
-            ssh_keys: Some(Vec::new()),
+            ssh_keys: None,
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
@@ -3425,7 +3425,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("test"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
@@ -3477,7 +3477,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             memory: ByteCount::try_from(config.1).unwrap(),
             hostname: config.0.to_string(),
             user_data: vec![],
-            ssh_keys: Some(Vec::new()),
+            ssh_keys: None,
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
@@ -3988,7 +3988,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![ephemeral_create.clone(), ephemeral_create],
         disks: vec![],
@@ -4113,7 +4113,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         memory: ByteCount::from_gibibytes_u32(4),
         hostname: String::from("inst"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool_name: Some(Name::try_from(String::from("default")).unwrap()),
