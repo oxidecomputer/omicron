@@ -105,7 +105,6 @@ pub fn make_omicron_oso(log: &slog::Logger) -> Result<OsoInit, anyhow::Error> {
         AuthenticatedActor::get_polar_class(),
         BlueprintConfig::get_polar_class(),
         Database::get_polar_class(),
-        DeploymentConfig::get_polar_class(),
         DnsConfig::get_polar_class(),
         Fleet::get_polar_class(),
         Inventory::get_polar_class(),

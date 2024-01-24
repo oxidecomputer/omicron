@@ -10,19 +10,34 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::DbConnection;
 use crate::db::TransactionError;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
+use chrono::Utc;
 use diesel::expression::SelectableHelper;
+use diesel::pg::Pg;
+use diesel::query_builder::AstPass;
+use diesel::query_builder::QueryFragment;
+use diesel::query_builder::QueryId;
+use diesel::result::DatabaseErrorKind;
+use diesel::result::Error as DieselError;
+use diesel::sql_types;
+use diesel::Column;
 use diesel::ExpressionMethods;
+use diesel::OptionalExtension;
 use diesel::QueryDsl;
+use diesel::RunQueryDsl;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpOmicronZoneNotInService;
 use nexus_db_model::BpSledOmicronZones;
+use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::OmicronZonesConfig;
 use omicron_common::api::external::Error;
 use omicron_common::bail_unless;
@@ -38,8 +53,7 @@ use uuid::Uuid;
 /// [`Paginator`] to guard against single queries returning an unchecked number
 /// of rows.
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
-// TODO XXX set to 1000; currently 1 for testing
-const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
+const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 
 impl DataStore {
     /// Store a complete blueprint into the database
@@ -49,7 +63,7 @@ impl DataStore {
         blueprint: &Blueprint,
     ) -> Result<(), Error> {
         opctx
-            .authorize(authz::Action::Modify, &authz::DEPLOYMENT_CONFIG)
+            .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
 
         // In the database, the blueprint is represented essentially as a tree
@@ -186,7 +200,7 @@ impl DataStore {
         opctx: &OpContext,
         blueprint_id: Uuid,
     ) -> Result<Blueprint, Error> {
-        opctx.authorize(authz::Action::Read, &authz::DEPLOYMENT_CONFIG).await?;
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
         // Read the metadata from the primary blueprint row, and ensure that it
@@ -459,8 +473,6 @@ impl DataStore {
         // collection if we crash while deleting it.
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        // TODO XXX check that this blueprint is not the target
-
         let (
             nblueprints,
             nsled_agent_zones,
@@ -469,6 +481,21 @@ impl DataStore {
             nzones_not_in_service,
         ) = conn
             .transaction_async(|conn| async move {
+                // Ensure that blueprint we're about to delete is not the
+                // current target.
+                let current_target =
+                    self.blueprint_current_target_only(&conn).await?;
+                if let Some(current_target) = current_target {
+                    if current_target.target_id == blueprint_id {
+                        return Err(TransactionError::CustomError(
+                            Error::conflict(format!(
+                                "blueprint {blueprint_id} is the \
+                                 current target and cannot be deleted",
+                            )),
+                        ));
+                    }
+                }
+
                 // Remove the record describing the blueprint itself.
                 let nblueprints = {
                     use db::schema::blueprint::dsl;
@@ -547,7 +574,414 @@ impl DataStore {
 
         Ok(())
     }
+
+    /// Set the current target blueprint
+    ///
+    /// In order to become the target blueprint, `target`'s parent blueprint
+    /// must be the current target
+    pub async fn blueprint_target_set_current(
+        &self,
+        opctx: &OpContext,
+        target: BlueprintTarget,
+    ) -> Result<(), Error> {
+        opctx
+            .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
+            .await?;
+
+        let query = InsertTargetQuery {
+            target_id: target.target_id,
+            enabled: target.enabled,
+            time_made_target: target.time_set,
+        };
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        query
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| Error::from(query.decode_error(e)))?;
+
+        Ok(())
+    }
+
+    /// Get the current target blueprint, if one exists
+    pub async fn blueprint_target_get_current(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<(BlueprintTarget, Blueprint)>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let Some(target) = self.blueprint_current_target_only(&conn).await?
+        else {
+            return Ok(None);
+        };
+
+        // The blueprint for the current target cannot be deleted while it is
+        // the current target, but it's possible someone else (a) made a new
+        // blueprint the target and (b) deleted the blueprint pointed to by our
+        // `target` between the above query and the below query. In such a case,
+        // this query will fail with an "unknown blueprint ID" error. This
+        // should be rare in practice, and is always possible during
+        // `blueprint_read` anyway since it has to read from multiple tables to
+        // construct the blueprint.
+        let blueprint = self.blueprint_read(opctx, target.target_id).await?;
+
+        Ok(Some((target, blueprint)))
+    }
+
+    // Helper to fetch the current blueprint target (without fetching the entire
+    // blueprint for that target).
+    //
+    // Caller is responsible for checking authz for this operation.
+    async fn blueprint_current_target_only(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<Option<BlueprintTarget>, Error> {
+        use db::schema::bp_target::dsl;
+
+        let current_target = dsl::bp_target
+            .order_by(dsl::version.desc())
+            .first_async::<BpTarget>(conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(current_target.map(BlueprintTarget::from))
+    }
 }
+
+/// Errors related to inserting a target blueprint
+#[derive(Debug)]
+enum InsertTargetError {
+    /// The requested target blueprint ID does not exist in the blueprint table.
+    NoSuchBlueprint(Uuid),
+    /// The requested target blueprint's parent does not match the current
+    /// target.
+    ParentNotTarget(Uuid),
+    /// Any other error
+    Other(DieselError),
+}
+
+impl From<InsertTargetError> for Error {
+    fn from(value: InsertTargetError) -> Self {
+        match value {
+            InsertTargetError::NoSuchBlueprint(id) => {
+                Error::invalid_request(format!("Blueprint {id} does not exist"))
+            }
+            InsertTargetError::ParentNotTarget(id) => {
+                Error::invalid_request(format!(
+                    "Blueprint {id}'s parent blueprint is not the current \
+                     target blueprint"
+                ))
+            }
+            InsertTargetError::Other(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
+        }
+    }
+}
+
+/// Query to insert a new current target blueprint.
+///
+/// The `bp_target` table's primary key is the `version` field, and we enforce
+/// the following invariants:
+///
+/// * The first "current target" blueprint is assigned version 1.
+/// * In order to be inserted as the first current target blueprint, a
+///   blueprint must have a parent_blueprint_id of NULL.
+/// * After the first, any subsequent blueprint can only be assigned as the
+///   current target if its parent_blueprint_id is the current target blueprint.
+/// * When inserting a new child blueprint as the current target, it is assigned
+///   a version of 1 + its parent's version.
+///
+/// The result of this is a linear history of blueprints, where each target is a
+/// direct child of the previous current target. Enforcing the above has some
+/// subtleties (particularly around handling the "first blueprint with no
+/// parent" case). These are expanded on below through inline comments on the
+/// query we generate:
+///
+/// ```sql
+/// WITH
+///   -- Subquery to fetch the current target (i.e., the row with the max
+///   -- veresion in `bp_target`).
+///   current_target AS (
+///     SELECT
+///       "version" AS version,
+///       "blueprint_id" AS blueprint_id
+///     FROM "bp_target"
+///     ORDER BY "version" DESC
+///     LIMIT 1
+///   ),
+///
+///   -- Error checking subquery: This uses similar tricks as elsewhere in
+///   -- this crate to `CAST(... AS UUID)` with non-UUID values that result
+///   -- in runtime errors in specific cases, allowing us to give accurate
+///   -- error messages.
+///   --
+///   -- These checks are not required for correct behavior by the insert
+///   -- below. If we removed them, the insert would insert 0 rows if
+///   -- these checks would have failed. But they make it easier to report
+///   -- specific problems to our caller.
+///   --
+///   -- The specific cases we check here are noted below.
+///   check_validity AS MATERIALIZED (
+///     SELECT CAST(IF(
+///       -- Return `no-such-blueprint` if the ID we're being told to
+///       -- set as the target doesn't exist in the blueprint table.
+///       (SELECT "id" FROM "blueprint" WHERE "id" = <new_target_id>) IS NULL,
+///       'no-such-blueprint',
+///       IF(
+///         -- Check for whether our new target's parent matches our current
+///         -- target. There are two cases here: The first is the common case
+///         -- (i.e., the new target has a parent: does it match the current
+///         -- target ID?). The second is the bootstrapping check: if we're
+///         -- trying to insert a new target that does not have a parent,
+///         -- we should not have a current target at all.
+///         --
+///         -- If either of these cases fails, we return `parent-not-target`.
+///         (
+///            SELECT "parent_blueprint_id" FROM "blueprint", current_target
+///            WHERE
+///              "id" = <new_target_id>
+///              AND current_target.blueprint_id = "parent_blueprint_id"
+///         ) IS NOT NULL
+///         OR
+///         (
+///            SELECT 1 FROM "blueprint"
+///            WHERE
+///              "id" = <new_target_id>
+///              AND "parent_blueprint_id" IS NULL
+///              AND NOT EXISTS (SELECT version FROM current_target)
+///         ) = 1,
+///         <new_target_id>,
+///         'parent-not-target'
+///       )
+///     ) AS UUID)
+///   ),
+///
+///   -- Determine the new version number to use: either 1 if this is the
+///   -- first blueprint being made the current target, or 1 higher than
+///   -- the previous target's version.
+///   --
+///   -- The final clauses of each of these WHERE clauses repeat the
+///   -- checks performed above in `check_validity`, and will cause this
+///   -- subquery to return no rows if we should not allow the new
+///   -- target to be set.
+///   new_target AS (
+///     SELECT 1 AS new_version FROM "blueprint"
+///       WHERE
+///         "id" = <new_target_id>
+///         AND "parent_blueprint_id" IS NULL
+///         AND NOT EXISTS (SELECT version FROM current_target)
+///     UNION
+///     SELECT current_target.version + 1 FROM current_target, "blueprint"
+///       WHERE
+///         "id" = <new_target_id>
+///         AND "parent_blueprint_id" IS NOT NULL
+///         AND "parent_blueprint_id" = current_target.blueprint_id
+///   )
+///
+///   -- Perform the actual insertion.
+///   INSERT INTO "bp_target"(
+///     "version","blueprint_id","enabled","time_made_target"
+///   )
+///   SELECT
+///     new_target.new_version,
+///     <new_target_id>,
+///     <new_target_enabled>,
+///     <new_target_time_made_target>
+///     FROM new_target
+/// ```
+#[derive(Debug, Clone, Copy)]
+struct InsertTargetQuery {
+    target_id: Uuid,
+    enabled: bool,
+    time_made_target: DateTime<Utc>,
+}
+
+// Uncastable sentinel used to detect we attempt to make a blueprint the target
+// when it does not exist in the blueprint table.
+const NO_SUCH_BLUEPRINT_SENTINEL: &str = "no-such-blueprint";
+
+// Uncastable sentinel used to detect we attempt to make a blueprint the target
+// when its parent_blueprint_id is not the current target.
+const PARENT_NOT_TARGET_SENTINEL: &str = "parent-not-target";
+
+// Error messages generated from the above sentinel values.
+const NO_SUCH_BLUEPRINT_ERROR_MESSAGE: &str =
+    "could not parse \"no-such-blueprint\" as type uuid: \
+     uuid: incorrect UUID length: no-such-blueprint";
+const PARENT_NOT_TARGET_ERROR_MESSAGE: &str =
+    "could not parse \"parent-not-target\" as type uuid: \
+     uuid: incorrect UUID length: parent-not-target";
+
+impl InsertTargetQuery {
+    fn decode_error(&self, err: DieselError) -> InsertTargetError {
+        match err {
+            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+                if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
+            {
+                InsertTargetError::NoSuchBlueprint(self.target_id)
+            }
+            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
+                if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
+            {
+                InsertTargetError::ParentNotTarget(self.target_id)
+            }
+            other => InsertTargetError::Other(other),
+        }
+    }
+}
+
+impl QueryId for InsertTargetQuery {
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+impl QueryFragment<Pg> for InsertTargetQuery {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+        use crate::db::schema::blueprint::dsl as bp_dsl;
+        use crate::db::schema::bp_target::dsl;
+
+        type FromClause<T> =
+            diesel::internal::table_macro::StaticQueryFragmentInstance<T>;
+        type BpTargetFromClause = FromClause<db::schema::bp_target::table>;
+        type BlueprintFromClause = FromClause<db::schema::blueprint::table>;
+        const BP_TARGET_FROM_CLAUSE: BpTargetFromClause =
+            BpTargetFromClause::new();
+        const BLUEPRINT_FROM_CLAUSE: BlueprintFromClause =
+            BlueprintFromClause::new();
+
+        out.push_sql("WITH ");
+
+        out.push_sql("current_target AS (SELECT ");
+        out.push_identifier(dsl::version::NAME)?;
+        out.push_sql(" AS version,");
+        out.push_identifier(dsl::blueprint_id::NAME)?;
+        out.push_sql(" AS blueprint_id FROM ");
+        BP_TARGET_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" ORDER BY ");
+        out.push_identifier(dsl::version::NAME)?;
+        out.push_sql(" DESC LIMIT 1),");
+
+        out.push_sql(
+            "check_validity AS MATERIALIZED ( \
+               SELECT \
+                 CAST( \
+                   IF( \
+                     (SELECT ",
+        );
+        out.push_identifier(bp_dsl::id::NAME)?;
+        out.push_sql(" FROM ");
+        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(bp_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
+        out.push_sql(") IS NULL, ");
+        out.push_bind_param::<sql_types::Text, &'static str>(
+            &NO_SUCH_BLUEPRINT_SENTINEL,
+        )?;
+        out.push_sql(
+            ", \
+                     IF( \
+                       (SELECT ",
+        );
+        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
+        out.push_sql(" FROM ");
+        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(", current_target WHERE ");
+        out.push_identifier(bp_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
+        out.push_sql(" AND current_target.blueprint_id = ");
+        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
+        out.push_sql(
+            "          ) IS NOT NULL \
+                       OR \
+                       (SELECT 1 FROM ",
+        );
+        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(bp_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
+        out.push_sql(" AND ");
+        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
+        out.push_sql(
+            "  IS NULL \
+                        AND NOT EXISTS ( \
+                          SELECT version FROM current_target) \
+                        ) = 1, ",
+        );
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
+        out.push_sql(", ");
+        out.push_bind_param::<sql_types::Text, &'static str>(
+            &PARENT_NOT_TARGET_SENTINEL,
+        )?;
+        out.push_sql(
+            "   ) \
+              ) \
+            AS UUID) \
+          ), ",
+        );
+
+        out.push_sql("new_target AS (SELECT 1 AS new_version FROM ");
+        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(bp_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
+        out.push_sql(" AND ");
+        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
+        out.push_sql(
+            " IS NULL \
+            AND NOT EXISTS \
+            (SELECT version FROM current_target) \
+             UNION \
+            SELECT current_target.version + 1 FROM \
+              current_target, ",
+        );
+        BLUEPRINT_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(bp_dsl::id::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
+        out.push_sql(" AND ");
+        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
+        out.push_sql(" IS NOT NULL AND ");
+        out.push_identifier(bp_dsl::parent_blueprint_id::NAME)?;
+        out.push_sql(" = current_target.blueprint_id) ");
+
+        out.push_sql("INSERT INTO ");
+        BP_TARGET_FROM_CLAUSE.walk_ast(out.reborrow())?;
+        out.push_sql("(");
+        out.push_identifier(dsl::version::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::blueprint_id::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::enabled::NAME)?;
+        out.push_sql(",");
+        out.push_identifier(dsl::time_made_target::NAME)?;
+        out.push_sql(") SELECT new_target.new_version, ");
+        out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
+        out.push_sql(",");
+        out.push_bind_param::<sql_types::Bool, bool>(&self.enabled)?;
+        out.push_sql(",");
+        out.push_bind_param::<sql_types::Timestamptz, DateTime<Utc>>(
+            &self.time_made_target,
+        )?;
+        out.push_sql(" FROM new_target");
+
+        Ok(())
+    }
+}
+
+impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 
 #[cfg(test)]
 mod tests {
@@ -555,6 +989,7 @@ mod tests {
     use crate::db::datastore::datastore_test;
     use nexus_deployment::blueprint_builder::BlueprintBuilder;
     use nexus_deployment::blueprint_builder::Ensure;
+    use nexus_inventory::now_db_precision;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
@@ -754,7 +1189,32 @@ mod tests {
         );
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
-        // TODO SET AS TARGET AND ENSURE WE CAN'T DELETE
+        // Set blueprint1 as the current target, and ensure that we cannot
+        // delete it (as the current target cannot be deleted).
+        let bp1_target = BlueprintTarget {
+            target_id: blueprint1.id,
+            enabled: true,
+            time_set: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp1_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some((bp1_target, blueprint1.clone()))
+        );
+        let err = datastore
+            .blueprint_delete(&opctx, blueprint1.id)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains(&format!(
+                "blueprint {} is the current target and cannot be deleted",
+                blueprint1.id
+            )),
+            "unexpected error: {err}"
+        );
 
         // Add a new sled to `policy`.
         let new_sled_id = Uuid::new_v4();
@@ -820,12 +1280,200 @@ mod tests {
         println!("diff: {}", blueprint2.diff(&blueprint_read));
         assert_eq!(blueprint2, blueprint_read);
 
-        // TODO SET AS TARGET AND ENSURE WE CAN'T DELETE
+        // Set blueprint2 as the current target and ensure that means we can not
+        // delete it.
+        let bp2_target = BlueprintTarget {
+            target_id: blueprint2.id,
+            enabled: true,
+            time_set: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp2_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some((bp2_target, blueprint2.clone()))
+        );
+        let err = datastore
+            .blueprint_delete(&opctx, blueprint2.id)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains(&format!(
+                "blueprint {} is the current target and cannot be deleted",
+                blueprint2.id
+            )),
+            "unexpected error: {err}"
+        );
 
         // Now that blueprint2 is the target, we should be able to delete
         // blueprint1.
         datastore.blueprint_delete(&opctx, blueprint1.id).await.unwrap();
         ensure_blueprint_fully_deleted(&datastore, blueprint1.id).await;
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_set_target() {
+        // Setup
+        let logctx = dev::test_setup_log("inventory_insert");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Trying to insert a target that doesn't reference a blueprint should
+        // fail with a relevant error message.
+        let nonexistent_blueprint_id = Uuid::new_v4();
+        let err = datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: nonexistent_blueprint_id,
+                    enabled: true,
+                    time_set: now_db_precision(),
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            Error::from(InsertTargetError::NoSuchBlueprint(
+                nonexistent_blueprint_id
+            ))
+        );
+
+        // There should be no current target still.
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            None
+        );
+
+        // Create three blueprints:
+        // * `blueprint1` has no parent
+        // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
+        let collection =
+            nexus_inventory::CollectionBuilder::new("test").build();
+        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            &EMPTY_POLICY,
+            "test1",
+        )
+        .unwrap();
+        let blueprint2 =
+            BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test2")
+                .build();
+        let blueprint3 =
+            BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test3")
+                .build();
+        assert_eq!(blueprint1.parent_blueprint_id, None);
+        assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
+        assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
+
+        // Insert all three into the blueprint table.
+        datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
+        datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
+        datastore.blueprint_insert(&opctx, &blueprint3).await.unwrap();
+
+        let bp1_target = BlueprintTarget {
+            target_id: blueprint1.id,
+            enabled: true,
+            time_set: now_db_precision(),
+        };
+        let bp2_target = BlueprintTarget {
+            target_id: blueprint2.id,
+            enabled: true,
+            time_set: now_db_precision(),
+        };
+        let bp3_target = BlueprintTarget {
+            target_id: blueprint3.id,
+            enabled: true,
+            time_set: now_db_precision(),
+        };
+
+        // Attempting to make blueprint2 the current target should fail because
+        // it has a non-NULL parent_blueprint_id, but there is no current target
+        // (i.e., only a blueprint with no parent can be made the current
+        // target).
+        let err = datastore
+            .blueprint_target_set_current(&opctx, bp2_target)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            Error::from(InsertTargetError::ParentNotTarget(blueprint2.id))
+        );
+
+        // There should be no current target still.
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            None
+        );
+
+        // We should be able to insert blueprint1, which has no parent (matching
+        // the currently-empty `bp_target` table's lack of a target).
+        datastore
+            .blueprint_target_set_current(&opctx, bp1_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some((bp1_target, blueprint1.clone()))
+        );
+
+        // Now that blueprint1 is the current target, we should be able to
+        // insert blueprint2 or blueprint3. WLOG, pick blueprint3.
+        datastore
+            .blueprint_target_set_current(&opctx, bp3_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some((bp3_target, blueprint3.clone()))
+        );
+
+        // Now that blueprint3 is the target, trying to insert blueprint1 or
+        // blueprint2 should fail, because neither of their parents (NULL and
+        // blueprint1, respectively) match the current target.
+        let err = datastore
+            .blueprint_target_set_current(&opctx, bp1_target)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            Error::from(InsertTargetError::ParentNotTarget(blueprint1.id))
+        );
+        let err = datastore
+            .blueprint_target_set_current(&opctx, bp2_target)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err,
+            Error::from(InsertTargetError::ParentNotTarget(blueprint2.id))
+        );
+
+        // Create a child of blueprint3, and ensure when we set it as the target
+        // with enabled=false, that status is serialized.
+        let blueprint4 =
+            BlueprintBuilder::new_based_on(&blueprint3, &EMPTY_POLICY, "test3")
+                .build();
+        assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
+        datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
+        let bp4_target = BlueprintTarget {
+            target_id: blueprint4.id,
+            enabled: false,
+            time_set: now_db_precision(),
+        };
+        datastore
+            .blueprint_target_set_current(&opctx, bp4_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some((bp4_target, blueprint4))
+        );
 
         // Clean up.
         db.cleanup().await.unwrap();

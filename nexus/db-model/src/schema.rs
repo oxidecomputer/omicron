@@ -1403,6 +1403,17 @@ table! {
 }
 
 table! {
+    bp_target (version) {
+        version -> Int8,
+
+        blueprint_id -> Uuid,
+
+        enabled -> Bool,
+        time_made_target -> Timestamptz,
+    }
+}
+
+table! {
     bp_sled_omicron_zones (blueprint_id, sled_id) {
         blueprint_id -> Uuid,
         sled_id -> Uuid,

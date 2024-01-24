@@ -9,11 +9,12 @@ use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
     blueprint, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_omicron_zones_not_in_service, bp_sled_omicron_zones,
+    bp_omicron_zones_not_in_service, bp_sled_omicron_zones, bp_target,
 };
 use crate::{ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::BlueprintTarget;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -35,6 +36,37 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
+        }
+    }
+}
+
+/// See [`nexus_types::deployment::BlueprintTarget`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_target)]
+pub struct BpTarget {
+    pub version: i64, // i64 only for db serialization; should never be negative
+    pub blueprint_id: Uuid,
+    pub enabled: bool,
+    pub time_made_target: DateTime<Utc>,
+}
+
+impl BpTarget {
+    pub fn new(version: i64, target: BlueprintTarget) -> Self {
+        Self {
+            version,
+            blueprint_id: target.target_id,
+            enabled: target.enabled,
+            time_made_target: target.time_set,
+        }
+    }
+}
+
+impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
+    fn from(value: BpTarget) -> Self {
+        Self {
+            target_id: value.blueprint_id,
+            enabled: value.enabled,
+            time_set: value.time_made_target,
         }
     }
 }

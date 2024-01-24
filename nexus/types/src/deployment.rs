@@ -187,9 +187,9 @@ impl Blueprint {
 
 /// Describes which blueprint the system is currently trying to make real
 // This is analogous to the db model type until we have that.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct BlueprintTarget {
-    pub target_id: Option<Uuid>,
+    pub target_id: Uuid,
     pub enabled: bool,
     pub time_set: chrono::DateTime<chrono::Utc>,
 }

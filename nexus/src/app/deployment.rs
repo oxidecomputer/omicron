@@ -53,19 +53,12 @@ const SQL_LIMIT_INVENTORY: NonZeroU32 =
 /// the need for this structure.
 pub struct Blueprints {
     all_blueprints: BTreeMap<Uuid, Blueprint>,
-    target: BlueprintTarget,
+    target: Option<BlueprintTarget>,
 }
 
 impl Blueprints {
     pub fn new() -> Blueprints {
-        Blueprints {
-            all_blueprints: BTreeMap::new(),
-            target: BlueprintTarget {
-                target_id: None,
-                enabled: false,
-                time_set: chrono::Utc::now(),
-            },
-        }
+        Blueprints { all_blueprints: BTreeMap::new(), target: None }
     }
 }
 
@@ -135,7 +128,8 @@ impl super::Nexus {
         opctx.authorize(Action::Delete, &blueprint).await?;
 
         let mut blueprints = self.blueprints.lock().unwrap();
-        if let Some(target_id) = blueprints.target.target_id {
+        if let Some(target_id) = blueprints.target.as_ref().map(|t| t.target_id)
+        {
             if target_id == blueprint_id {
                 return Err(Error::conflict(format!(
                     "blueprint {} is the current target and cannot be deleted",
@@ -154,8 +148,10 @@ impl super::Nexus {
     pub async fn blueprint_target_view(
         &self,
         opctx: &OpContext,
-    ) -> Result<BlueprintTarget, Error> {
-        self.blueprint_target(opctx).await.map(|(target, _)| target)
+    ) -> Result<Option<BlueprintTarget>, Error> {
+        self.blueprint_target(opctx)
+            .await
+            .map(|maybe_target| maybe_target.map(|(target, _blueprint)| target))
     }
 
     // This is a stand-in for a datastore function that fetches the current
@@ -165,15 +161,18 @@ impl super::Nexus {
     async fn blueprint_target(
         &self,
         opctx: &OpContext,
-    ) -> Result<(BlueprintTarget, Option<Blueprint>), Error> {
+    ) -> Result<Option<(BlueprintTarget, Blueprint)>, Error> {
         opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let blueprints = self.blueprints.lock().unwrap();
-        Ok((
-            blueprints.target.clone(),
-            blueprints.target.target_id.and_then(|target_id| {
-                blueprints.all_blueprints.get(&target_id).cloned()
-            }),
-        ))
+        let Some(target) = blueprints.target.clone() else {
+            return Ok(None);
+        };
+        let blueprint = blueprints
+            .all_blueprints
+            .get(&target.target_id)
+            .expect("current target does not exist")
+            .clone();
+        Ok(Some((target, blueprint)))
     }
 
     // Once we store blueprints in the database, this function will likely just
@@ -188,7 +187,9 @@ impl super::Nexus {
         let enabled = params.enabled;
         let mut blueprints = self.blueprints.lock().unwrap();
         if let Some(blueprint) = blueprints.all_blueprints.get(&new_target_id) {
-            if blueprint.parent_blueprint_id != blueprints.target.target_id {
+            if blueprint.parent_blueprint_id
+                != blueprints.target.as_ref().map(|t| t.target_id)
+            {
                 return Err(Error::conflict(&format!(
                     "blueprint {:?}: parent is {:?}, which is not the current \
                     target {:?}",
@@ -199,20 +200,21 @@ impl super::Nexus {
                         .unwrap_or_else(|| String::from("<none>")),
                     blueprints
                         .target
-                        .target_id
-                        .map(|p| p.to_string())
+                        .as_ref()
+                        .map(|t| t.target_id.to_string())
                         .unwrap_or_else(|| String::from("<none>")),
                 )));
             }
-            blueprints.target = BlueprintTarget {
-                target_id: Some(new_target_id),
+            let new_target = BlueprintTarget {
+                target_id: new_target_id,
                 enabled,
                 time_set: chrono::Utc::now(),
             };
+            blueprints.target = Some(new_target.clone());
 
             // When we add a background task executing the target blueprint,
             // this is the point where we'd signal it to update its target.
-            Ok(blueprints.target.clone())
+            Ok(new_target)
         } else {
             Err(Error::not_found_by_id(ResourceType::Blueprint, &new_target_id))
         }
@@ -337,8 +339,8 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
-        let (_, maybe_parent) = self.blueprint_target(opctx).await?;
-        let Some(parent_blueprint) = maybe_parent else {
+        let maybe_parent = self.blueprint_target(opctx).await?;
+        let Some((_, parent_blueprint)) = maybe_parent else {
             return Err(Error::conflict(
                 "cannot regenerate blueprint without existing target",
             ));

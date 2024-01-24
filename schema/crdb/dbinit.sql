@@ -3041,6 +3041,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     comment TEXT NOT NULL
 );
 
+-- table describing both the current and historical target blueprints of the
+-- system
+CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
+    -- Monotonically increasing version for all bp_targets
+    version INT8 PRIMARY KEY,
+
+    -- Effectively a foreign key into the `blueprint` table, but may reference a
+    -- blueprint that has been deleted (if this target is no longer the current
+    -- target: the current target must not be deleted).
+    blueprint_id UUID NOT NULL,
+
+    -- Is this blueprint enabled?
+    --
+    -- Currently, we have no code that acts on this value; however, it exists as
+    -- an escape hatch once we have automated blueprint planning and execution.
+    -- An operator can set the current blueprint to disabled, which should stop
+    -- planning and execution (presumably until a support case can address
+    -- whatever issue the update system is causing).
+    enabled BOOL NOT NULL,
+
+    -- Timestamp for when this blueprint was made the current target
+    time_made_target TIMESTAMPTZ NOT NULL
+);
+
 -- generation number for the OmicronZonesConfig for each sled in a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
     -- foreign key into `blueprint` table

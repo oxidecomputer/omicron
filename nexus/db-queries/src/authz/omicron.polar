@@ -393,17 +393,6 @@ resource Inventory {
 has_relation(fleet: Fleet, "parent_fleet", inventory: Inventory)
 	if inventory.fleet = fleet;
 
-# Describes the policy for reading and modifying deployment configuration and
-# policy
-resource DeploymentConfig {
-	permissions = [ "read", "modify" ];
-	relations = { parent_fleet: Fleet };
-	"read" if "viewer" on "parent_fleet";
-	"modify" if "admin" on "parent_fleet";
-}
-has_relation(fleet: Fleet, "parent_fleet", deployment_config: DeploymentConfig)
-	if deployment_config.fleet = fleet;
-
 # Describes the policy for accessing "/v1/system/ip-pools" in the API
 resource IpPoolList {
 	permissions = [
