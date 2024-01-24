@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
                     disk_source: DiskSource::Blank {
                         block_size: 512.try_into().unwrap(),
                     },
-                    size: ByteCount(1024 * 1024 * 1024),
+                    size: ByteCount::from(1024 * 1024 * 1024),
                 })
                 .send()
                 .await
