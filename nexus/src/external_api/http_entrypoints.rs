@@ -141,6 +141,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(floating_ip_create)?;
         api.register(floating_ip_view)?;
         api.register(floating_ip_delete)?;
+        api.register(floating_ip_attach)?;
+        api.register(floating_ip_detach)?;
 
         api.register(disk_list)?;
         api.register(disk_create)?;
@@ -199,6 +201,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_delete)?;
 
         api.register(instance_external_ip_list)?;
+        api.register(instance_ephemeral_ip_attach)?;
+        api.register(instance_ephemeral_ip_detach)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -278,6 +282,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_delete)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
+        api.register(silo_ip_pool_list)?;
 
         api.register(silo_utilization_view)?;
         api.register(silo_utilization_list)?;
@@ -726,7 +731,7 @@ async fn silo_create(
 
 /// Fetch a silo
 ///
-/// Fetch a silo by name.
+/// Fetch a silo by name or ID.
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}",
@@ -744,6 +749,48 @@ async fn silo_view(
         let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
         let (.., silo) = silo_lookup.fetch().await?;
         Ok(HttpResponseOk(silo.try_into()?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List IP pools available within silo
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silos/{silo}/ip-pools",
+    tags = ["system/silos"],
+}]
+async fn silo_ip_pool_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+        let pools = nexus
+            .silo_ip_pool_list(&opctx, &silo_lookup, &paginated_by)
+            .await?
+            .iter()
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1287,7 +1334,7 @@ async fn project_policy_update(
 async fn project_ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedByNameOrId>,
-) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -1297,10 +1344,13 @@ async fn project_ip_pool_list(
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let pools = nexus
-            .silo_ip_pools_list(&opctx, &paginated_by)
+            .current_silo_ip_pool_list(&opctx, &paginated_by)
             .await?
             .into_iter()
-            .map(IpPool::from)
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
             .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
@@ -1320,14 +1370,18 @@ async fn project_ip_pool_list(
 async fn project_ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
-        let pool = nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
-        Ok(HttpResponseOk(IpPool::from(pool)))
+        let (pool, silo_link) =
+            nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
+        Ok(HttpResponseOk(views::SiloIpPool {
+            identity: pool.identity(),
+            is_default: silo_link.is_default,
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1474,7 +1528,14 @@ async fn ip_pool_silo_list(
     // option would be to paginate by a composite key representing the (pool,
     // resource_type, resource)
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSilo>>, HttpError> {
+    // TODO: this could just list views::Silo -- it's not like knowing silo_id
+    // and nothing else is particularly useful -- except we also want to say
+    // whether the pool is marked default on each silo. So one option would
+    // be  to do the same as we did with SiloIpPool -- include is_default on
+    // whatever the thing is. Still... all we'd have to do to make this usable
+    // in both places would be to make it { ...IpPool, silo_id, silo_name,
+    // is_default }
+) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSiloLink>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1496,7 +1557,7 @@ async fn ip_pool_silo_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             assocs,
-            &|_, x: &views::IpPoolSilo| x.silo_id,
+            &|_, x: &views::IpPoolSiloLink| x.silo_id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -1511,8 +1572,8 @@ async fn ip_pool_silo_list(
 async fn ip_pool_silo_link(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    resource_assoc: TypedBody<params::IpPoolSiloLink>,
-) -> Result<HttpResponseCreated<views::IpPoolSilo>, HttpError> {
+    resource_assoc: TypedBody<params::IpPoolLinkSilo>,
+) -> Result<HttpResponseCreated<views::IpPoolSiloLink>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1566,7 +1627,7 @@ async fn ip_pool_silo_update(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolSiloPath>,
     update: TypedBody<params::IpPoolSiloUpdate>,
-) -> Result<HttpResponseOk<views::IpPoolSilo>, HttpError> {
+) -> Result<HttpResponseOk<views::IpPoolSiloLink>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
@@ -1900,6 +1961,69 @@ async fn floating_ip_view(
             .fetch()
             .await?;
         Ok(HttpResponseOk(fip.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Attach a floating IP to an instance or other resource
+#[endpoint {
+    method = POST,
+    path = "/v1/floating-ips/{floating_ip}/attach",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_attach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    target: TypedBody<params::FloatingIpAttach>,
+) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let ip = nexus
+            .floating_ip_attach(
+                &opctx,
+                floating_ip_selector,
+                target.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseAccepted(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach a floating IP from an instance or other resource
+#[endpoint {
+    method = POST,
+    path = "/v1/floating-ips/{floating_ip}/detach",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_detach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let fip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+        let ip = nexus.floating_ip_detach(&opctx, fip_lookup).await?;
+        Ok(HttpResponseAccepted(ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3808,6 +3932,79 @@ async fn instance_external_ip_list(
         let ips =
             nexus.instance_list_external_ips(&opctx, &instance_lookup).await?;
         Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Allocate and attach an ephemeral IP to an instance
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/external-ips/ephemeral",
+    tags = ["instances"],
+}]
+async fn instance_ephemeral_ip_attach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    ip_to_create: TypedBody<params::EphemeralIpCreate>,
+) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let ip = nexus
+            .instance_attach_external_ip(
+                &opctx,
+                &instance_lookup,
+                &params::ExternalIpCreate::Ephemeral {
+                    pool: ip_to_create.into_inner().pool,
+                },
+            )
+            .await?;
+        Ok(HttpResponseAccepted(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach and deallocate an ephemeral IP from an instance
+#[endpoint {
+    method = DELETE,
+    path = "/v1/instances/{instance}/external-ips/ephemeral",
+    tags = ["instances"],
+}]
+async fn instance_ephemeral_ip_detach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        nexus
+            .instance_detach_external_ip(
+                &opctx,
+                &instance_lookup,
+                &params::ExternalIpDetach::Ephemeral,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

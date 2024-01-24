@@ -818,6 +818,16 @@ pub struct CleanupContextUpdate {
     pub storage_limit: Option<u8>,
 }
 
+/// Used to dynamically update external IPs attached to an instance.
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Hash, Deserialize, JsonSchema, Serialize,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum InstanceExternalIpBody {
+    Ephemeral(IpAddr),
+    Floating(IpAddr),
+}
+
 // Our SledRole and Baseboard types do not have to be identical to the Nexus
 // ones, but they generally should be, and this avoids duplication.  If it
 // becomes easier to maintain a separate copy, we should do that.

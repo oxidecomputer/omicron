@@ -8,11 +8,12 @@ use super::{Control, OverviewPane, RackSetupPane, StatefulList, UpdatePane};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
-use crate::{Action, Cmd, Frame, State, Term};
+use crate::{Action, Cmd, State, Term};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
+use ratatui::Frame;
 use slog::{o, Logger};
 use wicketd_client::types::GetLocationResponse;
 

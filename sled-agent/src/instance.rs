@@ -10,8 +10,8 @@ use crate::common::instance::{
 };
 use crate::instance_manager::{InstanceManagerServices, InstanceTicket};
 use crate::nexus::NexusClientWithResolver;
-use crate::params::ZoneBundleCause;
 use crate::params::ZoneBundleMetadata;
+use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstanceStateRequested, VpcFirewallRule,
@@ -558,6 +558,110 @@ impl InstanceInner {
 
         Ok(())
     }
+
+    pub async fn add_external_ip(
+        &mut self,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        // v4 + v6 handling is delegated to `external_ips_ensure`.
+        // If OPTE is unhappy, we undo at `Instance` level.
+
+        match ip {
+            // For idempotency of add/delete, we want to return
+            // success on 'already done'.
+            InstanceExternalIpBody::Ephemeral(ip)
+                if Some(ip) == self.ephemeral_ip.as_ref() =>
+            {
+                return Ok(());
+            }
+            InstanceExternalIpBody::Floating(ip)
+                if self.floating_ips.contains(ip) =>
+            {
+                return Ok(());
+            }
+            // New Ephemeral IP while current exists -- error without
+            // explicit delete.
+            InstanceExternalIpBody::Ephemeral(ip)
+                if self.ephemeral_ip.is_some() =>
+            {
+                return Err(Error::Opte(
+                    illumos_utils::opte::Error::ImplicitEphemeralIpDetach(
+                        *ip,
+                        self.ephemeral_ip.unwrap(),
+                    ),
+                ));
+            }
+            // Not found, proceed with OPTE update.
+            InstanceExternalIpBody::Ephemeral(ip) => {
+                self.ephemeral_ip = Some(*ip);
+            }
+            InstanceExternalIpBody::Floating(ip) => {
+                self.floating_ips.push(*ip);
+            }
+        }
+
+        let Some(primary_nic) = self.requested_nics.get(0) else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        self.port_manager.external_ips_ensure(
+            primary_nic.id,
+            primary_nic.kind,
+            Some(self.source_nat),
+            self.ephemeral_ip,
+            &self.floating_ips,
+        )?;
+
+        Ok(())
+    }
+
+    pub async fn delete_external_ip(
+        &mut self,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        // v4 + v6 handling is delegated to `external_ips_ensure`.
+        // If OPTE is unhappy, we undo at `Instance` level.
+
+        match ip {
+            // For idempotency of add/delete, we want to return
+            // success on 'already done'.
+            // IP Mismatch and 'deleted in past' can't really be
+            // disambiguated here.
+            InstanceExternalIpBody::Ephemeral(ip)
+                if self.ephemeral_ip != Some(*ip) =>
+            {
+                return Ok(());
+            }
+            InstanceExternalIpBody::Ephemeral(_) => {
+                self.ephemeral_ip = None;
+            }
+            InstanceExternalIpBody::Floating(ip) => {
+                let floating_index =
+                    self.floating_ips.iter().position(|v| v == ip);
+                if let Some(pos) = floating_index {
+                    // Swap remove is valid here, OPTE is not sensitive
+                    // to Floating Ip ordering.
+                    self.floating_ips.swap_remove(pos);
+                } else {
+                    return Ok(());
+                }
+            }
+        }
+
+        let Some(primary_nic) = self.requested_nics.get(0) else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        self.port_manager.external_ips_ensure(
+            primary_nic.id,
+            primary_nic.kind,
+            Some(self.source_nat),
+            self.ephemeral_ip,
+            &self.floating_ips,
+        )?;
+
+        Ok(())
+    }
 }
 
 /// A reference to a single instance running a running Propolis server.
@@ -1093,5 +1197,53 @@ impl Instance {
         } else {
             Err(Error::InstanceNotRunning(inner.properties.id))
         }
+    }
+
+    pub async fn add_external_ip(
+        &self,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+
+        // The internal call can either fail on adding the IP
+        // to the list, or on the OPTE step.
+        // Be cautious and reset state if either fails.
+        // Note we don't need to re-ensure port manager/OPTE state
+        // since that's the last call we make internally.
+        let old_eph = inner.ephemeral_ip;
+        let out = inner.add_external_ip(ip).await;
+
+        if out.is_err() {
+            inner.ephemeral_ip = old_eph;
+            if let InstanceExternalIpBody::Floating(ip) = ip {
+                inner.floating_ips.retain(|v| v != ip);
+            }
+        }
+
+        out
+    }
+
+    pub async fn delete_external_ip(
+        &self,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        let mut inner = self.inner.lock().await;
+
+        // Similar logic to `add_external_ip`, except here we
+        // need to readd the floating IP if it was removed.
+        // OPTE doesn't care about the order of floating IPs.
+        let old_eph = inner.ephemeral_ip;
+        let out = inner.delete_external_ip(ip).await;
+
+        if out.is_err() {
+            inner.ephemeral_ip = old_eph;
+            if let InstanceExternalIpBody::Floating(ip) = ip {
+                if !inner.floating_ips.contains(ip) {
+                    inner.floating_ips.push(*ip);
+                }
+            }
+        }
+
+        out
     }
 }

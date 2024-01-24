@@ -6,21 +6,23 @@
 
 use anyhow::{anyhow, Context};
 use bootstore::schemes::v0 as bootstore;
-use ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use dpd_client::types::{Ipv6Entry, RouteSettingsV6};
+use ddm_admin_client::DdmError;
 use dpd_client::types::{
-    LinkCreate, LinkId, LinkSettings, PortId, PortSettings, RouteSettingsV4,
+    LinkCreate, LinkId, LinkSettings, PortId, PortSettings,
 };
 use dpd_client::Client as DpdClient;
 use futures::future;
 use gateway_client::Client as MgsClient;
 use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
-use ipnetwork::{IpNetwork, Ipv6Network};
-use mg_admin_client::types::{ApplyRequest, BgpPeerConfig, Prefix4};
+use ipnetwork::Ipv6Network;
+use mg_admin_client::types::{
+    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, Prefix4, StaticRoute4,
+    StaticRoute4List,
+};
 use mg_admin_client::Client as MgdClient;
-use omicron_common::address::{Ipv6Subnet, MGD_PORT, MGS_PORT};
-use omicron_common::address::{DDMD_PORT, DENDRITE_PORT};
+use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::api::internal::shared::{
     BgpConfig, PortConfigV1, PortFec, PortSpeed, RackNetworkConfig,
     RackNetworkConfigV1, SwitchLocation, UplinkConfig,
@@ -38,7 +40,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
-static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
 /// Errors that can occur during early network setup
@@ -421,21 +422,10 @@ impl<'a> EarlyNetworkSetup<'a> {
         // configure uplink for each requested uplink in configuration that
         // matches our switch_location
         for port_config in &our_ports {
-            let (ipv6_entry, dpd_port_settings, port_id) =
+            let (dpd_port_settings, port_id) =
                 self.build_port_config(port_config)?;
 
             self.wait_for_dendrite(&dpd).await;
-
-            info!(
-                self.log,
-                "Configuring boundary services loopback address on switch";
-                "config" => #?ipv6_entry
-            );
-            dpd.loopback_ipv6_create(&ipv6_entry).await.map_err(|e| {
-                EarlyNetworkSetupError::Dendrite(format!(
-                    "unable to create inital switch loopback address: {e}"
-                ))
-            })?;
 
             info!(
                 self.log,
@@ -453,13 +443,6 @@ impl<'a> EarlyNetworkSetup<'a> {
                     "unable to apply uplink port configuration: {e}"
                 ))
             })?;
-
-            info!(self.log, "advertising boundary services loopback address");
-
-            let ddmd_addr =
-                SocketAddrV6::new(switch_zone_underlay_ip, DDMD_PORT, 0, 0);
-            let ddmd_client = DdmAdminClient::new(&self.log, ddmd_addr)?;
-            ddmd_client.advertise_prefix(Ipv6Subnet::new(ipv6_entry.addr));
         }
 
         let mgd = MgdClient::new(
@@ -548,22 +531,40 @@ impl<'a> EarlyNetworkSetup<'a> {
             }
         }
 
+        // Iterate through ports and apply static routing config.
+        let mut rq = AddStaticRoute4Request {
+            routes: StaticRoute4List { list: Vec::new() },
+        };
+        for port in &our_ports {
+            for r in &port.routes {
+                let nexthop = match r.nexthop {
+                    IpAddr::V4(v4) => v4,
+                    IpAddr::V6(_) => continue,
+                };
+                let prefix = match r.destination.ip() {
+                    IpAddr::V4(v4) => {
+                        Prefix4 { value: v4, length: r.destination.prefix() }
+                    }
+                    IpAddr::V6(_) => continue,
+                };
+                let sr = StaticRoute4 { nexthop, prefix };
+                rq.routes.list.push(sr);
+            }
+        }
+        mgd.inner.static_add_v4_route(&rq).await.map_err(|e| {
+            EarlyNetworkSetupError::BgpConfigurationError(format!(
+                "static routing configuration failed: {e}",
+            ))
+        })?;
+
         Ok(our_ports)
     }
 
     fn build_port_config(
         &self,
         port_config: &PortConfigV1,
-    ) -> Result<(Ipv6Entry, PortSettings, PortId), EarlyNetworkSetupError> {
+    ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
         info!(self.log, "Building Port Configuration");
-        let ipv6_entry = Ipv6Entry {
-            addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
-                EarlyNetworkSetupError::BadConfig(format!(
-                "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
-            ))
-            })?,
-            tag: OMICRON_DPD_TAG.into(),
-        };
         let mut dpd_port_settings = PortSettings {
             links: HashMap::new(),
             v4_routes: HashMap::new(),
@@ -600,26 +601,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             ))
         })?;
 
-        for r in &port_config.routes {
-            if let (IpNetwork::V4(dst), IpAddr::V4(nexthop)) =
-                (r.destination, r.nexthop)
-            {
-                dpd_port_settings.v4_routes.insert(
-                    dst.to_string(),
-                    vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
-                );
-            }
-            if let (IpNetwork::V6(dst), IpAddr::V6(nexthop)) =
-                (r.destination, r.nexthop)
-            {
-                dpd_port_settings.v6_routes.insert(
-                    dst.to_string(),
-                    vec![RouteSettingsV6 { link_id: link_id.0, nexthop }],
-                );
-            }
-        }
-
-        Ok((ipv6_entry, dpd_port_settings, port_id))
+        Ok((dpd_port_settings, port_id))
     }
 
     async fn wait_for_dendrite(&self, dpd: &DpdClient) {

@@ -47,6 +47,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "hw_rot_slot",
     "identity_type",
     "instance_state",
+    "ip_attach_state",
     "ip_kind",
     "ip_pool_resource_type",
     "network_interface_kind",

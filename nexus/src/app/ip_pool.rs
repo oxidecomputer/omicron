@@ -20,6 +20,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
@@ -74,12 +75,20 @@ impl super::Nexus {
     }
 
     /// List IP pools in current silo
-    pub(crate) async fn silo_ip_pools_list(
+    pub(crate) async fn current_silo_ip_pool_list(
         &self,
         opctx: &OpContext,
         pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
-        self.db_datastore.silo_ip_pools_list(opctx, pagparams).await
+    ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
+        let authz_silo =
+            opctx.authn.silo_required().internal_context("listing IP pools")?;
+
+        // From the developer user's point of view, we treat IP pools linked to
+        // their silo as silo resources, so they can list them if they can list
+        // silo children
+        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
+
+        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
     // Look up pool by name or ID, but only return it if it's linked to the
@@ -88,19 +97,19 @@ impl super::Nexus {
         &'a self,
         opctx: &'a OpContext,
         pool: &'a NameOrId,
-    ) -> LookupResult<db::model::IpPool> {
+    ) -> LookupResult<(db::model::IpPool, db::model::IpPoolResource)> {
         let (authz_pool, pool) =
             self.ip_pool_lookup(opctx, pool)?.fetch().await?;
 
         // 404 if no link is found in the current silo
         let link = self.db_datastore.ip_pool_fetch_link(opctx, pool.id()).await;
-        if link.is_err() {
-            return Err(authz_pool.not_found());
+        match link {
+            Ok(link) => Ok((pool, link)),
+            Err(_) => Err(authz_pool.not_found()),
         }
-
-        Ok(pool)
     }
 
+    /// List silos for a given pool
     pub(crate) async fn ip_pool_silo_list(
         &self,
         opctx: &OpContext,
@@ -109,14 +118,34 @@ impl super::Nexus {
     ) -> ListResultVec<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
+
+        // check ability to list silos in general
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
         self.db_datastore.ip_pool_silo_list(opctx, &authz_pool, pagparams).await
+    }
+
+    // List pools for a given silo
+    pub(crate) async fn silo_ip_pool_list(
+        &self,
+        opctx: &OpContext,
+        silo_lookup: &lookup::Silo<'_>,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(db::model::IpPool, db::model::IpPoolResource)> {
+        let (.., authz_silo) =
+            silo_lookup.lookup_for(authz::Action::Read).await?;
+        // check ability to list pools in general
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
+            .await?;
+        self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
     pub(crate) async fn ip_pool_link_silo(
         &self,
         opctx: &OpContext,
         pool_lookup: &lookup::IpPool<'_>,
-        silo_link: &params::IpPoolSiloLink,
+        silo_link: &params::IpPoolLinkSilo,
     ) -> CreateResult<db::model::IpPoolResource> {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
