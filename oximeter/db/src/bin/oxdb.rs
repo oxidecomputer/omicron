@@ -391,7 +391,7 @@ async fn describe_virtual_table(
                 }
 
                 let mut builder = tabled::builder::Builder::default();
-                builder.set_header(cols);
+                builder.push_record(cols); // first record is the header
                 builder.push_record(types);
                 println!(
                     "{}",
@@ -553,7 +553,7 @@ async fn sql_shell(
                                     println!();
                                     let mut builder =
                                         tabled::builder::Builder::default();
-                                    builder.set_header(&table.column_names);
+                                    builder.push_record(&table.column_names); // first record is the header
                                     for row in table.rows.iter() {
                                         builder.push_record(
                                             row.iter().map(ToString::to_string),
