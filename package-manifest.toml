@@ -638,3 +638,11 @@ source.rust.binary_names = ["omdb"]
 source.rust.release = true
 output.type = "zone"
 output.intermediate_only = true
+
+[package.oxlog]
+service_name = "oxlog"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["oxlog"]
+source.rust.release = true
+output.type = "tarball"
