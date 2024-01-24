@@ -1336,13 +1336,34 @@ fn disk_size_limits(
 ) -> schemars::schema::Schema {
     let mut schema: schemars::schema::SchemaObject =
         ByteCount::json_schema(gen).into();
+    schema.instance_type = None;
     let min_disk = MIN_DISK_SIZE_BYTES / (1 << 30);
     let max_disk = MAX_DISK_SIZE_BYTES / (1 << 30);
+
+    schema.subschemas = Some(Box::new(schemars::schema::SubschemaValidation {
+        all_of: Some(vec![
+            schemars::schema::Schema::new_ref(
+                "#/components/schemas/ByteCount".to_string(),
+            ),
+            schemars::schema::SchemaObject {
+                number: Some(Box::new(schemars::schema::NumberValidation {
+                    minimum: Some(MIN_DISK_SIZE_BYTES as f64),
+                    maximum: Some(MAX_DISK_SIZE_BYTES as f64),
+                    ..Default::default()
+                })),
+                ..ByteCount::json_schema(gen).into()
+            }
+            .into(),
+        ]),
+        ..Default::default()
+    }));
+
+    // schema.reference = Some("#/components/schemas/ByteCount".to_string());
     schema.metadata().description = Some(
         format!("total size of the disk in bytes.\n\nMust be between {min_disk} and {max_disk} GiB.")
     );
-    schema.number().minimum = Some(MIN_DISK_SIZE_BYTES as f64);
-    schema.number().maximum = Some(MAX_DISK_SIZE_BYTES as f64);
+    // schema.number().minimum = Some(MIN_DISK_SIZE_BYTES as f64);
+    // schema.number().maximum = Some(MAX_DISK_SIZE_BYTES as f64);
     schema.into()
 }
 
