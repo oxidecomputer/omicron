@@ -340,7 +340,7 @@ impl super::Nexus {
             None => None,
         };
         if let Some(ssh_keys) = &ssh_keys {
-            if ssh_keys.len() > MAX_SSH_KEYS_PER_INSTANCE {
+            if ssh_keys.len() > MAX_SSH_KEYS_PER_INSTANCE.try_into().unwrap() {
                 return Err(Error::invalid_request(format!(
                     "cannot attach more than {} ssh keys to the instance",
                     MAX_SSH_KEYS_PER_INSTANCE
@@ -1139,7 +1139,16 @@ impl super::Nexus {
 
         let ssh_keys = self
             .db_datastore
-            .instance_ssh_keys_list(opctx, authz_instance.id())
+            .instance_ssh_keys_list(
+                opctx,
+                authz_instance,
+                &PaginatedBy::Name(DataPageParams {
+                    marker: None,
+                    direction: dropshot::PaginationOrder::Ascending,
+                    limit: std::num::NonZeroU32::new(MAX_SSH_KEYS_PER_INSTANCE)
+                        .unwrap(),
+                }),
+            )
             .await?
             .into_iter();
 

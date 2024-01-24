@@ -174,20 +174,31 @@ impl DataStore {
     pub async fn instance_ssh_keys_list(
         &self,
         opctx: &OpContext,
-        instance_id: Uuid,
+        authz_instance: &authz::Instance,
+        pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<SshKey> {
-        use db::schema::instance_ssh_key::dsl;
-        dsl::instance_ssh_key
-            .filter(dsl::instance_id.eq(instance_id))
-            .inner_join(
-                db::schema::ssh_key::table
-                    .on(dsl::ssh_key_id.eq(db::schema::ssh_key::dsl::id)),
-            )
-            .filter(db::schema::ssh_key::dsl::time_deleted.is_null())
-            .select(SshKey::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+        use db::schema::instance_ssh_key::dsl as inst_dsl;
+        use db::schema::ssh_key::dsl;
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::ssh_key, dsl::id, &pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::ssh_key,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .inner_join(
+            db::schema::instance_ssh_key::table
+                .on(dsl::id.eq(inst_dsl::ssh_key_id)),
+        )
+        .filter(inst_dsl::instance_id.eq(authz_instance.id()))
+        .filter(dsl::time_deleted.is_null())
+        .select(SshKey::as_select())
+        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn instance_ssh_keys_delete(

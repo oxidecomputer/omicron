@@ -60,6 +60,7 @@ mod silo;
 mod sled;
 mod sled_instance;
 mod snapshot;
+mod ssh_keys;
 mod switch;
 mod switch_interface;
 mod switch_port;
@@ -98,7 +99,7 @@ pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 256 * (1 << 30); // 256 GiB
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
 
-pub const MAX_SSH_KEYS_PER_INSTANCE: usize = 10;
+pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 10;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {

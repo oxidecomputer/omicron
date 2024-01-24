@@ -167,6 +167,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_disk_detach)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
+        api.register(instance_ssh_public_key_list)?;
 
         api.register(image_list)?;
         api.register(image_create)?;
@@ -2612,6 +2613,46 @@ async fn instance_serial_console_stream(
             Err(e.into())
         }
     }
+}
+
+#[endpoint {
+    method = GET,
+    path = "/v1/instances/{instance}/ssh-public-keys",
+    tags = ["instances"],
+}]
+async fn instance_ssh_public_key_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project: scan_params.selector.project.clone(),
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let ssh_keys = nexus
+            .instance_ssh_keys_list(&opctx, &instance_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|k| k.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            ssh_keys,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 /// List an instance's disks
