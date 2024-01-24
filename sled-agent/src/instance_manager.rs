@@ -6,7 +6,6 @@
 
 use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
-use crate::metrics::MetricsManager;
 use crate::nexus::NexusClientWithResolver;
 use crate::params::InstanceMetadata;
 use crate::params::ZoneBundleMetadata;
@@ -79,7 +78,6 @@ struct InstanceManagerInternal {
     port_manager: PortManager,
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
-    metrics_manager: MetricsManager,
     zone_builder_factory: ZoneBuilderFactory,
 }
 
@@ -89,7 +87,6 @@ pub(crate) struct InstanceManagerServices {
     pub port_manager: PortManager,
     pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
-    pub metrics_manager: MetricsManager,
     pub zone_builder_factory: ZoneBuilderFactory,
 }
 
@@ -100,7 +97,6 @@ pub struct InstanceManager {
 
 impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
         nexus_client: NexusClientWithResolver,
@@ -108,7 +104,6 @@ impl InstanceManager {
         port_manager: PortManager,
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
-        metrics_manager: MetricsManager,
         zone_builder_factory: ZoneBuilderFactory,
     ) -> Result<InstanceManager, Error> {
         Ok(InstanceManager {
@@ -123,7 +118,6 @@ impl InstanceManager {
                 port_manager,
                 storage,
                 zone_bundler,
-                metrics_manager,
                 zone_builder_factory,
             }),
         })
@@ -281,7 +275,6 @@ impl InstanceManager {
                     port_manager: self.inner.port_manager.clone(),
                     storage: self.inner.storage.clone(),
                     zone_bundler: self.inner.zone_bundler.clone(),
-                    metrics_manager: self.inner.metrics_manager.clone(),
                     zone_builder_factory: self
                         .inner
                         .zone_builder_factory

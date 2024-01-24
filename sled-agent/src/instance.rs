@@ -9,8 +9,6 @@ use crate::common::instance::{
     PublishedVmmState,
 };
 use crate::instance_manager::{InstanceManagerServices, InstanceTicket};
-use crate::metrics::MetricsManager;
-use crate::metrics::INSTANCE_SAMPLE_INTERVAL;
 use crate::nexus::NexusClientWithResolver;
 use crate::params::ZoneBundleCause;
 use crate::params::ZoneBundleMetadata;
@@ -235,15 +233,8 @@ struct InstanceInner {
     // Object used to collect zone bundles from this instance when terminated.
     zone_bundler: ZoneBundler,
 
-    // Data used to start / stop collection of instance-related metrics.
-    tracking_instance_metrics: bool,
-    metrics_manager: MetricsManager,
-
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
-
-    // Metadata used to track statistics for this instance.
-    metadata: InstanceMetadata,
 }
 
 impl InstanceInner {
@@ -390,38 +381,7 @@ impl InstanceInner {
                 self.terminate().await?;
                 Ok(Reaction::Terminate)
             }
-            None => {
-                // TODO-robustness: If we fail to register the actual kstats for
-                // this instance, we should produce missing samples, rather than
-                // nothing at all.
-                //
-                // See https://github.com/oxidecomputer/omicron/issues/4863.
-                //
-                // TODO(ben) -- need to do this once, or ignore duplicate target
-                // error, not every time we get a state update from propolis.
-                if !self.tracking_instance_metrics {
-                    if let Err(e) = self
-                        .metrics_manager
-                        .track_instance(
-                            &self.id(),
-                            &self.metadata,
-                            self.properties.vcpus.into(),
-                            INSTANCE_SAMPLE_INTERVAL,
-                        )
-                        .await
-                    {
-                        error!(
-                            self.log,
-                            "failed to track instance metrics, \
-                            no samples will be produced";
-                            "error" => ?e,
-                        );
-                    } else {
-                        self.tracking_instance_metrics = true;
-                    }
-                }
-                Ok(Reaction::Continue)
-            }
+            None => Ok(Reaction::Continue),
         }
     }
 
@@ -583,18 +543,6 @@ impl InstanceInner {
             );
         }
 
-        // Stop tracking instance-related metrics.
-        if let Err(e) =
-            self.metrics_manager.stop_tracking_instance(self.id()).await
-        {
-            error!(
-                self.log,
-                "Failed to stop tracking instance metrics";
-                "instance_id" => %self.id(),
-                "error" => ?e,
-            );
-        }
-
         // Ensure that no zone exists. This succeeds even if no zone was ever
         // created.
         // NOTE: we call`Zones::halt_and_remove_logged` directly instead of
@@ -674,7 +622,6 @@ impl Instance {
             port_manager,
             storage,
             zone_bundler,
-            metrics_manager,
             zone_builder_factory,
         } = services;
 
@@ -716,6 +663,9 @@ impl Instance {
                 id,
                 name: hardware.properties.hostname.clone(),
                 description: "Test description".to_string(),
+                metadata: propolis_client::types::InstanceMetadata::from(
+                    metadata.clone(),
+                ),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),
                 // TODO: Align the byte type w/propolis.
@@ -746,10 +696,7 @@ impl Instance {
             storage,
             zone_builder_factory,
             zone_bundler,
-            tracking_instance_metrics: false,
-            metrics_manager,
             instance_ticket: ticket,
-            metadata,
         };
 
         let inner = Arc::new(Mutex::new(instance));

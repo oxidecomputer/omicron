@@ -237,7 +237,7 @@ impl SledAgent {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
-        _metadata: InstanceMetadata,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -287,6 +287,7 @@ impl SledAgent {
                     id: propolis_id,
                     name: hardware.properties.hostname.clone(),
                     description: "sled-agent-sim created instance".to_string(),
+                    metadata: metadata.into(),
                     image_id: Uuid::default(),
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),

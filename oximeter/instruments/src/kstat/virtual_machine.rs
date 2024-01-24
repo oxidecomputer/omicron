@@ -25,6 +25,8 @@ use oximeter::Sample;
 use oximeter::Target;
 use uuid::Uuid;
 
+// TODO(ben): Add tests for changes to the kstat-based schema.
+
 /// A single virtual machine instance.
 #[derive(Clone, Debug)]
 pub struct VirtualMachine {

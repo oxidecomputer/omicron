@@ -301,9 +301,15 @@ prettyplease = "0.2.16"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
+
+# TODO(ben): Put back to main before merge.
+#bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
+#propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
+#propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", branch = "vcpu-usage-stats" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", branch = "vcpu-usage-stats" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", branch = "vcpu-usage-stats" }
+
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"

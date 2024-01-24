@@ -466,7 +466,6 @@ impl SledAgent {
             port_manager.clone(),
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
-            metrics_manager.clone(),
             ZoneBuilderFactory::default(),
         )?;
 
