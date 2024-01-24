@@ -33,7 +33,7 @@ use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfigCreate;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::params::{
-    AddressLotCreate, BgpPeerConfig, LoopbackAddressCreate, Route, SiloCreate,
+    AddressLotCreate, BgpPeerConfig, Route, SiloCreate,
     SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::shared::Baseboard;
@@ -395,24 +395,6 @@ impl super::Nexus {
                 },
             }?;
 
-            let address_lot_lookup = self
-                .address_lot_lookup(
-                    &opctx,
-                    NameOrId::Name(address_lot_name.clone()),
-                )
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to lookup infra address_lot: {e}"
-                    ))
-                })?;
-
-            let (.., authz_address_lot) = address_lot_lookup
-                .lookup_for(authz::Action::Modify)
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
-                })?;
-
             let mut bgp_configs = HashMap::new();
 
             for bgp_config in &rack_network_config.bgp {
@@ -525,43 +507,6 @@ impl super::Nexus {
                     ))
                 })?;
 
-                // TODO: #3603 Use separate address lots for loopback addresses and infra ips
-                let loopback_address_params = LoopbackAddressCreate {
-                    address_lot: NameOrId::Name(address_lot_name.clone()),
-                    rack_id,
-                    switch_location: switch_location.clone(),
-                    address: first_address,
-                    mask: 64,
-                    anycast: true,
-                };
-
-                if self
-                    .loopback_address_lookup(
-                        &opctx,
-                        rack_id,
-                        switch_location.clone().into(),
-                        ipnetwork::IpNetwork::new(
-                            loopback_address_params.address,
-                            loopback_address_params.mask,
-                        )
-                        .map_err(|_| {
-                            Error::invalid_request("invalid loopback address")
-                        })?
-                        .into(),
-                    )?
-                    .lookup_for(authz::Action::Read)
-                    .await
-                    .is_err()
-                {
-                    self.db_datastore
-                        .loopback_address_create(
-                            opctx,
-                            &loopback_address_params,
-                            None,
-                            &authz_address_lot,
-                        )
-                        .await?;
-                }
                 let uplink_name = format!("default-uplink{idx}");
                 let name = Name::from_str(&uplink_name).unwrap();
 
