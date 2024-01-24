@@ -1,5 +1,7 @@
-CREATE TABLE IF NOT EXISTS omicron.public.instance_ssh_key (
-    instance_id UUID NOT NULL,
-    ssh_key_id UUID NOT NULL,
-    PRIMARY KEY (instance_id, ssh_key_id)
+-- created solely to prevent a table scan when we delete links on silo delete
+CREATE INDEX IF NOT EXISTS ip_pool_resource_id ON omicron.public.ip_pool_resource (
+    resource_id
+);
+CREATE INDEX IF NOT EXISTS ip_pool_resource_ip_pool_id ON omicron.public.ip_pool_resource (
+    ip_pool_id
 );

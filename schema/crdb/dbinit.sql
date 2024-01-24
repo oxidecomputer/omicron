@@ -1617,6 +1617,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_default_ip_pool_per_resource ON omicron.pu
 ) where
     is_default = true;
 
+-- created solely to prevent a table scan when we delete links on silo delete
+CREATE INDEX IF NOT EXISTS ip_pool_resource_id ON omicron.public.ip_pool_resource (
+    resource_id
+);
+CREATE INDEX IF NOT EXISTS ip_pool_resource_ip_pool_id ON omicron.public.ip_pool_resource (
+    ip_pool_id
+);
+
 /*
  * IP Pools are made up of a set of IP ranges, which are start/stop addresses.
  * Note that these need not be CIDR blocks or well-behaved subnets with a
