@@ -17,7 +17,7 @@ use crate::ui::widgets::{
     PopupScrollOffset, StatusView,
 };
 use crate::ui::wrap::wrap_text;
-use crate::{Action, Cmd, Frame, State};
+use crate::{Action, Cmd, State};
 use indexmap::IndexMap;
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
@@ -26,6 +26,7 @@ use ratatui::widgets::{
     Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph,
     Row, Table,
 };
+use ratatui::Frame;
 use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
 use update_engine::{
@@ -148,8 +149,11 @@ pub struct UpdatePane {
 
     /// TODO: Move following  state into global `State` so that recorder snapshots
     /// capture all state.
-    tree_state: TreeState,
-    items: Vec<TreeItem<'static>>,
+    ///
+    /// TODO: The <usize> generic parameter is carried over from earlier versions
+    /// of tui-tree-widget, but there's likely a better index type.
+    tree_state: TreeState<usize>,
+    items: Vec<TreeItem<'static, usize>>,
 
     // Per-component update state that isn't serializable.
     component_state: BTreeMap<ComponentId, ComponentUpdateListState>,
@@ -175,14 +179,20 @@ impl UpdatePane {
     pub fn new(log: &Logger) -> UpdatePane {
         let log = log.new(o!("component" => "UpdatePane"));
         let mut tree_state = TreeState::default();
-        tree_state.select_first();
+        let items = ALL_COMPONENT_IDS
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                TreeItem::new(index, id.to_string_uppercase(), vec![])
+                    .expect("no children so no duplicate identifiers")
+            })
+            .collect::<Vec<_>>();
+        tree_state.select_first(&items);
+
         UpdatePane {
             log,
             tree_state,
-            items: ALL_COMPONENT_IDS
-                .iter()
-                .map(|id| TreeItem::new(id.to_string_uppercase(), vec![]))
-                .collect(),
+            items,
             help: vec![
                 ("Expand", "<e>"),
                 ("Collapse", "<c>"),
@@ -826,7 +836,8 @@ impl UpdatePane {
             .update_state
             .items
             .iter()
-            .map(|(id, states)| {
+            .enumerate()
+            .map(|(index, (id, states))| {
                 let children: Vec<_> = states
                     .iter()
                     .flat_map(|(component, s)| {
@@ -834,9 +845,8 @@ impl UpdatePane {
                             artifact_version(id, component, &versions);
                         let installed_versions =
                             all_installed_versions(id, component, inventory);
-                        let contents_rect = self.contents_rect;
                         installed_versions.into_iter().map(move |v| {
-                            let spans = vec![
+                            vec![
                                 Span::styled(v.title, style::selected()),
                                 Span::styled(v.version, style::selected_line()),
                                 Span::styled(
@@ -844,17 +854,20 @@ impl UpdatePane {
                                     style::selected(),
                                 ),
                                 Span::styled(s.to_string(), s.style()),
-                            ];
-                            TreeItem::new_leaf(align_by(
-                                0,
-                                MAX_COLUMN_WIDTH,
-                                contents_rect,
-                                spans,
-                            ))
+                            ]
                         })
                     })
+                    .enumerate()
+                    .map(|(leaf_index, spans)| {
+                        let contents_rect = self.contents_rect;
+                        TreeItem::new_leaf(
+                            leaf_index,
+                            align_by(0, MAX_COLUMN_WIDTH, contents_rect, spans),
+                        )
+                    })
                     .collect();
-                TreeItem::new(id.to_string_uppercase(), children)
+                TreeItem::new(index, id.to_string_uppercase(), children)
+                    .expect("tree does not contain duplicate identifiers")
             })
             .collect();
     }
@@ -1365,6 +1378,7 @@ impl UpdatePane {
 
         // Draw the contents
         let tree = Tree::new(self.items.clone())
+            .expect("tree does not have duplicate identifiers")
             .block(block.clone().borders(Borders::LEFT | Borders::RIGHT))
             .style(style::plain_text())
             .highlight_style(style::highlighted());
@@ -1421,12 +1435,11 @@ impl UpdatePane {
             Constraint::Length(cell_width),
             Constraint::Length(cell_width),
         ];
-        let header_table = Table::new(std::iter::empty())
+        let header_table = Table::new(std::iter::empty(), &width_constraints)
             .header(
                 Row::new(vec!["COMPONENT", "VERSION", "TARGET", "STATUS"])
                     .style(header_style),
             )
-            .widths(&width_constraints)
             .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(header_table, self.table_headers_rect);
 
@@ -1458,12 +1471,11 @@ impl UpdatePane {
                     ])
                 })
             });
-        let version_table =
-            Table::new(version_rows).widths(&width_constraints).block(
-                block
-                    .clone()
-                    .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM),
-            );
+        let version_table = Table::new(version_rows, &width_constraints).block(
+            block
+                .clone()
+                .borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM),
+        );
         frame.render_widget(version_table, self.status_view_version_rect);
 
         // Ensure the version table is connected to the table headers
@@ -2413,7 +2425,7 @@ impl Control for UpdatePane {
                 Some(Action::Redraw)
             }
             Cmd::GotoTop => {
-                self.tree_state.select_first();
+                self.tree_state.select_first(&self.items);
                 state.rack_state.selected = ALL_COMPONENT_IDS[0];
                 Some(Action::Redraw)
             }
