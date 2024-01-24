@@ -326,7 +326,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7b2dbe9169059af0f821e811180fddc971fc210c776c133c7819ccd6e478db"
 dependencies = [
- "rustix 0.38.25",
+ "rustix 0.38.30",
  "tempfile",
  "windows-sys 0.52.0",
 ]
@@ -1920,7 +1920,7 @@ dependencies = [
  "futures",
  "hostname",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "indexmap 2.1.0",
  "multer",
  "openapiv3",
@@ -2091,7 +2091,7 @@ dependencies = [
  "base64",
  "chrono",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "omicron-sled-agent",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -2145,23 +2145,12 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
 name = "errno"
-version = "0.3.2"
+version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b30f669a7961ef1631673d2766cc92f52d64f7ef354d4fe0ddfd30ed52f0f4f"
+checksum = "a258e46cdc063eb8519c00b9fc845fc47bcfca4130e2f08e88665ceda8474245"
 dependencies = [
- "errno-dragonfly",
  "libc",
- "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "errno-dragonfly"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa68f1b12764fab894d2755d2518754e71b4fd80ecfb822714a1206c2aab39bf"
-dependencies = [
- "cc",
- "libc",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2216,7 +2205,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef033ed5e9bad94e55838ca0ca906db0e043f517adda0c8b79c7a8c66c93c1b5"
 dependencies = [
  "cfg-if",
- "rustix 0.38.25",
+ "rustix 0.38.30",
  "windows-sys 0.48.0",
 ]
 
@@ -2718,9 +2707,9 @@ checksum = "92620684d99f750bae383ecb3be3748142d6095760afd5cbcf2261e9a279d780"
 
 [[package]]
 name = "h2"
-version = "0.3.21"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91fc23aa11be92976ef4729127f1a74adf36d8436f7816b185d18df956790833"
+checksum = "bb2c4422095b67ee78da96fbb51a4cc413b3b25883c7717ff7ca1ab31022c9c9"
 dependencies = [
  "bytes",
  "fnv",
@@ -2728,7 +2717,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.11",
- "indexmap 1.9.3",
+ "indexmap 2.1.0",
  "slab",
  "tokio",
  "tokio-util",
@@ -2746,6 +2735,15 @@ name = "hash32"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
+name = "hash32"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
 dependencies = [
  "byteorder",
 ]
@@ -2802,9 +2800,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db04bc24a18b9ea980628ecf00e6c0264f3c1426dac36c00cb49b6fbad8b0743"
 dependencies = [
  "atomic-polyfill",
- "hash32",
+ "hash32 0.2.1",
  "rustc_version 0.4.0",
  "spin 0.9.8",
+ "stable_deref_trait",
+]
+
+[[package]]
+name = "heapless"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
+dependencies = [
+ "hash32 0.3.1",
  "stable_deref_trait",
 ]
 
@@ -2931,6 +2939,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-body"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1cac85db508abc24a2e48553ba12a996e87244a0395ce011e62b37158745d643"
+dependencies = [
+ "bytes",
+ "http 1.0.0",
+]
+
+[[package]]
 name = "http-range"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2960,7 +2978,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "log",
  "once_cell",
  "regex",
@@ -3047,7 +3065,7 @@ dependencies = [
  "futures-util",
  "h2",
  "http 0.2.11",
- "http-body",
+ "http-body 0.4.5",
  "httparse",
  "httpdate",
  "itoa",
@@ -3060,6 +3078,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb5aa53871fc917b1a9ed87b683a5d86db645e23acb32c2e0785a353e522fb75"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http 1.0.0",
+ "http-body 1.0.0",
+ "httparse",
+ "itoa",
+ "pin-project-lite",
+ "tokio",
+ "want",
+]
+
+[[package]]
 name = "hyper-rustls"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3067,7 +3103,7 @@ checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "rustls 0.21.9",
  "tokio",
  "tokio-rustls 0.24.1",
@@ -3075,19 +3111,21 @@ dependencies = [
 
 [[package]]
 name = "hyper-rustls"
-version = "0.25.0"
+version = "0.26.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "399c78f9338483cb7e630c8474b07268983c6bd5acee012e4211f9f7bb21b070"
+checksum = "a0bea761b46ae2b24eb4aef630d8d1c398157b6fc29e6350ecf090a0b70c952c"
 dependencies = [
  "futures-util",
- "http 0.2.11",
- "hyper",
+ "http 1.0.0",
+ "hyper 1.1.0",
+ "hyper-util",
  "log",
  "rustls 0.22.2",
  "rustls-native-certs",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.25.0",
+ "tower-service",
 ]
 
 [[package]]
@@ -3100,7 +3138,7 @@ dependencies = [
  "http 0.2.11",
  "http-range",
  "httpdate",
- "hyper",
+ "hyper 0.14.27",
  "mime_guess",
  "percent-encoding",
  "rand 0.8.5",
@@ -3116,10 +3154,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6183ddfa99b85da61a140bea0efc93fdf56ceaa041b37d553518030827f9905"
 dependencies = [
  "bytes",
- "hyper",
+ "hyper 0.14.27",
  "native-tls",
  "tokio",
  "tokio-native-tls",
+]
+
+[[package]]
+name = "hyper-util"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdea9aac0dbe5a9240d68cfd9501e2db94222c6dc06843e06640b9e07f0fdc67"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http 1.0.0",
+ "http-body 1.0.0",
+ "hyper 1.1.0",
+ "pin-project-lite",
+ "socket2 0.5.5",
+ "tokio",
+ "tower",
+ "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -3185,7 +3243,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 
 [[package]]
 name = "illumos-utils"
@@ -3208,6 +3266,7 @@ dependencies = [
  "omicron-workspace-hack",
  "opte-ioctl",
  "oxide-vpc",
+ "oxlog",
  "regress",
  "schemars",
  "serde",
@@ -3363,7 +3422,7 @@ dependencies = [
  "clap 4.4.3",
  "dropshot",
  "expectorate",
- "hyper",
+ "hyper 0.14.27",
  "installinator-common",
  "omicron-common",
  "omicron-test-utils",
@@ -3419,7 +3478,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -3513,7 +3572,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb0889898416213fab133e1d33a0e5858a48177452750691bde3666d0fdbaf8b"
 dependencies = [
  "hermit-abi 0.3.2",
- "rustix 0.38.25",
+ "rustix 0.38.30",
  "windows-sys 0.48.0",
 ]
 
@@ -3593,7 +3652,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "quote",
  "syn 2.0.46",
@@ -3766,9 +3825,9 @@ checksum = "ef53942eb7bf7ff43a617b3e2c1c4a5ecf5944a7c1bc12d7ee39bbb15e5c1519"
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.4.11"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "969488b55f8ac402214f3f5fd243ebb7206cf82de60d3172994707a4bcc2b829"
+checksum = "01cda141df6706de531b6c46c3a33ecca755538219bd484262fa09410c13539c"
 
 [[package]]
 name = "lock_api"
@@ -4157,8 +4216,8 @@ dependencies = [
  "gateway-client",
  "headers",
  "http 0.2.11",
- "hyper",
- "hyper-rustls 0.25.0",
+ "hyper 0.14.27",
+ "hyper-rustls 0.26.0",
  "internal-dns",
  "ipnetwork",
  "itertools 0.12.0",
@@ -4296,7 +4355,7 @@ dependencies = [
  "gateway-test-utils",
  "headers",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "internal-dns",
  "nexus-db-queries",
  "nexus-test-interface",
@@ -4737,7 +4796,7 @@ dependencies = [
  "gateway-test-utils",
  "hex",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "illumos-utils",
  "ipcc",
  "omicron-common",
@@ -4798,8 +4857,8 @@ dependencies = [
  "http 0.2.11",
  "httptest",
  "hubtools",
- "hyper",
- "hyper-rustls 0.25.0",
+ "hyper 0.14.27",
+ "hyper-rustls 0.26.0",
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
@@ -5012,7 +5071,7 @@ dependencies = [
  "guppy",
  "hex",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "hyper-staticfile",
  "illumos-utils",
  "installinator-common",
@@ -5119,6 +5178,7 @@ dependencies = [
  "bstr 1.6.0",
  "byteorder",
  "bytes",
+ "camino",
  "chrono",
  "cipher",
  "clap 4.4.3",
@@ -5151,7 +5211,7 @@ dependencies = [
  "hashbrown 0.13.2",
  "hex",
  "hmac",
- "hyper",
+ "hyper 0.14.27",
  "indexmap 2.1.0",
  "inout",
  "ipnetwork",
@@ -5183,7 +5243,7 @@ dependencies = [
  "regex-syntax 0.8.2",
  "reqwest",
  "ring 0.17.7",
- "rustix 0.38.25",
+ "rustix 0.38.30",
  "schemars",
  "semver 1.0.21",
  "serde",
@@ -5192,6 +5252,7 @@ dependencies = [
  "similar",
  "slog",
  "snafu",
+ "socket2 0.5.5",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -5334,7 +5395,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "cfg-if",
  "dyn-clone",
@@ -5343,26 +5404,26 @@ dependencies = [
  "opte-api",
  "postcard",
  "serde",
- "smoltcp 0.10.0",
+ "smoltcp 0.11.0",
  "version_check",
 ]
 
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
  "postcard",
  "serde",
- "smoltcp 0.10.0",
+ "smoltcp 0.11.0",
 ]
 
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "libc",
  "libnet",
@@ -5419,7 +5480,7 @@ dependencies = [
  "chrono",
  "futures",
  "http 0.2.11",
- "hyper",
+ "hyper 0.14.27",
  "omicron-workspace-hack",
  "progenitor",
  "rand 0.8.5",
@@ -5436,12 +5497,12 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4#4e6e6ab6379fa4bc40f5d0c7340b9f35c45ad6e4"
+source = "git+https://github.com/oxidecomputer/opte?rev=dd2b7b0306d3f01fa09170b8884d402209e49244#dd2b7b0306d3f01fa09170b8884d402209e49244"
 dependencies = [
  "illumos-sys-hdrs",
  "opte",
  "serde",
- "smoltcp 0.10.0",
+ "smoltcp 0.11.0",
  "zerocopy 0.7.31",
 ]
 
@@ -5493,7 +5554,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "internal-dns",
  "nexus-client",
  "nexus-types",
@@ -5614,6 +5675,18 @@ dependencies = [
  "slog-dtrace",
  "thiserror",
  "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "oxlog"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "chrono",
+ "clap 4.4.3",
+ "omicron-workspace-hack",
  "uuid",
 ]
 
@@ -6344,7 +6417,7 @@ dependencies = [
  "clap 4.4.3",
  "dropshot",
  "futures",
- "hyper",
+ "hyper 0.14.27",
  "progenitor",
  "propolis_types",
  "rand 0.8.5",
@@ -6779,8 +6852,8 @@ dependencies = [
  "futures-util",
  "h2",
  "http 0.2.11",
- "http-body",
- "hyper",
+ "http-body 0.4.5",
+ "hyper 0.14.27",
  "hyper-rustls 0.24.2",
  "hyper-tls",
  "ipnet",
@@ -7100,15 +7173,15 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.38.25"
+version = "0.38.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc99bc2d4f1fed22595588a013687477aedf3cdcfb26558c559edb67b4d9b22e"
+checksum = "322394588aaf33c24007e8bb3238ee3e4c5c09c084ab32bc73890b99ff326bca"
 dependencies = [
  "bitflags 2.4.0",
  "errno",
  "libc",
- "linux-raw-sys 0.4.11",
- "windows-sys 0.48.0",
+ "linux-raw-sys 0.4.13",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7683,9 +7756,9 @@ checksum = "24188a676b6ae68c3b2cb3a01be17fbf7240ce009799bb56d5b1409051e78fde"
 
 [[package]]
 name = "shlex"
-version = "1.1.0"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43b2853a4d09f215c24cc5489c992ce46052d359b5109343cbafbf26bc62f8a3"
+checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "signal-hook"
@@ -8030,21 +8103,21 @@ dependencies = [
  "bitflags 1.3.2",
  "byteorder",
  "cfg-if",
- "heapless",
+ "heapless 0.7.16",
  "managed",
 ]
 
 [[package]]
 name = "smoltcp"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d2e3a36ac8fea7b94e666dfa3871063d6e0a5c9d5d4fec9a1a6b7b6760f0229"
+checksum = "5a1a996951e50b5971a2c8c0fa05a381480d70a933064245c4a223ddc87ccc97"
 dependencies = [
  "bitflags 1.3.2",
  "byteorder",
  "cfg-if",
  "defmt",
- "heapless",
+ "heapless 0.8.0",
  "managed",
 ]
 
@@ -8530,15 +8603,15 @@ dependencies = [
 
 [[package]]
 name = "tempfile"
-version = "3.8.1"
+version = "3.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ef1adac450ad7f4b3c28589471ade84f25f731a7a0fe30d71dfa9f60fd808e5"
+checksum = "01ce4141aa927a6d1bd34a041795abd0db1cccba5d5f24b009f694bdf3a1f3fa"
 dependencies = [
  "cfg-if",
  "fastrand",
  "redox_syscall 0.4.1",
- "rustix 0.38.25",
- "windows-sys 0.48.0",
+ "rustix 0.38.30",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9039,6 +9112,28 @@ dependencies = [
  "url",
  "walkdir",
 ]
+
+[[package]]
+name = "tower"
+version = "0.4.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
+dependencies = [
+ "futures-core",
+ "futures-util",
+ "pin-project",
+ "pin-project-lite",
+ "tokio",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
+name = "tower-layer"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c20c8dbed6283a09604c3e69b4b7eeb54e298b8a600d4d5ecb5ad39de609f1d0"
 
 [[package]]
 name = "tower-service"
@@ -9925,7 +10020,7 @@ dependencies = [
  "hex",
  "http 0.2.11",
  "hubtools",
- "hyper",
+ "hyper 0.14.27",
  "illumos-utils",
  "installinator",
  "installinator-artifact-client",

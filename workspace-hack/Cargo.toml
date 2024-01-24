@@ -25,6 +25,7 @@ bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
 bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.6.0" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
+camino = { version = "1.1.6", default-features = false, features = ["serde1"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -94,6 +95,7 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 snafu = { version = "0.7.5", features = ["futures"] }
+socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -129,6 +131,7 @@ bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
 bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.6.0" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
+camino = { version = "1.1.6", default-features = false, features = ["serde1"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -198,6 +201,7 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 snafu = { version = "0.7.5", features = ["futures"] }
+socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -226,57 +230,57 @@ zip = { version = "0.6.6", default-features = false, features = ["bzip2", "defla
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-unknown-illumos.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 toml_datetime = { version = "0.6.5", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
 [target.x86_64-unknown-illumos.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.2", default-features = false, features = ["std"] }
+errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
-rustix = { version = "0.38.25", features = ["fs", "termios"] }
+rustix = { version = "0.38.30", features = ["fs", "termios"] }
 toml_datetime = { version = "0.6.5", default-features = false, features = ["serde"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 

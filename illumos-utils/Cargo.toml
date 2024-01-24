@@ -20,6 +20,7 @@ libc.workspace = true
 macaddr.workspace = true
 omicron-common.workspace = true
 oxide-vpc.workspace = true
+oxlog.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
