@@ -71,7 +71,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
-path_param!(FloatingIpPath, floating_ip, "Floating IP");
+path_param!(FloatingIpPath, floating_ip, "floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
 path_param!(ImagePath, image, "image");
@@ -890,6 +890,23 @@ pub struct FloatingIpCreate {
     pub pool: Option<NameOrId>,
 }
 
+/// The type of resource that a floating IP is attached to
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FloatingIpParentKind {
+    Instance,
+}
+
+/// Parameters for attaching a floating IP address to another resource
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpAttach {
+    /// Name or ID of the resource that this IP address should be attached to
+    pub parent: NameOrId,
+
+    /// The type of `parent`'s resource
+    pub kind: FloatingIpParentKind,
+}
+
 // INSTANCES
 
 /// Describes an attachment of an `InstanceNetworkInterface` to an `Instance`,
@@ -954,14 +971,30 @@ pub struct InstanceDiskAttach {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
-    /// automatically-assigned from the provided IP Pool, or all available pools
-    /// if not specified.
-    Ephemeral { pool_name: Option<Name> },
+    /// automatically-assigned from the provided IP Pool, or the current silo's
+    /// default pool if not specified.
+    Ephemeral { pool: Option<NameOrId> },
     /// An IP address providing both inbound and outbound access. The address is
-    /// an existing Floating IP object assigned to the current project.
+    /// an existing floating IP object assigned to the current project.
     ///
     /// The floating IP must not be in use by another instance or service.
-    Floating { floating_ip_name: Name },
+    Floating { floating_ip: NameOrId },
+}
+
+/// Parameters for creating an ephemeral IP address for an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub struct EphemeralIpCreate {
+    /// Name or ID of the IP pool used to allocate an address
+    pub pool: Option<NameOrId>,
+}
+
+/// Parameters for detaching an external IP from an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalIpDetach {
+    Ephemeral,
+    Floating { floating_ip: NameOrId },
 }
 
 /// Create-time parameters for an `Instance`

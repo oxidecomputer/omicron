@@ -5,9 +5,9 @@ use anyhow::{ensure, Context as _, Result};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, ExternalIpCreate, InstanceCpuCount,
-    InstanceCreate, InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
-    SshKeyCreate,
+    ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
+    InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment, SshKeyCreate,
 };
 use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
@@ -70,7 +70,7 @@ async fn instance_launch() -> Result<()> {
                 name: disk_name.clone(),
             }],
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
-            external_ips: vec![ExternalIpCreate::Ephemeral { pool_name: None }],
+            external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
             user_data: String::new(),
             start: true,
         })
@@ -87,7 +87,10 @@ async fn instance_launch() -> Result<()> {
         .items
         .first()
         .context("no external IPs")?
-        .ip;
+        .clone();
+    let ExternalIp::Ephemeral { ip: ip_addr } = ip_addr else {
+        anyhow::bail!("IP bound to instance was not ephemeral as required.")
+    };
     eprintln!("instance external IP: {}", ip_addr);
 
     // poll serial for login prompt, waiting 5 min max

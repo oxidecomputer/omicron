@@ -1669,6 +1669,13 @@ CREATE TYPE IF NOT EXISTS omicron.public.ip_kind AS ENUM (
     'floating'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.ip_attach_state AS ENUM (
+    'detached',
+    'attached',
+    'detaching',
+    'attaching'
+);
+
 /*
  * External IP addresses used for guest instances and externally-facing
  * services.
@@ -1714,6 +1721,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     /* FK to the `project` table. */
     project_id UUID,
 
+    /* State of this IP with regard to instance attach/detach
+     * operations. This is mainly used to prevent concurrent use
+     * across sagas and allow rollback to correct state.
+     */
+    state omicron.public.ip_attach_state NOT NULL,
+
     /* The name must be non-NULL iff this is a floating IP. */
     CONSTRAINT null_fip_name CHECK (
         (kind != 'floating' AND name IS NULL) OR
@@ -1735,16 +1748,27 @@ CREATE TABLE IF NOT EXISTS omicron.public.external_ip (
     ),
 
     /*
-     * Only nullable if this is a floating IP, which may exist not
-     * attached to any instance or service yet.
+     * Only nullable if this is a floating/ephemeral IP, which may exist not
+     * attached to any instance or service yet. Ephemeral IPs should not generally
+     * exist without parent instances/services, but need to temporarily exist in
+     * this state for live attachment.
      */
-    CONSTRAINT null_non_fip_parent_id CHECK (
-        (kind != 'floating' AND parent_id is NOT NULL) OR (kind = 'floating')
+    CONSTRAINT null_snat_parent_id CHECK (
+        (kind != 'snat') OR (parent_id IS NOT NULL)
     ),
 
     /* Ephemeral IPs are not supported for services. */
     CONSTRAINT ephemeral_kind_service CHECK (
         (kind = 'ephemeral' AND is_service = FALSE) OR (kind != 'ephemeral')
+    ),
+
+    /*
+     * (Not detached) => non-null parent_id.
+     * This is not a two-way implication because SNAT IPs
+     * cannot have a null parent_id.
+     */
+    CONSTRAINT detached_null_parent_id CHECK (
+        (state = 'detached') OR (parent_id IS NOT NULL)
     )
 );
 
@@ -1776,6 +1800,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_external_ip_by_parent ON omicron.public
     id
 )
     WHERE parent_id IS NOT NULL AND time_deleted IS NULL;
+
+/* Enforce a limit of one Ephemeral IP per instance */
+CREATE UNIQUE INDEX IF NOT EXISTS one_ephemeral_ip_per_instance ON omicron.public.external_ip (
+    parent_id
+)
+    WHERE kind = 'ephemeral' AND parent_id IS NOT NULL AND time_deleted IS NULL;
 
 /* Enforce name-uniqueness of floating (service) IPs at fleet level. */
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_floating_ip_by_name on omicron.public.external_ip (

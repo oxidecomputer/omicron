@@ -390,6 +390,12 @@ pub static DEMO_INSTANCE_DISKS_DETACH_URL: Lazy<String> = Lazy::new(|| {
         *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
     )
 });
+pub static DEMO_INSTANCE_EPHEMERAL_IP_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/instances/{}/external-ips/ephemeral?{}",
+        *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
 pub static DEMO_INSTANCE_NICS_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/network-interfaces?project={}&instance={}",
@@ -414,7 +420,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some(DEMO_IP_POOL_NAME.clone()),
+            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
         }],
         disks: vec![],
         start: true,
@@ -720,6 +726,19 @@ pub static DEMO_FLOAT_IP_URL: Lazy<String> = Lazy::new(|| {
     )
 });
 
+pub static DEMO_FLOATING_IP_ATTACH_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/floating-ips/{}/attach?{}",
+        *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+pub static DEMO_FLOATING_IP_DETACH_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/floating-ips/{}/detach?{}",
+        *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+
 pub static DEMO_FLOAT_IP_CREATE: Lazy<params::FloatingIpCreate> =
     Lazy::new(|| params::FloatingIpCreate {
         identity: IdentityMetadataCreateParams {
@@ -730,6 +749,13 @@ pub static DEMO_FLOAT_IP_CREATE: Lazy<params::FloatingIpCreate> =
         pool: None,
     });
 
+pub static DEMO_FLOAT_IP_ATTACH: Lazy<params::FloatingIpAttach> =
+    Lazy::new(|| params::FloatingIpAttach {
+        kind: params::FloatingIpParentKind::Instance,
+        parent: DEMO_FLOAT_IP_NAME.clone().into(),
+    });
+pub static DEMO_EPHEMERAL_IP_ATTACH: Lazy<params::EphemeralIpCreate> =
+    Lazy::new(|| params::EphemeralIpCreate { pool: None });
 // Identity providers
 pub const IDENTITY_PROVIDERS_URL: &'static str =
     "/v1/system/identity-providers?silo=demo-silo";
@@ -1767,6 +1793,18 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
+        VerifyEndpoint {
+            url: &DEMO_INSTANCE_EPHEMERAL_IP_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_EPHEMERAL_IP_ATTACH).unwrap()
+                ),
+                AllowedMethod::Delete,
+            ],
+        },
+
         /* IAM */
 
         VerifyEndpoint {
@@ -2238,6 +2276,28 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOATING_IP_ATTACH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_ATTACH).unwrap(),
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOATING_IP_DETACH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&()).unwrap(),
+                ),
             ],
         },
     ]
