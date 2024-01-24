@@ -75,6 +75,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2768,6 +2774,10 @@ name = "hashbrown"
 version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f93e7192158dbcda357bdec5fb5788eebf8bbac027f3f33e719d29135ae84156"
+dependencies = [
+ "ahash",
+ "allocator-api2",
+]
 
 [[package]]
 name = "headers"
@@ -3879,6 +3889,15 @@ dependencies = [
  "thiserror",
  "x509-cert",
  "zerocopy 0.6.4",
+]
+
+[[package]]
+name = "lru"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2994eeba8ed550fd9b47a0b38f0242bc3344e496483c6180b69139cc2fa5d1d7"
+dependencies = [
+ "hashbrown 0.14.2",
 ]
 
 [[package]]
@@ -5209,6 +5228,7 @@ dependencies = [
  "getrandom 0.2.10",
  "group",
  "hashbrown 0.13.2",
+ "hashbrown 0.14.2",
  "hex",
  "hmac",
  "hyper 0.14.27",
@@ -6637,6 +6657,24 @@ dependencies = [
  "indoc 2.0.3",
  "itertools 0.11.0",
  "paste",
+ "strum",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
+name = "ratatui"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5659e52e4ba6e07b2dad9f1158f578ef84a73762625ddb51536019f34d180eb"
+dependencies = [
+ "bitflags 2.4.0",
+ "cassowary",
+ "indoc 2.0.3",
+ "itertools 0.12.0",
+ "lru",
+ "paste",
+ "stability",
  "strum",
  "unicode-segmentation",
  "unicode-width",
@@ -8273,6 +8311,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "stability"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebd1b177894da2a2d9120208c3386066af06a488255caabc5de8ddca22dbc3ce"
+dependencies = [
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9347,11 +9395,11 @@ dependencies = [
 
 [[package]]
 name = "tui-tree-widget"
-version = "0.13.0"
+version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f01f9172fb8f4f925fb1e259c2f411be14af031ab8b35d517fd05cb78c0784d5"
+checksum = "136011b328c4f392499a02c4b5b78d509fb297bf9c10f2bda5d11d65cb946e4c"
 dependencies = [
- "ratatui",
+ "ratatui 0.25.0",
  "unicode-width",
 ]
 
@@ -9929,7 +9977,7 @@ dependencies = [
  "once_cell",
  "owo-colors",
  "proptest",
- "ratatui",
+ "ratatui 0.23.0",
  "reqwest",
  "rpassword",
  "serde",
