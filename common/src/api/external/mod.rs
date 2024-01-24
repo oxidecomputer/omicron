@@ -3253,7 +3253,7 @@ mod test {
         let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
         assert_eq!(net, net_des);
 
-        let net_str = "fd00:99::1/64";
+        let net_str = "fd00:47::1/64";
         let net = IpNet::from_str(net_str).unwrap();
         let ser = serde_json::to_string(&net).unwrap();
 

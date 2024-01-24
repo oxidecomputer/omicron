@@ -15,6 +15,7 @@ publish = false
 ### BEGIN HAKARI SECTION
 [dependencies]
 ahash = { version = "0.8.6" }
+aho-corasick = { version = "1.0.4" }
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.5.3" }
@@ -25,6 +26,7 @@ bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
 bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.6.0" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
+camino = { version = "1.1.6", default-features = false, features = ["serde1"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -53,7 +55,8 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
-hashbrown = { version = "0.13.2" }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.2", features = ["raw"] }
+hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13.2" }
 hex = { version = "0.4.3", features = ["serde"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "0.14.27", features = ["full"] }
@@ -81,8 +84,8 @@ predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.74" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
-regex = { version = "1.10.2" }
-regex-automata = { version = "0.4.3", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
+regex = { version = "1.10.3" }
+regex-automata = { version = "0.4.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.7", features = ["std"] }
@@ -94,6 +97,7 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 snafu = { version = "0.7.5", features = ["futures"] }
+socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -111,7 +115,7 @@ trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.13" }
 unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
-uuid = { version = "1.6.1", features = ["serde", "v4"] }
+uuid = { version = "1.7.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.31", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
@@ -119,6 +123,7 @@ zip = { version = "0.6.6", default-features = false, features = ["bzip2", "defla
 
 [build-dependencies]
 ahash = { version = "0.8.6" }
+aho-corasick = { version = "1.0.4" }
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 base16ct = { version = "0.2.0", default-features = false, features = ["alloc"] }
 bit-set = { version = "0.5.3" }
@@ -129,6 +134,7 @@ bstr-6f8ce4dd05d13bba = { package = "bstr", version = "0.2.17" }
 bstr-dff4ba8e3ae991db = { package = "bstr", version = "1.6.0" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
+camino = { version = "1.1.6", default-features = false, features = ["serde1"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
@@ -157,7 +163,8 @@ gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.10", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
-hashbrown = { version = "0.13.2" }
+hashbrown-582f2526e08bb6a0 = { package = "hashbrown", version = "0.14.2", features = ["raw"] }
+hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13.2" }
 hex = { version = "0.4.3", features = ["serde"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "0.14.27", features = ["full"] }
@@ -185,8 +192,8 @@ predicates = { version = "3.1.0" }
 proc-macro2 = { version = "1.0.74" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
-regex = { version = "1.10.2" }
-regex-automata = { version = "0.4.3", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
+regex = { version = "1.10.3" }
+regex-automata = { version = "0.4.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.7", features = ["std"] }
@@ -198,6 +205,7 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 snafu = { version = "0.7.5", features = ["futures"] }
+socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -216,7 +224,7 @@ trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.13" }
 unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
-uuid = { version = "1.6.1", features = ["serde", "v4"] }
+uuid = { version = "1.7.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
 zerocopy = { version = "0.7.31", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }

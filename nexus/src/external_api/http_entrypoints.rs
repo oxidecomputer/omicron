@@ -142,6 +142,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(floating_ip_create)?;
         api.register(floating_ip_view)?;
         api.register(floating_ip_delete)?;
+        api.register(floating_ip_attach)?;
+        api.register(floating_ip_detach)?;
 
         api.register(disk_list)?;
         api.register(disk_create)?;
@@ -200,6 +202,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_delete)?;
 
         api.register(instance_external_ip_list)?;
+        api.register(instance_ephemeral_ip_attach)?;
+        api.register(instance_ephemeral_ip_detach)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -1972,6 +1976,69 @@ async fn floating_ip_view(
             .fetch()
             .await?;
         Ok(HttpResponseOk(fip.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Attach a floating IP to an instance or other resource
+#[endpoint {
+    method = POST,
+    path = "/v1/floating-ips/{floating_ip}/attach",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_attach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    target: TypedBody<params::FloatingIpAttach>,
+) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let ip = nexus
+            .floating_ip_attach(
+                &opctx,
+                floating_ip_selector,
+                target.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseAccepted(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach a floating IP from an instance or other resource
+#[endpoint {
+    method = POST,
+    path = "/v1/floating-ips/{floating_ip}/detach",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_detach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let fip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+        let ip = nexus.floating_ip_detach(&opctx, fip_lookup).await?;
+        Ok(HttpResponseAccepted(ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3880,6 +3947,79 @@ async fn instance_external_ip_list(
         let ips =
             nexus.instance_list_external_ips(&opctx, &instance_lookup).await?;
         Ok(HttpResponseOk(ResultsPage { items: ips, next_page: None }))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Allocate and attach an ephemeral IP to an instance
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/external-ips/ephemeral",
+    tags = ["instances"],
+}]
+async fn instance_ephemeral_ip_attach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    ip_to_create: TypedBody<params::EphemeralIpCreate>,
+) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let ip = nexus
+            .instance_attach_external_ip(
+                &opctx,
+                &instance_lookup,
+                &params::ExternalIpCreate::Ephemeral {
+                    pool: ip_to_create.into_inner().pool,
+                },
+            )
+            .await?;
+        Ok(HttpResponseAccepted(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach and deallocate an ephemeral IP from an instance
+#[endpoint {
+    method = DELETE,
+    path = "/v1/instances/{instance}/external-ips/ephemeral",
+    tags = ["instances"],
+}]
+async fn instance_ephemeral_ip_detach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        nexus
+            .instance_detach_external_ip(
+                &opctx,
+                &instance_lookup,
+                &params::ExternalIpDetach::Ephemeral,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

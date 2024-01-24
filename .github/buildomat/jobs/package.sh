@@ -91,7 +91,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic -r multi-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
-stamp_packages omicron-sled-agent mg-ddm-gz propolis-server overlay
+stamp_packages omicron-sled-agent mg-ddm-gz propolis-server overlay oxlog
 
 # Create global zone package @ /work/global-zone-packages.tar.gz
 ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work

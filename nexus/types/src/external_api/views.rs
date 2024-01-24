@@ -12,8 +12,8 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
-    ByteCount, Digest, IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName, SemverVersion, SimpleIdentity,
+    ByteCount, Digest, Error, IdentityMetadata, InstanceState, Ipv4Net,
+    Ipv6Net, Name, ObjectIdentity, RoleName, SemverVersion, SimpleIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -337,16 +337,34 @@ pub struct IpPoolRange {
 
 // INSTANCE EXTERNAL IP ADDRESSES
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct ExternalIp {
-    pub ip: IpAddr,
-    pub kind: IpKind,
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExternalIp {
+    Ephemeral { ip: IpAddr },
+    Floating(FloatingIp),
+}
+
+impl ExternalIp {
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            Self::Ephemeral { ip } => *ip,
+            Self::Floating(float) => float.ip,
+        }
+    }
+
+    pub fn kind(&self) -> IpKind {
+        match self {
+            Self::Ephemeral { .. } => IpKind::Ephemeral,
+            Self::Floating(_) => IpKind::Floating,
+        }
+    }
 }
 
 /// A Floating IP is a well-known IP address which can be attached
 /// and detached from instances.
-#[derive(ObjectIdentity, Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct FloatingIp {
     #[serde(flatten)]
@@ -358,6 +376,25 @@ pub struct FloatingIp {
     /// The ID of the instance that this Floating IP is attached to,
     /// if it is presently in use.
     pub instance_id: Option<Uuid>,
+}
+
+impl From<FloatingIp> for ExternalIp {
+    fn from(value: FloatingIp) -> Self {
+        ExternalIp::Floating(value)
+    }
+}
+
+impl TryFrom<ExternalIp> for FloatingIp {
+    type Error = Error;
+
+    fn try_from(value: ExternalIp) -> Result<Self, Self::Error> {
+        match value {
+            ExternalIp::Ephemeral { .. } => Err(Error::internal_error(
+                "tried to convert an ephemeral IP into a floating IP",
+            )),
+            ExternalIp::Floating(v) => Ok(v),
+        }
+    }
 }
 
 // RACKS

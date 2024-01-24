@@ -574,6 +574,7 @@ table! {
         last_port -> Int4,
 
         project_id -> Nullable<Uuid>,
+        state -> crate::IpAttachStateEnum,
     }
 }
 
