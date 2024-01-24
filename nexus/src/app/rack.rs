@@ -375,24 +375,7 @@ impl super::Nexus {
             let ipv4_block =
                 AddressLotBlockCreate { first_address, last_address };
 
-            let first_address =
-                IpAddr::from_str("fd00:99::1").map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to parse `fd00:99::1` as `IpAddr`: {e}"
-                    ))
-                })?;
-
-            let last_address =
-                IpAddr::from_str("fd00:99::ffff").map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to parse `fd00:99::ffff` as `IpAddr`: {e}"
-                    ))
-                })?;
-
-            let ipv6_block =
-                AddressLotBlockCreate { first_address, last_address };
-
-            let blocks = vec![ipv4_block, ipv6_block];
+            let blocks = vec![ipv4_block];
 
             let address_lot_params =
                 AddressLotCreate { identity, kind, blocks };

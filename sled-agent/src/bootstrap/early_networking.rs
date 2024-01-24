@@ -7,7 +7,6 @@
 use anyhow::{anyhow, Context};
 use bootstore::schemes::v0 as bootstore;
 use ddm_admin_client::DdmError;
-use dpd_client::types::Ipv6Entry;
 use dpd_client::types::{
     LinkCreate, LinkId, LinkSettings, PortId, PortSettings,
 };
@@ -41,7 +40,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
-static BOUNDARY_SERVICES_ADDR: &str = "fd00:99::1";
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
 /// Errors that can occur during early network setup
@@ -424,21 +422,10 @@ impl<'a> EarlyNetworkSetup<'a> {
         // configure uplink for each requested uplink in configuration that
         // matches our switch_location
         for port_config in &our_ports {
-            let (ipv6_entry, dpd_port_settings, port_id) =
+            let (dpd_port_settings, port_id) =
                 self.build_port_config(port_config)?;
 
             self.wait_for_dendrite(&dpd).await;
-
-            info!(
-                self.log,
-                "Configuring boundary services loopback address on switch";
-                "config" => #?ipv6_entry
-            );
-            dpd.loopback_ipv6_create(&ipv6_entry).await.map_err(|e| {
-                EarlyNetworkSetupError::Dendrite(format!(
-                    "unable to create inital switch loopback address: {e}"
-                ))
-            })?;
 
             info!(
                 self.log,
@@ -576,16 +563,8 @@ impl<'a> EarlyNetworkSetup<'a> {
     fn build_port_config(
         &self,
         port_config: &PortConfigV1,
-    ) -> Result<(Ipv6Entry, PortSettings, PortId), EarlyNetworkSetupError> {
+    ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
         info!(self.log, "Building Port Configuration");
-        let ipv6_entry = Ipv6Entry {
-            addr: BOUNDARY_SERVICES_ADDR.parse().map_err(|e| {
-                EarlyNetworkSetupError::BadConfig(format!(
-                "failed to parse `BOUNDARY_SERVICES_ADDR` as `Ipv6Addr`: {e}"
-            ))
-            })?,
-            tag: OMICRON_DPD_TAG.into(),
-        };
         let mut dpd_port_settings = PortSettings {
             links: HashMap::new(),
             v4_routes: HashMap::new(),
@@ -622,7 +601,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             ))
         })?;
 
-        Ok((ipv6_entry, dpd_port_settings, port_id))
+        Ok((dpd_port_settings, port_id))
     }
 
     async fn wait_for_dendrite(&self, dpd: &DpdClient) {
