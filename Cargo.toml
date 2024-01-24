@@ -325,7 +325,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.0.0"
 rustyline = "12.0.0"
-samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
+samael = { version = "0.0.14", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.21", features = ["std", "serde"] }
