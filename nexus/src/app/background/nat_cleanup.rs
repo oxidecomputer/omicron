@@ -32,14 +32,10 @@ impl Ipv4NatGarbageCollector {
 }
 
 impl BackgroundTask for Ipv4NatGarbageCollector {
-    fn activate<'a, 'b, 'c>(
+    fn activate<'a>(
         &'a mut self,
-        opctx: &'b OpContext,
-    ) -> BoxFuture<'c, serde_json::Value>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+        opctx: &'a OpContext,
+    ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let log = &opctx.log;
 
