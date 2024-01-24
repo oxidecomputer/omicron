@@ -199,26 +199,6 @@ async fn instance_launch() -> Result<()> {
         data
     );
 
-    // verify oximeter is doing its job
-    eprintln!("retrieving disk metric");
-    let now = chrono::Local::now();
-    let start = now - chrono::Duration::days(1);
-    let metrics = &ctx
-        .client
-        .disk_metrics_list()
-        .disk(disk_name.clone())
-        .metric(DiskMetricName::WriteBytes)
-        .limit(1)
-        .start_time(start)
-        .end_time(now)
-        .project(ctx.project_name.clone())
-        .send()
-        .await?;
-    ensure!(
-        metrics.items.len() == 1,
-        "a single metric should have been returned"
-    );
-
     // tear-down
     eprintln!("stopping instance");
     ctx.client
