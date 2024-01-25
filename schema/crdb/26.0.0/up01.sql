@@ -1,1 +1,6 @@
-DROP TABLE IF EXISTS omicron.public.update_deployment;
+CREATE TYPE IF NOT EXISTS omicron.public.ip_attach_state AS ENUM (
+    'detached',
+    'attached',
+    'detaching',
+    'attaching'
+);
