@@ -1363,10 +1363,14 @@ mod tests {
             .expect("failed to read collection back");
         println!("diff: {}", blueprint2.diff(&blueprint_read));
         assert_eq!(blueprint2, blueprint_read);
-        assert_eq!(
-            blueprint_list_all_ids(&opctx, &datastore).await,
-            [blueprint1.id, blueprint2.id]
-        );
+        {
+            let mut expected_ids = [blueprint1.id, blueprint2.id];
+            expected_ids.sort();
+            assert_eq!(
+                blueprint_list_all_ids(&opctx, &datastore).await,
+                expected_ids
+            );
+        }
 
         // Set blueprint2 as the current target and ensure that means we can not
         // delete it.
