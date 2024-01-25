@@ -52,8 +52,8 @@ const SQL_LIMIT_INVENTORY: NonZeroU32 =
 /// Blueprints eventually need to be stored in the database.  That will obviate
 /// the need for this structure.
 pub struct Blueprints {
-    all_blueprints: BTreeMap<Uuid, Blueprint>,
-    target: BlueprintTarget,
+    pub all_blueprints: BTreeMap<Uuid, Blueprint>,
+    pub target: BlueprintTarget,
 }
 
 impl Blueprints {

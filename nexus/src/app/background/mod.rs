@@ -13,6 +13,7 @@ mod init;
 mod inventory_collection;
 mod nat_cleanup;
 mod phantom_disks;
+mod plan_blueprint_load;
 mod plan_execution;
 mod status;
 
