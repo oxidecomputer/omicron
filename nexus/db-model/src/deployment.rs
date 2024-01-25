@@ -40,6 +40,18 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
     }
 }
 
+impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
+    fn from(value: Blueprint) -> Self {
+        Self {
+            id: value.id,
+            parent_blueprint_id: value.parent_blueprint_id,
+            time_created: value.time_created,
+            creator: value.creator,
+            comment: value.comment,
+        }
+    }
+}
+
 /// See [`nexus_types::deployment::BlueprintTarget`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_target)]

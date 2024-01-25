@@ -164,7 +164,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BlueprintResultsPage"
+                  "$ref": "#/components/schemas/BlueprintMetadataResultsPage"
                 }
               }
             }
@@ -2132,7 +2132,43 @@
           "zones_in_service"
         ]
       },
-      "BlueprintResultsPage": {
+      "BlueprintMetadata": {
+        "description": "Describe high-level metadata about a blueprint",
+        "type": "object",
+        "properties": {
+          "comment": {
+            "description": "human-readable string describing why this blueprint was created (for debugging)",
+            "type": "string"
+          },
+          "creator": {
+            "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique identifier for this blueprint",
+            "type": "string",
+            "format": "uuid"
+          },
+          "parent_blueprint_id": {
+            "nullable": true,
+            "description": "which blueprint this blueprint is based on",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "when this blueprint was generated (for debugging)",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "comment",
+          "creator",
+          "id",
+          "time_created"
+        ]
+      },
+      "BlueprintMetadataResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -2140,7 +2176,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Blueprint"
+              "$ref": "#/components/schemas/BlueprintMetadata"
             }
           },
           "next_page": {

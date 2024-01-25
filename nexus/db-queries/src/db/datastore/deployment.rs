@@ -4,6 +4,7 @@
 
 use super::DataStore;
 use crate::authz;
+use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
@@ -37,9 +38,14 @@ use nexus_db_model::BpOmicronZoneNotInService;
 use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::OmicronZonesConfig;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::ListResultVec;
+use omicron_common::api::external::LookupType;
+use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -56,6 +62,27 @@ use uuid::Uuid;
 const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 
 impl DataStore {
+    /// List blueprints
+    pub async fn blueprints_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<BlueprintMetadata> {
+        use db::schema::blueprint;
+
+        opctx
+            .authorize(authz::Action::ListChildren, &authz::BLUEPRINT_CONFIG)
+            .await?;
+
+        let blueprints = paginated(blueprint::table, blueprint::id, pagparams)
+            .select(DbBlueprint::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(blueprints.into_iter().map(BlueprintMetadata::from).collect())
+    }
+
     /// Store a complete blueprint into the database
     pub async fn blueprint_insert(
         &self,
@@ -198,27 +225,35 @@ impl DataStore {
     pub async fn blueprint_read(
         &self,
         opctx: &OpContext,
-        blueprint_id: Uuid,
+        authz_blueprint: &authz::Blueprint,
     ) -> Result<Blueprint, Error> {
-        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        opctx.authorize(authz::Action::Read, authz_blueprint).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
+        let blueprint_id = authz_blueprint.id();
 
         // Read the metadata from the primary blueprint row, and ensure that it
         // exists.
         let (parent_blueprint_id, time_created, creator, comment) = {
             use db::schema::blueprint::dsl;
 
-            let blueprints = dsl::blueprint
+            let mut blueprints = dsl::blueprint
                 .filter(dsl::id.eq(blueprint_id))
                 .limit(2)
                 .select(DbBlueprint::as_select())
                 .load_async(&*conn)
                 .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-            bail_unless!(blueprints.len() == 1);
-            let blueprint = blueprints.into_iter().next().unwrap();
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter();
+
+            // Check that this blueprint exists.
+            let Some(blueprint) = blueprints.next() else {
+                return Err(authz_blueprint.not_found());
+            };
+
+            // Ensure we don't have another blueprint with this ID (should be
+            // impossible given we filtered on an exact primary key)
+            bail_unless!(blueprints.next().is_none());
+
             (
                 blueprint.parent_blueprint_id,
                 blueprint.time_created,
@@ -461,9 +496,10 @@ impl DataStore {
     pub async fn blueprint_delete(
         &self,
         opctx: &OpContext,
-        blueprint_id: Uuid,
+        authz_blueprint: &authz::Blueprint,
     ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, &authz::INVENTORY).await?;
+        opctx.authorize(authz::Action::Delete, authz_blueprint).await?;
+        let blueprint_id = authz_blueprint.id();
 
         // As with inserting a whole blueprint, we remove it in one big
         // transaction.  Similar considerations apply.  We could
@@ -505,6 +541,15 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?
                 };
+
+                // Bail out if this blueprint didn't exist; there won't be
+                // references to it in any of the remaining tables either, since
+                // deletion always goes through this transaction.
+                if nblueprints == 0 {
+                    return Err(TransactionError::CustomError(
+                        authz_blueprint.not_found(),
+                    ));
+                }
 
                 // Remove rows associated with Omicron zones
                 let nsled_agent_zones = {
@@ -625,7 +670,8 @@ impl DataStore {
         // should be rare in practice, and is always possible during
         // `blueprint_read` anyway since it has to read from multiple tables to
         // construct the blueprint.
-        let blueprint = self.blueprint_read(opctx, target.target_id).await?;
+        let authz_blueprint = authz_blueprint_from_id(target.target_id);
+        let blueprint = self.blueprint_read(opctx, &authz_blueprint).await?;
 
         Ok(Some((target, blueprint)))
     }
@@ -651,6 +697,15 @@ impl DataStore {
     }
 }
 
+// Helper to create an `authz::Blueprint` for a specific blueprint ID
+fn authz_blueprint_from_id(blueprint_id: Uuid) -> authz::Blueprint {
+    authz::Blueprint::new(
+        authz::FLEET,
+        blueprint_id,
+        LookupType::ById(blueprint_id),
+    )
+}
+
 /// Errors related to inserting a target blueprint
 #[derive(Debug)]
 enum InsertTargetError {
@@ -667,7 +722,7 @@ impl From<InsertTargetError> for Error {
     fn from(value: InsertTargetError) -> Self {
         match value {
             InsertTargetError::NoSuchBlueprint(id) => {
-                Error::invalid_request(format!("Blueprint {id} does not exist"))
+                Error::not_found_by_id(ResourceType::Blueprint, &id)
             }
             InsertTargetError::ParentNotTarget(id) => {
                 Error::invalid_request(format!(
@@ -1108,6 +1163,19 @@ mod tests {
         (collection, policy, blueprint)
     }
 
+    async fn blueprint_list_all_ids(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> Vec<Uuid> {
+        datastore
+            .blueprints_list(opctx, &DataPageParams::max_page())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|bp| bp.id)
+            .collect()
+    }
+
     #[tokio::test]
     async fn test_empty_blueprint() {
         // Setup
@@ -1124,6 +1192,7 @@ mod tests {
             "test",
         )
         .unwrap();
+        let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
         // Write it to the database and read it back.
         datastore
@@ -1131,10 +1200,14 @@ mod tests {
             .await
             .expect("failed to insert blueprint");
         let blueprint_read = datastore
-            .blueprint_read(&opctx, blueprint1.id)
+            .blueprint_read(&opctx, &authz_blueprint)
             .await
             .expect("failed to read collection back");
         assert_eq!(blueprint1, blueprint_read);
+        assert_eq!(
+            blueprint_list_all_ids(&opctx, &datastore).await,
+            [blueprint1.id]
+        );
 
         // There ought to be no sleds or zones in service, and no parent
         // blueprint.
@@ -1143,8 +1216,9 @@ mod tests {
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
         // Delete the blueprint and ensure it's really gone.
-        datastore.blueprint_delete(&opctx, blueprint1.id).await.unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint).await.unwrap();
         ensure_blueprint_fully_deleted(&datastore, blueprint1.id).await;
+        assert_eq!(blueprint_list_all_ids(&opctx, &datastore).await, []);
 
         // Clean up.
         db.cleanup().await.unwrap();
@@ -1160,6 +1234,7 @@ mod tests {
 
         // Create a cohesive representative collection/policy/blueprint
         let (collection, mut policy, blueprint1) = representative();
+        let authz_blueprint1 = authz_blueprint_from_id(blueprint1.id);
 
         // Write it to the database and read it back.
         datastore
@@ -1167,10 +1242,14 @@ mod tests {
             .await
             .expect("failed to insert blueprint");
         let blueprint_read = datastore
-            .blueprint_read(&opctx, blueprint1.id)
+            .blueprint_read(&opctx, &authz_blueprint1)
             .await
             .expect("failed to read collection back");
         assert_eq!(blueprint1, blueprint_read);
+        assert_eq!(
+            blueprint_list_all_ids(&opctx, &datastore).await,
+            [blueprint1.id]
+        );
 
         // Check the number of blueprint elements against our collection.
         assert_eq!(blueprint1.omicron_zones.len(), policy.sleds.len());
@@ -1205,7 +1284,7 @@ mod tests {
             Some((bp1_target, blueprint1.clone()))
         );
         let err = datastore
-            .blueprint_delete(&opctx, blueprint1.id)
+            .blueprint_delete(&opctx, &authz_blueprint1)
             .await
             .unwrap_err();
         assert!(
@@ -1241,6 +1320,7 @@ mod tests {
         let num_new_sled_zones = 1 + new_sled_zpools.len();
 
         let blueprint2 = builder.build();
+        let authz_blueprint2 = authz_blueprint_from_id(blueprint2.id);
 
         // Check that we added the new sled and its zones.
         assert_eq!(
@@ -1265,11 +1345,15 @@ mod tests {
             .await
             .expect("failed to insert blueprint");
         let blueprint_read = datastore
-            .blueprint_read(&opctx, blueprint2.id)
+            .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
         println!("diff: {}", blueprint2.diff(&blueprint_read));
         assert_eq!(blueprint2, blueprint_read);
+        assert_eq!(
+            blueprint_list_all_ids(&opctx, &datastore).await,
+            [blueprint1.id, blueprint2.id]
+        );
 
         // Set blueprint2 as the current target and ensure that means we can not
         // delete it.
@@ -1287,7 +1371,7 @@ mod tests {
             Some((bp2_target, blueprint2.clone()))
         );
         let err = datastore
-            .blueprint_delete(&opctx, blueprint2.id)
+            .blueprint_delete(&opctx, &authz_blueprint2)
             .await
             .unwrap_err();
         assert!(
@@ -1300,8 +1384,12 @@ mod tests {
 
         // Now that blueprint2 is the target, we should be able to delete
         // blueprint1.
-        datastore.blueprint_delete(&opctx, blueprint1.id).await.unwrap();
+        datastore.blueprint_delete(&opctx, &authz_blueprint1).await.unwrap();
         ensure_blueprint_fully_deleted(&datastore, blueprint1.id).await;
+        assert_eq!(
+            blueprint_list_all_ids(&opctx, &datastore).await,
+            [blueprint2.id]
+        );
 
         // Clean up.
         db.cleanup().await.unwrap();

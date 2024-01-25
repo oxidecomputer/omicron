@@ -26,6 +26,7 @@ use dropshot::TypedBody;
 use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::internal_api::params::SwitchPutRequest;
@@ -620,7 +621,7 @@ async fn ipv4_nat_changeset(
 async fn blueprint_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Blueprint>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<BlueprintMetadata>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -631,7 +632,7 @@ async fn blueprint_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             blueprints,
-            &|_, blueprint: &Blueprint| blueprint.id,
+            &|_, blueprint: &BlueprintMetadata| blueprint.id,
         )?))
     };
 
