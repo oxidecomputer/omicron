@@ -60,7 +60,6 @@ impl super::Nexus {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<BlueprintMetadata> {
-        opctx.authorize(Action::ListChildren, &authz::BLUEPRINT_CONFIG).await?;
         self.db_datastore.blueprints_list(opctx, pagparams).await
     }
 
@@ -76,7 +75,6 @@ impl super::Nexus {
             blueprint_id,
             LookupType::ById(blueprint_id),
         );
-        opctx.authorize(Action::Read, &blueprint).await?;
         self.db_datastore.blueprint_read(opctx, &blueprint).await
     }
 
@@ -92,7 +90,6 @@ impl super::Nexus {
             blueprint_id,
             LookupType::ById(blueprint_id),
         );
-        opctx.authorize(Action::Delete, &blueprint).await?;
         self.db_datastore.blueprint_delete(opctx, &blueprint).await
     }
 
@@ -113,7 +110,6 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<Option<(BlueprintTarget, Blueprint)>, Error> {
-        opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
@@ -124,7 +120,6 @@ impl super::Nexus {
         opctx: &OpContext,
         params: BlueprintTargetSet,
     ) -> Result<BlueprintTarget, Error> {
-        opctx.authorize(Action::Modify, &authz::BLUEPRINT_CONFIG).await?;
         let new_target = BlueprintTarget {
             target_id: params.target_id,
             enabled: params.enabled,
@@ -211,7 +206,6 @@ impl super::Nexus {
         opctx: &OpContext,
         blueprint: &Blueprint,
     ) -> Result<(), Error> {
-        opctx.authorize(Action::Modify, &authz::BLUEPRINT_CONFIG).await?;
         self.db_datastore.blueprint_insert(opctx, blueprint).await
     }
 
