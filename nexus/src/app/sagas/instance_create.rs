@@ -10,7 +10,7 @@ use crate::app::{
     MAX_NICS_PER_INSTANCE,
 };
 use crate::external_api::params;
-use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::{ExternalIp, NetworkInterfaceKind};
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
@@ -20,8 +20,10 @@ use nexus_types::external_api::params::InstanceDiskAttachment;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
+use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::warn;
@@ -229,7 +231,7 @@ impl NexusSaga for SagaInstanceCreate {
                 SagaName::new(&format!("instance-create-external-ip{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
             subsaga_builder.append(Node::action(
-                "output",
+                format!("external-ip-{i}").as_str(),
                 format!("CreateExternalIp{i}").as_str(),
                 CREATE_EXTERNAL_IP.as_ref(),
             ));
@@ -685,7 +687,7 @@ async fn sic_allocate_instance_snat_ip_undo(
 /// index `ip_index`, and return its ID if one is created (or None).
 async fn sic_allocate_instance_external_ip(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<Option<ExternalIp>, ActionError> {
     // XXX: may wish to restructure partially: we have at most one ephemeral
     //      and then at most $n$ floating.
     let osagactx = sagactx.user_data();
@@ -695,7 +697,7 @@ async fn sic_allocate_instance_external_ip(
     let ip_index = repeat_saga_params.which;
     let Some(ip_params) = saga_params.create_params.external_ips.get(ip_index)
     else {
-        return Ok(());
+        return Ok(None);
     };
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -703,39 +705,80 @@ async fn sic_allocate_instance_external_ip(
     );
     let instance_id = repeat_saga_params.instance_id;
 
-    match ip_params {
+    // We perform the 'complete_op' in this saga stage because our IPs are
+    // created in the attaching state, and we need to move them to attached.
+    // We *can* do so because the `creating` state will block the IP attach/detach
+    // sagas from running, so we can safely undo in event of later error in this saga
+    // without worrying they have been detached by another API call.
+    // Runtime state should never be able to make 'complete_op' fallible.
+    let ip = match ip_params {
         // Allocate a new IP address from the target, possibly default, pool
-        params::ExternalIpCreate::Ephemeral { ref pool_name } => {
-            let pool_name =
-                pool_name.as_ref().map(|name| db::model::Name(name.clone()));
+        params::ExternalIpCreate::Ephemeral { pool } => {
+            let pool = if let Some(name_or_id) = pool {
+                Some(
+                    osagactx
+                        .nexus()
+                        .ip_pool_lookup(&opctx, name_or_id)
+                        .map_err(ActionError::action_failed)?
+                        .lookup_for(authz::Action::CreateChild)
+                        .await
+                        .map_err(ActionError::action_failed)?
+                        .0,
+                )
+            } else {
+                None
+            };
+
             let ip_id = repeat_saga_params.new_id;
             datastore
                 .allocate_instance_ephemeral_ip(
                     &opctx,
                     ip_id,
                     instance_id,
-                    pool_name,
+                    pool,
+                    true,
                 )
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(ActionError::action_failed)?
+                .0
         }
         // Set the parent of an existing floating IP to the new instance's ID.
-        params::ExternalIpCreate::Floating { ref floating_ip_name } => {
-            let floating_ip_name = db::model::Name(floating_ip_name.clone());
-            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
-                .project_id(saga_params.project_id)
-                .floating_ip_name(&floating_ip_name)
-                .fetch_for(authz::Action::Modify)
-                .await
-                .map_err(ActionError::action_failed)?;
+        params::ExternalIpCreate::Floating { floating_ip } => {
+            let (.., authz_fip) = match floating_ip {
+                NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
+                    .project_id(saga_params.project_id)
+                    .floating_ip_name(db::model::Name::ref_cast(name)),
+                NameOrId::Id(id) => {
+                    LookupPath::new(&opctx, datastore).floating_ip_id(*id)
+                }
+            }
+            .lookup_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
 
             datastore
-                .floating_ip_attach(&opctx, &authz_fip, &db_fip, instance_id)
+                .floating_ip_begin_attach(&opctx, &authz_fip, instance_id, true)
                 .await
-                .map_err(ActionError::action_failed)?;
+                .map_err(ActionError::action_failed)?
+                .0
         }
-    }
-    Ok(())
+    };
+
+    // Ignore row count here, this is infallible with correct
+    // (state, state', kind) but may be zero on repeat call for
+    // idempotency.
+    _ = datastore
+        .external_ip_complete_op(
+            &opctx,
+            ip.id,
+            ip.kind,
+            nexus_db_model::IpAttachState::Attaching,
+            nexus_db_model::IpAttachState::Attached,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(Some(ip))
 }
 
 async fn sic_allocate_instance_external_ip_undo(
@@ -750,6 +793,16 @@ async fn sic_allocate_instance_external_ip_undo(
         &sagactx,
         &saga_params.serialized_authn,
     );
+
+    // We store and lookup `ExternalIp` so that we can detach
+    // and/or deallocate without double name resolution.
+    let new_ip = sagactx
+        .lookup::<Option<ExternalIp>>(&format!("external-ip-{ip_index}"))?;
+
+    let Some(ip) = new_ip else {
+        return Ok(());
+    };
+
     let Some(ip_params) = saga_params.create_params.external_ips.get(ip_index)
     else {
         return Ok(());
@@ -757,18 +810,42 @@ async fn sic_allocate_instance_external_ip_undo(
 
     match ip_params {
         params::ExternalIpCreate::Ephemeral { .. } => {
-            let ip_id = repeat_saga_params.new_id;
-            datastore.deallocate_external_ip(&opctx, ip_id).await?;
+            datastore.deallocate_external_ip(&opctx, ip.id).await?;
         }
-        params::ExternalIpCreate::Floating { floating_ip_name } => {
-            let floating_ip_name = db::model::Name(floating_ip_name.clone());
-            let (.., authz_fip, db_fip) = LookupPath::new(&opctx, &datastore)
-                .project_id(saga_params.project_id)
-                .floating_ip_name(&floating_ip_name)
-                .fetch_for(authz::Action::Modify)
+        params::ExternalIpCreate::Floating { .. } => {
+            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
+                .floating_ip_id(ip.id)
+                .lookup_for(authz::Action::Modify)
                 .await?;
 
-            datastore.floating_ip_detach(&opctx, &authz_fip, &db_fip).await?;
+            datastore
+                .floating_ip_begin_detach(
+                    &opctx,
+                    &authz_fip,
+                    repeat_saga_params.instance_id,
+                    true,
+                )
+                .await?;
+
+            let n_rows = datastore
+                .external_ip_complete_op(
+                    &opctx,
+                    ip.id,
+                    ip.kind,
+                    nexus_db_model::IpAttachState::Detaching,
+                    nexus_db_model::IpAttachState::Detached,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            if n_rows != 1 {
+                error!(
+                    osagactx.log(),
+                    "sic_allocate_instance_external_ip_undo: failed to \
+                     completely detach ip {}",
+                    ip.id
+                );
+            }
         }
     }
     Ok(())
@@ -1042,7 +1119,7 @@ pub mod test {
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                    pool_name: None,
+                    pool: None,
                 }],
                 disks: vec![params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {

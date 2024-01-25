@@ -221,7 +221,9 @@ pub enum ServiceUsingCertificate {
 }
 
 /// The kind of an external IP address for an instance
-#[derive(Debug, Clone, Copy, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Debug, Clone, Copy, Deserialize, Eq, Serialize, JsonSchema, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum IpKind {
     Ephemeral,

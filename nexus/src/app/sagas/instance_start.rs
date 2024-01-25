@@ -405,34 +405,11 @@ async fn sis_dpd_ensure(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // Querying boundary switches also requires fleet access and the use of the
-    // instance allocator context.
-    let boundary_switches = osagactx
+    osagactx
         .nexus()
-        .boundary_switches(&osagactx.nexus().opctx_alloc)
+        .instance_ensure_dpd_config(&opctx, instance_id, &sled.address(), None)
         .await
         .map_err(ActionError::action_failed)?;
-
-    for switch in boundary_switches {
-        let dpd_client =
-            osagactx.nexus().dpd_clients.get(&switch).ok_or_else(|| {
-                ActionError::action_failed(Error::internal_error(&format!(
-                    "unable to find client for switch {switch}"
-                )))
-            })?;
-
-        osagactx
-            .nexus()
-            .instance_ensure_dpd_config(
-                &opctx,
-                instance_id,
-                &sled.address(),
-                None,
-                dpd_client,
-            )
-            .await
-            .map_err(ActionError::action_failed)?;
-    }
 
     Ok(())
 }

@@ -20,7 +20,7 @@ pub use inner::types;
 pub use inner::Error;
 
 use either::Either;
-use inner::types::Ipv6Prefix;
+use inner::types::{Ipv6Prefix, TunnelOrigin};
 use inner::Client as InnerClient;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -102,6 +102,22 @@ impl Client {
                 info!(
                     me.log,
                     "Failed to notify ddmd of our address (will retry after {duration:?}";
+                    "err" => %err,
+                );
+            }).await.unwrap();
+        });
+    }
+
+    pub fn advertise_tunnel_endpoint(&self, endpoint: TunnelOrigin) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            retry_notify(retry_policy_internal_service_aggressive(), || async {
+                me.inner.advertise_tunnel_endpoints(&vec![endpoint.clone()]).await?;
+                Ok(())
+            }, |err, duration| {
+                info!(
+                    me.log,
+                    "Failed to notify ddmd of tunnel endpoint (retry in {duration:?}";
                     "err" => %err,
                 );
             }).await.unwrap();

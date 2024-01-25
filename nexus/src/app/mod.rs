@@ -88,7 +88,9 @@ pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 //      The value here is arbitrary, but we need *a* limit for the instance
 //      create saga to have a bounded DAG. We might want to only enforce
 //      this during instance create (rather than live attach) in future.
-pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 32;
+pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
+    nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
+        as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
@@ -141,6 +143,7 @@ pub struct Nexus {
     timeseries_client: LazyTimeseriesClient,
 
     /// Contents of the trusted root role for the TUF repository.
+    #[allow(dead_code)]
     updates_config: Option<config::UpdatesConfig>,
 
     /// The tunable parameters from a configuration file

@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(26, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(28, 0, 0);
 
 table! {
     disk (id) {
@@ -574,6 +574,7 @@ table! {
         last_port -> Int4,
 
         project_id -> Nullable<Uuid>,
+        state -> crate::IpAttachStateEnum,
     }
 }
 
@@ -1183,72 +1184,45 @@ table! {
 }
 
 table! {
-    update_artifact (name, version, kind) {
-        name -> Text,
-        version -> Text,
-        kind -> crate::KnownArtifactKindEnum,
+    tuf_repo (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        sha256 -> Text,
         targets_role_version -> Int8,
         valid_until -> Timestamptz,
-        target_name -> Text,
-        target_sha256 -> Text,
-        target_length -> Int8,
-    }
-}
-
-table! {
-    system_update (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-    }
-}
-
-table! {
-    update_deployment (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-        status -> crate::UpdateStatusEnum,
-        // TODO: status reason for updateable_component
-    }
-}
-
-table! {
-    component_update (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-        component_type -> crate::UpdateableComponentTypeEnum,
-    }
-}
-
-table! {
-    updateable_component (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        device_id -> Text,
-        version -> Text,
         system_version -> Text,
-        component_type -> crate::UpdateableComponentTypeEnum,
-        status -> crate::UpdateStatusEnum,
-        // TODO: status reason for updateable_component
+        file_name -> Text,
     }
 }
 
 table! {
-    system_update_component_update (system_update_id, component_update_id) {
-        system_update_id -> Uuid,
-        component_update_id -> Uuid,
+    tuf_artifact (name, version, kind) {
+        name -> Text,
+        version -> Text,
+        kind -> Text,
+        time_created -> Timestamptz,
+        sha256 -> Text,
+        artifact_size -> Int8,
     }
 }
+
+table! {
+    tuf_repo_artifact (tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind) {
+        tuf_repo_id -> Uuid,
+        tuf_artifact_name -> Text,
+        tuf_artifact_version -> Text,
+        tuf_artifact_kind -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    tuf_repo,
+    tuf_repo_artifact,
+    tuf_artifact
+);
+joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
+// Can't specify joinable for a composite primary key (tuf_repo_artifact ->
+// tuf_artifact).
 
 /* hardware inventory */
 
@@ -1437,13 +1411,6 @@ table! {
         target_version -> Nullable<Text>,
     }
 }
-
-allow_tables_to_appear_in_same_query!(
-    system_update,
-    component_update,
-    system_update_component_update,
-);
-joinable!(system_update_component_update -> component_update (component_update_id));
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));

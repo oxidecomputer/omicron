@@ -7,6 +7,7 @@
 use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
 use crate::nexus::NexusClientWithResolver;
+use crate::params::InstanceExternalIpBody;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
@@ -433,6 +434,42 @@ impl InstanceManager {
             return Err(BundleError::NoSuchZone { name: name.to_string() });
         };
         instance.request_zone_bundle().await
+    }
+
+    pub async fn add_external_ip(
+        &self,
+        instance_id: Uuid,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        let instance = {
+            let instances = self.inner.instances.lock().unwrap();
+            instances.get(&instance_id).map(|(_id, v)| v.clone())
+        };
+
+        let Some(instance) = instance else {
+            return Err(Error::NoSuchInstance(instance_id));
+        };
+
+        instance.add_external_ip(ip).await?;
+        Ok(())
+    }
+
+    pub async fn delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        let instance = {
+            let instances = self.inner.instances.lock().unwrap();
+            instances.get(&instance_id).map(|(_id, v)| v.clone())
+        };
+
+        let Some(instance) = instance else {
+            return Err(Error::NoSuchInstance(instance_id));
+        };
+
+        instance.delete_external_ip(ip).await?;
+        Ok(())
     }
 }
 

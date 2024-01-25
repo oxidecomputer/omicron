@@ -1,12 +1,14 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use super::NexusActionContext;
 use crate::app::map_switch_zone_addrs;
 use crate::Nexus;
 use db::datastore::SwitchPortSettingsCombinedResult;
 use dpd_client::types::{
     LinkCreate, LinkId, LinkSettings, PortFec, PortSettings, PortSpeed,
-    RouteSettingsV4, RouteSettingsV6,
 };
-use dpd_client::{Ipv4Cidr, Ipv6Cidr};
 use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use mg_admin_client::types::Prefix4;
@@ -83,41 +85,6 @@ pub(crate) fn api_to_dpd_port_settings(
                     .collect(),
             },
         );
-    }
-
-    for r in &settings.routes {
-        match &r.dst {
-            IpNetwork::V4(n) => {
-                let gw = match r.gw.ip() {
-                    IpAddr::V4(gw) => gw,
-                    IpAddr::V6(_) => {
-                        return Err(
-                            "IPv4 destination cannot have IPv6 nexthop".into()
-                        )
-                    }
-                };
-                dpd_port_settings.v4_routes.insert(
-                    Ipv4Cidr { prefix: n.ip(), prefix_len: n.prefix() }
-                        .to_string(),
-                    vec![RouteSettingsV4 { link_id: link_id.0, nexthop: gw }],
-                );
-            }
-            IpNetwork::V6(n) => {
-                let gw = match r.gw.ip() {
-                    IpAddr::V6(gw) => gw,
-                    IpAddr::V4(_) => {
-                        return Err(
-                            "IPv6 destination cannot have IPv4 nexthop".into()
-                        )
-                    }
-                };
-                dpd_port_settings.v6_routes.insert(
-                    Ipv6Cidr { prefix: n.ip(), prefix_len: n.prefix() }
-                        .to_string(),
-                    vec![RouteSettingsV6 { link_id: link_id.0, nexthop: gw }],
-                );
-            }
-        }
     }
 
     Ok(dpd_port_settings)

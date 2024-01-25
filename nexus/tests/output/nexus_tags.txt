@@ -12,8 +12,10 @@ disk_view                                GET      /v1/disks/{disk}
 
 API operations found with tag "floating-ips"
 OPERATION ID                             METHOD   URL PATH
+floating_ip_attach                       POST     /v1/floating-ips/{floating_ip}/attach
 floating_ip_create                       POST     /v1/floating-ips
 floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
+floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
 floating_ip_list                         GET      /v1/floating-ips
 floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
@@ -40,6 +42,8 @@ instance_delete                          DELETE   /v1/instances/{instance}
 instance_disk_attach                     POST     /v1/instances/{instance}/disks/attach
 instance_disk_detach                     POST     /v1/instances/{instance}/disks/detach
 instance_disk_list                       GET      /v1/instances/{instance}/disks
+instance_ephemeral_ip_attach             POST     /v1/instances/{instance}/external-ips/ephemeral
+instance_ephemeral_ip_detach             DELETE   /v1/instances/{instance}/external-ips/ephemeral
 instance_external_ip_list                GET      /v1/instances/{instance}/external-ips
 instance_list                            GET      /v1/instances
 instance_migrate                         POST     /v1/instances/{instance}/migrate

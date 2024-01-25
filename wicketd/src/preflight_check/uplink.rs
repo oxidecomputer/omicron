@@ -161,8 +161,11 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
             |_cx| async {
                 // Check that the port name is valid and that it has no links
                 // configured already.
-                let port_id = PortId::from_str(&uplink.port)
-                    .map_err(UplinkPreflightTerminalError::InvalidPortName)?;
+                let port_id = PortId::from_str(&uplink.port).map_err(|_| {
+                    UplinkPreflightTerminalError::InvalidPortName(
+                        uplink.port.clone(),
+                    )
+                })?;
                 let links = dpd_client
                     .link_list(&port_id)
                     .await
@@ -892,7 +895,7 @@ type DpdError = dpd_client::Error<dpd_client::types::Error>;
 #[derive(Debug, Error)]
 pub(crate) enum UplinkPreflightTerminalError {
     #[error("invalid port name: {0}")]
-    InvalidPortName(&'static str),
+    InvalidPortName(String),
     #[error("failed to connect to dpd to check for current configuration")]
     GetCurrentConfig(#[source] DpdError),
     #[error("uplink already configured - is rack already initialized?")]

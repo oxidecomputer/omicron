@@ -4,11 +4,16 @@
 <service_bundle type='manifest' name='oximeter'>
 
 <service name='oxide/oximeter' type='service' version='1'>
-  <create_default_instance enabled='false' />
+  <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
   <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
 
   <method_context>
@@ -17,8 +22,10 @@
     </method_environment>
   </method_context>
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/oximeter/bin/oximeter run /var/svc/manifest/site/oximeter/config.toml --address %{config/address} --id %{config/id} &amp;'
-    timeout_seconds='0' />
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/oximeter-collector/bin/oximeter run /var/svc/manifest/site/oximeter/config.toml --address %{config/address} --id %{config/id} &amp;'
+    timeout_seconds='0'>
+  </exec_method>
+
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
