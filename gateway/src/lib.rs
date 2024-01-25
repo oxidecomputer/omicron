@@ -331,9 +331,8 @@ pub async fn start_server(
             .map_err(|message| format!("initializing logger: {}", message))?,
     );
     let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
-    if let slog_dtrace::ProbeRegistration::Failed(e) = registration {
-        let err = InlineErrorChain::new(&e);
-        error!(log, "failed to register DTrace probes"; &err);
+    if let slog_dtrace::ProbeRegistration::Failed(err) = registration {
+        error!(log, "failed to register DTrace probes"; "err" => &err);
         return Err(format!("failed to register DTrace probes: {err}"));
     } else {
         debug!(log, "registered DTrace probes");
