@@ -40,7 +40,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::SledInstanceState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::update::ArtifactId;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -438,15 +438,16 @@ async fn cpapi_metrics_collect(
 }]
 async fn cpapi_artifact_download(
     request_context: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UpdateArtifactId>,
+    path_params: Path<ArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
     let opctx =
         crate::context::op_context_for_internal_api(&request_context).await;
     // TODO: return 404 if the error we get here says that the record isn't found
-    let body =
-        nexus.download_artifact(&opctx, path_params.into_inner()).await?;
+    let body = nexus
+        .updates_download_artifact(&opctx, path_params.into_inner())
+        .await?;
 
     Ok(HttpResponseOk(Body::from(body).into()))
 }

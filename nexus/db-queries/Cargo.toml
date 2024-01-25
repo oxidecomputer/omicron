@@ -43,6 +43,7 @@ sled-agent-client.workspace = true
 slog.workspace = true
 static_assertions.workspace = true
 steno.workspace = true
+swrite.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 uuid.workspace = true

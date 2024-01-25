@@ -4273,6 +4273,7 @@ dependencies = [
  "steno",
  "strum",
  "subprocess",
+ "swrite",
  "term",
  "thiserror",
  "tokio",
@@ -4387,6 +4388,7 @@ dependencies = [
  "serde_urlencoded",
  "slog",
  "tokio",
+ "tokio-util",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -4847,6 +4849,7 @@ dependencies = [
  "async-trait",
  "base64",
  "buf-list",
+ "bytes",
  "camino",
  "camino-tempfile",
  "cancel-safe-futures",
@@ -4947,6 +4950,9 @@ dependencies = [
  "tokio-postgres",
  "tough",
  "trust-dns-resolver",
+ "tufaceous",
+ "tufaceous-lib",
+ "update-common",
  "uuid",
 ]
 
@@ -9570,6 +9576,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
+ "chrono",
  "clap 4.4.3",
  "debug-ignore",
  "display-error-chain",

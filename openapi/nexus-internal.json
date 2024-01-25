@@ -18,10 +18,10 @@
           {
             "in": "path",
             "name": "kind",
-            "description": "The kind of update artifact this is.",
+            "description": "The kind of artifact this is.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/KnownArtifactKind"
+              "type": "string"
             }
           },
           {
@@ -6533,21 +6533,6 @@
       },
       "ZpoolPutResponse": {
         "type": "object"
-      },
-      "KnownArtifactKind": {
-        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
-        "type": "string",
-        "enum": [
-          "gimlet_sp",
-          "gimlet_rot",
-          "host",
-          "trampoline",
-          "control_plane",
-          "psc_sp",
-          "psc_rot",
-          "switch_sp",
-          "switch_rot"
-        ]
       },
       "SemverVersion": {
         "type": "string",

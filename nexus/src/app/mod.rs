@@ -140,6 +140,7 @@ pub struct Nexus {
     timeseries_client: LazyTimeseriesClient,
 
     /// Contents of the trusted root role for the TUF repository.
+    #[allow(dead_code)]
     updates_config: Option<config::UpdatesConfig>,
 
     /// The tunable parameters from a configuration file

@@ -40,7 +40,6 @@ mod sp_updater;
 mod ssh_keys;
 mod subnet_allocation;
 mod switch_port;
-mod system_updates;
 mod unauthorized;
 mod unauthorized_coverage;
 mod updates;

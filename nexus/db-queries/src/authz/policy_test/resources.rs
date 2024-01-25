@@ -7,6 +7,8 @@
 use super::resource_builder::ResourceBuilder;
 use super::resource_builder::ResourceSet;
 use crate::authz;
+use crate::db::model::ArtifactId;
+use nexus_db_model::SemverVersion;
 use omicron_common::api::external::LookupType;
 use oso::PolarClass;
 use std::collections::BTreeSet;
@@ -126,20 +128,23 @@ pub async fn make_resources(
         LookupType::ById(blueprint_id),
     ));
 
-    let system_update_id =
-        "9c86d713-1bc2-4927-9892-ada3eb6f5f62".parse().unwrap();
-    builder.new_resource(authz::SystemUpdate::new(
+    let tuf_repo_id = "3c52d72f-cbf7-4951-a62f-a4154e74da87".parse().unwrap();
+    builder.new_resource(authz::TufRepo::new(
         authz::FLEET,
-        system_update_id,
-        LookupType::ById(system_update_id),
+        tuf_repo_id,
+        LookupType::ById(tuf_repo_id),
     ));
 
-    let update_deployment_id =
-        "c617a035-7c42-49ff-a36a-5dfeee382832".parse().unwrap();
-    builder.new_resource(authz::UpdateDeployment::new(
+    let artifact_id = ArtifactId {
+        name: "a".to_owned(),
+        version: SemverVersion("1.0.0".parse().unwrap()),
+        kind: "b".to_owned(),
+    };
+    let artifact_id_desc = artifact_id.to_string();
+    builder.new_resource(authz::TufArtifact::new(
         authz::FLEET,
-        update_deployment_id,
-        LookupType::ById(update_deployment_id),
+        artifact_id,
+        LookupType::ByCompositeId(artifact_id_desc),
     ));
 
     let address_lot_id =
@@ -375,7 +380,6 @@ pub fn exempted_authz_classes() -> BTreeSet<String> {
         authz::RouterRoute::get_polar_class(),
         authz::ConsoleSession::get_polar_class(),
         authz::RoleBuiltin::get_polar_class(),
-        authz::UpdateArtifact::get_polar_class(),
         authz::UserBuiltin::get_polar_class(),
     ]
     .into_iter()

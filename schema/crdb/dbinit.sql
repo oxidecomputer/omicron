@@ -1955,184 +1955,84 @@ CREATE INDEX IF NOT EXISTS lookup_console_by_silo_user ON omicron.public.console
 
 /*******************************************************************/
 
-CREATE TYPE IF NOT EXISTS omicron.public.update_artifact_kind AS ENUM (
-    -- Sled artifacts
-    'gimlet_sp',
-    'gimlet_rot',
-    'host',
-    'trampoline',
-    'control_plane',
+-- Describes a single uploaded TUF repo.
+--
+-- Identified by both a random uuid and its SHA256 hash. The hash could be the
+-- primary key, but it seems unnecessarily large and unwieldy.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo (
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
 
-    -- PSC artifacts
-    'psc_sp',
-    'psc_rot',
+    sha256 STRING(64) NOT NULL,
 
-    -- Switch artifacts
-    'switch_sp',
-    'switch_rot'
-);
-
-CREATE TABLE IF NOT EXISTS omicron.public.update_artifact (
-    name STRING(63) NOT NULL,
-    version STRING(63) NOT NULL,
-    kind omicron.public.update_artifact_kind NOT NULL,
-
-    /* the version of the targets.json role this came from */
+    -- The version of the targets.json role that was used to generate the repo.
     targets_role_version INT NOT NULL,
 
-    /* when the metadata this artifact was cached from expires */
+    -- The valid_until time for the repo.
     valid_until TIMESTAMPTZ NOT NULL,
 
-    /* data about the target from the targets.json role */
-    target_name STRING(512) NOT NULL,
-    target_sha256 STRING(64) NOT NULL,
-    target_length INT NOT NULL,
+    -- The system version described in the TUF repo.
+    --
+    -- This is the "true" primary key, but is not treated as such in the
+    -- database because we may want to change this format in the future.
+    -- Re-doing primary keys is annoying.
+    --
+    -- Because the system version is embedded in the repo's artifacts.json,
+    -- each system version is associated with exactly one checksum.
+    system_version STRING(64) NOT NULL,
+
+    -- For debugging only:
+    -- Filename provided by the user.
+    file_name TEXT NOT NULL,
+
+    CONSTRAINT unique_checksum UNIQUE (sha256),
+    CONSTRAINT unique_system_version UNIQUE (system_version)
+);
+
+-- Describes an individual artifact from an uploaded TUF repo.
+--
+-- In the future, this may also be used to describe artifacts that are fetched
+-- from a remote TUF repo, but that requires some additional design work.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_artifact (
+    name STRING(63) NOT NULL,
+    version STRING(63) NOT NULL,
+    -- This used to be an enum but is now a string, because it can represent
+    -- artifact kinds currently unknown to a particular version of Nexus as
+    -- well.
+    kind STRING(63) NOT NULL,
+
+    -- The time this artifact was first recorded.
+    time_created TIMESTAMPTZ NOT NULL,
+
+    -- The SHA256 hash of the artifact, typically obtained from the TUF
+    -- targets.json (and validated at extract time).
+    sha256 STRING(64) NOT NULL,
+    -- The length of the artifact, in bytes.
+    artifact_size INT8 NOT NULL,
 
     PRIMARY KEY (name, version, kind)
 );
 
-/* This index is used to quickly find outdated artifacts. */
-CREATE INDEX IF NOT EXISTS lookup_artifact_by_targets_role_version ON omicron.public.update_artifact (
-    targets_role_version
-);
+-- Reflects that a particular artifact was provided by a particular TUF repo.
+-- This is a many-many mapping.
+CREATE TABLE IF NOT EXISTS omicron.public.tuf_repo_artifact (
+    tuf_repo_id UUID NOT NULL,
+    tuf_artifact_name STRING(63) NOT NULL,
+    tuf_artifact_version STRING(63) NOT NULL,
+    tuf_artifact_kind STRING(63) NOT NULL,
 
-/*
- * System updates
- */
-CREATE TABLE IF NOT EXISTS omicron.public.system_update (
-    /* Identity metadata (asset) */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
+    /*
+    For the primary key, this definition uses the natural key rather than a
+    smaller surrogate key (UUID). That's because with CockroachDB the most
+    important factor in selecting a primary key is the ability to distribute
+    well. In this case, the first element of the primary key is the tuf_repo_id,
+    which is a random UUID.
 
-    -- Because the version is unique, it could be the PK, but that would make
-    -- this resource different from every other resource for little benefit.
-
-    -- Unique semver version
-    version STRING(64) NOT NULL -- TODO: length
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_update_by_version ON omicron.public.system_update (
-    version
-);
-
- 
-CREATE TYPE IF NOT EXISTS omicron.public.updateable_component_type AS ENUM (
-    'bootloader_for_rot',
-    'bootloader_for_sp',
-    'bootloader_for_host_proc',
-    'hubris_for_psc_rot',
-    'hubris_for_psc_sp',
-    'hubris_for_sidecar_rot',
-    'hubris_for_sidecar_sp',
-    'hubris_for_gimlet_rot',
-    'hubris_for_gimlet_sp',
-    'helios_host_phase_1',
-    'helios_host_phase_2',
-    'host_omicron'
-);
-
-/*
- * Component updates. Associated with at least one system_update through
- * system_update_component_update.
- */
-CREATE TABLE IF NOT EXISTS omicron.public.component_update (
-    /* Identity metadata (asset) */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
-    -- On component updates there's no device ID because the update can apply to
-    -- multiple instances of a given device kind
-
-    -- The *system* update version associated with this version (this is confusing, will rename)
-    version STRING(64) NOT NULL, -- TODO: length
-    -- TODO: add component update version to component_update
-
-    component_type omicron.public.updateable_component_type NOT NULL
-);
-
--- version is unique per component type
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_component_by_type_and_version ON omicron.public.component_update (
-    component_type, version
-);
-
-/*
- * Associate system updates with component updates. Not done with a
- * system_update_id field on component_update because the same component update
- * may be part of more than one system update.
- */
-CREATE TABLE IF NOT EXISTS omicron.public.system_update_component_update (
-    system_update_id UUID NOT NULL,
-    component_update_id UUID NOT NULL,
-
-    PRIMARY KEY (system_update_id, component_update_id)
-);
-
--- For now, the plan is to treat stopped, failed, completed as sub-cases of
--- "steady" described by a "reason". But reason is not implemented yet.
--- Obviously this could be a boolean, but boolean status fields never stay
--- boolean for long.
-CREATE TYPE IF NOT EXISTS omicron.public.update_status AS ENUM (
-    'updating',
-    'steady'
-);
-
-/*
- * Updateable components and their update status
- */
-CREATE TABLE IF NOT EXISTS omicron.public.updateable_component (
-    /* Identity metadata (asset) */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
-    -- Free-form string that comes from the device
-    device_id STRING(40) NOT NULL,
-
-    component_type omicron.public.updateable_component_type NOT NULL,
-
-    -- The semver version of this component's own software
-    version STRING(64) NOT NULL, -- TODO: length
-
-    -- The version of the system update this component's software came from.
-    -- This may need to be nullable if we are registering components before we
-    -- know about system versions at all
-    system_version STRING(64) NOT NULL, -- TODO: length
-
-    status omicron.public.update_status NOT NULL
-    -- TODO: status reason for updateable_component
-);
-
--- can't have two components of the same type with the same device ID
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_component_by_type_and_device ON omicron.public.updateable_component (
-    component_type, device_id
-);
-
-CREATE INDEX IF NOT EXISTS lookup_component_by_system_version ON omicron.public.updateable_component (
-    system_version
-);
-
-/*
- * System updates
- */
-CREATE TABLE IF NOT EXISTS omicron.public.update_deployment (
-    /* Identity metadata (asset) */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
-    -- semver version of corresponding system update
-    -- TODO: this makes sense while version is the PK of system_update, but
-    -- if/when I change that back to ID, this needs to be the ID too
-    version STRING(64) NOT NULL,
-
-    status omicron.public.update_status NOT NULL
-    -- TODO: status reason for update_deployment
-);
-
-CREATE INDEX IF NOT EXISTS lookup_deployment_by_creation on omicron.public.update_deployment (
-    time_created
+    For more, see https://www.cockroachlabs.com/blog/how-to-choose-a-primary-key/.
+    */
+    PRIMARY KEY (
+        tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind
+    )
 );
 
 /*******************************************************************/
@@ -3296,7 +3196,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '26.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '27.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
