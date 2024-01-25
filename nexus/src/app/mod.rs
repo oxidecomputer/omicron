@@ -60,7 +60,7 @@ mod silo;
 mod sled;
 mod sled_instance;
 mod snapshot;
-mod ssh_keys;
+mod ssh_key;
 mod switch;
 mod switch_interface;
 mod switch_port;
