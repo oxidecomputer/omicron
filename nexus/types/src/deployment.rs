@@ -185,12 +185,16 @@ impl Blueprint {
     }
 }
 
-/// Describes which blueprint the system is currently trying to make real
-// This is analogous to the db model type until we have that.
+/// Describes what blueprint, if any, the system is currently working toward
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct BlueprintTarget {
+    /// id of the blueprint that the system is trying to make real
     pub target_id: Uuid,
+    /// policy: should the system actively work towards this blueprint
+    ///
+    /// This should generally be left enabled.
     pub enabled: bool,
+    /// when this blueprint was made the target
     pub time_set: chrono::DateTime<chrono::Utc>,
 }
 
