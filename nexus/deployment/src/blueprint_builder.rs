@@ -95,7 +95,7 @@ impl<'a> BlueprintBuilder<'a> {
             .sleds
             .keys()
             .map(|sled_id| {
-                let zones = collection
+                let mut zones = collection
                     .omicron_zones
                     .get(sled_id)
                     .map(|z| z.zones.clone())
@@ -119,6 +119,11 @@ impl<'a> BlueprintBuilder<'a> {
                             sled_id
                         ))
                     })?;
+
+                // This is not strictly necessary.  But for testing, it's
+                // helpful for things to be in sorted order.
+                zones.zones.sort_by_key(|zone| zone.id);
+
                 Ok((*sled_id, zones))
             })
             .collect::<Result<_, Error>>()?;
@@ -163,7 +168,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 // Start with self.omicron_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
-                let zones = self
+                let mut zones = self
                     .omicron_zones
                     .remove(sled_id)
                     // If it's not there, use the config from the parent
@@ -181,6 +186,11 @@ impl<'a> BlueprintBuilder<'a> {
                         generation: Generation::new(),
                         zones: vec![],
                     });
+
+                // This is not strictly necessary.  But for testing, it's
+                // helpful for things to be in sorted order.
+                zones.zones.sort_by_key(|zone| zone.id);
+
                 (*sled_id, zones)
             })
             .collect();

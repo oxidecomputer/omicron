@@ -1240,16 +1240,7 @@ mod tests {
         }
         let num_new_sled_zones = 1 + new_sled_zpools.len();
 
-        let mut blueprint2 = builder.build();
-
-        // Sort the new sled's omicron zones by ID to match how we fetch them
-        // from the db.
-        blueprint2
-            .omicron_zones
-            .get_mut(&new_sled_id)
-            .unwrap()
-            .zones
-            .sort_by_key(|zone| zone.id);
+        let blueprint2 = builder.build();
 
         // Check that we added the new sled and its zones.
         assert_eq!(

@@ -164,7 +164,7 @@ impl super::Nexus {
     ) -> Result<Option<(BlueprintTarget, Blueprint)>, Error> {
         opctx.authorize(Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let blueprints = self.blueprints.lock().unwrap();
-        let Some(target) = blueprints.target.clone() else {
+        let Some(target) = blueprints.target else {
             return Ok(None);
         };
         let blueprint = blueprints
@@ -210,7 +210,7 @@ impl super::Nexus {
                 enabled,
                 time_set: chrono::Utc::now(),
             };
-            blueprints.target = Some(new_target.clone());
+            blueprints.target = Some(new_target);
 
             // When we add a background task executing the target blueprint,
             // this is the point where we'd signal it to update its target.
