@@ -183,7 +183,7 @@ pub struct Nexus {
 
     /// information about blueprints (deployment configurations)
     // This will go away once these are stored in the database.
-    blueprints: std::sync::Mutex<deployment::Blueprints>,
+    blueprints: Arc<std::sync::Mutex<deployment::Blueprints>>,
 }
 
 impl Nexus {
@@ -357,6 +357,10 @@ impl Nexus {
             authn::Context::internal_api(),
             Arc::clone(&db_datastore),
         );
+
+        let blueprints =
+            Arc::new(std::sync::Mutex::new(deployment::Blueprints::new()));
+
         let background_tasks = background::BackgroundTasks::start(
             &background_ctx,
             Arc::clone(&db_datastore),
@@ -364,6 +368,7 @@ impl Nexus {
             &dpd_clients,
             config.deployment.id,
             resolver.clone(),
+            Arc::clone(&blueprints),
         );
 
         let external_resolver = {
@@ -416,7 +421,7 @@ impl Nexus {
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
-            blueprints: std::sync::Mutex::new(deployment::Blueprints::new()),
+            blueprints,
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

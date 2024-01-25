@@ -21,7 +21,7 @@ use std::sync::Arc;
 use tokio::sync::watch;
 
 pub struct TargetBlueprintLoader {
-    blueprints: std::sync::Mutex<deployment::Blueprints>,
+    blueprints: Arc<std::sync::Mutex<deployment::Blueprints>>,
     #[allow(unused)]
     datastore: Arc<DataStore>,
     last: Option<Arc<Blueprint>>,
@@ -31,7 +31,7 @@ pub struct TargetBlueprintLoader {
 
 impl TargetBlueprintLoader {
     pub fn new(
-        blueprints: std::sync::Mutex<deployment::Blueprints>,
+        blueprints: Arc<std::sync::Mutex<deployment::Blueprints>>,
         datastore: Arc<DataStore>,
     ) -> TargetBlueprintLoader {
         let (tx, rx) = watch::channel(None);
@@ -43,7 +43,7 @@ impl TargetBlueprintLoader {
         self.rx.clone()
     }
 
-    // This functoin is a modified copy from `nexus/src/app/deployment.rs` for
+    // This function is a modified copy from `nexus/src/app/deployment.rs` for
     // use until the types are in the datastore.
     //
     // This is a stand-in for a datastore function that fetches the current

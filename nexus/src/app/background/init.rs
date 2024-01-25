@@ -4,6 +4,8 @@
 
 //! Background task initialization
 
+use crate::app::deployment;
+
 use super::common;
 use super::dns_config;
 use super::dns_propagation;
@@ -12,6 +14,8 @@ use super::external_endpoints;
 use super::inventory_collection;
 use super::nat_cleanup;
 use super::phantom_disks;
+use super::plan_blueprint_load;
+use super::plan_execution;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -56,6 +60,12 @@ pub struct BackgroundTasks {
 
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
+
+    /// task handle for blueprint target loader
+    pub task_plan_blueprint_target_loader: common::TaskHandle,
+
+    /// task handle for plan execution background task
+    pub task_plan_executor: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -67,6 +77,7 @@ impl BackgroundTasks {
         dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
+        blueprints: Arc<std::sync::Mutex<deployment::Blueprints>>,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -149,7 +160,8 @@ impl BackgroundTasks {
 
         // Background task: phantom disk detection
         let task_phantom_disks = {
-            let detector = phantom_disks::PhantomDiskDetector::new(datastore);
+            let detector =
+                phantom_disks::PhantomDiskDetector::new(datastore.clone());
 
             let task = driver.register(
                 String::from("phantom_disks"),
@@ -163,6 +175,35 @@ impl BackgroundTasks {
             task
         };
 
+        // Background task: blueprint loader
+        let blueprint_loader = plan_blueprint_load::TargetBlueprintLoader::new(
+            blueprints,
+            datastore.clone(),
+        );
+        let rx_blueprint = blueprint_loader.watcher();
+        let task_plan_blueprint_target_loader = driver.register(
+            String::from("blueprint_target_loader"),
+            String::from("Loads the current target blueprint from the DB"),
+            // TODO: Add to `BackgroundTaskConfig`?
+            std::time::Duration::from_secs(5),
+            Box::new(blueprint_loader),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
+
+        // Background task: plan executor
+        let plan_executor =
+            plan_execution::PlanExecutor::new(datastore, rx_blueprint.clone());
+        let task_plan_executor = driver.register(
+            String::from("plan_executor"),
+            String::from("Executes the target blueprint"),
+            // TODO: Add to `BackgroundTaskConfig`?
+            std::time::Duration::from_secs(60),
+            Box::new(plan_executor),
+            opctx.child(BTreeMap::new()),
+            vec![Box::new(rx_blueprint)],
+        );
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -174,6 +215,8 @@ impl BackgroundTasks {
             nat_cleanup,
             task_inventory_collection,
             task_phantom_disks,
+            task_plan_blueprint_target_loader,
+            task_plan_executor,
         }
     }
 
