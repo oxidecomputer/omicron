@@ -99,17 +99,6 @@ impl super::Nexus {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
-    // This is a stand-in for a datastore function that fetches the current
-    // target information and the target blueprint's contents.  This helper
-    // exists to combine the authz check with the lookup, which is what the
-    // datastore function will eventually do.
-    async fn blueprint_target(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<Option<(BlueprintTarget, Blueprint)>, Error> {
-        self.db_datastore.blueprint_target_get_current_full(opctx).await
-    }
-
     // Once we store blueprints in the database, this function will likely just
     // delegate to a corresponding datastore function.
     pub async fn blueprint_target_set(
