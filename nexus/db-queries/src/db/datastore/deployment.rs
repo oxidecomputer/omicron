@@ -395,16 +395,14 @@ impl DataStore {
 
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
+                // `paginated` implicitly orders by our `id`, which is also
+                // handy for testing: the zones are always consistently ordered
                 let batch = paginated(
                     dsl::bp_omicron_zone,
                     dsl::id,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::blueprint_id.eq(blueprint_id))
-                // It's not strictly necessary to order these by id.  Doing so
-                // ensures a consistent representation for `Blueprint`, which
-                // makes testing easier.  It's already indexed to do this, too.
-                .order_by(dsl::id)
                 .select(BpOmicronZone::as_select())
                 .load_async(&*conn)
                 .await
@@ -650,7 +648,11 @@ impl DataStore {
     }
 
     /// Get the current target blueprint, if one exists
-    pub async fn blueprint_target_get_current(
+    ///
+    /// Returns both the metadata about the target and the full blueprint
+    /// contents. If you only need the target metadata, use
+    /// `blueprint_target_get_current` instead.
+    pub async fn blueprint_target_get_current_full(
         &self,
         opctx: &OpContext,
     ) -> Result<Option<(BlueprintTarget, Blueprint)>, Error> {
@@ -667,13 +669,24 @@ impl DataStore {
         // blueprint the target and (b) deleted the blueprint pointed to by our
         // `target` between the above query and the below query. In such a case,
         // this query will fail with an "unknown blueprint ID" error. This
-        // should be rare in practice, and is always possible during
-        // `blueprint_read` anyway since it has to read from multiple tables to
-        // construct the blueprint.
+        // should be rare in practice.
+        //
+        // TODO-correctness Should we loop here if we get a "blueprint not
+        // found" error to catch this race?
         let authz_blueprint = authz_blueprint_from_id(target.target_id);
         let blueprint = self.blueprint_read(opctx, &authz_blueprint).await?;
 
         Ok(Some((target, blueprint)))
+    }
+
+    /// Get the current target blueprint, if one exists
+    pub async fn blueprint_target_get_current(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<BlueprintTarget>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.blueprint_current_target_only(&conn).await
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -1280,7 +1293,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
             Some((bp1_target, blueprint1.clone()))
         );
         let err = datastore
@@ -1367,7 +1380,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
             Some((bp2_target, blueprint2.clone()))
         );
         let err = datastore
@@ -1426,7 +1439,7 @@ mod tests {
 
         // There should be no current target still.
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
             None
         );
 
@@ -1487,7 +1500,7 @@ mod tests {
 
         // There should be no current target still.
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
             None
         );
 
@@ -1498,7 +1511,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
             Some((bp1_target, blueprint1.clone()))
         );
 
@@ -1509,7 +1522,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
             Some((bp3_target, blueprint3.clone()))
         );
 
@@ -1550,7 +1563,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
             Some((bp4_target, blueprint4))
         );
 

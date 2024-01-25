@@ -3017,9 +3017,42 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
 );
 
 /*
- * System policy and blueprints
+ * System-level blueprints
  *
- * TODO docs
+ * See RFD 457 and 459 for context.
+ *
+ * A blueprint describes a potential system configuration. The primary table is
+ * the `blueprint` table, which stores only a small amount of metadata about the
+ * blueprint. The bulk of the information is stored in the `bp_*` tables below,
+ * each of which references back to `blueprint` by ID.
+ *
+ * `bp_target` describes the "target blueprints" of the system. Insertion must
+ * follow a strict set of rules:
+ *
+ * * The first target blueprint must have version=1, and must have no parent
+ *   blueprint.
+ * * The Nth target blueprint must have version=N, and its parent blueprint must
+ *   be the blueprint that was the target at version=N-1.
+ *
+ * The result is that the current target blueprint can always be found by
+ * looking at the maximally-versioned row in `bp_target`, and there is a linear
+ * history from that blueprint all the way back to the version=1 blueprint. We
+ * will eventually prune old blueprint targets, so it will not always be
+ * possible to view the entire history.
+ *
+ * `bp_sled_omicron_zones`, `bp_omicron_zone`, and `bp_omicron_zone_nic` are
+ * nearly identical to their `inv_*` counterparts, and record the
+ * `OmicronZonesConfig` for each sled.
+ *
+ * `bp_omicron_zones_not_in_service` stores a list of Omicron zones (present in
+ * `bp_omicron_zone` that are NOT in service; e.g., should not appear in
+ * internal DNS. Nexus's in-memory `Blueprint` representation stores the set of
+ * zones that ARE in service. We invert that logic at this layer because we
+ * expect most blueprints to have a relatively large number of omicron zones,
+ * almost all of which will be in service. This is a minor and perhaps
+ * unnecessary optimization at the database layer, but it's also relatively
+ * simple and hidden by the relevant read and insert queries in
+ * `nexus-db-queries`.
  */
 
 -- list of all blueprints

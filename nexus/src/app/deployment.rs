@@ -5,7 +5,6 @@
 //! Configuration of the deployment system
 
 use nexus_db_queries::authz;
-use nexus_db_queries::authz::Action;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
@@ -97,9 +96,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<Option<BlueprintTarget>, Error> {
-        self.blueprint_target(opctx)
-            .await
-            .map(|maybe_target| maybe_target.map(|(target, _blueprint)| target))
+        self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
     // This is a stand-in for a datastore function that fetches the current
@@ -110,7 +107,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> Result<Option<(BlueprintTarget, Blueprint)>, Error> {
-        self.db_datastore.blueprint_target_get_current(opctx).await
+        self.db_datastore.blueprint_target_get_current_full(opctx).await
     }
 
     // Once we store blueprints in the database, this function will likely just
@@ -244,8 +241,9 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
     ) -> CreateResult<Blueprint> {
-        let maybe_parent = self.blueprint_target(opctx).await?;
-        let Some((_, parent_blueprint)) = maybe_parent else {
+        let maybe_target =
+            self.db_datastore.blueprint_target_get_current_full(opctx).await?;
+        let Some((_, parent_blueprint)) = maybe_target else {
             return Err(Error::conflict(
                 "cannot regenerate blueprint without existing target",
             ));
