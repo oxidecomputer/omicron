@@ -365,6 +365,16 @@ mod tests {
                     );
                 };
                 for (key, value) in map.iter() {
+                    // We intentionally skip the "description" key, provided
+                    // that the value is also a true String. This is mostly a
+                    // one-off for the udpate to Progenitor 0.5.0, which caused
+                    // this key to be added. But it's also pretty harmless,
+                    // since it's not possible to get this key-value combination
+                    // in a real JSON schema.
+                    if key == "description" && matches!(value, Value::String(_))
+                    {
+                        continue;
+                    }
                     let new_path = format!("{path}/{key}");
                     let rhs_value = rhs_map.get(key).unwrap_or_else(|| {
                         panic!("Real API JSON missing key: \"{new_path}\"")
