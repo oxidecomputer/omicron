@@ -400,7 +400,7 @@ tui-tree-widget = "0.16.0"
 unicode-width = "0.1.11"
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
-usdt = "0.3"
+usdt = "0.5"
 uuid = { version = "1.7.0", features = ["serde", "v4"] }
 walkdir = "2.4"
 wicket = { path = "wicket" }
