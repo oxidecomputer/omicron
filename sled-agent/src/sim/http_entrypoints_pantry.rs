@@ -371,8 +371,7 @@ mod tests {
                     // this key to be added. But it's also pretty harmless,
                     // since it's not possible to get this key-value combination
                     // in a real JSON schema.
-                    if key == "description" && matches!(value, Value::String(_))
-                    {
+                    if key == "description" && value.is_string() {
                         continue;
                     }
                     let new_path = format!("{path}/{key}");

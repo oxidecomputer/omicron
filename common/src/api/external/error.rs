@@ -487,20 +487,19 @@ pub trait ClientError: std::fmt::Debug {
 impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
     fn from(e: progenitor::progenitor_client::Error<T>) -> Self {
         match e {
-            // This error indicates that the inputs were not valid for this API
-            // call. It's reflective of either a client-side programming error.
-            progenitor::progenitor_client::Error::InvalidRequest(msg) => {
-                Error::internal_error(&format!("InvalidRequest: {}", msg))
+            // For most error variants, we delegate to the display impl for the
+            // Progenitor error type, but we pick apart an error response more
+            // carefully.
+            progenitor::progenitor_client::Error::InvalidRequest(_)
+            | progenitor::progenitor_client::Error::CommunicationError(_)
+            | progenitor::progenitor_client::Error::InvalidResponsePayload(
+                ..,
+            )
+            | progenitor::progenitor_client::Error::UnexpectedResponse(_)
+            | progenitor::progenitor_client::Error::InvalidUpgrade(_)
+            | progenitor::progenitor_client::Error::ResponseBodyError(_) => {
+                Error::internal_error(&e.to_string())
             }
-
-            // This error indicates a problem with the request to the remote
-            // service that did not result in an HTTP response code, but rather
-            // pertained to local (i.e. client-side) encoding or network
-            // communication.
-            progenitor::progenitor_client::Error::CommunicationError(ee) => {
-                Error::internal_error(&format!("CommunicationError: {}", ee))
-            }
-
             // This error represents an expected error from the remote service.
             progenitor::progenitor_client::Error::ErrorResponse(rv) => {
                 let message = rv.message();
@@ -514,37 +513,6 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
                     }
                     _ => Error::internal_error(&message),
                 }
-            }
-
-            // This error indicates that the body returned by the client didn't
-            // match what was documented in the OpenAPI description for the
-            // service. This could only happen for us in the case of a severe
-            // logic/encoding bug in the remote service or due to a failure of
-            // our version constraints (i.e. that the call was to a newer
-            // service with an incompatible response).
-            progenitor::progenitor_client::Error::InvalidResponsePayload(
-                _bytes,
-                ee,
-            ) => Error::internal_error(&format!(
-                "InvalidResponsePayload: {}",
-                ee,
-            )),
-
-            // This error indicates that the client generated a response code
-            // that was not described in the OpenAPI description for the
-            // service; this could be a success or failure response, but either
-            // way it indicates a logic or version error as above.
-            progenitor::progenitor_client::Error::UnexpectedResponse(r) => {
-                Error::internal_error(&format!(
-                    "UnexpectedResponse: status code {}",
-                    r.status(),
-                ))
-            }
-            progenitor::progenitor_client::Error::InvalidUpgrade(e) => {
-                Error::internal_error(&format!("InvalidUpgrade: {e}",))
-            }
-            progenitor::progenitor_client::Error::ResponseBodyError(_) => {
-                Error::internal_error(&format!("ResponseBodyError: {e}",))
             }
         }
     }
