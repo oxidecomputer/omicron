@@ -2645,6 +2645,7 @@
         ]
       },
       "CrucibleOpts": {
+        "description": "CrucibleOpts\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"lossy\", \"read_only\", \"target\" ], \"properties\": { \"cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"control\": { \"type\": [ \"string\", \"null\" ] }, \"flush_timeout\": { \"type\": [ \"number\", \"null\" ], \"format\": \"float\" }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"key\": { \"type\": [ \"string\", \"null\" ] }, \"key_pem\": { \"type\": [ \"string\", \"null\" ] }, \"lossy\": { \"type\": \"boolean\" }, \"read_only\": { \"type\": \"boolean\" }, \"root_cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"target\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } } } } ``` </details>",
         "type": "object",
         "properties": {
           "cert_pem": {
@@ -3410,6 +3411,7 @@
         ]
       },
       "DiskRequest": {
+        "description": "DiskRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"device\", \"name\", \"read_only\", \"slot\", \"volume_construction_request\" ], \"properties\": { \"device\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"read_only\": { \"type\": \"boolean\" }, \"slot\": { \"$ref\": \"#/components/schemas/Slot\" }, \"volume_construction_request\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "device": {
@@ -6332,7 +6334,7 @@
         ]
       },
       "SledRole": {
-        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes the role of the sled within the rack.\\n\\nNote that this may change if the sled is physically moved within the rack.\", \"oneOf\": [ { \"description\": \"The sled is a general compute sled.\", \"type\": \"string\", \"enum\": [ \"gimlet\" ] }, { \"description\": \"The sled is attached to the network switch, and has additional responsibilities.\", \"type\": \"string\", \"enum\": [ \"scrimlet\" ] } ] } ``` </details>",
         "oneOf": [
           {
             "description": "The sled is a general compute sled.",
@@ -6351,7 +6353,7 @@
         ]
       },
       "Slot": {
-        "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.",
+        "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A stable index which is translated by Propolis into a PCI BDF, visible to the guest.\", \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 } ``` </details>",
         "type": "integer",
         "format": "uint8",
         "minimum": 0
@@ -6602,6 +6604,7 @@
         "minimum": 0
       },
       "VolumeConstructionRequest": {
+        "description": "VolumeConstructionRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"sub_volumes\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"read_only_parent\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } ] }, \"sub_volumes\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } }, \"type\": { \"type\": \"string\", \"enum\": [ \"volume\" ] } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"type\", \"url\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"url\" ] }, \"url\": { \"type\": \"string\" } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"blocks_per_extent\", \"extent_count\", \"gen\", \"opts\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"blocks_per_extent\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"extent_count\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"gen\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"opts\": { \"$ref\": \"#/components/schemas/CrucibleOpts\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"region\" ] } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"path\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"path\": { \"type\": \"string\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"file\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",

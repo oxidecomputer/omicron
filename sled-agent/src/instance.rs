@@ -274,8 +274,10 @@ impl InstanceInner {
                                 ))
                             }
                             nexus_client::Error::InvalidRequest(_)
-                            | nexus_client::Error::InvalidResponsePayload(_)
-                            | nexus_client::Error::UnexpectedResponse(_) => {
+                            | nexus_client::Error::InvalidResponsePayload(..)
+                            | nexus_client::Error::UnexpectedResponse(_)
+                            | nexus_client::Error::InvalidUpgrade(_)
+                            | nexus_client::Error::ResponseBodyError(_) => {
                                 BackoffError::permanent(Error::Notification(
                                     err,
                                 ))
