@@ -94,7 +94,7 @@ impl DataStore {
             .await?;
 
         // In the database, the blueprint is represented essentially as a tree
-        // rooted at an `blueprint` row.  Other nodes in the tree point
+        // rooted at a `blueprint` row.  Other nodes in the tree point
         // back at the `blueprint` via `blueprint_id`.
         //
         // It's helpful to assemble some values before entering the transaction
