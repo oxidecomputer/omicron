@@ -1229,10 +1229,8 @@ mod tests {
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
         // Trying to insert the same blueprint again should fail.
-        let err = datastore
-            .blueprint_insert(&opctx, &blueprint1)
-            .await
-            .unwrap_err();
+        let err =
+            datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap_err();
         assert!(err.to_string().contains("duplicate key"));
 
         // Delete the blueprint and ensure it's really gone.
