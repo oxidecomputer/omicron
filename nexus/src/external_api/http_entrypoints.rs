@@ -2667,7 +2667,7 @@ async fn instance_serial_console_stream(
     }
 }
 
-/// List the SSH public keys sent to the instance via cloud-init during instance creation
+/// List the SSH public keys added to the instance via cloud-init during instance creation
 ///
 /// Note that this list is a snapshot in time and will not reflect updates made after
 /// the instance is created.
