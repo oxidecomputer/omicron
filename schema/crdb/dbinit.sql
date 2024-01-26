@@ -3045,7 +3045,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
  * `OmicronZonesConfig` for each sled.
  *
  * `bp_omicron_zones_not_in_service` stores a list of Omicron zones (present in
- * `bp_omicron_zone` that are NOT in service; e.g., should not appear in
+ * `bp_omicron_zone`) that are NOT in service; e.g., should not appear in
  * internal DNS. Nexus's in-memory `Blueprint` representation stores the set of
  * zones that ARE in service. We invert that logic at this layer because we
  * expect most blueprints to have a relatively large number of omicron zones,
@@ -3098,29 +3098,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
--- generation number for the OmicronZonesConfig for each sled in a blueprint
+-- see inv_sled_omicron_zones, which is identical except it references a
+-- collection whereas this table references a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
     -- foreign key into `blueprint` table
     blueprint_id UUID NOT NULL,
 
-    -- unique id for this sled (should be foreign keys into `sled` table, though
-    -- it's conceivable a blueprint could refer to a sled that no longer exists,
-    -- particularly if the blueprint is older than the current target)
     sled_id UUID NOT NULL,
-
-    -- OmicronZonesConfig generation for the zones on this sled in this
-    -- blueprint
     generation INT8 NOT NULL,
-
     PRIMARY KEY (blueprint_id, sled_id)
 );
 
 -- description of omicron zones specified in a blueprint
 --
--- this is currently identical to `inv_omicron_zone`, except that the foreign
--- keys reference other blueprint tables intead of inventory tables. we expect
+-- This is currently identical to `inv_omicron_zone`, except that the foreign
+-- keys reference other blueprint tables intead of inventory tables. We expect
 -- their sameness to diverge over time as either inventory or blueprints (or
--- both) grow context-specific properties
+-- both) grow context-specific properties.
 CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- foreign key into the `blueprint` table
     blueprint_id UUID NOT NULL,
