@@ -95,9 +95,10 @@ impl DataStore {
 
         let vni = nexus_db_model::Vni(Vni::SERVICES_VNI);
 
-        // find all nat entries with the services vni
+        // find all active nat entries with the services vni
         let result: Vec<Ipv4NatEntry> = dsl::ipv4_nat_entry
             .filter(dsl::vni.eq(vni))
+            .filter(dsl::version_removed.is_null())
             .select(Ipv4NatEntry::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -743,7 +744,7 @@ mod test {
         assert_eq!(db_entries.len(), 3);
 
         // nat2 and nat3 should not be soft deleted
-        for request in [nat2, nat3] {
+        for request in [nat2.clone(), nat3.clone()] {
             assert!(db_entries.iter().any(|entry| {
                 entry.first_port == request.first_port
                     && entry.last_port == request.last_port
@@ -757,6 +758,30 @@ mod test {
                 && entry.last_port == nat1.last_port
                 && entry.time_deleted.is_some()
                 && entry.version_removed.is_some()
+        }));
+
+        // add nat1 back
+        // this simulates a zone leaving and then returning, i.e. when a sled gets restarted
+        datastore
+            .ipv4_nat_sync_service_zones(
+                &opctx,
+                &[nat1.clone(), nat2.clone(), nat3.clone()],
+            )
+            .await
+            .unwrap();
+
+        // we should have four nat entries in the db
+        let db_entries =
+            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+
+        assert_eq!(db_entries.len(), 4);
+
+        // there should be an active entry for nat1 again
+        assert!(db_entries.iter().any(|entry| {
+            entry.first_port == nat1.first_port
+                && entry.last_port == nat1.last_port
+                && entry.time_deleted.is_none()
+                && entry.version_removed.is_none()
         }));
 
         db.cleanup().await.unwrap();
