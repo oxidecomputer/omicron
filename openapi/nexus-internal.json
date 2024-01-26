@@ -2202,7 +2202,7 @@
             "type": "string",
             "format": "uuid"
           },
-          "time_set": {
+          "time_made_target": {
             "description": "when this blueprint was made the target",
             "type": "string",
             "format": "date-time"
@@ -2211,7 +2211,7 @@
         "required": [
           "enabled",
           "target_id",
-          "time_set"
+          "time_made_target"
         ]
       },
       "BlueprintTargetSet": {
