@@ -236,23 +236,18 @@ impl DataStore {
         let (parent_blueprint_id, time_created, creator, comment) = {
             use db::schema::blueprint::dsl;
 
-            let mut blueprints = dsl::blueprint
+            let Some(blueprint) = dsl::blueprint
                 .filter(dsl::id.eq(blueprint_id))
-                .limit(2)
                 .select(DbBlueprint::as_select())
-                .load_async(&*conn)
+                .get_result_async(&*conn)
                 .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-                .into_iter();
-
-            // Check that this blueprint exists.
-            let Some(blueprint) = blueprints.next() else {
+                .optional()
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+            else {
                 return Err(authz_blueprint.not_found());
             };
-
-            // Ensure we don't have another blueprint with this ID (should be
-            // impossible given we filtered on an exact primary key)
-            bail_unless!(blueprints.next().is_none());
 
             (
                 blueprint.parent_blueprint_id,
@@ -1204,6 +1199,14 @@ mod tests {
         .unwrap();
         let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
+        // Trying to read it from the database should fail with the relevant
+        // "not found" error.
+        let err = datastore
+            .blueprint_read(&opctx, &authz_blueprint)
+            .await
+            .unwrap_err();
+        assert_eq!(err, authz_blueprint.not_found());
+
         // Write it to the database and read it back.
         datastore
             .blueprint_insert(&opctx, &blueprint1)
@@ -1224,6 +1227,13 @@ mod tests {
         assert_eq!(blueprint1.omicron_zones.len(), 0);
         assert_eq!(blueprint1.zones_in_service.len(), 0);
         assert_eq!(blueprint1.parent_blueprint_id, None);
+
+        // Trying to insert the same blueprint again should fail.
+        let err = datastore
+            .blueprint_insert(&opctx, &blueprint1)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("duplicate key"));
 
         // Delete the blueprint and ensure it's really gone.
         datastore.blueprint_delete(&opctx, &authz_blueprint).await.unwrap();
