@@ -134,12 +134,8 @@ impl DataStore {
         //     .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
         //     .await?;
 
-        // join ip_pool to ip_pool_resource and filter
-
-        // used in both success and error outcomes
-        let lookup_type = LookupType::ByCompositeId(
-            "Default pool for current silo".to_string(),
-        );
+        let lookup_type =
+            LookupType::ByOther("default IP pool for current silo".to_string());
 
         ip_pool::table
             .inner_join(ip_pool_resource::table)
@@ -161,9 +157,6 @@ impl DataStore {
             )
             .await
             .map_err(|e| {
-                // janky to do this manually, but this is an unusual kind of
-                // lookup in that it is by (silo_id, is_default=true), which is
-                // arguably a composite ID.
                 public_error_from_diesel_lookup(
                     e,
                     ResourceType::IpPool,

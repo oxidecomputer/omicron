@@ -54,6 +54,7 @@ mod certificate;
 mod console_session;
 mod dataset;
 mod db_metadata;
+mod deployment;
 mod device_auth;
 mod disk;
 mod dns;

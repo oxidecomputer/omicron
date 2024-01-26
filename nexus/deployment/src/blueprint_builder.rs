@@ -9,6 +9,7 @@ use anyhow::anyhow;
 use internal_dns::config::Host;
 use internal_dns::config::ZoneVariant;
 use ipnet::IpAdd;
+use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
@@ -94,7 +95,7 @@ impl<'a> BlueprintBuilder<'a> {
             .sleds
             .keys()
             .map(|sled_id| {
-                let zones = collection
+                let mut zones = collection
                     .omicron_zones
                     .get(sled_id)
                     .map(|z| z.zones.clone())
@@ -118,6 +119,11 @@ impl<'a> BlueprintBuilder<'a> {
                             sled_id
                         ))
                     })?;
+
+                // This is not strictly necessary.  But for testing, it's
+                // helpful for things to be in sorted order.
+                zones.zones.sort_by_key(|zone| zone.id);
+
                 Ok((*sled_id, zones))
             })
             .collect::<Result<_, Error>>()?;
@@ -125,10 +131,10 @@ impl<'a> BlueprintBuilder<'a> {
             collection.all_omicron_zones().map(|z| z.id).collect();
         Ok(Blueprint {
             id: Uuid::new_v4(),
-            omicron_zones: omicron_zones,
+            omicron_zones,
             zones_in_service,
             parent_blueprint_id: None,
-            time_created: chrono::Utc::now(),
+            time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("from collection {}", collection.id),
         })
@@ -162,7 +168,7 @@ impl<'a> BlueprintBuilder<'a> {
             .map(|sled_id| {
                 // Start with self.omicron_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
-                let zones = self
+                let mut zones = self
                     .omicron_zones
                     .remove(sled_id)
                     // If it's not there, use the config from the parent
@@ -180,15 +186,20 @@ impl<'a> BlueprintBuilder<'a> {
                         generation: Generation::new(),
                         zones: vec![],
                     });
+
+                // This is not strictly necessary.  But for testing, it's
+                // helpful for things to be in sorted order.
+                zones.zones.sort_by_key(|zone| zone.id);
+
                 (*sled_id, zones)
             })
             .collect();
         Blueprint {
             id: Uuid::new_v4(),
-            omicron_zones: omicron_zones,
+            omicron_zones,
             zones_in_service: self.zones_in_service,
             parent_blueprint_id: Some(self.parent_blueprint.id),
-            time_created: chrono::Utc::now(),
+            time_created: now_db_precision(),
             creator: self.creator,
             comment: self.comments.join(", "),
         }
