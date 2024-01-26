@@ -52,8 +52,6 @@ struct PlanningContext {
 }
 
 impl super::Nexus {
-    // Once we store blueprints in the database, this function will likely just
-    // delegate to a corresponding datastore function.
     pub async fn blueprint_list(
         &self,
         opctx: &OpContext,
@@ -62,8 +60,6 @@ impl super::Nexus {
         self.db_datastore.blueprints_list(opctx, pagparams).await
     }
 
-    // Once we store blueprints in the database, this function will likely just
-    // delegate to a corresponding datastore function.
     pub async fn blueprint_view(
         &self,
         opctx: &OpContext,
@@ -77,8 +73,6 @@ impl super::Nexus {
         self.db_datastore.blueprint_read(opctx, &blueprint).await
     }
 
-    // Once we store blueprints in the database, this function will likely just
-    // delegate to a corresponding datastore function.
     pub async fn blueprint_delete(
         &self,
         opctx: &OpContext,
@@ -99,8 +93,6 @@ impl super::Nexus {
         self.db_datastore.blueprint_target_get_current(opctx).await
     }
 
-    // Once we store blueprints in the database, this function will likely just
-    // delegate to a corresponding datastore function.
     pub async fn blueprint_target_set(
         &self,
         opctx: &OpContext,
@@ -185,8 +177,6 @@ impl super::Nexus {
         Ok(PlanningContext { creator, policy: Policy { sleds } })
     }
 
-    // Once we store blueprints in the database, this function will likely just
-    // delegate to a corresponding datastore function.
     async fn blueprint_add(
         &self,
         opctx: &OpContext,
