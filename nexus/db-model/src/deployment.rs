@@ -56,16 +56,16 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = bp_target)]
 pub struct BpTarget {
-    pub version: i64, // i64 only for db serialization; should never be negative
+    pub version: SqlU32,
     pub blueprint_id: Uuid,
     pub enabled: bool,
     pub time_made_target: DateTime<Utc>,
 }
 
 impl BpTarget {
-    pub fn new(version: i64, target: BlueprintTarget) -> Self {
+    pub fn new(version: u32, target: BlueprintTarget) -> Self {
         Self {
-            version,
+            version: version.into(),
             blueprint_id: target.target_id,
             enabled: target.enabled,
             time_made_target: target.time_made_target,
