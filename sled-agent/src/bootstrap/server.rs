@@ -61,8 +61,8 @@ pub enum StartError {
     #[error("Failed to initialize logger")]
     InitLogger(#[source] io::Error),
 
-    #[error("Failed to register DTrace probes")]
-    RegisterDTraceProbes(#[source] usdt::Error),
+    #[error("Failed to register DTrace probes: {0}")]
+    RegisterDTraceProbes(String),
 
     #[error("Failed to find address objects for maghemite")]
     FindMaghemiteAddrObjs(#[source] underlay::Error),

@@ -29,26 +29,6 @@ pub use oxide_vpc::api::DhcpCfg;
 pub use oxide_vpc::api::Vni;
 use std::net::IpAddr;
 
-fn default_boundary_services() -> BoundaryServices {
-    use oxide_vpc::api::Ipv6Addr;
-    use oxide_vpc::api::MacAddr;
-    // TODO-completeness: Don't hardcode any of these values.
-    //
-    // Boundary Services will be started on several Sidecars during rack
-    // setup, and those addresses and VNIs will need to be propagated here.
-    // See https://github.com/oxidecomputer/omicron/issues/1382
-    let ip = Ipv6Addr::from([0xfd00, 0x99, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01]);
-
-    // This MAC address is entirely irrelevant to the functionality of OPTE and
-    // the Oxide VPC. It's never used to actually forward packets. It only
-    // represents the "logical" destination of Boundary Services as a
-    // destination that OPTE as a virtual gateway forwards packets to as its
-    // next hop.
-    let mac = MacAddr::from_const([0xa8, 0x40, 0x25, 0xf9, 0x99, 0x99]);
-    let vni = Vni::new(99_u32).unwrap();
-    BoundaryServices { ip, mac, vni }
-}
-
 /// Information about the gateway for an OPTE port
 #[derive(Debug, Clone, Copy)]
 #[allow(dead_code)]

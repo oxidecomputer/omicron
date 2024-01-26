@@ -7,14 +7,14 @@ dtrace:::BEGIN
     printf("Tracing database query latency by connection ID for nexus PID %d, use Ctrl-C to exit\n", $target);
 }
 
-diesel-db$target:::query-start
+diesel_db$target:::query-start
 {
     @total_queries = count();
     this->conn_id = json(copyinstr(arg1), "ok");
     self->ts[this->conn_id] = timestamp;
 }
 
-diesel-db$target:::query-done
+diesel_db$target:::query-done
 /self->ts[json(copyinstr(arg1), "ok")] != 0/
 {
     this->conn_id = json(copyinstr(arg1), "ok");

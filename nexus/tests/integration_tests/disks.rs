@@ -1747,6 +1747,7 @@ async fn create_instance_with_disk(client: &ClientTestContext) {
             params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
         )],
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
 }
