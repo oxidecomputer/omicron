@@ -951,6 +951,7 @@ const SILO1: Uuid = Uuid::from_u128(0x111151F0_5c3d_4647_83b0_8f3515da7be1);
 const SILO2: Uuid = Uuid::from_u128(0x222251F0_5c3d_4647_83b0_8f3515da7be1);
 
 // "6001" -> "Pool"
+const POOL0: Uuid = Uuid::from_u128(0x00006001_5c3d_4647_83b0_8f3515da7be1);
 const POOL1: Uuid = Uuid::from_u128(0x11116001_5c3d_4647_83b0_8f3515da7be1);
 const POOL2: Uuid = Uuid::from_u128(0x22226001_5c3d_4647_83b0_8f3515da7be1);
 const POOL3: Uuid = Uuid::from_u128(0x33336001_5c3d_4647_83b0_8f3515da7be1);
@@ -976,6 +977,7 @@ fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
         // no corresponding silo.
         client.batch_execute(&format!("INSERT INTO ip_pool
             (id, name, description, time_created, time_modified, time_deleted, rcgen, silo_id, is_default) VALUES
+          ('{POOL0}', 'pool2', '', now(), now(), now(), 1, '{SILO2}', true),
           ('{POOL1}', 'pool1', '', now(), now(), NULL, 1, '{SILO1}', true),
           ('{POOL2}', 'pool2', '', now(), now(), NULL, 1, '{SILO2}', false),
           ('{POOL3}', 'pool3', '', now(), now(), NULL, 1, null, true),
