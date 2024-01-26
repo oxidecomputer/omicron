@@ -15,6 +15,7 @@ use serde::Serialize;
     Clone,
     Copy,
     Debug,
+    Eq,
     PartialEq,
     AsExpression,
     FromSqlRow,

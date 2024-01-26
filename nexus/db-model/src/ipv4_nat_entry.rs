@@ -10,7 +10,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 /// Values used to create an Ipv4NatEntry
-#[derive(Insertable, Debug, Clone)]
+#[derive(Insertable, Debug, Clone, Eq, PartialEq)]
 #[diesel(table_name = ipv4_nat_entry)]
 pub struct Ipv4NatValues {
     pub external_address: Ipv4Net,
