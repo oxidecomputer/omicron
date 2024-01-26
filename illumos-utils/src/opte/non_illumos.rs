@@ -8,6 +8,7 @@ use slog::Logger;
 
 use crate::addrobj::AddrObject;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use std::net::IpAddr;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -16,6 +17,15 @@ pub enum Error {
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
     ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
+    ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Could not find Primary NIC")]
+    NoPrimaryNic,
+
+    #[error("Can't attach new ephemeral IP {0}, currently have {1}")]
+    ImplicitEphemeralIpDetach(IpAddr, IpAddr),
 }
 
 pub fn initialize_xde_driver(

@@ -4,14 +4,18 @@
 
 //! External IP addresses for instances
 
+use std::sync::Arc;
+
 use crate::external_api::views::ExternalIp;
 use crate::external_api::views::FloatingIp;
+use nexus_db_model::IpAttachState;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::IpKind;
 use nexus_types::external_api::params;
+use nexus_types::external_api::views;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -19,6 +23,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::UpdateResult;
 
 impl super::Nexus {
     pub(crate) async fn instance_list_external_ips(
@@ -34,7 +39,9 @@ impl super::Nexus {
             .await?
             .into_iter()
             .filter_map(|ip| {
-                if ip.kind == IpKind::SNat {
+                if ip.kind == IpKind::SNat
+                    || ip.state != IpAttachState::Attached
+                {
                     None
                 } else {
                     Some(ip.try_into().unwrap())
@@ -102,9 +109,19 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
+        let pool = match &params.pool {
+            Some(pool) => Some(
+                self.ip_pool_lookup(opctx, pool)?
+                    .lookup_for(authz::Action::Read)
+                    .await?
+                    .0,
+            ),
+            None => None,
+        };
+
         Ok(self
             .db_datastore
-            .allocate_floating_ip(opctx, authz_project.id(), params)
+            .allocate_floating_ip(opctx, authz_project.id(), params, pool)
             .await?
             .try_into()
             .unwrap())
@@ -115,9 +132,68 @@ impl super::Nexus {
         opctx: &OpContext,
         ip_lookup: lookup::FloatingIp<'_>,
     ) -> DeleteResult {
-        let (.., authz_fip, db_fip) =
-            ip_lookup.fetch_for(authz::Action::Delete).await?;
+        let (.., authz_fip) =
+            ip_lookup.lookup_for(authz::Action::Delete).await?;
 
-        self.db_datastore.floating_ip_delete(opctx, &authz_fip, &db_fip).await
+        self.db_datastore.floating_ip_delete(opctx, &authz_fip).await
+    }
+
+    pub(crate) async fn floating_ip_attach(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        fip_selector: params::FloatingIpSelector,
+        target: params::FloatingIpAttach,
+    ) -> UpdateResult<views::FloatingIp> {
+        match target.kind {
+            params::FloatingIpParentKind::Instance => {
+                let instance_selector = params::InstanceSelector {
+                    project: fip_selector.project,
+                    instance: target.parent,
+                };
+                let instance =
+                    self.instance_lookup(opctx, instance_selector)?;
+                let attach_params = &params::ExternalIpCreate::Floating {
+                    floating_ip: fip_selector.floating_ip,
+                };
+                self.instance_attach_external_ip(
+                    opctx,
+                    &instance,
+                    attach_params,
+                )
+                .await
+                .and_then(FloatingIp::try_from)
+            }
+        }
+    }
+
+    pub(crate) async fn floating_ip_detach(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        ip_lookup: lookup::FloatingIp<'_>,
+    ) -> UpdateResult<views::FloatingIp> {
+        // XXX: Today, this only happens for instances.
+        //      In future, we will need to separate out by the *type* of
+        //      parent attached to a floating IP. We don't yet store this
+        //      in db for user-facing FIPs (is_service => internal-only
+        //      at this point).
+        let (.., authz_fip, db_fip) =
+            ip_lookup.fetch_for(authz::Action::Modify).await?;
+
+        let Some(parent_id) = db_fip.parent_id else {
+            return Ok(db_fip.into());
+        };
+
+        let instance_selector = params::InstanceSelector {
+            project: None,
+            instance: parent_id.into(),
+        };
+        let instance = self.instance_lookup(opctx, instance_selector)?;
+        let attach_params = &params::ExternalIpDetach::Floating {
+            floating_ip: authz_fip.id().into(),
+        };
+
+        self.instance_detach_external_ip(opctx, &instance, attach_params)
+            .await
+            .and_then(FloatingIp::try_from)
     }
 }

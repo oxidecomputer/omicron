@@ -32,7 +32,6 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
 use once_cell::sync::Lazy;
@@ -390,6 +389,12 @@ pub static DEMO_INSTANCE_DISKS_DETACH_URL: Lazy<String> = Lazy::new(|| {
         *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
     )
 });
+pub static DEMO_INSTANCE_EPHEMERAL_IP_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/instances/{}/external-ips/ephemeral?{}",
+        *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
 pub static DEMO_INSTANCE_NICS_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/network-interfaces?project={}&instance={}",
@@ -414,7 +419,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some(DEMO_IP_POOL_NAME.clone()),
+            pool: Some(DEMO_IP_POOL_NAME.clone().into()),
         }],
         disks: vec![],
         start: true,
@@ -702,13 +707,6 @@ pub static DEMO_SSHKEY_CREATE: Lazy<params::SshKeyCreate> =
 pub static DEMO_SPECIFIC_SSHKEY_URL: Lazy<String> =
     Lazy::new(|| format!("{}/{}", DEMO_SSHKEYS_URL, *DEMO_SSHKEY_NAME));
 
-// System update
-
-pub static DEMO_SYSTEM_UPDATE_PARAMS: Lazy<params::SystemUpdatePath> =
-    Lazy::new(|| params::SystemUpdatePath {
-        version: SemverVersion::new(1, 0, 0),
-    });
-
 // Project Floating IPs
 pub static DEMO_FLOAT_IP_NAME: Lazy<Name> =
     Lazy::new(|| "float-ip".parse().unwrap());
@@ -717,6 +715,19 @@ pub static DEMO_FLOAT_IP_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/floating-ips/{}?project={}",
         *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_NAME
+    )
+});
+
+pub static DEMO_FLOATING_IP_ATTACH_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/floating-ips/{}/attach?{}",
+        *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
+pub static DEMO_FLOATING_IP_DETACH_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/floating-ips/{}/detach?{}",
+        *DEMO_FLOAT_IP_NAME, *DEMO_PROJECT_SELECTOR
     )
 });
 
@@ -730,6 +741,13 @@ pub static DEMO_FLOAT_IP_CREATE: Lazy<params::FloatingIpCreate> =
         pool: None,
     });
 
+pub static DEMO_FLOAT_IP_ATTACH: Lazy<params::FloatingIpAttach> =
+    Lazy::new(|| params::FloatingIpAttach {
+        kind: params::FloatingIpParentKind::Instance,
+        parent: DEMO_FLOAT_IP_NAME.clone().into(),
+    });
+pub static DEMO_EPHEMERAL_IP_ATTACH: Lazy<params::EphemeralIpCreate> =
+    Lazy::new(|| params::EphemeralIpCreate { pool: None });
 // Identity providers
 pub const IDENTITY_PROVIDERS_URL: &'static str =
     "/v1/system/identity-providers?silo=demo-silo";
@@ -1767,6 +1785,18 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![AllowedMethod::Get],
         },
 
+        VerifyEndpoint {
+            url: &DEMO_INSTANCE_EPHEMERAL_IP_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_EPHEMERAL_IP_ATTACH).unwrap()
+                ),
+                AllowedMethod::Delete,
+            ],
+        },
+
         /* IAM */
 
         VerifyEndpoint {
@@ -1882,81 +1912,22 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         /* Updates */
 
         VerifyEndpoint {
-            url: "/v1/system/update/refresh",
+            url: "/v1/system/update/repository?file_name=demo-repo.zip",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::Value::Null
+            allowed_methods: vec![AllowedMethod::Put(
+                // In reality this is the contents of a zip file.
+                serde_json::Value::Null,
             )],
         },
 
         VerifyEndpoint {
-            url: "/v1/system/update/version",
+            url: "/v1/system/update/repository/1.0.0",
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/components",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        // TODO: make system update endpoints work instead of expecting 404
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates/1.0.0",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/updates/1.0.0/components",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/start",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::to_value(&*DEMO_SYSTEM_UPDATE_PARAMS).unwrap()
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/stop",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Post(
-                serde_json::Value::Null
-            )],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/deployments",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::Get],
-        },
-
-        VerifyEndpoint {
-            url: "/v1/system/update/deployments/120bbb6f-660a-440c-8cb7-199be202ddff",
-            visibility: Visibility::Public,
-            unprivileged_access: UnprivilegedAccess::None,
-            allowed_methods: vec![AllowedMethod::GetNonexistent],
+            // The update system is disabled, which causes a 500 error even for
+            // privileged users. That is captured by GetUnimplemented.
+            allowed_methods: vec![AllowedMethod::GetUnimplemented],
         },
 
         /* Metrics */
@@ -2238,6 +2209,28 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOATING_IP_ATTACH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_ATTACH).unwrap(),
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_FLOATING_IP_DETACH_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&()).unwrap(),
+                ),
             ],
         },
     ]

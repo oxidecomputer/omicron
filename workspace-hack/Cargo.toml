@@ -81,7 +81,7 @@ petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.0" }
-proc-macro2 = { version = "1.0.74" }
+proc-macro2 = { version = "1.0.78" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.3" }
@@ -96,13 +96,12 @@ serde_json = { version = "1.0.111", features = ["raw_value", "unbounded_depth"] 
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-snafu = { version = "0.7.5", features = ["futures"] }
 socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.46", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.48", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.27", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.35.1", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
@@ -115,9 +114,10 @@ trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.13" }
 unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
+usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.7.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
-zerocopy = { version = "0.7.31", features = ["derive", "simd"] }
+zerocopy = { version = "0.7.32", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
 zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
@@ -189,7 +189,7 @@ petgraph = { version = "0.6.4", features = ["serde-1"] }
 postgres-types = { version = "0.2.6", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 ppv-lite86 = { version = "0.2.17", default-features = false, features = ["simd", "std"] }
 predicates = { version = "3.1.0" }
-proc-macro2 = { version = "1.0.74" }
+proc-macro2 = { version = "1.0.78" }
 rand = { version = "0.8.5" }
 rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] }
 regex = { version = "1.10.3" }
@@ -204,13 +204,12 @@ serde_json = { version = "1.0.111", features = ["raw_value", "unbounded_depth"] 
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
-snafu = { version = "0.7.5", features = ["futures"] }
 socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.46", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.48", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.27", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.13", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.35.1", features = ["full", "test-util"] }
@@ -224,20 +223,23 @@ trust-dns-proto = { version = "0.22.0" }
 unicode-bidi = { version = "0.3.13" }
 unicode-normalization = { version = "0.1.22" }
 usdt = { version = "0.3.5" }
+usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.7.0", features = ["serde", "v4"] }
 yasna = { version = "0.5.2", features = ["bit-vec", "num-bigint", "std", "time"] }
-zerocopy = { version = "0.7.31", features = ["derive", "simd"] }
+zerocopy = { version = "0.7.32", features = ["derive", "simd"] }
 zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
 zip = { version = "0.6.6", default-features = false, features = ["bzip2", "deflate"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
+dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
 rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
+dof = { version = "0.3.0", default-features = false, features = ["des"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
 rustix = { version = "0.38.30", features = ["fs", "termios"] }
@@ -272,6 +274,7 @@ rustix = { version = "0.38.30", features = ["fs", "termios"] }
 
 [target.x86_64-unknown-illumos.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
+dof = { version = "0.3.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }
@@ -281,6 +284,7 @@ toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", featu
 
 [target.x86_64-unknown-illumos.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
+dof = { version = "0.3.0", default-features = false, features = ["des"] }
 errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0", features = ["unstable"] }

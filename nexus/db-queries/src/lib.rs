@@ -19,7 +19,7 @@ extern crate newtype_derive;
 #[macro_use]
 extern crate diesel;
 
-#[usdt::provider(provider = "nexus__db__queries")]
+#[usdt::provider(provider = "nexus_db_queries")]
 mod probes {
     // Fires before we start a search over a range for a VNI.
     //

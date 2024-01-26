@@ -280,7 +280,7 @@ openssl-sys = "0.9"
 openssl-probe = "0.1.5"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "1d29ef60a18179babfb44f0f7a3c2fe71034a2c1" }
 oso = "0.27"
-owo-colors = "3.5.0"
+owo-colors = "4.0.0"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-client = { path = "clients/oximeter-client" }
 oximeter-db = { path = "oximeter/db/" }
@@ -324,8 +324,8 @@ rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.0.0"
-rustyline = "12.0.0"
-samael = { git = "https://github.com/njaremko/samael", features = ["xmlsec"], branch = "master" }
+rustyline = "13.0.0"
+samael = { version = "0.0.14", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.21", features = ["std", "serde"] }
@@ -349,7 +349,7 @@ sled-hardware = { path = "sled-hardware" }
 sled-storage = { path = "sled-storage" }
 slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.8"
-slog-dtrace = "0.2"
+slog-dtrace = "0.3"
 slog-envlogger = "2.2"
 slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
 slog-term = "2.9"
@@ -400,7 +400,7 @@ tui-tree-widget = "0.16.0"
 unicode-width = "0.1.11"
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
-usdt = "0.3"
+usdt = "0.5.0"
 uuid = { version = "1.7.0", features = ["serde", "v4"] }
 walkdir = "2.4"
 wicket = { path = "wicket" }

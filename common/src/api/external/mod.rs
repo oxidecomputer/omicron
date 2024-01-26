@@ -13,6 +13,8 @@ use dropshot::HttpError;
 pub use error::*;
 
 pub use crate::api::internal::shared::SwitchLocation;
+use crate::update::ArtifactHash;
+use crate::update::ArtifactId;
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -760,13 +762,9 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     RoleBuiltin,
-    UpdateArtifact,
+    TufRepo,
+    TufArtifact,
     SwitchPort,
-    SystemUpdate,
-    ComponentUpdate,
-    SystemUpdateComponentUpdate,
-    UpdateDeployment,
-    UpdateableComponent,
     UserBuiltin,
     Zpool,
     Vmm,
@@ -2623,6 +2621,101 @@ pub struct BgpImportedRouteIpv4 {
 
     /// Switch the route is imported into.
     pub switch: SwitchLocation,
+}
+
+/// A description of an uploaded TUF repository.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoDescription {
+    // Information about the repository.
+    pub repo: TufRepoMeta,
+
+    // Information about the artifacts present in the repository.
+    pub artifacts: Vec<TufArtifactMeta>,
+}
+
+impl TufRepoDescription {
+    /// Sorts the artifacts so that descriptions can be compared.
+    pub fn sort_artifacts(&mut self) {
+        self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+}
+
+/// Metadata about a TUF repository.
+///
+/// Found within a [`TufRepoDescription`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoMeta {
+    /// The hash of the repository.
+    ///
+    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
+    /// individual artifacts within the repository. However, we use it here for
+    /// convenience.
+    pub hash: ArtifactHash,
+
+    /// The version of the targets role.
+    pub targets_role_version: u64,
+
+    /// The time until which the repo is valid.
+    pub valid_until: DateTime<Utc>,
+
+    /// The system version in artifacts.json.
+    pub system_version: SemverVersion,
+
+    /// The file name of the repository.
+    ///
+    /// This is purely used for debugging and may not always be correct (e.g.
+    /// with wicket, we read the file contents from stdin so we don't know the
+    /// correct file name).
+    pub file_name: String,
+}
+
+/// Metadata about an individual TUF artifact.
+///
+/// Found within a [`TufRepoDescription`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufArtifactMeta {
+    /// The artifact ID.
+    pub id: ArtifactId,
+
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
+
+    /// The size of the artifact in bytes.
+    pub size: u64,
+}
+
+/// Data about a successful TUF repo import into Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoInsertResponse {
+    /// The repository as present in the database.
+    pub recorded: TufRepoDescription,
+
+    /// Whether this repository already existed or is new.
+    pub status: TufRepoInsertStatus,
+}
+
+/// Status of a TUF repo import.
+///
+/// Part of [`TufRepoInsertResponse`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TufRepoInsertStatus {
+    /// The repository already existed in the database.
+    AlreadyExists,
+
+    /// The repository did not exist, and was inserted into the database.
+    Inserted,
+}
+
+/// Data about a successful TUF repo get from Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoGetResponse {
+    /// The description of the repository.
+    pub description: TufRepoDescription,
 }
 
 #[cfg(test)]
