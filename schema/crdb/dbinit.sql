@@ -3063,9 +3063,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- allowed to be NULL: the initial blueprint has no parent. Additionally,
     -- it may be non-NULL but no longer reference a row in this table: once a
     -- child blueprint has been created from a parent, it's possible for the
-    -- parent to be deleted. An open question is whether we should NULL out this
-    -- field on such a deletion; currently we do not, so we can always see that
-    -- there had been a particular parent even if it's now gone.
+    -- parent to be deleted. We do not NULL out this field on such a deletion,
+    -- so we can always see that there had been a particular parent even if it's
+    -- now gone.
     parent_blueprint_id UUID,
 
     -- These fields are for debugging only.

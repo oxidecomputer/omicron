@@ -670,9 +670,6 @@ impl DataStore {
         // `target` between the above query and the below query. In such a case,
         // this query will fail with an "unknown blueprint ID" error. This
         // should be rare in practice.
-        //
-        // TODO-correctness Should we loop here if we get a "blueprint not
-        // found" error to catch this race?
         let authz_blueprint = authz_blueprint_from_id(target.target_id);
         let blueprint = self.blueprint_read(opctx, &authz_blueprint).await?;
 
