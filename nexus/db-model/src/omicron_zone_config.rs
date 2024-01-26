@@ -242,6 +242,10 @@ impl OmicronZone {
                 ensure!(expected_id == nic_row.id, "caller provided wrong NIC");
                 Ok(nic_row.into_network_interface_for_zone(self.id)?)
             }
+            // We don't expect and don't have a NIC. This is reasonable, so we
+            // don't `bail!` like we do in the next two cases, but we also
+            // _don't have a NIC_. Put an error into `nic`, and then if we land
+            // in a zone below that expects one, we'll fail then.
             (None, None) => Err(anyhow!(
                 "expected zone to have an associated NIC, but it doesn't"
             )),
