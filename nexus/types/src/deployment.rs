@@ -217,7 +217,7 @@ pub struct BlueprintTarget {
     /// This should generally be left enabled.
     pub enabled: bool,
     /// when this blueprint was made the target
-    pub time_set: chrono::DateTime<chrono::Utc>,
+    pub time_made_target: chrono::DateTime<chrono::Utc>,
 }
 
 /// Specifies what blueprint, if any, the system should be working toward

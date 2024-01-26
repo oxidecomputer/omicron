@@ -68,7 +68,7 @@ impl BpTarget {
             version,
             blueprint_id: target.target_id,
             enabled: target.enabled,
-            time_made_target: target.time_set,
+            time_made_target: target.time_made_target,
         }
     }
 }
@@ -78,7 +78,7 @@ impl From<BpTarget> for nexus_types::deployment::BlueprintTarget {
         Self {
             target_id: value.blueprint_id,
             enabled: value.enabled,
-            time_set: value.time_made_target,
+            time_made_target: value.time_made_target,
         }
     }
 }

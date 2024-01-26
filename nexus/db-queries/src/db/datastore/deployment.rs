@@ -634,7 +634,7 @@ impl DataStore {
         let query = InsertTargetQuery {
             target_id: target.target_id,
             enabled: target.enabled,
-            time_made_target: target.time_set,
+            time_made_target: target.time_made_target,
         };
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1286,7 +1286,7 @@ mod tests {
         let bp1_target = BlueprintTarget {
             target_id: blueprint1.id,
             enabled: true,
-            time_set: now_db_precision(),
+            time_made_target: now_db_precision(),
         };
         datastore
             .blueprint_target_set_current(&opctx, bp1_target)
@@ -1377,7 +1377,7 @@ mod tests {
         let bp2_target = BlueprintTarget {
             target_id: blueprint2.id,
             enabled: true,
-            time_set: now_db_precision(),
+            time_made_target: now_db_precision(),
         };
         datastore
             .blueprint_target_set_current(&opctx, bp2_target)
@@ -1429,7 +1429,7 @@ mod tests {
                 BlueprintTarget {
                     target_id: nonexistent_blueprint_id,
                     enabled: true,
-                    time_set: now_db_precision(),
+                    time_made_target: now_db_precision(),
                 },
             )
             .await
@@ -1476,17 +1476,17 @@ mod tests {
         let bp1_target = BlueprintTarget {
             target_id: blueprint1.id,
             enabled: true,
-            time_set: now_db_precision(),
+            time_made_target: now_db_precision(),
         };
         let bp2_target = BlueprintTarget {
             target_id: blueprint2.id,
             enabled: true,
-            time_set: now_db_precision(),
+            time_made_target: now_db_precision(),
         };
         let bp3_target = BlueprintTarget {
             target_id: blueprint3.id,
             enabled: true,
-            time_set: now_db_precision(),
+            time_made_target: now_db_precision(),
         };
 
         // Attempting to make blueprint2 the current target should fail because
@@ -1560,7 +1560,7 @@ mod tests {
         let bp4_target = BlueprintTarget {
             target_id: blueprint4.id,
             enabled: false,
-            time_set: now_db_precision(),
+            time_made_target: now_db_precision(),
         };
         datastore
             .blueprint_target_set_current(&opctx, bp4_target)

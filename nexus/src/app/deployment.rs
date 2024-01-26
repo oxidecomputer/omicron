@@ -101,7 +101,7 @@ impl super::Nexus {
         let new_target = BlueprintTarget {
             target_id: params.target_id,
             enabled: params.enabled,
-            time_set: chrono::Utc::now(),
+            time_made_target: chrono::Utc::now(),
         };
 
         self.db_datastore
