@@ -51,14 +51,10 @@ impl InventoryCollector {
 }
 
 impl BackgroundTask for InventoryCollector {
-    fn activate<'a, 'b, 'c>(
+    fn activate<'a>(
         &'a mut self,
-        opctx: &'b OpContext,
-    ) -> BoxFuture<'c, serde_json::Value>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+        opctx: &'a OpContext,
+    ) -> BoxFuture<'a, serde_json::Value> {
         async {
             match inventory_activate(
                 opctx,

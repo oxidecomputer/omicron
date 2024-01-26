@@ -5,6 +5,7 @@ use crate::{schema::ipv4_nat_entry, Ipv4Net, Ipv6Net, SqlU16, Vni};
 use chrono::{DateTime, Utc};
 use omicron_common::api::external;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -21,7 +22,7 @@ pub struct Ipv4NatValues {
 }
 
 /// Database representation of an Ipv4 NAT Entry.
-#[derive(Queryable, Debug, Clone, Selectable)]
+#[derive(Queryable, Debug, Clone, Selectable, Serialize, Deserialize)]
 #[diesel(table_name = ipv4_nat_entry)]
 pub struct Ipv4NatEntry {
     pub id: Uuid,

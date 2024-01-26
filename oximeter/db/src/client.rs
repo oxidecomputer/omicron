@@ -50,7 +50,7 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-#[usdt::provider(provider = "clickhouse__client")]
+#[usdt::provider(provider = "clickhouse_client")]
 mod probes {
     fn query__start(_: &usdt::UniqueId, sql: &str) {}
     fn query__done(_: &usdt::UniqueId) {}

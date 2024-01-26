@@ -9,15 +9,6 @@ pub struct Fade {}
 
 impl Widget for Fade {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        for x in area.left()..area.right() {
-            for y in area.top()..area.bottom() {
-                buf.set_string(
-                    x,
-                    y,
-                    buf.get(x, y).symbol.clone(),
-                    style::faded_background(),
-                );
-            }
-        }
+        buf.set_style(area, style::faded_background());
     }
 }

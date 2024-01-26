@@ -27,12 +27,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         nat_entry: Ipv4NatValues,
-    ) -> CreateResult<()> {
+    ) -> CreateResult<Ipv4NatEntry> {
         use db::schema::ipv4_nat_entry::dsl;
         use diesel::sql_types;
 
         // Look up any NAT entries that already have the exact parameters
         // we're trying to INSERT.
+        // We want to return any existing entry, but not to mask the UniqueViolation
+        // when trying to use an existing IP + port range with a different target.
         let matching_entry_subquery = dsl::ipv4_nat_entry
             .filter(dsl::external_address.eq(nat_entry.external_address))
             .filter(dsl::first_port.eq(nat_entry.first_port))
@@ -62,7 +64,7 @@ impl DataStore {
         ))
         .filter(diesel::dsl::not(diesel::dsl::exists(matching_entry_subquery)));
 
-        diesel::insert_into(dsl::ipv4_nat_entry)
+        let out = diesel::insert_into(dsl::ipv4_nat_entry)
             .values(new_entry_subquery)
             .into_columns((
                 dsl::external_address,
@@ -72,11 +74,24 @@ impl DataStore {
                 dsl::vni,
                 dsl::mac,
             ))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .returning(Ipv4NatEntry::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await;
 
-        Ok(())
+        match out {
+            Ok(o) => Ok(o),
+            Err(diesel::result::Error::NotFound) => {
+                // Idempotent ensure. Annoyingly, we can't easily extract
+                // the existing row as part of the insert query:
+                // - (SELECT ..) UNION (INSERT INTO .. RETURNING ..) isn't
+                //   allowed by crdb.
+                // - Can't ON CONFLICT with a partial constraint, so we can't
+                //   do a no-op write and return the row that way either.
+                // So, we do another lookup.
+                self.ipv4_nat_find_by_values(opctx, nat_entry).await
+            }
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+        }
     }
 
     /// Method for synchronizing service zone nat, called by `ServiceZoneNatTracker`

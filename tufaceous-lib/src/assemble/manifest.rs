@@ -343,9 +343,65 @@ impl DeserializedManifest {
             .context("error deserializing manifest")
     }
 
+    pub fn to_toml(&self) -> Result<String> {
+        toml::to_string(self).context("error serializing manifest to TOML")
+    }
+
+    /// For fake manifests, applies a set of changes to them.
+    ///
+    /// Intended for testing.
+    pub fn apply_tweaks(&mut self, tweaks: &[ManifestTweak]) -> Result<()> {
+        for tweak in tweaks {
+            match tweak {
+                ManifestTweak::SystemVersion(version) => {
+                    self.system_version = version.clone();
+                }
+                ManifestTweak::ArtifactVersion { kind, version } => {
+                    let entries =
+                        self.artifacts.get_mut(kind).with_context(|| {
+                            format!(
+                                "manifest does not have artifact kind \
+                                 {kind}",
+                            )
+                        })?;
+                    for entry in entries {
+                        entry.version = version.clone();
+                    }
+                }
+                ManifestTweak::ArtifactContents { kind, size_delta } => {
+                    let entries =
+                        self.artifacts.get_mut(kind).with_context(|| {
+                            format!(
+                                "manifest does not have artifact kind \
+                                 {kind}",
+                            )
+                        })?;
+
+                    for entry in entries {
+                        entry.source.apply_size_delta(*size_delta)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns the fake manifest.
     pub fn fake() -> Self {
         Self::from_str(FAKE_MANIFEST_TOML).unwrap()
+    }
+
+    /// Returns a version of the fake manifest with a set of changes applied.
+    ///
+    /// This is primarily intended for testing.
+    pub fn tweaked_fake(tweaks: &[ManifestTweak]) -> Self {
+        let mut manifest = Self::fake();
+        manifest
+            .apply_tweaks(tweaks)
+            .expect("builtin fake manifest should accept all tweaks");
+
+        manifest
     }
 }
 
@@ -378,6 +434,39 @@ pub enum DeserializedArtifactSource {
     CompositeControlPlane {
         zones: Vec<DeserializedControlPlaneZoneSource>,
     },
+}
+
+impl DeserializedArtifactSource {
+    fn apply_size_delta(&mut self, size_delta: i64) -> Result<()> {
+        match self {
+            DeserializedArtifactSource::File { .. } => {
+                bail!("cannot apply size delta to `file` source")
+            }
+            DeserializedArtifactSource::Fake { size } => {
+                *size = (*size).saturating_add_signed(size_delta);
+                Ok(())
+            }
+            DeserializedArtifactSource::CompositeHost { phase_1, phase_2 } => {
+                phase_1.apply_size_delta(size_delta)?;
+                phase_2.apply_size_delta(size_delta)?;
+                Ok(())
+            }
+            DeserializedArtifactSource::CompositeRot {
+                archive_a,
+                archive_b,
+            } => {
+                archive_a.apply_size_delta(size_delta)?;
+                archive_b.apply_size_delta(size_delta)?;
+                Ok(())
+            }
+            DeserializedArtifactSource::CompositeControlPlane { zones } => {
+                for zone in zones {
+                    zone.apply_size_delta(size_delta)?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -415,6 +504,18 @@ impl DeserializedFileArtifactSource {
         };
         let entry = CompositeEntry { data: &data, mtime_source };
         f(entry)
+    }
+
+    fn apply_size_delta(&mut self, size_delta: i64) -> Result<()> {
+        match self {
+            DeserializedFileArtifactSource::File { .. } => {
+                bail!("cannot apply size delta to `file` source")
+            }
+            DeserializedFileArtifactSource::Fake { size } => {
+                *size = (*size).saturating_add_signed(size_delta);
+                Ok(())
+            }
+        }
     }
 }
 
@@ -459,6 +560,30 @@ impl DeserializedControlPlaneZoneSource {
         let entry = CompositeEntry { data: &data, mtime_source };
         f(name, entry)
     }
+
+    fn apply_size_delta(&mut self, size_delta: i64) -> Result<()> {
+        match self {
+            DeserializedControlPlaneZoneSource::File { .. } => {
+                bail!("cannot apply size delta to `file` source")
+            }
+            DeserializedControlPlaneZoneSource::Fake { size, .. } => {
+                (*size) = (*size).saturating_add_signed(size_delta);
+                Ok(())
+            }
+        }
+    }
+}
+/// A change to apply to a manifest.
+#[derive(Clone, Debug)]
+pub enum ManifestTweak {
+    /// Update the system version.
+    SystemVersion(SemverVersion),
+
+    /// Update the versions for this artifact.
+    ArtifactVersion { kind: KnownArtifactKind, version: SemverVersion },
+
+    /// Update the contents of this artifact (only support changing the size).
+    ArtifactContents { kind: KnownArtifactKind, size_delta: i64 },
 }
 
 fn deserialize_byte_size<'de, D>(deserializer: D) -> Result<u64, D::Error>
