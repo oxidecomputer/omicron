@@ -16,6 +16,7 @@ pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
+pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -184,13 +185,39 @@ impl Blueprint {
     }
 }
 
-/// Describes which blueprint the system is currently trying to make real
-// This is analogous to the db model type until we have that.
-#[derive(Debug, Clone)]
+/// Describe high-level metadata about a blueprint
+// These fields are a subset of [`Blueprint`], and include only the data we can
+// quickly fetch from the main blueprint table (e.g., when listing all
+// blueprints).
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Serialize)]
+pub struct BlueprintMetadata {
+    /// unique identifier for this blueprint
+    pub id: Uuid,
+
+    /// which blueprint this blueprint is based on
+    pub parent_blueprint_id: Option<Uuid>,
+
+    /// when this blueprint was generated (for debugging)
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    /// identity of the component that generated the blueprint (for debugging)
+    /// This would generally be the Uuid of a Nexus instance.
+    pub creator: String,
+    /// human-readable string describing why this blueprint was created
+    /// (for debugging)
+    pub comment: String,
+}
+
+/// Describes what blueprint, if any, the system is currently working toward
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct BlueprintTarget {
-    pub target_id: Option<Uuid>,
+    /// id of the blueprint that the system is trying to make real
+    pub target_id: Uuid,
+    /// policy: should the system actively work towards this blueprint
+    ///
+    /// This should generally be left enabled.
     pub enabled: bool,
-    pub time_set: chrono::DateTime<chrono::Utc>,
+    /// when this blueprint was made the target
+    pub time_made_target: chrono::DateTime<chrono::Utc>,
 }
 
 /// Specifies what blueprint, if any, the system should be working toward

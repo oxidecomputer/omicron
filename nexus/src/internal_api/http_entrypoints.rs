@@ -26,6 +26,8 @@ use dropshot::TypedBody;
 use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
@@ -45,7 +47,6 @@ use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -620,7 +621,7 @@ async fn ipv4_nat_changeset(
 async fn blueprint_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Blueprint>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<BlueprintMetadata>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -631,7 +632,7 @@ async fn blueprint_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             blueprints,
-            &|_, blueprint: &Blueprint| blueprint.id,
+            &|_, blueprint: &BlueprintMetadata| blueprint.id,
         )?))
     };
 
@@ -680,35 +681,6 @@ async fn blueprint_delete(
 
 // Managing the current target blueprint
 
-/// Describes what blueprint, if any, the system is currently working toward
-#[derive(Debug, Serialize, JsonSchema)]
-pub struct BlueprintTarget {
-    /// id of the blueprint that the system is trying to make real
-    pub target_id: Uuid,
-    /// policy: should the system actively work towards this blueprint
-    ///
-    /// This should generally be left enabled.
-    pub enabled: bool,
-    /// when this blueprint was made the target
-    pub time_set: chrono::DateTime<chrono::Utc>,
-}
-
-impl TryFrom<nexus_types::deployment::BlueprintTarget> for BlueprintTarget {
-    type Error = Error;
-
-    fn try_from(
-        value: nexus_types::deployment::BlueprintTarget,
-    ) -> Result<Self, Error> {
-        Ok(BlueprintTarget {
-            target_id: value.target_id.ok_or_else(|| {
-                Error::conflict("no target blueprint has been configured")
-            })?,
-            enabled: value.enabled,
-            time_set: value.time_set,
-        })
-    }
-}
-
 /// Fetches the current target blueprint, if any
 #[endpoint {
     method = GET,
@@ -721,8 +693,11 @@ async fn blueprint_target_view(
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
-        let target = nexus.blueprint_target_view(&opctx).await?;
-        Ok(HttpResponseOk(BlueprintTarget::try_from(target)?))
+        let target =
+            nexus.blueprint_target_view(&opctx).await?.ok_or_else(|| {
+                Error::conflict("no target blueprint has been configured")
+            })?;
+        Ok(HttpResponseOk(target))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -741,11 +716,8 @@ async fn blueprint_target_set(
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
         let target = target.into_inner();
-        let result = nexus.blueprint_target_set(&opctx, target).await?;
-        Ok(HttpResponseOk(
-            BlueprintTarget::try_from(result)
-                .map_err(|e| Error::conflict(e.to_string()))?,
-        ))
+        let target = nexus.blueprint_target_set(&opctx, target).await?;
+        Ok(HttpResponseOk(target))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

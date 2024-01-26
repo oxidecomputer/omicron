@@ -866,7 +866,7 @@ async fn cmd_nexus_blueprints_target_show(
         .await
         .context("fetching target blueprint")?;
     println!("target blueprint: {}", target.target_id);
-    println!("set at:           {}", target.time_set);
+    println!("made target at:   {}", target.time_made_target);
     println!("enabled:          {}", target.enabled);
     Ok(())
 }
