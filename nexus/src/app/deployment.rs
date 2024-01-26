@@ -103,9 +103,14 @@ impl super::Nexus {
             enabled: params.enabled,
             time_set: chrono::Utc::now(),
         };
+
         self.db_datastore
             .blueprint_target_set_current(opctx, new_target)
             .await?;
+
+        // When we add a background task executing the target blueprint,
+        // this is the point where we'd signal it to update its target.
+
         Ok(new_target)
     }
 
