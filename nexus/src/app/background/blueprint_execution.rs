@@ -24,19 +24,19 @@ use uuid::Uuid;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
 /// the state of the system based on the `Blueprint`.
-pub struct PlanExecutor {
+pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<Arc<Blueprint>>>,
 }
 
-impl PlanExecutor {
+impl BlueprintExecutor {
     // Temporary until we wire up the background task
     #[allow(unused)]
     pub fn new(
         datastore: Arc<DataStore>,
         rx_blueprint: watch::Receiver<Option<Arc<Blueprint>>>,
-    ) -> PlanExecutor {
-        PlanExecutor { datastore, rx_blueprint }
+    ) -> BlueprintExecutor {
+        BlueprintExecutor { datastore, rx_blueprint }
     }
 
     // This is a modified copy of the functionality from `nexus/src/app/sled.rs`.
@@ -92,7 +92,7 @@ impl PlanExecutor {
                 let client = match self.sled_client(&opctx, &sled_id).await {
                     Ok(client) => client,
                     Err(err) => {
-                        warn!(log, "{}", err);
+                        warn!(log, "{err:#}");
                         return Some(err);
                     }
                 };
@@ -105,7 +105,7 @@ impl PlanExecutor {
 
                 match result {
                     Err(error) => {
-                        warn!(log, "{}", error);
+                        warn!(log, "{error:#}");
                         Some(error)
                     }
                     Ok(_) => {
@@ -130,7 +130,7 @@ impl PlanExecutor {
     }
 }
 
-impl BackgroundTask for PlanExecutor {
+impl BackgroundTask for BlueprintExecutor {
     fn activate<'a>(
         &'a mut self,
         opctx: &'a OpContext,
@@ -138,7 +138,7 @@ impl BackgroundTask for PlanExecutor {
         async {
             // Get the latest blueprint, cloning to prevent holding a read lock
             // on the watch.
-            let blueprint = self.rx_blueprint.borrow().clone();
+            let blueprint = self.rx_blueprint.borrow_and_update().clone();
 
             let Some(blueprint) = blueprint else {
                 warn!(&opctx.log,
@@ -210,7 +210,7 @@ mod test {
         );
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
-        let mut task = PlanExecutor::new(datastore.clone(), blueprint_rx);
+        let mut task = BlueprintExecutor::new(datastore.clone(), blueprint_rx);
 
         // With no blueprint we should fail with an appropriate message.
         let value = task.activate(&opctx).await;
@@ -267,8 +267,7 @@ mod test {
 
         // Zones are updated in a particular order, but each request contains
         // the full set of zones that must be running.
-        // See https://github.com/oxidecomputer/omicron/blob/main/sled-agent/src/rack_setup/service.rs#L976-L998
-        // for more details.
+        // See `rack_setup::service::ServiceInner::run` for more details.
         let mut zones = OmicronZonesConfig {
             generation,
             zones: vec![OmicronZoneConfig {

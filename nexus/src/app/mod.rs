@@ -357,9 +357,6 @@ impl Nexus {
             Arc::clone(&db_datastore),
         );
 
-        let blueprints =
-            Arc::new(std::sync::Mutex::new(deployment::Blueprints::new()));
-
         let background_tasks = background::BackgroundTasks::start(
             &background_ctx,
             Arc::clone(&db_datastore),
@@ -367,7 +364,6 @@ impl Nexus {
             &dpd_clients,
             config.deployment.id,
             resolver.clone(),
-            Arc::clone(&blueprints),
         );
 
         let external_resolver = {
