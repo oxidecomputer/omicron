@@ -334,6 +334,8 @@ pub struct BackgroundTaskConfig {
     pub inventory: InventoryConfig,
     /// configuration for phantom disks task
     pub phantom_disks: PhantomDiskConfig,
+    /// configuration for blueprint related tasks
+    pub blueprints: BlueprintTasksConfig,
 }
 
 #[serde_as]
@@ -406,6 +408,20 @@ pub struct PhantomDiskConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BlueprintTasksConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads the latest target blueprint from the database
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_load: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// executes the latest target blueprint
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_execute: Duration,
 }
 
 /// Configuration for a nexus server
@@ -508,12 +524,12 @@ impl std::fmt::Display for SchemeName {
 mod test {
     use super::{
         default_techport_external_server_port, AuthnConfig,
-        BackgroundTaskConfig, Config, ConfigDropshotWithTls, ConsoleConfig,
-        Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
-        ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
-        LoadErrorKind, MgdConfig, NatCleanupConfig, PackageConfig,
-        PhantomDiskConfig, SchemeName, TimeseriesDbConfig, Tunables,
-        UpdatesConfig,
+        BackgroundTaskConfig, BlueprintTasksConfig, Config,
+        ConfigDropshotWithTls, ConsoleConfig, Database, DeploymentConfig,
+        DnsTasksConfig, DpdConfig, ExternalEndpointsConfig, InternalDns,
+        InventoryConfig, LoadError, LoadErrorKind, MgdConfig, NatCleanupConfig,
+        PackageConfig, PhantomDiskConfig, SchemeName, TimeseriesDbConfig,
+        Tunables, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
@@ -665,6 +681,8 @@ mod test {
             inventory.nkeep = 11
             inventory.disable = false
             phantom_disks.period_secs = 30
+            blueprints.period_secs_load = 10
+            blueprints.period_secs_execute = 60
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -769,6 +787,10 @@ mod test {
                         phantom_disks: PhantomDiskConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        blueprints: BlueprintTasksConfig {
+                            period_secs_load: Duration::from_secs(10),
+                            period_secs_execute: Duration::from_secs(60)
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -827,6 +849,8 @@ mod test {
             inventory.nkeep = 3
             inventory.disable = false
             phantom_disks.period_secs = 30
+            blueprints.period_secs_load = 10
+            blueprints.period_secs_execute = 60
             [default_region_allocation_strategy]
             type = "random"
             "##,

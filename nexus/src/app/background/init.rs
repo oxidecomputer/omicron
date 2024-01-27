@@ -179,8 +179,7 @@ impl BackgroundTasks {
         let task_blueprint_loader = driver.register(
             String::from("blueprint_loader"),
             String::from("Loads the current target blueprint from the DB"),
-            // TODO: Add to `BackgroundTaskConfig`?
-            std::time::Duration::from_secs(5),
+            config.blueprints.period_secs_load,
             Box::new(blueprint_loader),
             opctx.child(BTreeMap::new()),
             vec![],
@@ -194,8 +193,7 @@ impl BackgroundTasks {
         let task_blueprint_executor = driver.register(
             String::from("blueprint_executor"),
             String::from("Executes the target blueprint"),
-            // TODO: Add to `BackgroundTaskConfig`?
-            std::time::Duration::from_secs(60),
+            config.blueprints.period_secs_execute,
             Box::new(blueprint_executor),
             opctx.child(BTreeMap::new()),
             vec![Box::new(rx_blueprint)],
