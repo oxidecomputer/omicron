@@ -5,6 +5,7 @@
 #: target = "lab-2.0-opte-0.28"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log*",
+#:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_ntp_*/root/var/log/chrony/*.log*",
