@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::external_api::params;
-use mg_admin_client::types::{AddBfdPeerRequest, PeerState};
+use mg_admin_client::types::{AddBfdPeerRequest, PeerState, SessionMode};
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::shared::{BfdState, BfdStatus};
 use omicron_common::api::{
@@ -62,6 +62,10 @@ impl super::Nexus {
                 listen: session.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
                 peer: session.remote,
                 required_rx: session.required_rx,
+                mode: match session.mode {
+                    params::BfdMode::SingleHop => SessionMode::SingleHop,
+                    params::BfdMode::MultiHop => SessionMode::MultiHop,
+                },
             })
             .await
             .map_err(|e| {

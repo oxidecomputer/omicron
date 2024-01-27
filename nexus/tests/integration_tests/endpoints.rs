@@ -594,6 +594,7 @@ pub static DEMO_BFD_ENABLE: Lazy<params::BfdSessionEnable> =
         detection_threshold: 3,
         required_rx: 1000000,
         switch: "switch0".parse().unwrap(),
+        mode: params::BfdMode::MultiHop,
     });
 
 pub static DEMO_BFD_DISABLE: Lazy<params::BfdSessionDisable> =

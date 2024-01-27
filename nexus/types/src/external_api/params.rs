@@ -1796,6 +1796,13 @@ pub struct BgpStatusSelector {
     pub name_or_id: NameOrId,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
+}
+
 /// Information about a bidirectional forwarding detection (BFD) session.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BfdSessionEnable {
@@ -1817,6 +1824,9 @@ pub struct BfdSessionEnable {
 
     /// The switch to enable this session on. Must be `switch0` or `switch1`.
     pub switch: Name,
+
+    /// Select either single-hop (RFC 5881) or multi-hop (RFC 5883)
+    pub mode: BfdMode,
 }
 
 /// Information needed to disable a BFD session

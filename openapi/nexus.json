@@ -8656,6 +8656,13 @@
           "serial"
         ]
       },
+      "BfdMode": {
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
       "BfdSessionDisable": {
         "description": "Information needed to disable a BFD session",
         "type": "object",
@@ -8695,6 +8702,14 @@
             "type": "string",
             "format": "ip"
           },
+          "mode": {
+            "description": "Select either single-hop (RFC 5881) or multi-hop (RFC 5883)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BfdMode"
+              }
+            ]
+          },
           "remote": {
             "description": "Address of the remote peer to establish a BFD session with.",
             "type": "string",
@@ -8717,6 +8732,7 @@
         },
         "required": [
           "detection_threshold",
+          "mode",
           "remote",
           "required_rx",
           "switch"
