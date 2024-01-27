@@ -116,8 +116,15 @@ setup_hint = """
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
 
-[package.oximeter-collector]
+[package.oximeter]
 service_name = "oximeter"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz" ]
+output.type = "zone"
+
+[package.oximeter-collector]
+service_name = "oximeter-collector"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
@@ -127,6 +134,7 @@ source.paths = [
     { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
 ]
 output.type = "zone"
+output.intermediate_only = true
 
 [package.clickhouse]
 service_name = "clickhouse"
@@ -438,10 +446,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "2fd39b75df696961e5ea190c7d74dd91f4849cd3"
+source.commit = "d12bdf89b9058065789cd00c8704e4ce0a352342"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "38851c79c85d53e997db748520fb27c82299ce7e58a550e35646a548498f1271"
+source.sha256 = "442ef3a927ce2f2a401b631daa3c67a708fbbed83a839552a6fbcadd68120783"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -454,10 +462,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "2fd39b75df696961e5ea190c7d74dd91f4849cd3"
+source.commit = "d12bdf89b9058065789cd00c8704e4ce0a352342"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "8cd94e9a6f6175081ce78f0281085a08a5306cde453d8e21deb28050945b1d88"
+source.sha256 = "81a766a88fab3fe7cb7fb6698ec02d05224320500b7a4421bbea9f4123127fba"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -469,10 +477,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "2fd39b75df696961e5ea190c7d74dd91f4849cd3"
+source.commit = "d12bdf89b9058065789cd00c8704e4ce0a352342"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "802636775fa77dc6eec193e65fde87e403f6a11531745d47ef5e7ff13b242890"
+source.sha256 = "bc887e08e3d052d8440983a2d6186cd1d92a52345504092f64f4de2e5335a75d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -638,3 +646,11 @@ source.rust.binary_names = ["omdb"]
 source.rust.release = true
 output.type = "zone"
 output.intermediate_only = true
+
+[package.oxlog]
+service_name = "oxlog"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["oxlog"]
+source.rust.release = true
+output.type = "tarball"

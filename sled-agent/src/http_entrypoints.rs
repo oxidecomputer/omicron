@@ -9,7 +9,7 @@ use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
     CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
-    InstancePutMigrationIdsBody, InstancePutStateBody,
+    InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
     InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
     OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
     ZoneBundleId, ZoneBundleMetadata, Zpool,
@@ -53,6 +53,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_put_external_ip)?;
+        api.register(instance_delete_external_ip)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
         api.register(omicron_zones_get)?;
@@ -465,6 +467,38 @@ async fn instance_put_migration_ids(
         )
         .await?,
     ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_put_external_ip(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_put_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_delete_external_ip(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_delete_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 /// Path parameters for Disk requests (sled agent API)

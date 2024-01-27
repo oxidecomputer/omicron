@@ -97,3 +97,13 @@ if [[ "$RC" -ne 0 ]]; then
     echo "The \`opteadm\` administration tool is not on your path."
     echo "You may add \"/opt/oxide/opte/bin\" to your path to access it."
 fi
+
+source $OMICRON_TOP/tools/opte_version_override
+
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+    set +x
+    curl -fOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
+    pfexec rem_drv xde || true
+    pfexec mv xde /kernel/drv/amd64/xde
+    pfexec add_drv xde || true
+fi

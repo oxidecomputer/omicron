@@ -7,6 +7,7 @@
 use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
+use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use headers::authorization::Credentials;
@@ -142,6 +143,35 @@ impl<'a> RequestBuilder<'a> {
         match new_body {
             Some(Err(error)) => self.error = Some(error),
             Some(Ok(new_body)) => self.body = hyper::Body::from(new_body),
+            None => self.body = hyper::Body::empty(),
+        };
+        self
+    }
+
+    /// Set the outgoing request body to the contents of a file.
+    ///
+    /// A handle to the file will be kept open until the request is completed.
+    ///
+    /// If `path` is `None`, the request body will be empty.
+    pub fn body_file(mut self, path: Option<&Utf8Path>) -> Self {
+        match path {
+            Some(path) => {
+                // Turn the file into a stream. (Opening the file with
+                // std::fs::File::open means that this method doesn't have to
+                // be async.)
+                let file = std::fs::File::open(path).with_context(|| {
+                    format!("failed to open request body file at {path}")
+                });
+                match file {
+                    Ok(file) => {
+                        let stream = tokio_util::io::ReaderStream::new(
+                            tokio::fs::File::from_std(file),
+                        );
+                        self.body = hyper::Body::wrap_stream(stream);
+                    }
+                    Err(error) => self.error = Some(error),
+                }
+            }
             None => self.body = hyper::Body::empty(),
         };
         self

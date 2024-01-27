@@ -23,8 +23,11 @@ SELECT
   -- AND NOT EXISTS here causes is_default to be false in row 1 if there is a
   -- conflicting silo default pool. row 2 is inserted in up5.
   p.is_default AND NOT EXISTS (
-    SELECT 1 FROM omicron.public.ip_pool 
-    WHERE silo_id = s.id AND is_default
+    SELECT 1 
+    FROM omicron.public.ip_pool p0
+    WHERE p0.silo_id = s.id 
+      AND p0.is_default
+      AND p0.time_deleted IS NULL
   )
 FROM omicron.public.ip_pool AS p
 -- cross join means we are looking at the cartesian product of all fleet-scoped

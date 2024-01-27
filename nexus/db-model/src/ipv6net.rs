@@ -21,6 +21,7 @@ use crate::RequestAddressError;
     Clone,
     Copy,
     Debug,
+    Eq,
     PartialEq,
     AsExpression,
     FromSqlRow,

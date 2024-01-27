@@ -37,7 +37,7 @@ rustc --version
 # trampoline global zone images.
 #
 COMMIT=$(git rev-parse HEAD)
-VERSION="5.0.0-0.ci+git${COMMIT:0:11}"
+VERSION="6.0.0-0.ci+git${COMMIT:0:11}"
 echo "$VERSION" >/work/version.txt
 
 ptime -m ./tools/install_builder_prerequisites.sh -yp
@@ -91,7 +91,7 @@ ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host target create -i standard -m gimlet -s asic -r multi-sled
 ptime -m cargo run --locked --release --bin omicron-package -- \
   -t host package
-stamp_packages omicron-sled-agent mg-ddm-gz propolis-server overlay
+stamp_packages omicron-sled-agent mg-ddm-gz propolis-server overlay oxlog
 
 # Create global zone package @ /work/global-zone-packages.tar.gz
 ptime -m ./tools/build-global-zone-packages.sh "$tarball_src_dir" /work
@@ -117,7 +117,7 @@ zones=(
   out/internal-dns.tar.gz
   out/omicron-nexus.tar.gz
   out/omicron-nexus-single-sled.tar.gz
-  out/oximeter-collector.tar.gz
+  out/oximeter.tar.gz
   out/propolis-server.tar.gz
   out/switch-*.tar.gz
   out/ntp.tar.gz

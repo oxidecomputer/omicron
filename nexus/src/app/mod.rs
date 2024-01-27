@@ -87,7 +87,9 @@ pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
 //      The value here is arbitrary, but we need *a* limit for the instance
 //      create saga to have a bounded DAG. We might want to only enforce
 //      this during instance create (rather than live attach) in future.
-pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 32;
+pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
+    nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
+        as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
@@ -138,6 +140,7 @@ pub struct Nexus {
     timeseries_client: LazyTimeseriesClient,
 
     /// Contents of the trusted root role for the TUF repository.
+    #[allow(dead_code)]
     updates_config: Option<config::UpdatesConfig>,
 
     /// The tunable parameters from a configuration file
@@ -180,10 +183,6 @@ pub struct Nexus {
 
     /// Default Crucible region allocation strategy
     default_region_allocation_strategy: RegionAllocationStrategy,
-
-    /// information about blueprints (deployment configurations)
-    // This will go away once these are stored in the database.
-    blueprints: std::sync::Mutex<deployment::Blueprints>,
 }
 
 impl Nexus {
@@ -416,7 +415,6 @@ impl Nexus {
                 .pkg
                 .default_region_allocation_strategy
                 .clone(),
-            blueprints: std::sync::Mutex::new(deployment::Blueprints::new()),
         };
 
         // TODO-cleanup all the extra Arcs here seems wrong

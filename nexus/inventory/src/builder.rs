@@ -96,7 +96,7 @@ impl CollectionBuilder {
     pub fn new(collector: &str) -> Self {
         CollectionBuilder {
             errors: vec![],
-            time_started: now(),
+            time_started: now_db_precision(),
             collector: collector.to_owned(),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
@@ -122,7 +122,7 @@ impl CollectionBuilder {
             id: Uuid::new_v4(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
             time_started: self.time_started,
-            time_done: now(),
+            time_done: now_db_precision(),
             collector: self.collector,
             baseboards: self.baseboards,
             cabooses: self.cabooses,
@@ -178,7 +178,7 @@ impl CollectionBuilder {
 
         // Separate the SP state into the SP-specific state and the RoT state,
         // if any.
-        let now = now();
+        let now = now_db_precision();
         let _ = self.sps.entry(baseboard.clone()).or_insert_with(|| {
             ServiceProcessor {
                 time_collected: now,
@@ -279,7 +279,7 @@ impl CollectionBuilder {
         if let Some(previous) = by_id.insert(
             baseboard.clone(),
             CabooseFound {
-                time_collected: now(),
+                time_collected: now_db_precision(),
                 source: source.to_owned(),
                 caboose: sw_caboose.clone(),
             },
@@ -348,7 +348,7 @@ impl CollectionBuilder {
         if let Some(previous) = by_id.insert(
             baseboard.clone(),
             RotPageFound {
-                time_collected: now(),
+                time_collected: now_db_precision(),
                 source: source.to_owned(),
                 page: sw_rot_page.clone(),
             },
@@ -456,7 +456,7 @@ impl CollectionBuilder {
             usable_hardware_threads: inventory.usable_hardware_threads,
             usable_physical_ram: inventory.usable_physical_ram,
             reservoir_size: inventory.reservoir_size,
-            time_collected: now(),
+            time_collected: now_db_precision(),
             sled_id,
         };
 
@@ -491,7 +491,7 @@ impl CollectionBuilder {
             self.omicron_zones.insert(
                 sled_id,
                 OmicronZonesFound {
-                    time_collected: now(),
+                    time_collected: now_db_precision(),
                     source: source.to_string(),
                     sled_id,
                     zones,
@@ -507,7 +507,7 @@ impl CollectionBuilder {
 /// This exists because the database doesn't store nanosecond-precision, so if
 /// we store nanosecond-precision timestamps, then DateTime conversion is lossy
 /// when round-tripping through the database.  That's rather inconvenient.
-fn now() -> DateTime<Utc> {
+pub fn now_db_precision() -> DateTime<Utc> {
     let ts = Utc::now();
     let nanosecs = ts.timestamp_subsec_nanos();
     let micros = ts.timestamp_subsec_micros();
@@ -517,7 +517,7 @@ fn now() -> DateTime<Utc> {
 
 #[cfg(test)]
 mod test {
-    use super::now;
+    use super::now_db_precision;
     use super::CollectionBuilder;
     use crate::examples::representative;
     use crate::examples::sp_state;
@@ -541,10 +541,10 @@ mod test {
     // Verify the contents of an empty collection.
     #[test]
     fn test_empty() {
-        let time_before = now();
+        let time_before = now_db_precision();
         let builder = CollectionBuilder::new("test_empty");
         let collection = builder.build();
-        let time_after = now();
+        let time_after = now_db_precision();
 
         assert!(collection.errors.is_empty());
         assert!(time_before <= collection.time_started);
@@ -577,7 +577,7 @@ mod test {
     // a useful quick check.
     #[test]
     fn test_basic() {
-        let time_before = now();
+        let time_before = now_db_precision();
         let Representative {
             builder,
             sleds: [sled1_bb, sled2_bb, sled3_bb, sled4_bb],
@@ -587,7 +587,7 @@ mod test {
                 [sled_agent_id_basic, sled_agent_id_extra, sled_agent_id_pc, sled_agent_id_unknown],
         } = representative();
         let collection = builder.build();
-        let time_after = now();
+        let time_after = now_db_precision();
         println!("{:#?}", collection);
         assert!(time_before <= collection.time_started);
         assert!(collection.time_started <= collection.time_done);

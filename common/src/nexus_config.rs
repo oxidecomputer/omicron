@@ -213,8 +213,6 @@ pub struct ConsoleConfig {
 pub struct UpdatesConfig {
     /// Trusted root.json role for the TUF updates repository.
     pub trusted_root: Utf8PathBuf,
-    /// Default base URL for the TUF repository.
-    pub default_base_url: String,
 }
 
 /// Options to tweak database schema changes.
@@ -336,6 +334,8 @@ pub struct BackgroundTaskConfig {
     pub inventory: InventoryConfig,
     /// configuration for phantom disks task
     pub phantom_disks: PhantomDiskConfig,
+    /// configuration for service zone nat sync task
+    pub sync_service_zone_nat: SyncServiceZoneNatConfig,
 }
 
 #[serde_as]
@@ -373,6 +373,14 @@ pub struct ExternalEndpointsConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NatCleanupConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SyncServiceZoneNatConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -519,6 +527,7 @@ mod test {
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
+    use crate::nexus_config::SyncServiceZoneNatConfig;
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -631,7 +640,6 @@ mod test {
             address = "[::1]:8123"
             [updates]
             trusted_root = "/path/to/root.json"
-            default_base_url = "http://example.invalid/"
             [tunables]
             max_vpc_ipv4_subnet_prefix = 27
             [deployment]
@@ -668,6 +676,7 @@ mod test {
             inventory.nkeep = 11
             inventory.disable = false
             phantom_disks.period_secs = 30
+            sync_service_zone_nat.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -728,7 +737,6 @@ mod test {
                     },
                     updates: Some(UpdatesConfig {
                         trusted_root: Utf8PathBuf::from("/path/to/root.json"),
-                        default_base_url: "http://example.invalid/".into(),
                     }),
                     schema: None,
                     tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
@@ -773,6 +781,9 @@ mod test {
                         phantom_disks: PhantomDiskConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        sync_service_zone_nat: SyncServiceZoneNatConfig {
+                            period_secs: Duration::from_secs(30)
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -831,6 +842,7 @@ mod test {
             inventory.nkeep = 3
             inventory.disable = false
             phantom_disks.period_secs = 30
+            sync_service_zone_nat.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

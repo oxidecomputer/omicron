@@ -9,6 +9,7 @@ chrono.workspace = true
 internal-dns.workspace = true
 ipnet.workspace = true
 ipnetwork.workspace = true
+nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
@@ -18,6 +19,5 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-nexus-inventory.workspace = true
 omicron-test-utils.workspace = true
 sled-agent-client.workspace = true

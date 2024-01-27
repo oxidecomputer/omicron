@@ -11,6 +11,7 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_detach_many::DatastoreDetachManyTarget;
 use crate::db::collection_detach_many::DetachManyError;
+use crate::db::collection_detach_many::DetachManyFromCollectionStatement;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
@@ -28,6 +29,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::Disk;
 use nexus_db_model::VmmRuntimeState;
 use omicron_common::api;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -405,59 +407,63 @@ impl DataStore {
         let ok_to_detach_disk_state_labels: Vec<_> =
             ok_to_detach_disk_states.iter().map(|s| s.label()).collect();
 
-        let _instance = Instance::detach_resources(
-            authz_instance.id(),
-            instance::table.into_boxed().filter(
-                instance::dsl::state
-                    .eq_any(ok_to_delete_instance_states)
-                    .and(instance::dsl::active_propolis_id.is_null()),
-            ),
-            disk::table.into_boxed().filter(
-                disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels),
-            ),
-            diesel::update(instance::dsl::instance).set((
-                instance::dsl::state.eq(destroyed),
-                instance::dsl::time_deleted.eq(Utc::now()),
-            )),
-            diesel::update(disk::dsl::disk).set((
-                disk::dsl::disk_state.eq(detached_label),
-                disk::dsl::attach_instance_id.eq(Option::<Uuid>::None),
-                disk::dsl::slot.eq(Option::<i16>::None),
-            )),
-        )
-        .detach_and_get_result_async(
-            &*self.pool_connection_authorized(opctx).await?,
-        )
-        .await
-        .map_err(|e| match e {
-            DetachManyError::CollectionNotFound => Error::not_found_by_id(
-                ResourceType::Instance,
-                &authz_instance.id(),
-            ),
-            DetachManyError::NoUpdate { collection } => {
-                if collection.runtime_state.propolis_id.is_some() {
-                    return Error::invalid_request(
+        let stmt: DetachManyFromCollectionStatement<Disk, _, _, _> =
+            Instance::detach_resources(
+                authz_instance.id(),
+                instance::table.into_boxed().filter(
+                    instance::dsl::state
+                        .eq_any(ok_to_delete_instance_states)
+                        .and(instance::dsl::active_propolis_id.is_null()),
+                ),
+                disk::table.into_boxed().filter(
+                    disk::dsl::disk_state
+                        .eq_any(ok_to_detach_disk_state_labels),
+                ),
+                diesel::update(instance::dsl::instance).set((
+                    instance::dsl::state.eq(destroyed),
+                    instance::dsl::time_deleted.eq(Utc::now()),
+                )),
+                diesel::update(disk::dsl::disk).set((
+                    disk::dsl::disk_state.eq(detached_label),
+                    disk::dsl::attach_instance_id.eq(Option::<Uuid>::None),
+                    disk::dsl::slot.eq(Option::<i16>::None),
+                )),
+            );
+
+        let _instance = stmt
+            .detach_and_get_result_async(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| match e {
+                DetachManyError::CollectionNotFound => Error::not_found_by_id(
+                    ResourceType::Instance,
+                    &authz_instance.id(),
+                ),
+                DetachManyError::NoUpdate { collection } => {
+                    if collection.runtime_state.propolis_id.is_some() {
+                        return Error::invalid_request(
                         "cannot delete instance: instance is running or has \
                                 not yet fully stopped",
                     );
-                }
-                let instance_state =
-                    collection.runtime_state.nexus_state.state();
-                match instance_state {
-                    api::external::InstanceState::Stopped
-                    | api::external::InstanceState::Failed => {
-                        Error::internal_error("cannot delete instance")
                     }
-                    _ => Error::invalid_request(&format!(
-                        "instance cannot be deleted in state \"{}\"",
-                        instance_state,
-                    )),
+                    let instance_state =
+                        collection.runtime_state.nexus_state.state();
+                    match instance_state {
+                        api::external::InstanceState::Stopped
+                        | api::external::InstanceState::Failed => {
+                            Error::internal_error("cannot delete instance")
+                        }
+                        _ => Error::invalid_request(&format!(
+                            "instance cannot be deleted in state \"{}\"",
+                            instance_state,
+                        )),
+                    }
                 }
-            }
-            DetachManyError::DatabaseError(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-        })?;
+                DetachManyError::DatabaseError(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })?;
 
         Ok(())
     }

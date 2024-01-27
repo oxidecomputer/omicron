@@ -333,6 +333,7 @@ impl UpdateItem {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum UpdateState {
     NotStarted,
     Starting,

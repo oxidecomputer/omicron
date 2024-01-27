@@ -61,8 +61,8 @@ pub enum StartError {
     #[error("Failed to initialize logger")]
     InitLogger(#[source] io::Error),
 
-    #[error("Failed to register DTrace probes")]
-    RegisterDTraceProbes(#[source] usdt::Error),
+    #[error("Failed to register DTrace probes: {0}")]
+    RegisterDTraceProbes(String),
 
     #[error("Failed to find address objects for maghemite")]
     FindMaghemiteAddrObjs(#[source] underlay::Error),
@@ -604,7 +604,7 @@ impl Inner {
                         // This error is unrecoverable, and if returned we'd
                         // end up in maintenance mode anyway.
                         error!(log, "Failed to start sled agent: {err:#}");
-                        panic!("Failed to start sled agent");
+                        panic!("Failed to start sled agent: {err:#}");
                     }
                 };
                 _ = response_tx.send(response);
