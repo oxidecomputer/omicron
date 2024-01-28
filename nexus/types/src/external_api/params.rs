@@ -1796,7 +1796,18 @@ pub struct BgpStatusSelector {
     pub name_or_id: NameOrId,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum BfdMode {
     SingleHop,

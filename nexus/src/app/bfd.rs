@@ -2,34 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{
-    net::{IpAddr, Ipv4Addr},
-    sync::Arc,
-};
-
 use crate::external_api::params;
-use mg_admin_client::types::{AddBfdPeerRequest, PeerState, SessionMode};
+use mg_admin_client::types::BfdPeerState;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::shared::{BfdState, BfdStatus};
-use omicron_common::api::{
-    external::{Error, Name},
-    internal::shared::{ParseSwitchLocationError, SwitchLocation},
-};
+use omicron_common::api::{external::Error, internal::shared::SwitchLocation};
+use std::sync::Arc;
 
 impl super::Nexus {
-    fn mg_client_for_switch_name(
-        &self,
-        switch: &Name,
-    ) -> Result<Arc<mg_admin_client::Client>, Error> {
-        let switch_location: SwitchLocation = switch.as_str().parse().map_err(
-            |_: ParseSwitchLocationError| {
-                Error::invalid_value("switch", "must be switch0 or switch 1")
-            },
-        )?;
-
-        self.mg_client_for_switch_location(switch_location)
-    }
-
     fn mg_client_for_switch_location(
         &self,
         switch: SwitchLocation,
@@ -50,42 +30,25 @@ impl super::Nexus {
 
     pub async fn bfd_enable(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         session: params::BfdSessionEnable,
     ) -> Result<(), Error> {
-        let mg_client = self.mg_client_for_switch_name(&session.switch)?;
-
-        mg_client
-            .inner
-            .add_bfd_peer(&AddBfdPeerRequest {
-                detection_threshold: session.detection_threshold,
-                listen: session.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
-                peer: session.remote,
-                required_rx: session.required_rx,
-                mode: match session.mode {
-                    params::BfdMode::SingleHop => SessionMode::SingleHop,
-                    params::BfdMode::MultiHop => SessionMode::MultiHop,
-                },
-            })
-            .await
-            .map_err(|e| {
-                Error::internal_error(&format!("maghemite bfd enable: {e}"))
-            })?;
-
+        self.datastore().bfd_session_create(opctx, &session).await?;
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.bfd_manager);
         Ok(())
     }
 
     pub async fn bfd_disable(
         &self,
-        _opctx: &OpContext,
+        opctx: &OpContext,
         session: params::BfdSessionDisable,
     ) -> Result<(), Error> {
-        let mg_client = self.mg_client_for_switch_name(&session.switch)?;
-
-        mg_client.inner.remove_bfd_peer(&session.remote).await.map_err(
-            |e| Error::internal_error(&format!("maghemite bfd disable: {e}")),
-        )?;
-
+        self.datastore().bfd_session_delete(opctx, &session).await?;
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.bfd_manager);
         Ok(())
     }
 
@@ -107,17 +70,27 @@ impl super::Nexus {
                 })?
                 .into_inner();
 
-            for (addr, state) in status.iter() {
-                let addr: IpAddr = addr.parse().unwrap();
+            for info in status.iter() {
                 result.push(BfdStatus {
-                    peer: addr,
-                    state: match state {
-                        PeerState::Up => BfdState::Up,
-                        PeerState::Down => BfdState::Down,
-                        PeerState::Init => BfdState::Init,
-                        PeerState::AdminDown => BfdState::AdminDown,
+                    peer: info.config.peer,
+                    state: match info.state {
+                        BfdPeerState::Up => BfdState::Up,
+                        BfdPeerState::Down => BfdState::Down,
+                        BfdPeerState::Init => BfdState::Init,
+                        BfdPeerState::AdminDown => BfdState::AdminDown,
                     },
                     switch: s.to_string().parse().unwrap(),
+                    local: Some(info.config.listen),
+                    detection_threshold: info.config.detection_threshold,
+                    required_rx: info.config.required_rx,
+                    mode: match info.config.mode {
+                        mg_admin_client::types::SessionMode::SingleHop => {
+                            params::BfdMode::SingleHop
+                        }
+                        mg_admin_client::types::SessionMode::MultiHop => {
+                            params::BfdMode::MultiHop
+                        }
+                    },
                 })
             }
         }

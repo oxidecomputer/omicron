@@ -1486,6 +1486,21 @@ table! {
 }
 
 table! {
+    bfd_session (remote, switch) {
+        id -> Uuid,
+        local -> Nullable<Inet>,
+        remote -> Inet,
+        detection_threshold -> Int8,
+        required_rx -> Int8,
+        switch -> Text,
+        mode -> crate::BfdModeEnum,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,

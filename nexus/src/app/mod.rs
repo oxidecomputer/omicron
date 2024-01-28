@@ -366,6 +366,7 @@ impl Nexus {
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
             &dpd_clients,
+            &mg_clients,
             config.deployment.id,
             resolver.clone(),
         );

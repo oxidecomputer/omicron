@@ -8773,9 +8773,27 @@
       "BfdStatus": {
         "type": "object",
         "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
           "peer": {
             "type": "string",
             "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
           "state": {
             "$ref": "#/components/schemas/BfdState"
@@ -8785,7 +8803,10 @@
           }
         },
         "required": [
+          "detection_threshold",
+          "mode",
           "peer",
+          "required_rx",
           "state",
           "switch"
         ]

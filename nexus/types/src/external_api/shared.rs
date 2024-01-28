@@ -18,6 +18,8 @@ use uuid::Uuid;
 
 pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
 
+use super::params::BfdMode;
+
 /// Maximum number of role assignments allowed on any one resource
 // Today's implementation assumes a relatively small number of role assignments
 // per resource.  Things should work if we bump this up, but we'll want to look
@@ -328,6 +330,10 @@ pub struct BfdStatus {
     pub peer: IpAddr,
     pub state: BfdState,
     pub switch: Name,
+    pub local: Option<IpAddr>,
+    pub detection_threshold: u8,
+    pub required_rx: u64,
+    pub mode: BfdMode,
 }
 
 #[cfg(test)]
