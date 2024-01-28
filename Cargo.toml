@@ -178,9 +178,9 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2d4bc11232d53f177c286383926fa5f8c1b2a938" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2d4bc11232d53f177c286383926fa5f8c1b2a938" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2d4bc11232d53f177c286383926fa5f8c1b2a938" }
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
 display-error-chain = "0.2.0"
@@ -304,9 +304,9 @@ prettyplease = "0.2.16"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "ff6c4df2e816eee6e7b2b0488777d30ef35ee217" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "ff6c4df2e816eee6e7b2b0488777d30ef35ee217" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "ff6c4df2e816eee6e7b2b0488777d30ef35ee217" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
