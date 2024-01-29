@@ -11,12 +11,23 @@ use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
+use nexus_types::inventory::Collection;
 use slog::{info, Logger};
 
 pub struct Planner<'a> {
     log: Logger,
     policy: &'a Policy,
     blueprint: BlueprintBuilder<'a>,
+    // latest inventory collection
+    //
+    // We must be very careful when using this during planning.  The real-world
+    // state may have changed since this inventory was collected.  Planning
+    // choices should not depend on this still being totally accurate.
+    //
+    // If we do start depending on specific criteria (e.g., it contains
+    // information about all sleds that we expect), we should verify that up
+    // front and update callers to ensure that it's true.
+    inventory: &'a Collection,
 }
 
 impl<'a> Planner<'a> {
@@ -25,10 +36,13 @@ impl<'a> Planner<'a> {
         parent_blueprint: &'a Blueprint,
         policy: &'a Policy,
         creator: &str,
+        // NOTE: Right now, we just assume that this is the latest inventory
+        // collection.  See the comment on the corresponding field in `Planner`.
+        inventory: &'a Collection,
     ) -> Planner<'a> {
         let blueprint =
             BlueprintBuilder::new_based_on(parent_blueprint, policy, creator);
-        Planner { log, policy, blueprint }
+        Planner { log, policy, blueprint, inventory }
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
@@ -63,6 +77,41 @@ impl<'a> Planner<'a> {
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
+                continue;
+            }
+
+            // Now we've established that the current blueprint _says_ there's
+            // an NTP zone on this system.  But we must wait for it to actually
+            // be there before we can proceed to add anything else.  Otherwise,
+            // we may wind up trying to provision this zone at the same time as
+            // other zones, and Sled Agent will reject requests to provision
+            // other zones before the clock is synchronized.
+            //
+            // Note that it's always possible that the NTP zone was added after
+            // this inventory was collected (in which case we'll erroneously
+            // choose to bail out here, but we'll pick it up again next time
+            // we're invoked).  It's conceivable that the NTP zone was removed
+            // after this inventory was collected (in which case we'd be making
+            // a wrong decision here).  However, we don't ever do this today.
+            // If we were to do something like that (maybe as part of upgrading
+            // the NTP zone or switching between an internal NTP vs. boundary
+            // NTP zone), we'll need to be careful how we do it to avoid a
+            // problem here.
+            let has_ntp_inventory = self
+                .inventory
+                .omicron_zones
+                .get(&sled_id)
+                .map(|sled_zones| {
+                    sled_zones.zones.zones.iter().any(|z| z.zone_type.is_ntp())
+                })
+                .unwrap_or(false);
+            if !has_ntp_inventory {
+                info!(
+                    &self.log,
+                    "parent blueprint contains NTP zone, but it's not in \
+                    inventory yet";
+                    "sled_id" => ?sled_id,
+                );
                 continue;
             }
 
@@ -106,9 +155,11 @@ mod test {
     use crate::blueprint_builder::test::example;
     use crate::blueprint_builder::test::policy_add_sled;
     use crate::blueprint_builder::BlueprintBuilder;
+    use nexus_inventory::now_db_precision;
+    use nexus_types::inventory::OmicronZoneType;
+    use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_client::types::OmicronZoneType;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -116,7 +167,7 @@ mod test {
         let logctx = test_setup_log("planner_basic_add_sled");
 
         // Use our example inventory collection.
-        let (collection, mut policy) = example();
+        let (mut collection, mut policy) = example();
 
         // Build the initial blueprint.  We don't bother verifying it here
         // because there's a separate test for that.
@@ -135,6 +186,7 @@ mod test {
             &blueprint1,
             &policy,
             "no-op?",
+            &collection,
         )
         .plan()
         .expect("failed to plan");
@@ -156,6 +208,7 @@ mod test {
             &blueprint2,
             &policy,
             "test: add NTP?",
+            &collection,
         )
         .plan()
         .expect("failed to plan");
@@ -177,18 +230,55 @@ mod test {
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
 
-        // Check that the next step is to add Crucible zones
+        // Check that with no change in inventory, the planner makes no changes.
+        // It needs to wait for inventory to reflect the new NTP zone before
+        // proceeding.
         let blueprint4 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint3,
             &policy,
+            "test: add nothing more",
+            &collection,
+        )
+        .plan()
+        .expect("failed to plan");
+        let diff = blueprint3.diff(&blueprint4);
+        println!("3 -> 4 (expected no changes):\n{}", diff);
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_changed().count(), 0);
+
+        // Now update the inventory to have the requested NTP zone.
+        assert!(collection
+            .omicron_zones
+            .insert(
+                new_sled_id,
+                OmicronZonesFound {
+                    time_collected: now_db_precision(),
+                    source: String::from("test suite"),
+                    sled_id: new_sled_id,
+                    zones: blueprint4
+                        .omicron_zones
+                        .get(&new_sled_id)
+                        .cloned()
+                        .expect("blueprint should contain zones for new sled"),
+                }
+            )
+            .is_none());
+
+        // Check that the next step is to add Crucible zones
+        let blueprint5 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint3,
+            &policy,
             "test: add Crucible zones?",
+            &collection,
         )
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint3.diff(&blueprint4);
-        println!("3 -> 4 (expect Crucible zones):\n{}", diff);
+        let diff = blueprint3.diff(&blueprint5);
+        println!("3 -> 5 (expect Crucible zones):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let sleds = diff.sleds_changed().collect::<Vec<_>>();
@@ -210,17 +300,18 @@ mod test {
         }
 
         // Check that there are no more steps
-        let blueprint5 = Planner::new_based_on(
+        let blueprint6 = Planner::new_based_on(
             logctx.log.clone(),
-            &blueprint4,
+            &blueprint5,
             &policy,
             "test: no-op?",
+            &collection,
         )
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint4.diff(&blueprint5);
-        println!("4 -> 5 (expect no changes):\n{}", diff);
+        let diff = blueprint5.diff(&blueprint6);
+        println!("5 -> 6 (expect no changes):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
