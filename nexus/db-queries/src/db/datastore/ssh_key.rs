@@ -69,7 +69,8 @@ impl DataStore {
             match key {
                 NameOrId::Name(name) => {
                     if !result
-                        .contains(|(_, n)| n.clone() == name.clone().into())
+                        .iter()
+                        .any(|(_, n)| n.clone() == name.clone().into())
                     {
                         return Err(Error::ObjectNotFound {
                             type_name: ResourceType::SshKey,
@@ -78,7 +79,7 @@ impl DataStore {
                     }
                 }
                 NameOrId::Id(id) => {
-                    if !result.contains(|(i, _)| i == id) {
+                    if !result.iter().any(|&(i, _)| i == *id) {
                         return Err(Error::ObjectNotFound {
                             type_name: ResourceType::SshKey,
                             lookup_type: LookupType::ById(*id),
