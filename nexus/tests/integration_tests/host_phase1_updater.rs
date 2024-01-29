@@ -6,7 +6,7 @@
 //! MGS to SP.
 
 use gateway_client::types::SpType;
-use gateway_messages::{SpPort, UpdateInProgressStatus, UpdateStatus};
+use gateway_messages::SpPort;
 use gateway_test_utils::setup as mgs_setup;
 use omicron_nexus::app::test_interfaces::{
     HostPhase1Updater, MgsClients, UpdateProgress,
