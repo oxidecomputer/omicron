@@ -1,9 +1,8 @@
 //! Common code shared between `omicron-package` and `thing-flinger` binaries.
 
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::Subcommand;
 use serde::de::DeserializeOwned;
-use std::path::Path;
-use std::path::PathBuf;
 use thiserror::Error;
 
 pub mod dot;
@@ -13,12 +12,12 @@ pub mod target;
 #[derive(Error, Debug)]
 pub enum ParseError {
     #[error("Error deserializing toml from {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
+    Toml { path: Utf8PathBuf, err: toml::de::Error },
     #[error("IO error: {message}: {err}")]
     Io { message: String, err: std::io::Error },
 }
 
-pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
+pub fn parse<P: AsRef<Utf8Path>, C: DeserializeOwned>(
     path: P,
 ) -> Result<C, ParseError> {
     let path = path.as_ref();
@@ -116,7 +115,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Unpacks the files created by `package` to an install directory.
     /// Issues the `uninstall` command.
@@ -134,7 +133,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Imports and starts the sled-agent illumos service
     ///
@@ -145,7 +144,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Deletes all Omicron zones and stops all services.
     ///
@@ -166,6 +165,6 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
 }
