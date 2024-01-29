@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(28, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(30, 0, 0);
 
 table! {
     disk (id) {
@@ -1392,6 +1392,89 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+/* blueprints */
+
+table! {
+    blueprint (id) {
+        id -> Uuid,
+
+        parent_blueprint_id -> Nullable<Uuid>,
+
+        time_created -> Timestamptz,
+        creator -> Text,
+        comment -> Text,
+    }
+}
+
+table! {
+    bp_target (version) {
+        version -> Int8,
+
+        blueprint_id -> Uuid,
+
+        enabled -> Bool,
+        time_made_target -> Timestamptz,
+    }
+}
+
+table! {
+    bp_sled_omicron_zones (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    bp_omicron_zone (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Uuid,
+        underlay_address -> Inet,
+        zone_type -> crate::ZoneTypeEnum,
+
+        primary_service_ip -> Inet,
+        primary_service_port -> Int4,
+        second_service_ip -> Nullable<Inet>,
+        second_service_port -> Nullable<Int4>,
+        dataset_zpool_name -> Nullable<Text>,
+        bp_nic_id -> Nullable<Uuid>,
+        dns_gz_address -> Nullable<Inet>,
+        dns_gz_address_index -> Nullable<Int8>,
+        ntp_ntp_servers -> Nullable<Array<Text>>,
+        ntp_dns_servers -> Nullable<Array<Inet>>,
+        ntp_domain -> Nullable<Text>,
+        nexus_external_tls -> Nullable<Bool>,
+        nexus_external_dns_servers -> Nullable<Array<Inet>>,
+        snat_ip -> Nullable<Inet>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
+    }
+}
+
+table! {
+    bp_omicron_zone_nic (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        id -> Uuid,
+        name -> Text,
+        ip -> Inet,
+        mac -> Int8,
+        subnet -> Inet,
+        vni -> Int8,
+        is_primary -> Bool,
+        slot -> Int2,
+    }
+}
+
+table! {
+    bp_omicron_zones_not_in_service (blueprint_id, bp_omicron_zone_id) {
+        blueprint_id -> Uuid,
+        bp_omicron_zone_id -> Uuid,
     }
 }
 

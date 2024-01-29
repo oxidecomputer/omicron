@@ -334,6 +334,8 @@ pub struct BackgroundTaskConfig {
     pub inventory: InventoryConfig,
     /// configuration for phantom disks task
     pub phantom_disks: PhantomDiskConfig,
+    /// configuration for service zone nat sync task
+    pub sync_service_zone_nat: SyncServiceZoneNatConfig,
 }
 
 #[serde_as]
@@ -371,6 +373,14 @@ pub struct ExternalEndpointsConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NatCleanupConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SyncServiceZoneNatConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -517,6 +527,7 @@ mod test {
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
+    use crate::nexus_config::SyncServiceZoneNatConfig;
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -665,6 +676,7 @@ mod test {
             inventory.nkeep = 11
             inventory.disable = false
             phantom_disks.period_secs = 30
+            sync_service_zone_nat.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -769,6 +781,9 @@ mod test {
                         phantom_disks: PhantomDiskConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        sync_service_zone_nat: SyncServiceZoneNatConfig {
+                            period_secs: Duration::from_secs(30)
+                        }
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -827,6 +842,7 @@ mod test {
             inventory.nkeep = 3
             inventory.disable = false
             phantom_disks.period_secs = 30
+            sync_service_zone_nat.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

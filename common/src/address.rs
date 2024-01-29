@@ -18,6 +18,12 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
+/// maximum possible value for a tcp or udp port
+pub const MAX_PORT: u16 = u16::MAX;
+
+/// minimum possible value for a tcp or udp port
+pub const MIN_PORT: u16 = u16::MIN;
+
 /// The amount of redundancy for internal DNS servers.
 ///
 /// Must be less than or equal to MAX_DNS_REDUNDANCY.

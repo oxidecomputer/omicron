@@ -144,11 +144,11 @@ pub enum LookupType {
     ByName(String),
     /// a specific id was requested
     ById(Uuid),
-    /// a session token was requested
-    BySessionToken(String),
     /// a specific id was requested with some composite type
     /// (caller summarizes it)
     ByCompositeId(String),
+    /// object selected by criteria that would be confusing to call an ID
+    ByOther(String),
 }
 
 impl LookupType {
@@ -359,23 +359,22 @@ impl From<Error> for HttpError {
     fn from(error: Error) -> HttpError {
         match error {
             Error::ObjectNotFound { type_name: t, lookup_type: lt } => {
-                // TODO-cleanup is there a better way to express this?
-                let (lookup_field, lookup_value) = match lt {
-                    LookupType::ByName(name) => ("name", name),
-                    LookupType::ById(id) => ("id", id.to_string()),
-                    LookupType::ByCompositeId(label) => ("id", label),
-                    LookupType::BySessionToken(token) => {
-                        ("session token", token)
+                let message = match lt {
+                    LookupType::ByName(name) => {
+                        format!("{} with name \"{}\"", t, name)
                     }
+                    LookupType::ById(id) => {
+                        format!("{} with id \"{}\"", t, id)
+                    }
+                    LookupType::ByCompositeId(label) => {
+                        format!("{} with id \"{}\"", t, label)
+                    }
+                    LookupType::ByOther(msg) => msg,
                 };
-                let message = format!(
-                    "not found: {} with {} \"{}\"",
-                    t, lookup_field, lookup_value
-                );
                 HttpError::for_client_error(
                     Some(String::from("ObjectNotFound")),
                     http::StatusCode::NOT_FOUND,
-                    message,
+                    format!("not found: {}", message),
                 )
             }
 
