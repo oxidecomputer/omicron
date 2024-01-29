@@ -608,12 +608,7 @@ async fn test_instance_start_creates_networking_state(
         // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
         // itself.
         if agent.id != sled_id {
-            assert_sled_v2p_mappings(
-                agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
+            assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
         } else {
             assert!(agent.v2p_mappings.lock().await.is_empty());
         }
@@ -654,6 +649,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         &params::InstanceNetworkInterfaceAttachment::Default,
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
     let instance_id = instance.identity.id;
@@ -757,6 +753,7 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // located with their instances.
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
     let instance_id = instance.identity.id;
@@ -807,12 +804,8 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // all mappings explicitly (without skipping the instance's current
         // sled) this bifurcation should be removed.
         if sled_agent.id != original_sled_id {
-            assert_sled_v2p_mappings(
-                sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
+            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
+                .await;
         } else {
             assert!(sled_agent.v2p_mappings.lock().await.is_empty());
         }
@@ -860,12 +853,8 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // agent will have updated any mappings there. Remove this bifurcation
         // when Nexus programs all mappings explicitly.
         if sled_agent.id != dst_sled_id {
-            assert_sled_v2p_mappings(
-                sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
+            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
+                .await;
         }
     }
 }
@@ -1117,6 +1106,7 @@ async fn test_instance_metrics_with_migration(
         &params::InstanceNetworkInterfaceAttachment::Default,
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
     let instance_id = instance.identity.id;
@@ -3657,7 +3647,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
 
     let ip = fetch_instance_ephemeral_ip(client, "pool1-inst").await;
     assert!(
-        ip.ip >= range1.first_address() && ip.ip <= range1.last_address(),
+        ip.ip() >= range1.first_address() && ip.ip() <= range1.last_address(),
         "Expected ephemeral IP to come from pool1"
     );
 
@@ -3665,12 +3655,12 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     create_instance_with_pool(client, "pool2-inst", Some("pool2")).await;
     let ip = fetch_instance_ephemeral_ip(client, "pool2-inst").await;
     assert!(
-        ip.ip >= range2.first_address() && ip.ip <= range2.last_address(),
+        ip.ip() >= range2.first_address() && ip.ip() <= range2.last_address(),
         "Expected ephemeral IP to come from pool2"
     );
 
     // make pool2 default and create instance with default pool. check that it now it comes from pool2
-    let _: views::IpPoolSilo = object_put(
+    let _: views::IpPoolSiloLink = object_put(
         client,
         &format!("/v1/system/ip-pools/pool2/silos/{}", DEFAULT_SILO.id()),
         &params::IpPoolSiloUpdate { is_default: true },
@@ -3680,7 +3670,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     create_instance_with_pool(client, "pool2-inst2", None).await;
     let ip = fetch_instance_ephemeral_ip(client, "pool2-inst2").await;
     assert!(
-        ip.ip >= range2.first_address() && ip.ip <= range2.last_address(),
+        ip.ip() >= range2.first_address() && ip.ip() <= range2.last_address(),
         "Expected ephemeral IP to come from pool2"
     );
 
@@ -3718,7 +3708,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some("pool1".parse().unwrap()),
+            pool: Some("pool1".parse::<Name>().unwrap().into()),
         }],
         disks: vec![],
         start: true,
@@ -3782,7 +3772,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some("orphan-pool".parse().unwrap()),
+            pool: Some("orphan-pool".parse::<Name>().unwrap().into()),
         }],
         disks: vec![],
         start: true,
@@ -3801,11 +3791,11 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
 
     // associate the pool with a different silo and we should get the same
     // error on instance create
-    let params = params::IpPoolSiloLink {
+    let params = params::IpPoolLinkSilo {
         silo: NameOrId::Name(cptestctx.silo_name.clone()),
         is_default: false,
     };
-    let _: views::IpPoolSilo =
+    let _: views::IpPoolSiloLink =
         object_create(client, "/v1/system/ip-pools/orphan-pool/silos", &params)
             .await;
 
@@ -3842,7 +3832,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: None, // <--- the only important thing here
+            pool: None, // <--- the only important thing here
         }],
         disks: vec![],
         start: true,
@@ -3851,14 +3841,13 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
     let error =
         object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
-    let msg = "not found: ip-pool with id \"Default pool for current silo\""
-        .to_string();
+    let msg = "not found: default IP pool for current silo".to_string();
     assert_eq!(error.message, msg);
 
     // same deal if you specify a pool that doesn't exist
     let body = params::InstanceCreate {
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some("nonexistent-pool".parse().unwrap()),
+            pool: Some("nonexistent-pool".parse::<Name>().unwrap().into()),
         }],
         ..body
     };
@@ -3892,7 +3881,7 @@ async fn test_instance_attach_several_external_ips(
 
     // Create several floating IPs for the instance, totalling 8 IPs.
     let mut external_ip_create =
-        vec![params::ExternalIpCreate::Ephemeral { pool_name: None }];
+        vec![params::ExternalIpCreate::Ephemeral { pool: None }];
     let mut fips = vec![];
     for i in 1..8 {
         let name = format!("fip-{i}");
@@ -3900,7 +3889,7 @@ async fn test_instance_attach_several_external_ips(
             create_floating_ip(&client, &name, PROJECT_NAME, None, None).await,
         );
         external_ip_create.push(params::ExternalIpCreate::Floating {
-            floating_ip_name: name.parse().unwrap(),
+            floating_ip: name.parse::<Name>().unwrap().into(),
         });
     }
 
@@ -3913,30 +3902,31 @@ async fn test_instance_attach_several_external_ips(
         &params::InstanceNetworkInterfaceAttachment::Default,
         vec![],
         external_ip_create,
+        true,
     )
     .await;
 
     // Verify that all external IPs are visible on the instance and have
     // been allocated in order.
     let external_ips =
-        fetch_instance_external_ips(&client, instance_name).await;
+        fetch_instance_external_ips(&client, instance_name, PROJECT_NAME).await;
     assert_eq!(external_ips.len(), 8);
     eprintln!("{external_ips:?}");
     for (i, eip) in external_ips
         .iter()
-        .sorted_unstable_by(|a, b| a.ip.cmp(&b.ip))
+        .sorted_unstable_by(|a, b| a.ip().cmp(&b.ip()))
         .enumerate()
     {
         let last_octet = i + if i != external_ips.len() - 1 {
-            assert_eq!(eip.kind, IpKind::Floating);
+            assert_eq!(eip.kind(), IpKind::Floating);
             1
         } else {
             // SNAT will occupy 1.0.0.8 here, since it it alloc'd before
             // the ephemeral.
-            assert_eq!(eip.kind, IpKind::Ephemeral);
+            assert_eq!(eip.kind(), IpKind::Ephemeral);
             2
         };
-        assert_eq!(eip.ip, Ipv4Addr::new(10, 0, 0, last_octet as u8));
+        assert_eq!(eip.ip(), Ipv4Addr::new(10, 0, 0, last_octet as u8));
     }
 
     // Verify that all floating IPs are bound to their parent instance.
@@ -3961,7 +3951,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
     // don't need any IP pools because request fails at parse time
 
     let ephemeral_create = params::ExternalIpCreate::Ephemeral {
-        pool_name: Some("default".parse().unwrap()),
+        pool: Some("default".parse::<Name>().unwrap().into()),
     };
     let create_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -4005,19 +3995,20 @@ async fn create_instance_with_pool(
         &params::InstanceNetworkInterfaceAttachment::Default,
         vec![],
         vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: pool_name.map(|name| name.parse().unwrap()),
+            pool: pool_name.map(|name| name.parse::<Name>().unwrap().into()),
         }],
+        true,
     )
     .await
 }
 
-async fn fetch_instance_external_ips(
+pub async fn fetch_instance_external_ips(
     client: &ClientTestContext,
     instance_name: &str,
+    project_name: &str,
 ) -> Vec<views::ExternalIp> {
     let ips_url = format!(
-        "/v1/instances/{}/external-ips?project={}",
-        instance_name, PROJECT_NAME
+        "/v1/instances/{instance_name}/external-ips?project={project_name}",
     );
     let ips = NexusRequest::object_get(client, &ips_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -4033,10 +4024,10 @@ async fn fetch_instance_ephemeral_ip(
     client: &ClientTestContext,
     instance_name: &str,
 ) -> views::ExternalIp {
-    fetch_instance_external_ips(client, instance_name)
+    fetch_instance_external_ips(client, instance_name, PROJECT_NAME)
         .await
         .into_iter()
-        .find(|v| v.kind == IpKind::Ephemeral)
+        .find(|v| v.kind() == IpKind::Ephemeral)
         .unwrap()
 }
 
@@ -4100,7 +4091,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some(Name::try_from(String::from("default")).unwrap()),
+            pool: Some("default".parse::<Name>().unwrap().into()),
         }],
         disks: vec![],
         start: true,
@@ -4248,12 +4239,8 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
         // itself.
         if sled_agent.id != sled_id {
-            assert_sled_v2p_mappings(
-                sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
+            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
+                .await;
         } else {
             assert!(sled_agent.v2p_mappings.lock().await.is_empty());
         }

@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(23, 0, 1);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(29, 0, 0);
 
 table! {
     disk (id) {
@@ -574,6 +574,7 @@ table! {
         last_port -> Int4,
 
         project_id -> Nullable<Uuid>,
+        state -> crate::IpAttachStateEnum,
     }
 }
 
@@ -938,6 +939,11 @@ table! {
     }
 }
 
+allow_tables_to_appear_in_same_query! {
+    zpool,
+    physical_disk
+}
+
 table! {
     dataset (id) {
         id -> Uuid,
@@ -1171,72 +1177,45 @@ table! {
 }
 
 table! {
-    update_artifact (name, version, kind) {
-        name -> Text,
-        version -> Text,
-        kind -> crate::KnownArtifactKindEnum,
+    tuf_repo (id) {
+        id -> Uuid,
+        time_created -> Timestamptz,
+        sha256 -> Text,
         targets_role_version -> Int8,
         valid_until -> Timestamptz,
-        target_name -> Text,
-        target_sha256 -> Text,
-        target_length -> Int8,
-    }
-}
-
-table! {
-    system_update (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-    }
-}
-
-table! {
-    update_deployment (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-        status -> crate::UpdateStatusEnum,
-        // TODO: status reason for updateable_component
-    }
-}
-
-table! {
-    component_update (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        version -> Text,
-        component_type -> crate::UpdateableComponentTypeEnum,
-    }
-}
-
-table! {
-    updateable_component (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        device_id -> Text,
-        version -> Text,
         system_version -> Text,
-        component_type -> crate::UpdateableComponentTypeEnum,
-        status -> crate::UpdateStatusEnum,
-        // TODO: status reason for updateable_component
+        file_name -> Text,
     }
 }
 
 table! {
-    system_update_component_update (system_update_id, component_update_id) {
-        system_update_id -> Uuid,
-        component_update_id -> Uuid,
+    tuf_artifact (name, version, kind) {
+        name -> Text,
+        version -> Text,
+        kind -> Text,
+        time_created -> Timestamptz,
+        sha256 -> Text,
+        artifact_size -> Int8,
     }
 }
+
+table! {
+    tuf_repo_artifact (tuf_repo_id, tuf_artifact_name, tuf_artifact_version, tuf_artifact_kind) {
+        tuf_repo_id -> Uuid,
+        tuf_artifact_name -> Text,
+        tuf_artifact_version -> Text,
+        tuf_artifact_kind -> Text,
+    }
+}
+
+allow_tables_to_appear_in_same_query!(
+    tuf_repo,
+    tuf_repo_artifact,
+    tuf_artifact
+);
+joinable!(tuf_repo_artifact -> tuf_repo (tuf_repo_id));
+// Can't specify joinable for a composite primary key (tuf_repo_artifact ->
+// tuf_artifact).
 
 /* hardware inventory */
 
@@ -1409,6 +1388,89 @@ table! {
     }
 }
 
+/* blueprints */
+
+table! {
+    blueprint (id) {
+        id -> Uuid,
+
+        parent_blueprint_id -> Nullable<Uuid>,
+
+        time_created -> Timestamptz,
+        creator -> Text,
+        comment -> Text,
+    }
+}
+
+table! {
+    bp_target (version) {
+        version -> Int8,
+
+        blueprint_id -> Uuid,
+
+        enabled -> Bool,
+        time_made_target -> Timestamptz,
+    }
+}
+
+table! {
+    bp_sled_omicron_zones (blueprint_id, sled_id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        generation -> Int8,
+    }
+}
+
+table! {
+    bp_omicron_zone (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Uuid,
+        underlay_address -> Inet,
+        zone_type -> crate::ZoneTypeEnum,
+
+        primary_service_ip -> Inet,
+        primary_service_port -> Int4,
+        second_service_ip -> Nullable<Inet>,
+        second_service_port -> Nullable<Int4>,
+        dataset_zpool_name -> Nullable<Text>,
+        bp_nic_id -> Nullable<Uuid>,
+        dns_gz_address -> Nullable<Inet>,
+        dns_gz_address_index -> Nullable<Int8>,
+        ntp_ntp_servers -> Nullable<Array<Text>>,
+        ntp_dns_servers -> Nullable<Array<Inet>>,
+        ntp_domain -> Nullable<Text>,
+        nexus_external_tls -> Nullable<Bool>,
+        nexus_external_dns_servers -> Nullable<Array<Inet>>,
+        snat_ip -> Nullable<Inet>,
+        snat_first_port -> Nullable<Int4>,
+        snat_last_port -> Nullable<Int4>,
+    }
+}
+
+table! {
+    bp_omicron_zone_nic (blueprint_id, id) {
+        blueprint_id -> Uuid,
+        id -> Uuid,
+        name -> Text,
+        ip -> Inet,
+        mac -> Int8,
+        subnet -> Inet,
+        vni -> Int8,
+        is_primary -> Bool,
+        slot -> Int2,
+    }
+}
+
+table! {
+    bp_omicron_zones_not_in_service (blueprint_id, bp_omicron_zone_id) {
+        blueprint_id -> Uuid,
+        bp_omicron_zone_id -> Uuid,
+    }
+}
+
 table! {
     bootstore_keys (key, generation) {
         key -> Text,
@@ -1425,13 +1487,6 @@ table! {
         target_version -> Nullable<Text>,
     }
 }
-
-allow_tables_to_appear_in_same_query!(
-    system_update,
-    component_update,
-    system_update_component_update,
-);
-joinable!(system_update_component_update -> component_update (component_update_id));
 
 allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));

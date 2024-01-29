@@ -16,10 +16,11 @@ use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
-    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
+    ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
@@ -159,7 +160,7 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         match err {
-            crate::sled_agent::Error::Instance(instance_manager_error) => {
+            Error::Instance(instance_manager_error) => {
                 match instance_manager_error {
                     crate::instance_manager::Error::Instance(
                         instance_error,
@@ -196,7 +197,7 @@ impl From<Error> for dropshot::HttpError {
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
-            crate::sled_agent::Error::ZoneBundle(ref inner) => match inner {
+            Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
                 }
@@ -611,7 +612,7 @@ impl SledAgent {
                 warn!(
                     self.log,
                     "Failed to load services, will retry in {:?}", delay;
-                    "error" => %err,
+                    "error" => ?err,
                 );
             },
         )
@@ -975,6 +976,37 @@ impl SledAgent {
         self.inner
             .instances
             .put_migration_ids(instance_id, old_runtime, migration_ids)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that an instance's OPTE/port state includes the
+    /// specified external IP address.
+    ///
+    /// This method will return an error when trying to register an ephemeral IP which
+    /// does not match the current ephemeral IP.
+    pub async fn instance_put_external_ip(
+        &self,
+        instance_id: Uuid,
+        external_ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .add_external_ip(instance_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that an instance's OPTE/port state does not include the
+    /// specified external IP address in either its ephemeral or floating IP set.
+    pub async fn instance_delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        external_ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .delete_external_ip(instance_id, external_ip)
             .await
             .map_err(|e| Error::Instance(e))
     }

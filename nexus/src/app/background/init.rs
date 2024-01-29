@@ -13,6 +13,7 @@ use super::inventory_collection;
 use super::nat_cleanup;
 use super::phantom_disks;
 use super::region_replacement;
+use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use crate::app::sagas::SagaRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
@@ -59,6 +60,9 @@ pub struct BackgroundTasks {
 
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
+
+    /// task handle for the service zone nat tracker
+    pub task_service_zone_nat_tracker: common::TaskHandle,
 
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
@@ -114,6 +118,9 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
+        let dpd_clients: Vec<_> =
+            dpd_clients.values().map(|client| client.clone()).collect();
+
         let nat_cleanup = {
             driver.register(
                 "nat_v4_garbage_collector".to_string(),
@@ -124,7 +131,7 @@ impl BackgroundTasks {
                 config.nat_cleanup.period_secs,
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
                     datastore.clone(),
-                    dpd_clients.values().map(|client| client.clone()).collect(),
+                    dpd_clients.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -172,6 +179,22 @@ impl BackgroundTasks {
             task
         };
 
+        let task_service_zone_nat_tracker = {
+            driver.register(
+                "service_zone_nat_tracker".to_string(),
+                String::from(
+                    "ensures service zone nat records are recorded in NAT RPW table",
+                ),
+                config.sync_service_zone_nat.period_secs,
+                Box::new(ServiceZoneNatTracker::new(
+                    datastore.clone(),
+                    dpd_clients.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
         // Background task: detect if a region needs replacement and begin the
         // process
         let task_region_replacement = {
@@ -203,6 +226,7 @@ impl BackgroundTasks {
             nat_cleanup,
             task_inventory_collection,
             task_phantom_disks,
+            task_service_zone_nat_tracker,
             task_region_replacement,
         }
     }

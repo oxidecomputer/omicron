@@ -10,13 +10,12 @@
  * Copyright 2023 Oxide Computer Company
  */
 
-use std::{
-    collections::HashMap,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::collections::HashMap;
 
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+
+use crate::MtimeSource;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -48,12 +47,14 @@ impl Metadata {
     pub fn append_to_tar<T: std::io::Write>(
         &self,
         a: &mut tar::Builder<T>,
+        mtime_source: MtimeSource,
     ) -> Result<()> {
         let mut b = serde_json::to_vec(self)?;
         b.push(b'\n');
 
-        let mtime =
-            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+        // XXX This was changed from upstream to add oxide.json with optionally
+        // a zero timestamp, to ensure stability of fake manifests.
+        let mtime = mtime_source.into_mtime();
 
         let mut h = tar::Header::new_ustar();
         h.set_entry_type(tar::EntryType::Regular);

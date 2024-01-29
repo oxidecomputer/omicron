@@ -20,7 +20,7 @@ use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::net::IpAddr;
 use tokio::time::timeout;
 use tokio::time::Duration;
 use uuid::Uuid;
@@ -53,7 +53,7 @@ async fn test_setup<'a>(
         );
     let populate = false;
     builder.start_crdb(populate).await;
-    let schema_dir = PathBuf::from(SCHEMA_DIR);
+    let schema_dir = Utf8PathBuf::from(SCHEMA_DIR);
     builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
@@ -192,6 +192,7 @@ enum AnySqlType {
     String(String),
     TextArray(Vec<String>),
     Uuid(Uuid),
+    Inet(IpAddr),
     // TODO: This isn't exhaustive, feel free to add more.
     //
     // These should only be necessary for rows where the database schema changes also choose to
@@ -231,6 +232,12 @@ impl From<String> for AnySqlType {
 impl From<Uuid> for AnySqlType {
     fn from(value: Uuid) -> Self {
         Self::Uuid(value)
+    }
+}
+
+impl From<IpAddr> for AnySqlType {
+    fn from(value: IpAddr) -> Self {
+        Self::Inet(value)
     }
 }
 
@@ -278,6 +285,9 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
             return Ok(AnySqlType::TextArray(Vec::<String>::from_sql(
                 ty, raw,
             )?));
+        }
+        if IpAddr::accepts(ty) {
+            return Ok(AnySqlType::Inet(IpAddr::from_sql(ty, raw)?));
         }
 
         use tokio_postgres::types::Kind;
@@ -468,10 +478,14 @@ async fn nexus_applies_update_on_boot() {
     // Start Nexus. It should auto-format itself to the latest version,
     // upgrading through each intermediate update.
     //
+    // The timeout here is a bit longer than usual (120s vs 60s) because if
+    // lots of tests are running at the same time, there can be contention
+    // here.
+    //
     // NOTE: If this grows excessively, we could break it into several smaller
     // tests.
     assert!(
-        timeout(Duration::from_secs(60), builder.start_nexus_internal())
+        timeout(Duration::from_secs(120), builder.start_nexus_internal())
             .await
             .is_ok(),
         "Nexus should have started"
@@ -937,9 +951,18 @@ const SILO1: Uuid = Uuid::from_u128(0x111151F0_5c3d_4647_83b0_8f3515da7be1);
 const SILO2: Uuid = Uuid::from_u128(0x222251F0_5c3d_4647_83b0_8f3515da7be1);
 
 // "6001" -> "Pool"
+const POOL0: Uuid = Uuid::from_u128(0x00006001_5c3d_4647_83b0_8f3515da7be1);
 const POOL1: Uuid = Uuid::from_u128(0x11116001_5c3d_4647_83b0_8f3515da7be1);
 const POOL2: Uuid = Uuid::from_u128(0x22226001_5c3d_4647_83b0_8f3515da7be1);
 const POOL3: Uuid = Uuid::from_u128(0x33336001_5c3d_4647_83b0_8f3515da7be1);
+const POOL4: Uuid = Uuid::from_u128(0x44446001_5c3d_4647_83b0_8f3515da7be1);
+
+// "513D" -> "Sled"
+const SLED1: Uuid = Uuid::from_u128(0x1111513d_5c3d_4647_83b0_8f3515da7be1);
+const SLED2: Uuid = Uuid::from_u128(0x2222513d_5c3d_4647_83b0_8f3515da7be1);
+
+// "7AC4" -> "Rack"
+const RACK1: Uuid = Uuid::from_u128(0x11117ac4_5c3d_4647_83b0_8f3515da7be1);
 
 fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async move {
@@ -954,9 +977,11 @@ fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
         // no corresponding silo.
         client.batch_execute(&format!("INSERT INTO ip_pool
             (id, name, description, time_created, time_modified, time_deleted, rcgen, silo_id, is_default) VALUES
+          ('{POOL0}', 'pool2', '', now(), now(), now(), 1, '{SILO2}', true),
           ('{POOL1}', 'pool1', '', now(), now(), NULL, 1, '{SILO1}', true),
           ('{POOL2}', 'pool2', '', now(), now(), NULL, 1, '{SILO2}', false),
-          ('{POOL3}', 'pool3', '', now(), now(), NULL, 1, null, true);
+          ('{POOL3}', 'pool3', '', now(), now(), NULL, 1, null, true),
+          ('{POOL4}', 'pool4', '', now(), now(), NULL, 1, null, false);
         ")).await.expect("Failed to create IP Pool");
     })
 }
@@ -971,55 +996,95 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
             .expect("Failed to query ip pool resource");
         let ip_pool_resources = process_rows(&rows);
 
-        assert_eq!(ip_pool_resources.len(), 4);
+        assert_eq!(ip_pool_resources.len(), 6);
 
-        let type_silo = SqlEnum::from(("ip_pool_resource_type", "silo"));
+        fn assert_row(
+            row: &Vec<ColumnValue>,
+            ip_pool_id: Uuid,
+            silo_id: Uuid,
+            is_default: bool,
+        ) {
+            let type_silo = SqlEnum::from(("ip_pool_resource_type", "silo"));
+            assert_eq!(
+                row,
+                &vec![
+                    ColumnValue::new("ip_pool_id", ip_pool_id),
+                    ColumnValue::new("resource_type", type_silo),
+                    ColumnValue::new("resource_id", silo_id),
+                    ColumnValue::new("is_default", is_default),
+                ],
+            );
+        }
 
-        // pool1, which referenced silo1 in the "ip_pool" table, has a newly
-        // created resource.
-        //
-        // The same relationship is true for pool2 / silo2.
+        // pool1 was default on silo1, so gets an entry in the join table
+        // reflecting that
+        assert_row(&ip_pool_resources[0].values, POOL1, SILO1, true);
+
+        // pool1 was default on silo1, so gets an entry in the join table
+        // reflecting that
+        assert_row(&ip_pool_resources[1].values, POOL2, SILO2, false);
+
+        // fleet-scoped silos are a little more complicated
+
+        // pool3 was a fleet-level default, so now it's associated with both
+        // silos. silo1 had its own default pool as well (pool1), so pool3
+        // cannot also be default for silo1. silo2 did not have its own default,
+        // so pool3 is default for silo2.
+        assert_row(&ip_pool_resources[2].values, POOL3, SILO1, false);
+        assert_row(&ip_pool_resources[3].values, POOL3, SILO2, true);
+
+        // fleet-level pool that was not default becomes non-default on all silos
+        assert_row(&ip_pool_resources[4].values, POOL4, SILO1, false);
+        assert_row(&ip_pool_resources[5].values, POOL4, SILO2, false);
+    })
+}
+
+fn before_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    // IP addresses were pulled off dogfood sled 16
+    Box::pin(async move {
+        // Create two sleds
+        client
+            .batch_execute(&format!(
+                "INSERT INTO sled
+            (id, time_created, time_modified, time_deleted, rcgen, rack_id,
+            is_scrimlet, serial_number, part_number, revision,
+            usable_hardware_threads, usable_physical_ram, reservoir_size, ip,
+            port, last_used_address, provision_state) VALUES
+
+          ('{SLED1}', now(), now(), NULL, 1, '{RACK1}', true, 'abcd', 'defg',
+             '1', 64, 12345678, 77, 'fd00:1122:3344:104::1', 12345,
+            'fd00:1122:3344:104::1ac', 'provisionable'),
+          ('{SLED2}', now(), now(), NULL, 1, '{RACK1}', false, 'zzzz', 'xxxx',
+             '2', 64, 12345678, 77,'fd00:1122:3344:107::1', 12345,
+            'fd00:1122:3344:107::d4', 'provisionable');
+        "
+            ))
+            .await
+            .expect("Failed to create sleds");
+    })
+}
+
+fn after_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
+        let rows = client
+            .query("SELECT last_used_address FROM sled ORDER BY id", &[])
+            .await
+            .expect("Failed to sled last_used_address");
+        let last_used_addresses = process_rows(&rows);
+
+        let expected_addr_1: IpAddr =
+            "fd00:1122:3344:104::ffff".parse().unwrap();
+        let expected_addr_2: IpAddr =
+            "fd00:1122:3344:107::ffff".parse().unwrap();
+
         assert_eq!(
-            ip_pool_resources[0].values,
-            vec![
-                ColumnValue::new("ip_pool_id", POOL1),
-                ColumnValue::new("resource_type", type_silo.clone()),
-                ColumnValue::new("resource_id", SILO1),
-                ColumnValue::new("is_default", true),
-            ],
+            last_used_addresses[0].values,
+            vec![ColumnValue::new("last_used_address", expected_addr_1)]
         );
         assert_eq!(
-            ip_pool_resources[1].values,
-            vec![
-                ColumnValue::new("ip_pool_id", POOL2),
-                ColumnValue::new("resource_type", type_silo.clone()),
-                ColumnValue::new("resource_id", SILO2),
-                ColumnValue::new("is_default", false),
-            ],
-        );
-
-        // pool3 did not previously have a corresponding silo, so now it's associated
-        // with both silos as a new resource in each.
-        //
-        // Additionally, silo1 already had a default pool (pool1), but silo2 did
-        // not have one. As a result, pool3 becomes the new default pool for silo2.
-        assert_eq!(
-            ip_pool_resources[2].values,
-            vec![
-                ColumnValue::new("ip_pool_id", POOL3),
-                ColumnValue::new("resource_type", type_silo.clone()),
-                ColumnValue::new("resource_id", SILO1),
-                ColumnValue::new("is_default", false),
-            ],
-        );
-        assert_eq!(
-            ip_pool_resources[3].values,
-            vec![
-                ColumnValue::new("ip_pool_id", POOL3),
-                ColumnValue::new("resource_type", type_silo.clone()),
-                ColumnValue::new("resource_id", SILO2),
-                ColumnValue::new("is_default", true),
-            ],
+            last_used_addresses[1].values,
+            vec![ColumnValue::new("last_used_address", expected_addr_2)]
         );
     })
 }
@@ -1036,6 +1101,10 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion(semver::Version::parse("23.0.0").unwrap()),
         DataMigrationFns { before: Some(before_23_0_0), after: after_23_0_0 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("24.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_24_0_0), after: after_24_0_0 },
     );
 
     map

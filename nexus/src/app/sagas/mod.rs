@@ -27,6 +27,8 @@ pub mod image_delete;
 mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
+pub mod instance_ip_attach;
+pub mod instance_ip_detach;
 pub mod instance_migrate;
 pub mod instance_start;
 pub mod loopback_address_create;
@@ -129,6 +131,12 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <instance_delete::SagaInstanceDelete as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_ip_attach::SagaInstanceIpAttach as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <instance_ip_detach::SagaInstanceIpDetach as NexusSaga>::register_actions(
         &mut registry,
     );
     <instance_migrate::SagaInstanceMigrate as NexusSaga>::register_actions(

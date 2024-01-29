@@ -12,8 +12,8 @@ use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
 use omicron_common::api::external::{
-    ByteCount, Digest, IdentityMetadata, InstanceState, Ipv4Net, Ipv6Net, Name,
-    ObjectIdentity, RoleName, SemverVersion, SimpleIdentity,
+    ByteCount, Digest, Error, IdentityMetadata, InstanceState, Ipv4Net,
+    Ipv6Net, Name, ObjectIdentity, RoleName, SimpleIdentity,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -303,10 +303,22 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
 }
 
+/// An IP pool in the context of a silo
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct SiloIpPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// When a pool is the default for a silo, floating IPs and instance
+    /// ephemeral IPs will come from that pool when no other pool is specified.
+    /// There can be at most one default for a given silo.
+    pub is_default: bool,
+}
+
 /// A link between an IP pool and a silo that allows one to allocate IPs from
 /// the pool within the silo
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct IpPoolSilo {
+pub struct IpPoolSiloLink {
     pub ip_pool_id: Uuid,
     pub silo_id: Uuid,
     /// When a pool is the default for a silo, floating IPs and instance
@@ -325,16 +337,34 @@ pub struct IpPoolRange {
 
 // INSTANCE EXTERNAL IP ADDRESSES
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct ExternalIp {
-    pub ip: IpAddr,
-    pub kind: IpKind,
+#[derive(Debug, Clone, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExternalIp {
+    Ephemeral { ip: IpAddr },
+    Floating(FloatingIp),
+}
+
+impl ExternalIp {
+    pub fn ip(&self) -> IpAddr {
+        match self {
+            Self::Ephemeral { ip } => *ip,
+            Self::Floating(float) => float.ip,
+        }
+    }
+
+    pub fn kind(&self) -> IpKind {
+        match self {
+            Self::Ephemeral { .. } => IpKind::Ephemeral,
+            Self::Floating(_) => IpKind::Floating,
+        }
+    }
 }
 
 /// A Floating IP is a well-known IP address which can be attached
 /// and detached from instances.
-#[derive(ObjectIdentity, Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ObjectIdentity, Debug, PartialEq, Clone, Deserialize, Serialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct FloatingIp {
     #[serde(flatten)]
@@ -346,6 +376,25 @@ pub struct FloatingIp {
     /// The ID of the instance that this Floating IP is attached to,
     /// if it is presently in use.
     pub instance_id: Option<Uuid>,
+}
+
+impl From<FloatingIp> for ExternalIp {
+    fn from(value: FloatingIp) -> Self {
+        ExternalIp::Floating(value)
+    }
+}
+
+impl TryFrom<ExternalIp> for FloatingIp {
+    type Error = Error;
+
+    fn try_from(value: ExternalIp) -> Result<Self, Self::Error> {
+        match value {
+            ExternalIp::Ephemeral { .. } => Err(Error::internal_error(
+                "tried to convert an ephemeral IP into a floating IP",
+            )),
+            ExternalIp::Floating(v) => Ok(v),
+        }
+    }
 }
 
 // RACKS
@@ -428,7 +477,7 @@ pub struct Switch {
 ///
 /// Physical disks reside in a particular sled and are used to store both
 /// Instance Disk data as well as internal metadata.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct PhysicalDisk {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
@@ -557,65 +606,6 @@ pub struct DeviceAccessTokenGrant {
 #[serde(rename_all = "snake_case")]
 pub enum DeviceAccessTokenType {
     Bearer,
-}
-
-// SYSTEM UPDATES
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct VersionRange {
-    pub low: SemverVersion,
-    pub high: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum UpdateStatus {
-    Updating,
-    Steady,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
-pub struct SystemVersion {
-    pub version_range: VersionRange,
-    pub status: UpdateStatus,
-    // TODO: time_released? time_last_applied? I got a fever and the only
-    // prescription is more timestamps
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdate {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ComponentUpdate {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-
-    pub component_type: shared::UpdateableComponentType,
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateableComponent {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-
-    pub device_id: String,
-    pub component_type: shared::UpdateableComponentType,
-    pub version: SemverVersion,
-    pub system_version: SemverVersion,
-    pub status: UpdateStatus,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateDeployment {
-    #[serde(flatten)]
-    pub identity: AssetIdentityMetadata,
-    pub version: SemverVersion,
-    pub status: UpdateStatus,
 }
 
 // SYSTEM HEALTH

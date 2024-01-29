@@ -153,13 +153,10 @@ use tokio::time::MissedTickBehavior;
 ///
 /// See module-level documentation for details.
 pub trait BackgroundTask: Send + Sync {
-    fn activate<'a, 'b, 'c>(
+    fn activate<'a>(
         &'a mut self,
-        opctx: &'b OpContext,
-    ) -> BoxFuture<'c, serde_json::Value>
-    where
-        'a: 'c,
-        'b: 'c;
+        opctx: &'a OpContext,
+    ) -> BoxFuture<'a, serde_json::Value>;
 }
 
 /// Drives the execution of background tasks
@@ -501,14 +498,10 @@ mod test {
     }
 
     impl BackgroundTask for ReportingTask {
-        fn activate<'a, 'b, 'c>(
+        fn activate<'a>(
             &'a mut self,
-            _: &'b OpContext,
-        ) -> BoxFuture<'c, serde_json::Value>
-        where
-            'a: 'c,
-            'b: 'c,
-        {
+            _: &'a OpContext,
+        ) -> BoxFuture<'a, serde_json::Value> {
             async {
                 let count = self.counter;
                 self.counter += 1;
@@ -686,14 +679,10 @@ mod test {
     }
 
     impl BackgroundTask for PausingTask {
-        fn activate<'a, 'b, 'c>(
+        fn activate<'a>(
             &'a mut self,
-            _: &'b OpContext,
-        ) -> BoxFuture<'c, serde_json::Value>
-        where
-            'a: 'c,
-            'b: 'c,
-        {
+            _: &'a OpContext,
+        ) -> BoxFuture<'a, serde_json::Value> {
             async {
                 let count = self.counter;
                 self.counter += 1;
@@ -840,14 +829,10 @@ mod test {
     }
 
     impl BackgroundTask for SagaRequestTask {
-        fn activate<'a, 'b, 'c>(
+        fn activate<'a>(
             &'a mut self,
-            _: &'b OpContext,
-        ) -> BoxFuture<'c, serde_json::Value>
-        where
-            'a: 'c,
-            'b: 'c,
-        {
+            _: &'a OpContext,
+        ) -> BoxFuture<'a, serde_json::Value> {
             async {
                 let _ = self.saga_request.send(SagaRequest::TestOnly).await;
                 serde_json::Value::Null

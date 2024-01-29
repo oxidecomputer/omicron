@@ -702,7 +702,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 dns_servers,
                 domain,
                 ntp_servers,
-                snat_cfg: snat_cfg.into(),
+                snat_cfg,
                 nic: nic.into(),
             },
             OmicronZoneType::Clickhouse { address, dataset } => {
@@ -816,6 +816,16 @@ pub struct CleanupContextUpdate {
     pub priority: Option<PriorityOrder>,
     /// The new limit on the underlying dataset quota allowed for bundles.
     pub storage_limit: Option<u8>,
+}
+
+/// Used to dynamically update external IPs attached to an instance.
+#[derive(
+    Copy, Clone, Debug, Eq, PartialEq, Hash, Deserialize, JsonSchema, Serialize,
+)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum InstanceExternalIpBody {
+    Ephemeral(IpAddr),
+    Floating(IpAddr),
 }
 
 // Our SledRole and Baseboard types do not have to be identical to the Nexus

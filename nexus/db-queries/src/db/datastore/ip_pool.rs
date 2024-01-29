@@ -10,11 +10,12 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::SERVICE_IP_POOL_NAME;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
-use crate::db::fixed_data::silo::INTERNAL_SILO_ID;
 use crate::db::identity::Resource;
+use crate::db::lookup::LookupPath;
 use crate::db::model::ExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::IpPool;
@@ -56,7 +57,6 @@ impl DataStore {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<IpPool> {
         use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
 
         opctx
             .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
@@ -71,57 +71,9 @@ impl DataStore {
                 &pagparams.map_name(|n| Name::ref_cast(n)),
             ),
         }
-        .left_outer_join(ip_pool_resource::table)
-        .filter(
-            ip_pool_resource::resource_id
-                .ne(*INTERNAL_SILO_ID)
-                // resource_id is not nullable -- null here means the
-                // pool has no entry in the join table
-                .or(ip_pool_resource::resource_id.is_null()),
-        )
+        .filter(ip_pool::name.ne(SERVICE_IP_POOL_NAME))
         .filter(ip_pool::time_deleted.is_null())
         .select(IpPool::as_select())
-        .get_results_async(&*self.pool_connection_authorized(opctx).await?)
-        .await
-        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    /// List IP pools linked to the current silo
-    pub async fn silo_ip_pools_list(
-        &self,
-        opctx: &OpContext,
-        pagparams: &PaginatedBy<'_>,
-    ) -> ListResultVec<db::model::IpPool> {
-        use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
-
-        // From the developer user's point of view, we treat IP pools linked to
-        // their silo as silo resources, so they can list them if they can list
-        // silo children
-        let authz_silo =
-            opctx.authn.silo_required().internal_context("listing IP pools")?;
-        opctx.authorize(authz::Action::ListChildren, &authz_silo).await?;
-
-        let silo_id = authz_silo.id();
-
-        match pagparams {
-            PaginatedBy::Id(pagparams) => {
-                paginated(ip_pool::table, ip_pool::id, pagparams)
-            }
-            PaginatedBy::Name(pagparams) => paginated(
-                ip_pool::table,
-                ip_pool::name,
-                &pagparams.map_name(|n| Name::ref_cast(n)),
-            ),
-        }
-        .inner_join(ip_pool_resource::table)
-        .filter(
-            ip_pool_resource::resource_type
-                .eq(IpPoolResourceType::Silo)
-                .and(ip_pool_resource::resource_id.eq(silo_id)),
-        )
-        .filter(ip_pool::time_deleted.is_null())
-        .select(db::model::IpPool::as_select())
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -182,12 +134,8 @@ impl DataStore {
         //     .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
         //     .await?;
 
-        // join ip_pool to ip_pool_resource and filter
-
-        // used in both success and error outcomes
-        let lookup_type = LookupType::ByCompositeId(
-            "Default pool for current silo".to_string(),
-        );
+        let lookup_type =
+            LookupType::ByOther("default IP pool for current silo".to_string());
 
         ip_pool::table
             .inner_join(ip_pool_resource::table)
@@ -209,9 +157,6 @@ impl DataStore {
             )
             .await
             .map_err(|e| {
-                // janky to do this manually, but this is an unusual kind of
-                // lookup in that it is by (silo_id, is_default=true), which is
-                // arguably a composite ID.
                 public_error_from_diesel_lookup(
                     e,
                     ResourceType::IpPool,
@@ -225,48 +170,15 @@ impl DataStore {
             })
     }
 
-    /// Looks up an IP pool intended for internal services.
+    /// Look up IP pool intended for internal services by its well-known name.
     ///
     /// This method may require an index by Availability Zone in the future.
     pub async fn ip_pools_service_lookup(
         &self,
         opctx: &OpContext,
     ) -> LookupResult<(authz::IpPool, IpPool)> {
-        use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
-
-        opctx
-            .authorize(authz::Action::ListChildren, &authz::IP_POOL_LIST)
-            .await?;
-
-        // Look up IP pool by its association with the internal silo.
-        // We assume there is only one pool for that silo, or at least,
-        // if there is more than one, it doesn't matter which one we pick.
-        let (authz_pool, pool) = ip_pool::table
-            .inner_join(ip_pool_resource::table)
-            .filter(ip_pool::time_deleted.is_null())
-            .filter(
-                ip_pool_resource::resource_type
-                    .eq(IpPoolResourceType::Silo)
-                    .and(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID)),
-            )
-            .select(IpPool::as_select())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-            .map(|ip_pool| {
-                (
-                    authz::IpPool::new(
-                        authz::FLEET,
-                        ip_pool.id(),
-                        LookupType::ByCompositeId(
-                            "Service IP Pool".to_string(),
-                        ),
-                    ),
-                    ip_pool,
-                )
-            })?;
-        Ok((authz_pool, pool))
+        let name = SERVICE_IP_POOL_NAME.parse().unwrap();
+        LookupPath::new(&opctx, self).ip_pool_name(&Name(name)).fetch().await
     }
 
     /// Creates a new IP pool.
@@ -305,38 +217,21 @@ impl DataStore {
         use db::schema::ip_pool_resource;
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         // Verify there are no IP ranges still in this pool
         let range = ip_pool_range::dsl::ip_pool_range
             .filter(ip_pool_range::dsl::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::dsl::time_deleted.is_null())
             .select(ip_pool_range::dsl::id)
             .limit(1)
-            .first_async::<Uuid>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
+            .first_async::<Uuid>(&*conn)
             .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         if range.is_some() {
             return Err(Error::invalid_request(
                 "IP Pool cannot be deleted while it contains IP ranges",
-            ));
-        }
-
-        // Verify there are no linked silos
-        let silo_link = ip_pool_resource::table
-            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
-            .select(ip_pool_resource::resource_id)
-            .limit(1)
-            .first_async::<Uuid>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .optional()
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        if silo_link.is_some() {
-            return Err(Error::invalid_request(
-                "IP Pool cannot be deleted while it is linked to a silo",
             ));
         }
 
@@ -349,7 +244,7 @@ impl DataStore {
             .filter(dsl::id.eq(authz_pool.id()))
             .filter(dsl::rcgen.eq(db_pool.rcgen))
             .set(dsl::time_deleted.eq(now))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -363,6 +258,18 @@ impl DataStore {
                 "deletion failed due to concurrent modification",
             ));
         }
+
+        // Rather than treating outstanding links as a blocker for pool delete,
+        // just delete them. If we've gotten this far, we know there are no
+        // ranges in the pool, which means it can't be in use.
+
+        // delete any links from this pool to any other resources (silos)
+        diesel::delete(ip_pool_resource::table)
+            .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
@@ -374,15 +281,10 @@ impl DataStore {
         authz_pool: &authz::IpPool,
     ) -> LookupResult<bool> {
         use db::schema::ip_pool;
-        use db::schema::ip_pool_resource;
 
         ip_pool::table
-            .inner_join(ip_pool_resource::table)
             .filter(ip_pool::id.eq(authz_pool.id()))
-            .filter(
-                ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo),
-            )
-            .filter(ip_pool_resource::resource_id.eq(*INTERNAL_SILO_ID))
+            .filter(ip_pool::name.eq(SERVICE_IP_POOL_NAME))
             .filter(ip_pool::time_deleted.is_null())
             .select(ip_pool::id)
             .first_async::<Uuid>(
@@ -441,6 +343,37 @@ impl DataStore {
         .load_async::<IpPoolResource>(
             &*self.pool_connection_authorized(opctx).await?,
         )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Returns (IpPool, IpPoolResource) so we can know in the calling code
+    /// whether the pool is default for the silo
+    pub async fn silo_ip_pool_list(
+        &self,
+        opctx: &OpContext,
+        authz_silo: &authz::Silo,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<(IpPool, IpPoolResource)> {
+        use db::schema::ip_pool;
+        use db::schema::ip_pool_resource;
+
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(ip_pool::table, ip_pool::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                ip_pool::table,
+                ip_pool::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .inner_join(ip_pool_resource::table)
+        .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
+        .filter(ip_pool_resource::resource_type.eq(IpPoolResourceType::Silo))
+        .filter(ip_pool::time_deleted.is_null())
+        .select(<(IpPool, IpPoolResource)>::as_select())
+        .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -912,8 +845,11 @@ mod test {
             .await
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 0);
+
+        let authz_silo = opctx.authn.silo_required().unwrap();
+
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -938,7 +874,7 @@ mod test {
             .expect("Should list IP pools");
         assert_eq!(all_pools.len(), 1);
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
@@ -974,11 +910,12 @@ mod test {
 
         // now it shows up in the silo list
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 1);
-        assert_eq!(silo_pools[0].id(), pool1_for_silo.id());
+        assert_eq!(silo_pools[0].0.id(), pool1_for_silo.id());
+        assert_eq!(silo_pools[0].1.is_default, false);
 
         // linking an already linked silo errors due to PK conflict
         let err = datastore
@@ -1043,7 +980,7 @@ mod test {
 
         // and silo pools list is empty again
         let silo_pools = datastore
-            .silo_ip_pools_list(&opctx, &pagbyid)
+            .silo_ip_pool_list(&opctx, &authz_silo, &pagbyid)
             .await
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);

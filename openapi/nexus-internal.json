@@ -18,10 +18,10 @@
           {
             "in": "path",
             "name": "kind",
-            "description": "The kind of update artifact this is.",
+            "description": "The kind of artifact this is.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/KnownArtifactKind"
+              "type": "string"
             }
           },
           {
@@ -112,6 +112,240 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BackgroundTask"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/blueprints/all": {
+      "get": {
+        "summary": "Lists blueprints",
+        "operationId": "blueprint_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlueprintMetadataResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
+    "/deployment/blueprints/all/{blueprint_id}": {
+      "get": {
+        "summary": "Fetches one blueprint",
+        "operationId": "blueprint_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "blueprint_id",
+            "description": "ID of the blueprint",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blueprint"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Deletes one blueprint",
+        "operationId": "blueprint_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "blueprint_id",
+            "description": "ID of the blueprint",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/blueprints/generate-from-collection": {
+      "post": {
+        "summary": "Generates a new blueprint matching the specified inventory collection",
+        "operationId": "blueprint_generate_from_collection",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectionId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blueprint"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/blueprints/regenerate": {
+      "post": {
+        "summary": "Generates a new blueprint for the current system, re-evaluating anything",
+        "description": "that's changed since the last one was generated",
+        "operationId": "blueprint_regenerate",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Blueprint"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/blueprints/target": {
+      "get": {
+        "summary": "Fetches the current target blueprint, if any",
+        "operationId": "blueprint_target_view",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlueprintTarget"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Make the specified blueprint the new target",
+        "operationId": "blueprint_target_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlueprintTargetSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlueprintTarget"
                 }
               }
             }
@@ -1844,6 +2078,159 @@
           "range"
         ]
       },
+      "Blueprint": {
+        "description": "Describes a complete set of software and configuration for the system",
+        "type": "object",
+        "properties": {
+          "comment": {
+            "description": "human-readable string describing why this blueprint was created (for debugging)",
+            "type": "string"
+          },
+          "creator": {
+            "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique identifier for this blueprint",
+            "type": "string",
+            "format": "uuid"
+          },
+          "omicron_zones": {
+            "description": "mapping: sled id -> zones deployed on each sled A sled is considered part of the control plane cluster iff it has an entry in this map.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/OmicronZonesConfig"
+            }
+          },
+          "parent_blueprint_id": {
+            "nullable": true,
+            "description": "which blueprint this blueprint is based on",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "when this blueprint was generated (for debugging)",
+            "type": "string",
+            "format": "date-time"
+          },
+          "zones_in_service": {
+            "description": "Omicron zones considered in-service (which generally means that they should appear in DNS)",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "comment",
+          "creator",
+          "id",
+          "omicron_zones",
+          "time_created",
+          "zones_in_service"
+        ]
+      },
+      "BlueprintMetadata": {
+        "description": "Describe high-level metadata about a blueprint",
+        "type": "object",
+        "properties": {
+          "comment": {
+            "description": "human-readable string describing why this blueprint was created (for debugging)",
+            "type": "string"
+          },
+          "creator": {
+            "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique identifier for this blueprint",
+            "type": "string",
+            "format": "uuid"
+          },
+          "parent_blueprint_id": {
+            "nullable": true,
+            "description": "which blueprint this blueprint is based on",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "when this blueprint was generated (for debugging)",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "comment",
+          "creator",
+          "id",
+          "time_created"
+        ]
+      },
+      "BlueprintMetadataResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlueprintMetadata"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "BlueprintTarget": {
+        "description": "Describes what blueprint, if any, the system is currently working toward",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "description": "policy: should the system actively work towards this blueprint\n\nThis should generally be left enabled.",
+            "type": "boolean"
+          },
+          "target_id": {
+            "description": "id of the blueprint that the system is trying to make real",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_made_target": {
+            "description": "when this blueprint was made the target",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "enabled",
+          "target_id",
+          "time_made_target"
+        ]
+      },
+      "BlueprintTargetSet": {
+        "description": "Specifies what blueprint, if any, the system should be working toward",
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "target_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "enabled",
+          "target_id"
+        ]
+      },
       "ByteCount": {
         "description": "Byte count to express memory or storage capacity.",
         "type": "integer",
@@ -1863,6 +2250,18 @@
         "required": [
           "cert",
           "key"
+        ]
+      },
+      "CollectionId": {
+        "type": "object",
+        "properties": {
+          "collection_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "collection_id"
         ]
       },
       "Cumulativedouble": {
@@ -2855,6 +3254,7 @@
         ]
       },
       "DnsConfigParams": {
+        "description": "DnsConfigParams\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"generation\", \"time_created\", \"zones\" ], \"properties\": { \"generation\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"time_created\": { \"type\": \"string\", \"format\": \"date-time\" }, \"zones\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsConfigZone\" } } } } ``` </details>",
         "type": "object",
         "properties": {
           "generation": {
@@ -2880,6 +3280,7 @@
         ]
       },
       "DnsConfigZone": {
+        "description": "DnsConfigZone\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"records\", \"zone_name\" ], \"properties\": { \"records\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsRecord\" } } }, \"zone_name\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "records": {
@@ -2901,6 +3302,7 @@
         ]
       },
       "DnsRecord": {
+        "description": "DnsRecord\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv4\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"A\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"AAAA\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"$ref\": \"#/components/schemas/Srv\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"SRV\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -3825,6 +4227,17 @@
           }
         ]
       },
+      "IpNet": {
+        "description": "IpNet\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"title\": \"v4\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Ipv4Net\" } ] }, { \"title\": \"v6\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Ipv6Net\" } ] } ] } ``` </details>",
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/Ipv4Net"
+          },
+          {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        ]
+      },
       "IpNetwork": {
         "oneOf": [
           {
@@ -3912,6 +4325,10 @@
           "vni"
         ]
       },
+      "Ipv4Net": {
+        "description": "An IPv4 subnet, including prefix and subnet mask\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"An IPv4 subnet\", \"description\": \"An IPv4 subnet, including prefix and subnet mask\", \"examples\": [ \"192.168.1.0/24\" ], \"type\": \"string\", \"pattern\": \"^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$\" } ``` </details>",
+        "type": "string"
+      },
       "Ipv4Network": {
         "type": "string",
         "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
@@ -3933,6 +4350,10 @@
           "first",
           "last"
         ]
+      },
+      "Ipv6Net": {
+        "description": "An IPv6 subnet, including prefix and subnet mask\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"An IPv6 subnet\", \"description\": \"An IPv6 subnet, including prefix and subnet mask\", \"examples\": [ \"fd12:3456::/64\" ], \"type\": \"string\", \"pattern\": \"^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$\" } ``` </details>",
+        "type": "string"
       },
       "Ipv6Network": {
         "type": "string",
@@ -4272,6 +4693,99 @@
         "minLength": 1,
         "maxLength": 63
       },
+      "NetworkInterface": {
+        "description": "Information required to construct a virtual network interface\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Information required to construct a virtual network interface\", \"type\": \"object\", \"required\": [ \"id\", \"ip\", \"kind\", \"mac\", \"name\", \"primary\", \"slot\", \"subnet\", \"vni\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"ip\": { \"type\": \"string\", \"format\": \"ip\" }, \"kind\": { \"$ref\": \"#/components/schemas/NetworkInterfaceKind\" }, \"mac\": { \"$ref\": \"#/components/schemas/MacAddr\" }, \"name\": { \"$ref\": \"#/components/schemas/Name\" }, \"primary\": { \"type\": \"boolean\" }, \"slot\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"subnet\": { \"$ref\": \"#/components/schemas/IpNet\" }, \"vni\": { \"$ref\": \"#/components/schemas/Vni\" } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NetworkInterfaceKind"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "subnet": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "id",
+          "ip",
+          "kind",
+          "mac",
+          "name",
+          "primary",
+          "slot",
+          "subnet",
+          "vni"
+        ]
+      },
+      "NetworkInterfaceKind": {
+        "description": "The type of network interface\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"The type of network interface\", \"oneOf\": [ { \"description\": \"A vNIC attached to a guest instance\", \"type\": \"object\", \"required\": [ \"id\", \"type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"instance\" ] } } }, { \"description\": \"A vNIC associated with an internal service\", \"type\": \"object\", \"required\": [ \"id\", \"type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"service\" ] } } } ] } ``` </details>",
+        "oneOf": [
+          {
+            "description": "A vNIC attached to a guest instance",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with an internal service",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        ]
+      },
       "NewPasswordHash": {
         "title": "A password hash in PHC string format",
         "description": "Password hashes must be in PHC (Password Hashing Competition) string format.  Passwords must be hashed with Argon2id.  Password hashes may be rejected if the parameters appear not to be secure enough.",
@@ -4280,6 +4794,410 @@
       "NodeName": {
         "description": "Unique name for a saga [`Node`]\n\nEach node requires a string name that's unique within its DAG.  The name is used to identify its output.  Nodes that depend on a given node (either directly or indirectly) can access the node's output using its name.",
         "type": "string"
+      },
+      "OmicronZoneConfig": {
+        "description": "Describes one Omicron-managed zone running on a sled\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes one Omicron-managed zone running on a sled\", \"type\": \"object\", \"required\": [ \"id\", \"underlay_address\", \"zone_type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"underlay_address\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"zone_type\": { \"$ref\": \"#/components/schemas/OmicronZoneType\" } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "underlay_address": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "zone_type": {
+            "$ref": "#/components/schemas/OmicronZoneType"
+          }
+        },
+        "required": [
+          "id",
+          "underlay_address",
+          "zone_type"
+        ]
+      },
+      "OmicronZoneDataset": {
+        "description": "Describes a persistent ZFS dataset associated with an Omicron zone\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes a persistent ZFS dataset associated with an Omicron zone\", \"type\": \"object\", \"required\": [ \"pool_name\" ], \"properties\": { \"pool_name\": { \"$ref\": \"#/components/schemas/ZpoolName\" } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "pool_name": {
+            "$ref": "#/components/schemas/ZpoolName"
+          }
+        },
+        "required": [
+          "pool_name"
+        ]
+      },
+      "OmicronZoneType": {
+        "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"address\", \"dns_servers\", \"nic\", \"ntp_servers\", \"snat_cfg\", \"type\" ], \"properties\": { \"address\": { \"type\": \"string\" }, \"dns_servers\": { \"type\": \"array\", \"items\": { \"type\": \"string\", \"format\": \"ip\" } }, \"domain\": { \"type\": [ \"string\", \"null\" ] }, \"nic\": { \"description\": \"The service vNIC providing outbound connectivity using OPTE.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/NetworkInterface\" } ] }, \"ntp_servers\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } }, \"snat_cfg\": { \"description\": \"The SNAT configuration for outbound connections.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SourceNatConfig\" } ] }, \"type\": { \"type\": \"string\", \"enum\": [ \"boundary_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"address\", \"dataset\", \"type\" ], \"properties\": { \"address\": { \"type\": \"string\" }, \"dataset\": { \"$ref\": \"#/components/schemas/OmicronZoneDataset\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"clickhouse\" ] } } }, { \"type\": \"object\", \"required\": [ \"address\", \"dataset\", \"type\" ], \"properties\": { \"address\": { \"type\": \"string\" }, \"dataset\": { \"$ref\": \"#/components/schemas/OmicronZoneDataset\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"clickhouse_keeper\" ] } } }, { \"type\": \"object\", \"required\": [ \"address\", \"dataset\", \"type\" ], \"properties\": { \"address\": { \"type\": \"string\" }, \"dataset\": { \"$ref\": \"#/components/schemas/OmicronZoneDataset\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"cockroach_db\" ] } } }, { \"type\": \"object\", \"required\": [ \"address\", \"dataset\", \"type\" ], \"properties\": { \"address\": { \"type\": \"string\" }, \"dataset\": { \"$ref\": \"#/components/schemas/OmicronZoneDataset\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"crucible\" ] } } }, { \"type\": \"object\", \"required\": [ \"address\", \"type\" ], \"properties\": { \"address\": { \"type\": \"string\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"crucible_pantry\" ] } } }, { \"type\": \"object\", \"required\": [ \"dataset\", \"dns_address\", \"http_address\", \"nic\", \"type\" ], \"properties\": { \"dataset\": { \"$ref\": \"#/components/schemas/OmicronZoneDataset\" }, \"dns_address\": { \"description\": \"The address at which the external DNS server is reachable.\", \"type\": \"string\" }, \"http_address\": { \"description\": \"The address at which the external DNS server API is reachable.\", \"type\": \"string\" }, \"nic\": { \"description\": \"The service vNIC providing external connectivity using OPTE.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/NetworkInterface\" } ] }, \"type\": { \"type\": \"string\", \"enum\": [ \"external_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"dataset\", \"dns_address\", \"gz_address\", \"gz_address_index\", \"http_address\", \"type\" ], \"properties\": { \"dataset\": { \"$ref\": \"#/components/schemas/OmicronZoneDataset\" }, \"dns_address\": { \"type\": \"string\" }, \"gz_address\": { \"description\": \"The addresses in the global zone which should be created\\n\\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.\", \"type\": \"string\", \"format\": \"ipv6\" }, \"gz_address_index\": { \"description\": \"The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"http_address\": { \"type\": \"string\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"internal_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"address\", \"dns_servers\", \"ntp_servers\", \"type\" ], \"properties\": { \"address\": { \"type\": \"string\" }, \"dns_servers\": { \"type\": \"array\", \"items\": { \"type\": \"string\", \"format\": \"ip\" } }, \"domain\": { \"type\": [ \"string\", \"null\" ] }, \"ntp_servers\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } }, \"type\": { \"type\": \"string\", \"enum\": [ \"internal_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"external_dns_servers\", \"external_ip\", \"external_tls\", \"internal_address\", \"nic\", \"type\" ], \"properties\": { \"external_dns_servers\": { \"description\": \"External DNS servers Nexus can use to resolve external hosts.\", \"type\": \"array\", \"items\": { \"type\": \"string\", \"format\": \"ip\" } }, \"external_ip\": { \"description\": \"The address at which the external nexus server is reachable.\", \"type\": \"string\", \"format\": \"ip\" }, \"external_tls\": { \"description\": \"Whether Nexus's external endpoint should use TLS\", \"type\": \"boolean\" }, \"internal_address\": { \"description\": \"The address at which the internal nexus server is reachable.\", \"type\": \"string\" }, \"nic\": { \"description\": \"The service vNIC providing external connectivity using OPTE.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/NetworkInterface\" } ] }, \"type\": { \"type\": \"string\", \"enum\": [ \"nexus\" ] } } }, { \"type\": \"object\", \"required\": [ \"address\", \"type\" ], \"properties\": { \"address\": { \"type\": \"string\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"oximeter\" ] } } } ] } ``` </details>",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing outbound connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "snat_cfg": {
+                "description": "The SNAT configuration for outbound connections.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceNatConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dns_servers",
+              "nic",
+              "ntp_servers",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
+                "type": "string"
+              },
+              "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "dataset",
+              "dns_address",
+              "http_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "dns_address": {
+                "type": "string"
+              },
+              "gz_address": {
+                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "gz_address_index": {
+                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "http_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "dataset",
+              "dns_address",
+              "gz_address",
+              "gz_address_index",
+              "http_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dns_servers",
+              "ntp_servers",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "external_dns_servers": {
+                "description": "External DNS servers Nexus can use to resolve external hosts.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "external_ip": {
+                "description": "The address at which the external nexus server is reachable.",
+                "type": "string",
+                "format": "ip"
+              },
+              "external_tls": {
+                "description": "Whether Nexus's external endpoint should use TLS",
+                "type": "boolean"
+              },
+              "internal_address": {
+                "description": "The address at which the internal nexus server is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "external_dns_servers",
+              "external_ip",
+              "external_tls",
+              "internal_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          }
+        ]
+      },
+      "OmicronZonesConfig": {
+        "description": "Describes the set of Omicron-managed zones running on a sled\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes the set of Omicron-managed zones running on a sled\", \"type\": \"object\", \"required\": [ \"generation\", \"zones\" ], \"properties\": { \"generation\": { \"description\": \"generation number of this configuration\\n\\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\\n\\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Generation\" } ] }, \"zones\": { \"description\": \"list of running zones\", \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/OmicronZoneConfig\" } } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "zones": {
+            "description": "list of running zones",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmicronZoneConfig"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "zones"
+        ]
       },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
@@ -5508,6 +6426,7 @@
         ]
       },
       "Srv": {
+        "description": "Srv\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"port\", \"prio\", \"target\", \"weight\" ], \"properties\": { \"port\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"prio\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"target\": { \"type\": \"string\" }, \"weight\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 } } } ``` </details>",
         "type": "object",
         "properties": {
           "port": {
@@ -5620,6 +6539,10 @@
         "format": "uint32",
         "minimum": 0
       },
+      "ZpoolName": {
+        "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"The name of a Zpool\", \"description\": \"Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique\", \"type\": \"string\", \"pattern\": \"^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$\" } ``` </details>",
+        "type": "string"
+      },
       "ZpoolPutRequest": {
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
@@ -5651,21 +6574,6 @@
       },
       "ZpoolPutResponse": {
         "type": "object"
-      },
-      "KnownArtifactKind": {
-        "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
-        "type": "string",
-        "enum": [
-          "gimlet_sp",
-          "gimlet_rot",
-          "host",
-          "trampoline",
-          "control_plane",
-          "psc_sp",
-          "psc_rot",
-          "switch_sp",
-          "switch_rot"
-        ]
       },
       "SemverVersion": {
         "type": "string",

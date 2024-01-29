@@ -17,6 +17,7 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
@@ -26,6 +27,7 @@ use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_types::external_api::views;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
@@ -39,8 +41,8 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
-use omicron_common::api::external::Vni;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::shared::SourceNatConfig;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
 use propolis_client::support::tungstenite::protocol::CloseFrame;
 use propolis_client::support::tungstenite::Message as WebSocketMessage;
@@ -52,7 +54,6 @@ use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
-use sled_agent_client::types::SourceNatConfig;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -1053,6 +1054,15 @@ impl super::Nexus {
             ));
         }
 
+        // If there are any external IPs not yet fully attached/detached,then
+        // there are attach/detach sagas in progress. That should complete in
+        // its own time, so return a 503 to indicate a possible retry.
+        if external_ips.iter().any(|v| v.state != IpAttachState::Attached) {
+            return Err(Error::unavail(
+                "External IP attach/detach is in progress during instance_ensure_registered"
+            ));
+        }
+
         // Partition remaining external IPs by class: we can have at most
         // one ephemeral ip.
         let (ephemeral_ips, floating_ips): (Vec<_>, Vec<_>) = external_ips
@@ -1089,7 +1099,7 @@ impl super::Nexus {
         // matter which one we use because all NICs must be in the
         // same VPC; see the check in project_create_instance.)
         let firewall_rules = if let Some(nic) = nics.first() {
-            let vni = Vni::try_from(nic.vni.0)?;
+            let vni = nic.vni;
             let vpc = self
                 .db_datastore
                 .resolve_vni_to_vpc(opctx, db::model::Vni(vni))
@@ -1904,6 +1914,73 @@ impl super::Nexus {
         }
 
         Ok(())
+    }
+
+    /// Attach an external IP to an instance.
+    pub(crate) async fn instance_attach_external_ip(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        ext_ip: &params::ExternalIpCreate,
+    ) -> UpdateResult<views::ExternalIp> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let saga_params = sagas::instance_ip_attach::Params {
+            create_params: ext_ip.clone(),
+            authz_instance,
+            project_id: authz_project.id(),
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+        };
+
+        let saga_outputs = self
+            .execute_saga::<sagas::instance_ip_attach::SagaInstanceIpAttach>(
+                saga_params,
+            )
+            .await?;
+
+        saga_outputs
+            .lookup_node_output::<views::ExternalIp>("output")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from ip attach saga")
+    }
+
+    /// Detach an external IP from an instance.
+    pub(crate) async fn instance_detach_external_ip(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        ext_ip: &params::ExternalIpDetach,
+    ) -> UpdateResult<views::ExternalIp> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let saga_params = sagas::instance_ip_detach::Params {
+            delete_params: ext_ip.clone(),
+            authz_instance,
+            project_id: authz_project.id(),
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+        };
+
+        let saga_outputs = self
+            .execute_saga::<sagas::instance_ip_detach::SagaInstanceIpDetach>(
+                saga_params,
+            )
+            .await?;
+
+        saga_outputs
+            .lookup_node_output::<Option<views::ExternalIp>>("output")
+            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
+            .internal_context("looking up output from ip detach saga")
+            .and_then(|eip| {
+                // Saga idempotency means we'll get Ok(None) on double detach
+                // of an ephemeral IP. Convert this case to an error here.
+                eip.ok_or_else(|| {
+                    Error::invalid_request(
+                        "instance does not have an ephemeral IP attached",
+                    )
+                })
+            })
     }
 }
 

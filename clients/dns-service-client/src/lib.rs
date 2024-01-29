@@ -29,8 +29,10 @@ pub fn is_retryable(error: &DnsConfigError<crate::types::Error>) -> bool {
     let response_value = match error {
         DnsConfigError::CommunicationError(_) => return true,
         DnsConfigError::InvalidRequest(_)
-        | DnsConfigError::InvalidResponsePayload(_)
-        | DnsConfigError::UnexpectedResponse(_) => return false,
+        | DnsConfigError::InvalidResponsePayload(_, _)
+        | DnsConfigError::UnexpectedResponse(_)
+        | DnsConfigError::InvalidUpgrade(_)
+        | DnsConfigError::ResponseBodyError(_) => return false,
         DnsConfigError::ErrorResponse(response_value) => response_value,
     };
 
