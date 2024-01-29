@@ -244,17 +244,6 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        // let subsaga_name = SagaName::new("instance-associate-ssh-keys");
-        // let mut sagabuilder = DagBuilder::new(subsaga_name);
-        // subsaga_builder.append(Node::action("output", "AssociateSshKeys", ASSOCIATE_SSH_KEYS.as_ref(),
-        // ));
-        // subsaga_append(
-        //     "ssh_keys".into(),
-        //     subsaga_builder.build()?,
-        //     &mut builder,
-        //     params.clone(),
-        //     0,
-        // )?;
         // Appends the disk create saga as a subsaga directly to the instance
         // create builder.
         for (i, disk) in params.create_params.disks.iter().enumerate() {
