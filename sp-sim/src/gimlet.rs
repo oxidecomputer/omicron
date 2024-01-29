@@ -488,6 +488,7 @@ struct UdpTask {
 }
 
 impl UdpTask {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
