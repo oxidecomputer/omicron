@@ -576,33 +576,32 @@ impl SelectQuery {
         match self.field_selectors.len() {
             0 => None,
             n => {
-                // Select timeseries key for first column, plus field name and field value for
-                // all columns.
-                const SELECTED_COLUMNS: &[&str] =
-                    &["field_name", "field_value"];
+                // Select timeseries key for first column, plus the field value
+                // for all columns, aliased to the field name.
                 const JOIN_COLUMNS: &[&str] =
                     &["timeseries_name", "timeseries_key"];
-                let mut top_level_columns =
-                    Vec::with_capacity(1 + SELECTED_COLUMNS.len() * n);
+                let mut top_level_columns = Vec::with_capacity(2 + n);
                 top_level_columns.push(String::from(
                     "filter0.timeseries_key as timeseries_key",
                 ));
                 let mut from_statements = String::new();
-                for (i, subquery) in self
+                for (i, (field_name, subquery)) in self
                     .field_selectors
-                    .values()
-                    .map(|sel| {
-                        sel.as_query(&self.timeseries_schema.timeseries_name)
+                    .iter()
+                    .map(|(field_schema, selector)| {
+                        (
+                            &field_schema.name,
+                            selector.as_query(
+                                &self.timeseries_schema.timeseries_name,
+                            ),
+                        )
                     })
                     .enumerate()
                 {
-                    for column in SELECTED_COLUMNS {
-                        top_level_columns.push(format!(
-                            "filter{i}.{column}",
-                            i = i,
-                            column = column
-                        ));
-                    }
+                    top_level_columns.push(format!(
+                        "filter{}.field_value AS {}",
+                        i, field_name,
+                    ));
 
                     if i == 0 {
                         from_statements.push_str(&format!(
@@ -1028,8 +1027,8 @@ mod tests {
             concat!(
                 "SELECT ",
                 "filter0.timeseries_key as timeseries_key, ",
-                "filter0.field_name, filter0.field_value, ",
-                "filter1.field_name, filter1.field_value ",
+                "filter0.field_value AS f0, ",
+                "filter1.field_value AS f1 ",
                 "FROM (",
                 "SELECT * FROM oximeter.fields_i64 ",
                 "WHERE timeseries_name = 'foo:bar' ",
@@ -1095,8 +1094,8 @@ mod tests {
             concat!(
                 "SELECT ",
                 "filter0.timeseries_key as timeseries_key, ",
-                "filter0.field_name, filter0.field_value, ",
-                "filter1.field_name, filter1.field_value ",
+                "filter0.field_value AS f0, ",
+                "filter1.field_value AS f1 ",
                 "FROM (",
                 "SELECT * FROM oximeter.fields_i64 ",
                 "WHERE timeseries_name = 'foo:bar' AND field_name = 'f0' AND field_value = 0",
@@ -1152,8 +1151,8 @@ mod tests {
             query.field_query().unwrap(),
             concat!(
                 "SELECT filter0.timeseries_key as timeseries_key, ",
-                "filter0.field_name, filter0.field_value, ",
-                "filter1.field_name, filter1.field_value ",
+                "filter0.field_value AS f0, ",
+                "filter1.field_value AS f1 ",
                 "FROM (",
                 "SELECT * FROM oximeter.fields_i64 ",
                 "WHERE timeseries_name = 'foo:bar' AND field_name = 'f0' AND field_value = 0",

@@ -175,7 +175,6 @@ backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.22.0"
 bb8 = "0.8.3"
 bcs = "0.1.6"
-bincode = "1.3.3"
 bootstore = { path = "bootstore" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
@@ -192,13 +191,11 @@ clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 colored = "2.1"
 cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
-crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
 crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
 crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
 csv = "1.3.0"
-curve25519-dalek = "4"
 datatest-stable = "0.2.3"
 display-error-chain = "0.2.0"
 ddm-admin-client = { path = "clients/ddm-admin-client" }
@@ -265,10 +262,11 @@ linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mime_guess = "2.0.4"
-mockall = "0.12"
-newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
+mockall = "0.12"
 multimap = "0.10.0"
+newtype_derive = "0.1.6"
+nexus-blueprint-execution = { path = "nexus/blueprint-execution" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
 nexus-db-model = { path = "nexus/db-model" }
@@ -280,24 +278,23 @@ nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
-omicron-certificates = { path = "certificates" }
-omicron-passwords = { path = "passwords" }
-omicron-workspace-hack = "0.1.0"
-oxlog = { path = "dev-tools/oxlog" }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.46"
 num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
+omicron-certificates = { path = "certificates" }
+omicron-passwords = { path = "passwords" }
+omicron-workspace-hack = "0.1.0"
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
-omicron-package = { path = "package" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.11.0"
+oxlog = { path = "dev-tools/oxlog" }
 oxide-client = { path = "clients/oxide-client" }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "a4c956e44fc9b75b58b83ad2eec22f6bd9005262", features = [ "api", "std" ] }
 once_cell = "1.19.0"
@@ -317,15 +314,13 @@ oximeter-collector = { path = "oximeter/collector" }
 oximeter-instruments = { path = "oximeter/instruments" }
 oximeter-macro-impl = { path = "oximeter/oximeter-macro-impl" }
 oximeter-producer = { path = "oximeter/producer" }
-p256 = "0.13"
 parse-display = "0.9.0"
 partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.0.0"
 paste = "1.0.14"
-percent-encoding = "2.3.1"
+peg = "0.8.2"
 pem = "3.0"
 petgraph = "0.6.4"
-postgres-protocol = "0.6.6"
 predicates = "3.1.0"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
@@ -389,9 +384,8 @@ smf = "0.2"
 snafu = "0.7"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
-sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
+sqlformat = "0.2.3"
 sqlparser = { version = "0.43.1", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
@@ -472,23 +466,6 @@ debug = "line-tables-only"
 # times, because it allows target and host dependencies to be unified.
 debug = "line-tables-only"
 
-# `bindgen` is used by `samael`'s build script; building it with optimizations
-# makes that build script run ~5x faster, more than offsetting the additional
-# build time added to `bindgen` itself.
-[profile.dev.package.bindgen]
-opt-level = 3
-
-# `lalrpop` is used by `polar-core`'s build script; building it with
-# optimizations makes that build script run ~20x faster, more than offsetting
-# the additional build time added to `lalrpop` itself.
-[profile.dev.package.lalrpop]
-opt-level = 3
-
-# `polar-core` is exercised heavily during the test suite and it's worthwhile to
-# have it built with optimizations.
-[profile.dev.package.polar-core]
-opt-level = 3
-
 # Password hashing is expensive by construction.  Build the hashing libraries
 # with optimizations to significantly speed up tests.
 [profile.dev.package.argon2]
@@ -515,45 +492,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.chacha20poly1305]
 opt-level = 3
-[profile.dev.package.chacha20]
-opt-level = 3
 [profile.dev.package.vsss-rs]
-opt-level = 3
-[profile.dev.package.curve25519-dalek]
-opt-level = 3
-[profile.dev.package.aead]
-opt-level = 3
-[profile.dev.package.aes]
-opt-level = 3
-[profile.dev.package.aes-gcm]
-opt-level = 3
-[profile.dev.package.bcrypt-pbkdf]
-opt-level = 3
-[profile.dev.package.blake2]
-opt-level = 3
-[profile.dev.package.blake2b_simd]
-opt-level = 3
-[profile.dev.package.block-buffer]
-opt-level = 3
-[profile.dev.package.block-padding]
-opt-level = 3
-[profile.dev.package.blowfish]
-opt-level = 3
-[profile.dev.package.constant_time_eq]
-opt-level = 3
-[profile.dev.package.crypto-bigint]
 opt-level = 3
 [profile.dev.package.crypto-common]
 opt-level = 3
-[profile.dev.package.ctr]
-opt-level = 3
-[profile.dev.package.cbc]
-opt-level = 3
 [profile.dev.package.digest]
-opt-level = 3
-[profile.dev.package.ed25519]
-opt-level = 3
-[profile.dev.package.ed25519-dalek]
 opt-level = 3
 [profile.dev.package.elliptic-curve]
 opt-level = 3
@@ -563,47 +506,19 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.hmac]
 opt-level = 3
-[profile.dev.package.lpc55_sign]
-opt-level = 3
-[profile.dev.package.md5]
-opt-level = 3
-[profile.dev.package.md-5]
-opt-level = 3
 [profile.dev.package.num-bigint]
-opt-level = 3
-[profile.dev.package.num-bigint-dig]
 opt-level = 3
 [profile.dev.package.rand]
 opt-level = 3
 [profile.dev.package.rand_chacha]
 opt-level = 3
-[profile.dev.package.rand_core]
-opt-level = 3
-[profile.dev.package.rand_hc]
-opt-level = 3
-[profile.dev.package.rand_xorshift]
-opt-level = 3
-[profile.dev.package.rsa]
-opt-level = 3
-[profile.dev.package.salty]
-opt-level = 3
-[profile.dev.package.signature]
-opt-level = 3
 [profile.dev.package.subtle]
-opt-level = 3
-[profile.dev.package.tiny-keccak]
 opt-level = 3
 [profile.dev.package.uuid]
 opt-level = 3
 [profile.dev.package.cipher]
 opt-level = 3
-[profile.dev.package.cpufeatures]
-opt-level = 3
-[profile.dev.package.poly1305]
-opt-level = 3
 [profile.dev.package.inout]
-opt-level = 3
-[profile.dev.package.keccak]
 opt-level = 3
 
 

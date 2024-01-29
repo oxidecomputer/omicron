@@ -4,11 +4,19 @@
 
 //! Rust client to ClickHouse database
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
+pub(crate) mod dbwrite;
+#[cfg(any(feature = "oxql", test))]
+pub(crate) mod oxql;
+pub(crate) mod query_summary;
+#[cfg(any(feature = "sql", test))]
+mod sql;
+
+pub use self::dbwrite::DbWrite;
+use crate::client::query_summary::QuerySummary;
 use crate::model;
 use crate::query;
-use crate::sql::RestrictedQuery;
 use crate::Error;
 use crate::Metric;
 use crate::Target;
@@ -18,16 +26,13 @@ use crate::TimeseriesName;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
-use async_trait::async_trait;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
-use indexmap::IndexMap;
 use oximeter::types::Sample;
 use regex::Regex;
 use regex::RegexBuilder;
-use reqwest::header::HeaderMap;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -44,7 +49,6 @@ use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::time::Duration;
 use std::time::Instant;
 use tokio::fs;
 use tokio::sync::Mutex;
@@ -56,139 +60,11 @@ const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
 
 #[usdt::provider(provider = "clickhouse_client")]
 mod probes {
-    fn query__start(_: &usdt::UniqueId, sql: &str) {}
-    fn query__done(_: &usdt::UniqueId) {}
-}
+    /// Fires when a SQL query begins, with the query string.
+    fn sql__query__start(_: &usdt::UniqueId, sql: &str) {}
 
-/// A count of bytes / rows accessed during a query.
-#[derive(Clone, Copy, Debug)]
-pub struct IoCount {
-    pub bytes: u64,
-    pub rows: u64,
-}
-
-impl std::fmt::Display for IoCount {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{} rows ({} bytes)", self.rows, self.bytes)
-    }
-}
-
-/// Summary of the I/O and duration of a query.
-#[derive(Clone, Copy, Debug, serde::Deserialize)]
-#[serde(try_from = "serde_json::Value")]
-pub struct QuerySummary {
-    /// The bytes and rows read by the query.
-    pub read: IoCount,
-    /// The bytes and rows written by the query.
-    pub written: IoCount,
-}
-
-impl TryFrom<serde_json::Value> for QuerySummary {
-    type Error = Error;
-
-    fn try_from(j: serde_json::Value) -> Result<Self, Self::Error> {
-        use serde_json::Map;
-        use serde_json::Value;
-        use std::str::FromStr;
-
-        let Value::Object(map) = j else {
-            return Err(Error::Database(String::from(
-                "Expected a JSON object for a metadata summary",
-            )));
-        };
-
-        fn unpack_summary_value<T>(
-            map: &Map<String, Value>,
-            key: &str,
-        ) -> Result<T, Error>
-        where
-            T: FromStr,
-            <T as FromStr>::Err: std::error::Error,
-        {
-            let value = map.get(key).ok_or_else(|| {
-                Error::MissingHeaderKey { key: key.to_string() }
-            })?;
-            let Value::String(v) = value else {
-                return Err(Error::BadMetadata {
-                    key: key.to_string(),
-                    msg: String::from("Expected a string value"),
-                });
-            };
-            v.parse::<T>().map_err(|e| Error::BadMetadata {
-                key: key.to_string(),
-                msg: e.to_string(),
-            })
-        }
-        let rows_read: u64 = unpack_summary_value(&map, "read_rows")?;
-        let bytes_read: u64 = unpack_summary_value(&map, "read_bytes")?;
-        let rows_written: u64 = unpack_summary_value(&map, "written_rows")?;
-        let bytes_written: u64 = unpack_summary_value(&map, "written_bytes")?;
-        Ok(Self {
-            read: IoCount { bytes: bytes_read, rows: rows_read },
-            written: IoCount { bytes: bytes_written, rows: rows_written },
-        })
-    }
-}
-
-/// Basic metadata about the resource usage of a single SQL query.
-#[derive(Clone, Copy, Debug)]
-pub struct QueryMetadata {
-    /// The database-assigned query ID.
-    pub id: Uuid,
-    /// The total duration of the query (network plus execution).
-    pub elapsed: Duration,
-    /// Summary of the data read and written.
-    pub summary: QuerySummary,
-}
-
-impl QueryMetadata {
-    fn from_headers(
-        elapsed: Duration,
-        headers: &HeaderMap,
-    ) -> Result<Self, Error> {
-        fn get_header<'a>(
-            map: &'a HeaderMap,
-            key: &'a str,
-        ) -> Result<&'a str, Error> {
-            let hdr = map.get(key).ok_or_else(|| Error::MissingHeaderKey {
-                key: key.to_string(),
-            })?;
-            std::str::from_utf8(hdr.as_bytes())
-                .map_err(|err| Error::Database(err.to_string()))
-        }
-        let summary =
-            serde_json::from_str(get_header(headers, "X-ClickHouse-Summary")?)
-                .map_err(|err| Error::Database(err.to_string()))?;
-        let id = get_header(headers, "X-ClickHouse-Query-Id")?
-            .parse()
-            .map_err(|err: uuid::Error| Error::Database(err.to_string()))?;
-        Ok(Self { id, elapsed, summary })
-    }
-}
-
-/// A tabular result from a SQL query against a timeseries.
-#[derive(Clone, Debug, Default, serde::Serialize)]
-pub struct Table {
-    /// The name of each column in the result set.
-    pub column_names: Vec<String>,
-    /// The rows of the result set, one per column.
-    pub rows: Vec<Vec<serde_json::Value>>,
-}
-
-/// The full result of running a SQL query against a timeseries.
-#[derive(Clone, Debug)]
-pub struct QueryResult {
-    /// The query as written by the client.
-    pub original_query: String,
-    /// The rewritten query, run against the JOINed representation of the
-    /// timeseries.
-    ///
-    /// This is the query that is actually run in the database itself.
-    pub rewritten_query: String,
-    /// Metadata about the resource usage of the query.
-    pub metadata: QueryMetadata,
-    /// The result of the query, with column names and rows.
-    pub table: Table,
+    /// Fires when a SQL query ends, either in success or failure.
+    fn sql__query__done(_: &usdt::UniqueId) {}
 }
 
 /// A `Client` to the ClickHouse metrics database.
@@ -227,76 +103,6 @@ impl Client {
         .await?;
         debug!(self.log, "successful ping of ClickHouse server");
         Ok(())
-    }
-
-    /// Transform a SQL query against a timeseries, but do not execute it.
-    pub async fn transform_query(
-        &self,
-        query: impl AsRef<str>,
-    ) -> Result<String, Error> {
-        let restricted = RestrictedQuery::new(query.as_ref())?;
-        restricted.to_oximeter_sql(&*self.schema.lock().await)
-    }
-
-    /// Run a SQL query against a timeseries.
-    pub async fn query(
-        &self,
-        query: impl AsRef<str>,
-    ) -> Result<QueryResult, Error> {
-        let original_query = query.as_ref().trim_end_matches(';');
-        let ox_sql = self.transform_query(original_query).await?;
-        let rewritten = format!("{ox_sql} FORMAT JSONEachRow");
-        debug!(
-            self.log,
-            "rewrote restricted query";
-            "original_sql" => &original_query,
-            "rewritten_sql" => &rewritten,
-        );
-        let request = self
-            .client
-            .post(&self.url)
-            .query(&[
-                ("output_format_json_quote_64bit_integers", "0"),
-                ("database", crate::DATABASE_NAME),
-            ])
-            .body(rewritten.clone());
-        let query_start = Instant::now();
-        let response = handle_db_response(
-            request
-                .send()
-                .await
-                .map_err(|err| Error::DatabaseUnavailable(err.to_string()))?,
-        )
-        .await?;
-        let metadata = QueryMetadata::from_headers(
-            query_start.elapsed(),
-            response.headers(),
-        )?;
-        let text = response.text().await.unwrap();
-        let mut table = Table::default();
-        for line in text.lines() {
-            let row =
-                serde_json::from_str::<IndexMap<String, serde_json::Value>>(
-                    line.trim(),
-                )
-                .unwrap();
-            if table.column_names.is_empty() {
-                table.column_names.extend(row.keys().cloned())
-            } else {
-                assert!(table
-                    .column_names
-                    .iter()
-                    .zip(row.keys())
-                    .all(|(k1, k2)| k1 == k2));
-            }
-            table.rows.push(row.into_values().collect());
-        }
-        Ok(QueryResult {
-            original_query: original_query.to_string(),
-            rewritten_query: rewritten,
-            metadata,
-            table,
-        })
     }
 
     /// Select timeseries from criteria on the fields and start/end timestamps.
@@ -348,6 +154,7 @@ impl Client {
             Some(field_query) => {
                 self.select_matching_timeseries_info(&field_query, &schema)
                     .await?
+                    .1
             }
             None => BTreeMap::new(),
         };
@@ -367,6 +174,7 @@ impl Client {
         }
     }
 
+    /// Return a page of timeseries schema from the database.
     pub async fn list_timeseries(
         &self,
         page: &WhichPage<TimeseriesScanParams, TimeseriesPageSelector>,
@@ -401,6 +209,7 @@ impl Client {
             Some(field_query) => {
                 self.select_matching_timeseries_info(&field_query, &schema)
                     .await?
+                    .1
             }
             None => BTreeMap::new(),
         };
@@ -445,6 +254,7 @@ impl Client {
                     concat!(
                         "SELECT * ",
                         "FROM {}.timeseries_schema ",
+                        "ORDER BY timeseries_name ",
                         "LIMIT {} ",
                         "FORMAT JSONEachRow;",
                     ),
@@ -457,6 +267,7 @@ impl Client {
                     concat!(
                         "SELECT * FROM {}.timeseries_schema ",
                         "WHERE timeseries_name > '{}' ",
+                        "ORDER BY timeseries_name ",
                         "LIMIT {} ",
                         "FORMAT JSONEachRow;",
                     ),
@@ -466,7 +277,7 @@ impl Client {
                 )
             }
         };
-        let body = self.execute_with_body(sql).await?;
+        let body = self.execute_with_body(sql).await?.1;
         let schema = body
             .lines()
             .map(|line| {
@@ -848,14 +659,14 @@ impl Client {
         );
 
         let version = match self.execute_with_body(sql).await {
-            Ok(body) if body.is_empty() => {
+            Ok((_, body)) if body.is_empty() => {
                 warn!(
                     self.log,
                     "no version in database (treated as 'version 0')"
                 );
                 0
             }
-            Ok(body) => body.trim().parse::<u64>().map_err(|err| {
+            Ok((_, body)) => body.trim().parse::<u64>().map_err(|err| {
                 Error::Database(format!("Cannot read version: {err}"))
             })?,
             Err(Error::Database(err))
@@ -895,14 +706,13 @@ impl Client {
             "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
             db_name = crate::DATABASE_NAME,
         );
-        self.execute_with_body(sql).await?;
-        Ok(())
+        self.execute(sql).await
     }
 
     /// Verifies if instance is part of oximeter_cluster
     pub async fn is_oximeter_cluster(&self) -> Result<bool, Error> {
         let sql = "SHOW CLUSTERS FORMAT JSONEachRow;";
-        let res = self.execute_with_body(sql).await?;
+        let res = self.execute_with_body(sql).await?.1;
         Ok(res.contains("oximeter_cluster"))
     }
 
@@ -972,8 +782,9 @@ impl Client {
         &self,
         field_query: &str,
         schema: &TimeseriesSchema,
-    ) -> Result<BTreeMap<TimeseriesKey, (Target, Metric)>, Error> {
-        let body = self.execute_with_body(field_query).await?;
+    ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, (Target, Metric)>), Error>
+    {
+        let (summary, body) = self.execute_with_body(field_query).await?;
         let mut results = BTreeMap::new();
         for line in body.lines() {
             let row: model::FieldSelectRow = serde_json::from_str(line)
@@ -982,7 +793,7 @@ impl Client {
                 model::parse_field_select_row(&row, schema);
             results.insert(id, (target, metric));
         }
-        Ok(results)
+        Ok((summary, results))
     }
 
     // Given information returned from `select_matching_timeseries_info`, select the actual
@@ -996,7 +807,8 @@ impl Client {
         let mut timeseries_by_key = BTreeMap::new();
         let keys = info.keys().copied().collect::<Vec<_>>();
         let measurement_query = query.measurement_query(&keys);
-        for line in self.execute_with_body(&measurement_query).await?.lines() {
+        for line in self.execute_with_body(&measurement_query).await?.1.lines()
+        {
             let (key, measurement) =
                 model::parse_measurement_from_row(line, schema.datum_type);
             let timeseries = timeseries_by_key.entry(key).or_insert_with(
@@ -1032,7 +844,10 @@ impl Client {
     // Execute a generic SQL statement, awaiting the response as text
     //
     // TODO-robustness This currently does no validation of the statement.
-    async fn execute_with_body<S>(&self, sql: S) -> Result<String, Error>
+    async fn execute_with_body<S>(
+        &self,
+        sql: S,
+    ) -> Result<(QuerySummary, String), Error>
     where
         S: AsRef<str>,
     {
@@ -1042,24 +857,50 @@ impl Client {
             "executing SQL query";
             "sql" => &sql,
         );
+
+        // Run the SQL query itself.
+        //
+        // This code gets a bit convoluted, so that we can fire the USDT probe
+        // in all situations, even when the various fallible operations
+        // complete.
         let id = usdt::UniqueId::new();
-        probes::query__start!(|| (&id, &sql));
-        let response = handle_db_response(
-            self.client
-                .post(&self.url)
-                // See regression test `test_unquoted_64bit_integers` for details.
-                .query(&[("output_format_json_quote_64bit_integers", "0")])
-                .body(sql)
-                .send()
-                .await
-                .map_err(|err| Error::DatabaseUnavailable(err.to_string()))?,
-        )
-        .await?
-        .text()
-        .await
-        .map_err(|err| Error::Database(err.to_string()));
-        probes::query__done!(|| (&id));
-        response
+        probes::sql__query__start!(|| (&id, &sql));
+        let start = Instant::now();
+
+        // Submit the SQL request itself.
+        let response = self
+            .client
+            .post(&self.url)
+            .query(&[("output_format_json_quote_64bit_integers", "0")])
+            .body(sql)
+            .send()
+            .await
+            .map_err(|err| {
+                probes::sql__query__done!(|| (&id));
+                Error::DatabaseUnavailable(err.to_string())
+            })?;
+
+        // Convert the HTTP response into a database response.
+        let response = handle_db_response(response).await.map_err(|err| {
+            probes::sql__query__done!(|| (&id));
+            err
+        })?;
+
+        // Extract the query summary, measuring resource usage and duration.
+        let summary =
+            QuerySummary::from_headers(start.elapsed(), response.headers())
+                .map_err(|err| {
+                    probes::sql__query__done!(|| (&id));
+                    err
+                })?;
+
+        // Extract the actual text of the response.
+        let text = response.text().await.map_err(|err| {
+            probes::sql__query__done!(|| (&id));
+            Error::Database(err.to_string())
+        })?;
+        probes::sql__query__done!(|| (&id));
+        Ok((summary, text))
     }
 
     // Get timeseries schema from the database.
@@ -1095,7 +936,7 @@ impl Client {
                 )
             }
         };
-        let body = self.execute_with_body(sql).await?;
+        let body = self.execute_with_body(sql).await?.1;
         if body.is_empty() {
             trace!(self.log, "no new timeseries schema in database");
         } else {
@@ -1110,167 +951,6 @@ impl Client {
                 (schema.timeseries_name.clone(), schema)
             });
             schema.extend(new);
-        }
-        Ok(())
-    }
-
-    // Unroll each sample into its consituent rows, after verifying the schema.
-    //
-    // Note that this also inserts the schema into the internal cache, if it
-    // does not already exist there.
-    async fn unroll_samples(&self, samples: &[Sample]) -> UnrolledSampleRows {
-        let mut seen_timeseries = BTreeSet::new();
-        let mut rows = BTreeMap::new();
-        let mut new_schema = BTreeMap::new();
-
-        for sample in samples.iter() {
-            match self.verify_or_cache_sample_schema(sample).await {
-                Err(_) => {
-                    // Skip the sample, but otherwise do nothing. The error is logged in the above
-                    // call.
-                    continue;
-                }
-                Ok(None) => {}
-                Ok(Some((name, schema))) => {
-                    debug!(
-                        self.log,
-                        "new timeseries schema";
-                        "timeseries_name" => %name,
-                        "schema" => %schema
-                    );
-                    new_schema.insert(name, schema);
-                }
-            }
-
-            // Key on both the timeseries name and key, as timeseries may actually share keys.
-            let key = (
-                sample.timeseries_name.as_str(),
-                crate::timeseries_key(&sample),
-            );
-            if !seen_timeseries.contains(&key) {
-                for (table_name, table_rows) in model::unroll_field_rows(sample)
-                {
-                    rows.entry(table_name)
-                        .or_insert_with(Vec::new)
-                        .extend(table_rows);
-                }
-            }
-
-            let (table_name, measurement_row) =
-                model::unroll_measurement_row(sample);
-
-            rows.entry(table_name)
-                .or_insert_with(Vec::new)
-                .push(measurement_row);
-
-            seen_timeseries.insert(key);
-        }
-
-        UnrolledSampleRows { new_schema, rows }
-    }
-
-    // Save new schema to the database, or remove them from the cache on
-    // failure.
-    //
-    // This attempts to insert the provided schema into the timeseries schema
-    // table. If that fails, those schema are _also_ removed from the internal
-    // cache.
-    //
-    // TODO-robustness There's still a race possible here. If two distinct clients receive new
-    // but conflicting schema, they will both try to insert those at some point into the schema
-    // tables. It's not clear how to handle this, since ClickHouse provides no transactions.
-    // This is unlikely to happen at this point, because the design is such that there will be
-    // a single `oximeter` instance, which has one client object, connected to a single
-    // ClickHouse server. But once we start replicating data, the window within which the race
-    // can occur is much larger, since it includes the time it takes ClickHouse to replicate
-    // data between nodes.
-    //
-    // NOTE: This is an issue even in the case where the schema don't conflict. Two clients may
-    // receive a sample with a new schema, and both would then try to insert that schema.
-    async fn save_new_schema_or_remove(
-        &self,
-        new_schema: BTreeMap<TimeseriesName, String>,
-    ) -> Result<(), Error> {
-        if !new_schema.is_empty() {
-            debug!(
-                self.log,
-                "inserting {} new timeseries schema",
-                new_schema.len()
-            );
-            const APPROX_ROW_SIZE: usize = 64;
-            let mut body = String::with_capacity(
-                APPROX_ROW_SIZE + APPROX_ROW_SIZE * new_schema.len(),
-            );
-            body.push_str("INSERT INTO ");
-            body.push_str(crate::DATABASE_NAME);
-            body.push_str(".timeseries_schema FORMAT JSONEachRow\n");
-            for row_data in new_schema.values() {
-                body.push_str(row_data);
-                body.push_str("\n");
-            }
-
-            // Try to insert the schema.
-            //
-            // If this fails, be sure to remove the schema we've added from the
-            // internal cache. Since we check the internal cache first for
-            // schema, if we fail here but _don't_ remove the schema, we'll
-            // never end up inserting the schema, but we will insert samples.
-            if let Err(e) = self.execute(body).await {
-                debug!(
-                    self.log,
-                    "failed to insert new schema, removing from cache";
-                    "error" => ?e,
-                );
-                let mut schema = self.schema.lock().await;
-                for name in new_schema.keys() {
-                    schema
-                        .remove(name)
-                        .expect("New schema should have been cached");
-                }
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
-    // Insert unrolled sample rows into the corresponding tables.
-    async fn insert_unrolled_samples(
-        &self,
-        rows: BTreeMap<String, Vec<String>>,
-    ) -> Result<(), Error> {
-        for (table_name, rows) in rows {
-            let body = format!(
-                "INSERT INTO {table_name} FORMAT JSONEachRow\n{row_data}\n",
-                table_name = table_name,
-                row_data = rows.join("\n")
-            );
-            // TODO-robustness We've verified the schema, so this is likely a transient failure.
-            // But we may want to check the actual error condition, and, if possible, continue
-            // inserting any remaining data.
-            self.execute(body).await?;
-            debug!(
-                self.log,
-                "inserted rows into table";
-                "n_rows" => rows.len(),
-                "table_name" => table_name,
-            );
-        }
-
-        // TODO-correctness We'd like to return all errors to clients here, and there may be as
-        // many as one per sample. It's not clear how to structure this in a way that's useful.
-        Ok(())
-    }
-
-    // Run one or more SQL statements.
-    //
-    // This is intended to be used for the methods which run SQL from one of the
-    // SQL files in the crate, e.g., the DB initialization or update files.
-    async fn run_many_sql_statements(
-        &self,
-        sql: impl AsRef<str>,
-    ) -> Result<(), Error> {
-        for stmt in sql.as_ref().split(';').filter(|s| !s.trim().is_empty()) {
-            self.execute(stmt).await?;
         }
         Ok(())
     }
@@ -1297,87 +977,6 @@ fn schema_validation_regex() -> &'static Regex {
         .expect("Invalid regex")
     })
 }
-
-#[derive(Debug)]
-struct UnrolledSampleRows {
-    // The timeseries schema rows, keyed by timeseries name.
-    new_schema: BTreeMap<TimeseriesName, String>,
-    // The rows to insert in all the other tables, keyed by the table name.
-    rows: BTreeMap<String, Vec<String>>,
-}
-
-/// A trait allowing a [`Client`] to write data into the timeseries database.
-///
-/// The vanilla [`Client`] object allows users to query the timeseries database, returning
-/// timeseries samples corresponding to various filtering criteria. This trait segregates the
-/// methods required for _writing_ new data into the database, and is intended only for use by the
-/// `oximeter-collector` crate.
-#[async_trait]
-pub trait DbWrite {
-    /// Insert the given samples into the database.
-    async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
-
-    /// Initialize the replicated telemetry database, creating tables as needed.
-    async fn init_replicated_db(&self) -> Result<(), Error>;
-
-    /// Initialize a single node telemetry database, creating tables as needed.
-    async fn init_single_node_db(&self) -> Result<(), Error>;
-
-    /// Wipe the ClickHouse database entirely from a single node set up.
-    async fn wipe_single_node_db(&self) -> Result<(), Error>;
-
-    /// Wipe the ClickHouse database entirely from a replicated set up.
-    async fn wipe_replicated_db(&self) -> Result<(), Error>;
-}
-
-#[async_trait]
-impl DbWrite for Client {
-    /// Insert the given samples into the database.
-    async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error> {
-        debug!(self.log, "unrolling {} total samples", samples.len());
-        let UnrolledSampleRows { new_schema, rows } =
-            self.unroll_samples(samples).await;
-        self.save_new_schema_or_remove(new_schema).await?;
-        self.insert_unrolled_samples(rows).await
-    }
-
-    /// Initialize the replicated telemetry database, creating tables as needed.
-    async fn init_replicated_db(&self) -> Result<(), Error> {
-        debug!(self.log, "initializing ClickHouse database");
-        self.run_many_sql_statements(include_str!(
-            "../schema/replicated/db-init.sql"
-        ))
-        .await
-    }
-
-    /// Wipe the ClickHouse database entirely from a replicated set up.
-    async fn wipe_replicated_db(&self) -> Result<(), Error> {
-        debug!(self.log, "wiping ClickHouse database");
-        self.run_many_sql_statements(include_str!(
-            "../schema/replicated/db-wipe.sql"
-        ))
-        .await
-    }
-
-    /// Initialize a single node telemetry database, creating tables as needed.
-    async fn init_single_node_db(&self) -> Result<(), Error> {
-        debug!(self.log, "initializing ClickHouse database");
-        self.run_many_sql_statements(include_str!(
-            "../schema/single-node/db-init.sql"
-        ))
-        .await
-    }
-
-    /// Wipe the ClickHouse database entirely from a single node set up.
-    async fn wipe_single_node_db(&self) -> Result<(), Error> {
-        debug!(self.log, "wiping ClickHouse database");
-        self.run_many_sql_statements(include_str!(
-            "../schema/single-node/db-wipe.sql"
-        ))
-        .await
-    }
-}
-
 // Return Ok if the response indicates success, otherwise return either the reqwest::Error, if this
 // is a client-side error, or the body of the actual error retrieved from ClickHouse if the error
 // was generated there.
@@ -1397,6 +996,7 @@ async fn handle_db_response(
 
 #[cfg(test)]
 mod tests {
+    use super::dbwrite::UnrolledSampleRows;
     use super::*;
     use crate::model::OXIMETER_VERSION;
     use crate::query;
@@ -1933,7 +1533,7 @@ mod tests {
         let mut result = String::from("");
         let tries = 5;
         for _ in 0..tries {
-            result = client_2.execute_with_body(sql.clone()).await.unwrap();
+            result = client_2.execute_with_body(sql.clone()).await.unwrap().1;
             if !result.contains("oximeter") {
                 sleep(Duration::from_secs(1)).await;
                 continue;
@@ -1948,21 +1548,21 @@ mod tests {
         let sql = String::from(
             "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
         );
-        let result = client_2.execute_with_body(sql.clone()).await.unwrap();
+        let result = client_2.execute_with_body(sql.clone()).await.unwrap().1;
         info!(log, "Inserted datum to client #2"; "sql" => sql, "result" => result);
 
         // Make sure replicas are synched
         let sql = String::from(
             "SYSTEM SYNC REPLICA oximeter.measurements_string_local;",
         );
-        let result = client_1.execute_with_body(sql.clone()).await.unwrap();
+        let result = client_1.execute_with_body(sql.clone()).await.unwrap().1;
         info!(log, "Synced replicas via client #1"; "sql" => sql, "result" => result);
 
         // Make sure data exists in the other replica
         let sql = String::from(
             "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
         );
-        let result = client_1.execute_with_body(sql.clone()).await.unwrap();
+        let result = client_1.execute_with_body(sql.clone()).await.unwrap().1;
         info!(log, "Retrieved values via client #1"; "sql" => sql, "result" => result.clone());
         assert!(result.contains("hiya"));
 
@@ -2124,7 +1724,7 @@ mod tests {
         let sql = String::from(
             "SELECT * FROM oximeter.timeseries_schema FORMAT JSONEachRow;",
         );
-        let result = client.execute_with_body(sql).await.unwrap();
+        let result = client.execute_with_body(sql).await.unwrap().1;
         let schema = result
             .lines()
             .map(|line| {
@@ -2253,7 +1853,8 @@ mod tests {
                     table
                 ))
                 .await
-                .unwrap();
+                .unwrap()
+                .1;
             let actual_count =
                 body.lines().next().unwrap().trim().parse::<usize>().expect(
                     "Expected a count of the number of rows from ClickHouse",
@@ -2301,7 +1902,8 @@ mod tests {
                 "SELECT toUInt64(1) AS foo FORMAT JSONEachRow;".to_string(),
             )
             .await
-            .unwrap();
+            .unwrap()
+            .1;
         let json: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["foo"], Value::Number(1u64.into()));
 
@@ -3167,7 +2769,8 @@ mod tests {
         let body = client
             .execute_with_body(select_sql)
             .await
-            .expect("Failed to select field row");
+            .expect("Failed to select field row")
+            .1;
         let actual_row: serde_json::Value = serde_json::from_str(&body)
             .expect("Failed to parse field row JSON");
         println!("{actual_row:?}");
@@ -3507,7 +3110,8 @@ mod tests {
         let body = client
             .execute_with_body(select_sql)
             .await
-            .expect("Failed to select measurement row");
+            .expect("Failed to select measurement row")
+            .1;
         let (_, actual_row) = crate::model::parse_measurement_from_row(
             &body,
             measurement.datum_type(),
@@ -3528,6 +3132,7 @@ mod tests {
             )
             .await
             .expect("Failed to SELECT from database")
+            .1
             .lines()
             .count()
     }
@@ -3749,7 +3354,7 @@ mod tests {
         // one.
         let response = client.execute_with_body(
             "SELECT COUNT() FROM oximeter.timeseries_schema FORMAT JSONEachRow;
-        ").await.unwrap();
+        ").await.unwrap().1;
         assert_eq!(response.lines().count(), 1, "Expected exactly 1 schema");
         assert_eq!(client.schema.lock().await.len(), 1);
 
@@ -3766,7 +3371,7 @@ mod tests {
         // only the one schema.
         let response = client.execute_with_body(
             "SELECT COUNT() FROM oximeter.timeseries_schema FORMAT JSONEachRow;
-        ").await.unwrap();
+        ").await.unwrap().1;
         assert_eq!(
             response.lines().count(),
             1,
@@ -3804,7 +3409,7 @@ mod tests {
                 crate::DATABASE_NAME,
                 crate::model::DbDatumType::from(ty),
             );
-            let res = client.execute_with_body(sql).await.unwrap();
+            let res = client.execute_with_body(sql).await.unwrap().1;
             let count = res.trim().parse::<usize>().unwrap();
             assert_eq!(count, 0);
         }
@@ -4099,7 +3704,8 @@ mod tests {
         "
             ))
             .await
-            .unwrap();
+            .unwrap()
+            .1;
         let mut lines = body.lines();
         assert_eq!(lines.next().unwrap(), "\"col0\",\"UInt8\"");
         assert_eq!(lines.next().unwrap(), "\"col1\",\"UInt16\"");
@@ -4319,7 +3925,8 @@ mod tests {
         "
             ))
             .await
-            .unwrap();
+            .unwrap()
+            .1;
         let mut lines = body.lines();
         assert_eq!(lines.next().unwrap(), "\"col0\",\"UInt8\"");
         assert_eq!(lines.next().unwrap(), "\"col1\",\"UInt16\"");
@@ -4480,7 +4087,7 @@ mod tests {
                 crate::DATABASE_NAME,
                 crate::model::DbFieldType::from(ty),
             );
-            let res = client.execute_with_body(sql).await.unwrap();
+            let res = client.execute_with_body(sql).await.unwrap().1;
             let count = res.trim().parse::<usize>().unwrap();
             assert_eq!(count, 0);
         }
@@ -4488,6 +4095,7 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[cfg(any(feature = "sql", test))]
     #[tokio::test]
     async fn test_sql_query_output() {
         let logctx = test_setup_log("test_sql_query_output");

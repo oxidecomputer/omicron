@@ -311,7 +311,7 @@ pub enum DatumType {
 
 impl DatumType {
     /// Return `true` if this datum type is cumulative, and `false` otherwise.
-    pub fn is_cumulative(&self) -> bool {
+    pub const fn is_cumulative(&self) -> bool {
         matches!(
             self,
             DatumType::CumulativeI64
@@ -331,9 +331,26 @@ impl DatumType {
         )
     }
 
+    /// Return `true` if this datum type is a scalar, and `false` otherwise.
+    pub const fn is_scalar(&self) -> bool {
+        !self.is_histogram()
+    }
+
     /// Return `true` if this datum type is a histogram, and `false` otherwise.
     pub const fn is_histogram(&self) -> bool {
-        matches!(self, DatumType::HistogramF64 | DatumType::HistogramI64)
+        matches!(
+            self,
+            DatumType::HistogramI8
+                | DatumType::HistogramU8
+                | DatumType::HistogramI16
+                | DatumType::HistogramU16
+                | DatumType::HistogramI32
+                | DatumType::HistogramU32
+                | DatumType::HistogramI64
+                | DatumType::HistogramU64
+                | DatumType::HistogramF32
+                | DatumType::HistogramF64
+        )
     }
 }
 
@@ -449,6 +466,11 @@ impl Datum {
             Datum::HistogramF64(ref inner) => Some(inner.start_time()),
             Datum::Missing(ref inner) => inner.start_time(),
         }
+    }
+
+    /// Return true if this datum is missing.
+    pub fn is_missing(&self) -> bool {
+        matches!(self, Datum::Missing(_))
     }
 }
 
@@ -580,7 +602,7 @@ impl Measurement {
 
     /// Return true if this measurement represents a missing datum.
     pub fn is_missing(&self) -> bool {
-        matches!(self.datum, Datum::Missing(_))
+        self.datum.is_missing()
     }
 
     /// Return the datum for this measurement
