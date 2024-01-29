@@ -468,6 +468,35 @@ mod tests {
     }
 
     #[test]
+    fn serialize_rack_initialize_request() {
+        // Conjure up a config; we'll tweak the internal services pools and
+        // external DNS IPs, but no other fields matter.
+        let config = RackInitializeRequest {
+            rack_subnet: Ipv6Addr::LOCALHOST,
+            trust_quorum_peers: Some(vec![
+                Baseboard::Pc{identifier: "g0".into(), model: "i686pc".into()},
+                Baseboard::Pc{identifier: "g1".into(), model: "i686pc".into()},
+                Baseboard::Pc{identifier: "g2".into(), model: "i686pc".into()}
+            ]),
+            bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
+            ntp_servers: Vec::new(),
+            dns_servers: Vec::new(),
+            internal_services_ip_pool_ranges: Vec::new(),
+            external_dns_ips: Vec::new(),
+            external_dns_zone_name: "".to_string(),
+            external_certificates: Vec::new(),
+            recovery_silo: RecoverySiloConfig {
+                silo_name: "recovery".parse().unwrap(),
+                user_name: "recovery".parse().unwrap(),
+                user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
+            },
+            rack_network_config: None,
+        };
+
+        println!("{}", toml::to_string(&config).unwrap());
+    }
+
+    #[test]
     fn validate_external_dns_ips_must_be_in_internal_services_ip_pools() {
         // Conjure up a config; we'll tweak the internal services pools and
         // external DNS IPs, but no other fields matter.

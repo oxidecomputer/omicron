@@ -525,7 +525,11 @@ fn poll_device_tree(
 
                         if inner.baseboard.is_none() {
                             let pc_baseboard = Baseboard::new_pc(
-                                Uuid::new_v4().simple().to_string(),
+                                gethostname::gethostname()
+                                    .into_string()
+                                    .unwrap_or_else(|_| {
+                                        Uuid::new_v4().simple().to_string()
+                                    }),
                                 root_node.clone(),
                             );
 
