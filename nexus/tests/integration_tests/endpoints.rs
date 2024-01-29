@@ -395,6 +395,12 @@ pub static DEMO_INSTANCE_EPHEMERAL_IP_URL: Lazy<String> = Lazy::new(|| {
         *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
     )
 });
+pub static DEMO_INSTANCE_SSH_KEYS_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/instances/{}/ssh-public-keys?{}",
+        *DEMO_INSTANCE_NAME, *DEMO_PROJECT_SELECTOR
+    )
+});
 pub static DEMO_INSTANCE_NICS_URL: Lazy<String> = Lazy::new(|| {
     format!(
         "/v1/network-interfaces?project={}&instance={}",
@@ -1796,6 +1802,13 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                 ),
                 AllowedMethod::Delete,
             ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INSTANCE_SSH_KEYS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![AllowedMethod::Get]
         },
 
         /* IAM */
