@@ -2055,3 +2055,10 @@ pub struct ProbeListSelector {
     /// A name or id to use when selecting a probe.
     pub name_or_id: Option<NameOrId>,
 }
+
+/// A timeseries query string, written in the Oximeter query language.
+#[derive(Deserialize, JsonSchema, Serialize)]
+pub struct TimeseriesQuery {
+    /// A timeseries query string, written in the Oximeter query language.
+    pub query: String,
+}

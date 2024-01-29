@@ -330,6 +330,7 @@ partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.0.0"
 paste = "1.0.14"
 percent-encoding = "2.3.1"
+peg = "0.8.2"
 pem = "3.0"
 petgraph = "0.6.4"
 postgres-protocol = "0.6.6"
@@ -400,6 +401,7 @@ sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
+sqlformat = "0.2.3"
 sqlparser = { version = "0.43.1", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
