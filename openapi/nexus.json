@@ -2257,7 +2257,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "List the SSH public keys sent to the instance via cloud-init during instance creation",
+        "summary": "List the SSH public keys added to the instance via cloud-init during instance creation",
         "description": "Note that this list is a snapshot in time and will not reflect updates made after the instance is created.",
         "operationId": "instance_ssh_public_key_list",
         "parameters": [
