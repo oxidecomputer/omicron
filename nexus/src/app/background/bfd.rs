@@ -36,6 +36,7 @@ impl BfdManager {
 
 struct BfdSessionKey {
     switch: SwitchLocation,
+    local: Option<IpAddr>,
     remote: IpAddr,
     detection_threshold: u8,
     required_rx: u64,
@@ -70,6 +71,7 @@ impl From<BfdSession> for BfdSessionKey {
         Self {
             switch: value.switch.parse().unwrap(), //TODO unwrap
             remote: value.remote.ip(),
+            local: value.local.map(|x| x.ip()),
             detection_threshold: value
                 .detection_threshold
                 .0
@@ -125,6 +127,7 @@ impl BackgroundTask for BfdManager {
                 };
                 for info in &client_current {
                     current.insert(BfdSessionKey {
+                        local: Some(info.config.listen),
                         remote: info.config.peer,
                         detection_threshold: info.config.detection_threshold,
                         required_rx: info.config.required_rx,
@@ -170,7 +173,7 @@ impl BackgroundTask for BfdManager {
                     .add_bfd_peer(&BfdPeerConfig {
                         peer: x.remote,
                         detection_threshold: x.detection_threshold,
-                        listen: Ipv4Addr::UNSPECIFIED.into(),
+                        listen: x.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),
                         mode: match x.mode {
                             BfdMode::SingleHop => SessionMode::SingleHop,
                             BfdMode::MultiHop => SessionMode::MultiHop,
@@ -204,7 +207,8 @@ impl BackgroundTask for BfdManager {
                 }
             }
 
-            //TODO parameter updates
+            // TODO parameter updates
+            // https://github.com/oxidecomputer/omicron/issues/4921
 
             json!({})
         }

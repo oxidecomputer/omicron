@@ -33,6 +33,8 @@ impl super::Nexus {
         opctx: &OpContext,
         session: params::BfdSessionEnable,
     ) -> Result<(), Error> {
+        // add the bfd session to the db and trigger the bfd manager to handle
+        // the reset
         self.datastore().bfd_session_create(opctx, &session).await?;
         self.background_tasks
             .driver
@@ -45,6 +47,8 @@ impl super::Nexus {
         opctx: &OpContext,
         session: params::BfdSessionDisable,
     ) -> Result<(), Error> {
+        // remove the bfd session from the db and trigger the bfd manager to
+        // handle the reset
         self.datastore().bfd_session_delete(opctx, &session).await?;
         self.background_tasks
             .driver
@@ -56,6 +60,8 @@ impl super::Nexus {
         &self,
         _opctx: &OpContext,
     ) -> Result<Vec<BfdStatus>, Error> {
+        // ask each rack switch about all its BFD sessions. This will need to
+        // be updated for multirack.
         let mut result = Vec::new();
         for s in &[SwitchLocation::Switch0, SwitchLocation::Switch1] {
             let mg_client = self.mg_client_for_switch_location(*s)?;
