@@ -310,7 +310,7 @@ async fn sic_associate_ssh_keys(
     );
     let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
 
-    // Gather the SSH public keys of the actor make the request so
+    // Gather the SSH public keys of the actor making the request so
     // that they may be injected into the new image via cloud-init.
     // TODO-security: this should be replaced with a lookup based on
     // on `SiloUser` role assignments once those are in place.
