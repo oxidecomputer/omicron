@@ -65,13 +65,11 @@ impl DataStore {
         // doesn't exist or isn't owned by the user. Either way we want to give a specific lookup error
         // for at least the first result. It would be nice to include an aggregate error with all the missing
         // keys.
-        // TODO: Optimize the performance of this
         for key in keys.iter() {
             match key {
                 NameOrId::Name(name) => {
                     if !result
-                        .iter()
-                        .any(|(_, n)| n.clone() == name.clone().into())
+                        .contains(|(_, n)| n.clone() == name.clone().into())
                     {
                         return Err(Error::ObjectNotFound {
                             type_name: ResourceType::SshKey,
@@ -80,7 +78,7 @@ impl DataStore {
                     }
                 }
                 NameOrId::Id(id) => {
-                    if !result.iter().any(|(i, _)| i == id) {
+                    if !result.contains(|(i, _)| i == id) {
                         return Err(Error::ObjectNotFound {
                             type_name: ResourceType::SshKey,
                             lookup_type: LookupType::ById(*id),
