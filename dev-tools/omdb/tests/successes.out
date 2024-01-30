@@ -217,6 +217,14 @@ EXECUTING COMMAND: omdb ["nexus", "background-tasks", "doc"]
 termination: Exited(0)
 ---------------------------------------------
 stdout:
+task: "blueprint_executor"
+    Executes the target blueprint
+
+
+task: "blueprint_loader"
+    Loads the current target blueprint from the DB
+
+
 task: "dns_config_external"
     watches external DNS data stored in CockroachDB
 
@@ -338,6 +346,20 @@ task: "nat_v4_garbage_collector"
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "nat_v4_garbage_collector" (don't know how to interpret details: Null)
+
+task: "blueprint_loader"
+  configured period: every 10s
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "blueprint_loader" (don't know how to interpret details: Object {"status": String("no target blueprint")})
+
+task: "blueprint_executor"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: iter 2, triggered by an explicit signal
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    last completion reported error: no blueprint
 
 task: "external_endpoints"
   configured period: every 1m
