@@ -9,16 +9,20 @@ use uuid::Uuid;
 pub use nexus_types::external_api::params::MAX_USER_DATA_BYTES;
 
 pub trait InstanceCiData {
-    fn generate_cidata(&self, ssh_keys: &[String]) -> Result<Vec<u8>, Error>;
+    fn generate_cidata(&self, public_keys: &[String])
+        -> Result<Vec<u8>, Error>;
 }
 
 impl InstanceCiData for Instance {
-    fn generate_cidata(&self, ssh_keys: &[String]) -> Result<Vec<u8>, Error> {
+    fn generate_cidata(
+        &self,
+        public_keys: &[String],
+    ) -> Result<Vec<u8>, Error> {
         // cloud-init meta-data is YAML, but YAML is a strict superset of JSON.
         let meta_data = serde_json::to_vec(&MetaData {
             instance_id: self.id(),
             local_hostname: &self.hostname,
-            ssh_keys,
+            public_keys,
         })
         .map_err(|_| Error::internal_error("failed to serialize meta-data"))?;
         let cidata =

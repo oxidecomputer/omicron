@@ -32,7 +32,7 @@ async fn instance_launch() -> Result<()> {
         .body(SshKeyCreate {
             name: ssh_key_name.clone(),
             description: String::new(),
-            public_key: public_key_str.clone(),
+            public_key: public_key_str,
         })
         .send()
         .await?;
@@ -132,10 +132,7 @@ async fn instance_launch() -> Result<()> {
         .split_once("-----BEGIN SSH HOST KEY KEYS-----")
         .and_then(|(_, s)| s.split_once("-----END SSH HOST KEY KEYS-----"))
         .and_then(|(lines, _)| {
-            lines
-                .trim()
-                .lines()
-                .find(|line| line.contains(public_key_str.clone().as_str()))
+            lines.trim().lines().find(|line| line.starts_with("ssh-ed25519"))
         })
         .and_then(|line| line.split_whitespace().nth(1))
         .context("failed to get SSH host key from serial console")?;
