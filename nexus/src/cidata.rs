@@ -37,7 +37,7 @@ impl InstanceCiData for Instance {
 struct MetaData<'a> {
     instance_id: Uuid,
     local_hostname: &'a str,
-    ssh_keys: &'a [String],
+    public_keys: &'a [String],
 }
 
 fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
