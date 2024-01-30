@@ -696,6 +696,101 @@ impl TryFrom<i64> for Generation {
     }
 }
 
+/// An RFC-1035-compliant hostname.
+#[derive(
+    Clone, Debug, Deserialize, Display, Eq, PartialEq, SerializeDisplay,
+)]
+#[display("{0}")]
+#[serde(try_from = "&str", into = "String")]
+pub struct Hostname(String);
+
+impl Hostname {
+    /// Return the hostname as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+// Regular expression for hostnames.
+//
+// Each name is a dot-separated sequence of labels. Each label is supposed to
+// be an "LDH": letter, dash, or hyphen. Hostnames can consist of one label, or
+// many, separated by a `.`. While _domain_ names are allowed to end in a `.`,
+// making them fully-qualified, hostnames are not.
+//
+// Note that labels are allowed to contain a hyphen, but may not start or end
+// with one. See RFC 952, "Lexical grammar" section.
+//
+// Note that we need to use a regex engine capable of lookbehind to support
+// this, since we need to check that labels don't end with a `-`.
+const HOSTNAME_REGEX: &str = r#"^([a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))(\.[a-zA-Z1-9]+[a-zA-Z0-9\-]*(?<!-))*$"#;
+
+// Labels need to be encoded on the wire, and prefixed with a signel length
+// octet. They also need to end with a length octet of 0 when encoded. So the
+// longest name is a single label of 253 characters, which will be encoded as
+// `\xfd<the label>\x00`.
+const HOSTNAME_MAX_LEN: u32 = 253;
+
+impl FromStr for Hostname {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        anyhow::ensure!(
+            s.len() <= HOSTNAME_MAX_LEN as usize,
+            "Max hostname length is {HOSTNAME_MAX_LEN}"
+        );
+        let re = regress::Regex::new(HOSTNAME_REGEX).unwrap();
+        if re.find(s).is_some() {
+            Ok(Hostname(s.to_string()))
+        } else {
+            anyhow::bail!("Hostnames must comply with RFC 1035")
+        }
+    }
+}
+
+impl TryFrom<&str> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+// Custom implementation of JsonSchema for Hostname to ensure RFC-1035-style
+// validation
+impl JsonSchema for Hostname {
+    fn schema_name() -> String {
+        "Hostname".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An RFC-1035-compliant hostname".to_string()),
+                description: Some(
+                    "A hostname identifies a host on a network, and \
+                    is usually a dot-delimited sequence of labels, \
+                    where each label contains only letters, digits, \
+                    or the hyphen. See RFCs 1035 an 952 for more details."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(HOSTNAME_MAX_LEN),
+                min_length: None,
+                pattern: Some(HOSTNAME_REGEX.to_string()),
+            })),
+            ..Default::default()
+        })
+    }
+}
+
 // General types used to implement API resources
 
 /// Identifies a type of API resource
@@ -939,7 +1034,7 @@ pub struct Instance {
     /// memory allocated for this Instance
     pub memory: ByteCount,
     /// RFC1035-compliant hostname for the Instance.
-    pub hostname: String, // TODO-cleanup different type?
+    pub hostname: Hostname,
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
@@ -2737,6 +2832,7 @@ mod test {
         VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
+    use crate::api::external::Hostname;
     use crate::api::external::ResourceType;
     use std::convert::TryFrom;
     use std::str::FromStr;
@@ -3459,5 +3555,25 @@ mod test {
         assert_eq!(mac.0.as_bytes(), &[0xa8, 0x40, 0x25, 0xff, 0x00, 0x01]);
         let conv = mac.to_i64();
         assert_eq!(original, conv);
+    }
+
+    #[test]
+    fn test_hostname_from_str() {
+        assert!(Hostname::from_str("name").is_ok());
+        assert!(Hostname::from_str("a.good.name").is_ok());
+        assert!(Hostname::from_str("another.very-good.name").is_ok());
+        assert!(Hostname::from_str("0name").is_ok());
+        assert!(Hostname::from_str("name0").is_ok());
+        assert!(Hostname::from_str("0name0").is_ok());
+
+        assert!(Hostname::from_str("").is_err());
+        assert!(Hostname::from_str("no_no").is_err());
+        assert!(Hostname::from_str("no.fqdns.").is_err());
+        assert!(Hostname::from_str("empty..label").is_err());
+        assert!(Hostname::from_str("-hypen.cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.-cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.cannot.end-").is_err());
+        assert!(Hostname::from_str("hyphen-cannot-end-").is_err());
+        assert!(Hostname::from_str(&"too-long".repeat(100)).is_err());
     }
 }

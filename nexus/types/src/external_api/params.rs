@@ -9,7 +9,7 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, ByteCount, IdentityMetadataCreateParams,
+    AddressLotKind, ByteCount, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
     Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
     SemverVersion,
@@ -1004,7 +1004,7 @@ pub struct InstanceCreate {
     pub identity: IdentityMetadataCreateParams,
     pub ncpus: InstanceCpuCount,
     pub memory: ByteCount,
-    pub hostname: String, // TODO-cleanup different type?
+    pub hostname: Hostname,
 
     /// User data for instance initialization systems (such as cloud-init).
     /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /

@@ -11975,6 +11975,13 @@
           "start_time"
         ]
       },
+      "Hostname": {
+        "title": "An RFC-1035-compliant hostname",
+        "description": "A hostname identifies a host on a network, and is usually a dot-delimited sequence of labels, where each label contains only letters, digits, or the hyphen. See RFCs 1035 an 952 for more details.",
+        "type": "string",
+        "pattern": "^([a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))(\\.[a-zA-Z1-9]+[a-zA-Z0-9\\-]*(?<!-))*$",
+        "maxLength": 253
+      },
       "IdentityProvider": {
         "description": "View of an Identity Provider",
         "type": "object",
@@ -12310,7 +12317,11 @@
           },
           "hostname": {
             "description": "RFC1035-compliant hostname for the Instance.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Hostname"
+              }
+            ]
           },
           "id": {
             "description": "unique, immutable, system-controlled identifier for each resource",
@@ -12408,7 +12419,7 @@
             }
           },
           "hostname": {
-            "type": "string"
+            "$ref": "#/components/schemas/Hostname"
           },
           "memory": {
             "$ref": "#/components/schemas/ByteCount"

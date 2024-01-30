@@ -97,7 +97,11 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
             project_id: value.instance.project_id,
             ncpus: value.instance.ncpus.into(),
             memory: value.instance.memory.into(),
-            hostname: value.instance.hostname,
+            hostname: value
+                .instance
+                .hostname
+                .parse()
+                .expect("found invalid hostname in the database"),
             runtime: omicron_common::api::external::InstanceRuntimeState {
                 run_state: *run_state.state(),
                 time_run_state_updated,
