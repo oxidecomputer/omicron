@@ -149,6 +149,11 @@ impl super::Nexus {
     ) -> CreateResult<db::model::IpPoolResource> {
         let (authz_pool,) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+            return Err(not_found_from_lookup(pool_lookup));
+        }
+
         let (authz_silo,) = self
             .silo_lookup(&opctx, silo_link.silo.clone())?
             .lookup_for(authz::Action::Modify)
@@ -174,6 +179,11 @@ impl super::Nexus {
     ) -> DeleteResult {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+            return Err(not_found_from_lookup(pool_lookup));
+        }
+
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -191,6 +201,11 @@ impl super::Nexus {
     ) -> CreateResult<db::model::IpPoolResource> {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
+
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
+            return Err(not_found_from_lookup(pool_lookup));
+        }
+
         let (.., authz_silo) =
             silo_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -220,9 +235,7 @@ impl super::Nexus {
         let (.., authz_pool, db_pool) =
             pool_lookup.fetch_for(authz::Action::Delete).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -238,9 +251,7 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -258,9 +269,7 @@ impl super::Nexus {
         let (.., authz_pool) =
             pool_lookup.lookup_for(authz::Action::ListChildren).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
@@ -278,11 +287,10 @@ impl super::Nexus {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
+
         self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
@@ -295,10 +303,7 @@ impl super::Nexus {
         let (.., authz_pool, _db_pool) =
             pool_lookup.fetch_for(authz::Action::Modify).await?;
 
-        let is_internal =
-            self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await?;
-
-        if is_internal {
+        if self.db_datastore.ip_pool_is_internal(opctx, &authz_pool).await? {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
