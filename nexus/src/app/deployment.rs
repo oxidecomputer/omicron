@@ -197,7 +197,7 @@ impl super::Nexus {
     ) -> CreateResult<Blueprint> {
         let collection = self
             .datastore()
-            .inventory_collection_read_all_or_nothing(
+            .inventory_collection_read_batched(
                 opctx,
                 collection_id,
                 SQL_LIMIT_INVENTORY,

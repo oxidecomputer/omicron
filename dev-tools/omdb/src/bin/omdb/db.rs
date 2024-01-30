@@ -2499,13 +2499,10 @@ async fn cmd_db_inventory_collections_show(
     limit: NonZeroU32,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
-    let (collection, incomplete) = datastore
-        .inventory_collection_read_best_effort(opctx, id, limit)
+    let collection = datastore
+        .inventory_collection_read_batched(opctx, id, limit)
         .await
         .context("reading collection")?;
-    if incomplete {
-        limit_error(limit, || "loading collection");
-    }
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;
