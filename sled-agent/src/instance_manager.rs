@@ -82,7 +82,9 @@ pub(crate) struct InstanceManagerServices {
     pub zone_builder_factory: ZoneBuilderFactory,
 }
 
-pub struct InstanceManagerInternal {
+// Describes the internals of the "InstanceManager", though most of the
+// instance manager's state exists within the "InstanceManagerRunner" structure.
+struct InstanceManagerInternal {
     log: Logger,
     tx: mpsc::Sender<InstanceManagerRequest>,
     // NOTE: Arguably, this field could be "owned" by the InstanceManagerRunner.
@@ -122,7 +124,6 @@ impl InstanceManager {
             terminate_tx,
             terminate_rx,
             nexus_client,
-            // no reservoir size set on startup
             instances: BTreeMap::new(),
             vnic_allocator: VnicAllocator::new("Instance", etherstub),
             port_manager,
@@ -138,6 +139,7 @@ impl InstanceManager {
             inner: Arc::new(InstanceManagerInternal {
                 log,
                 tx,
+                // no reservoir size set on startup
                 reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
                 runner_handle,
             }),
@@ -378,6 +380,12 @@ impl InstanceManager {
     }
 }
 
+// Most requests that can be sent to the "InstanceManagerRunner" task.
+//
+// These messages are sent by "InstanceManager"'s interface, and processed by
+// the runner task.
+//
+// By convention, responses are sent on the "tx" oneshot.
 enum InstanceManagerRequest {
     EnsureRegistered {
         instance_id: Uuid,
