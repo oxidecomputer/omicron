@@ -269,7 +269,7 @@ mod test {
         let (new_target, new_blueprint) = create_blueprint(Some(blueprint.id));
         datastore.blueprint_insert(&opctx, &new_blueprint).await.unwrap();
         datastore
-            .blueprint_target_set_current(&opctx, new_target.clone())
+            .blueprint_target_set_current(&opctx, new_target)
             .await
             .unwrap();
         let value = task.activate(&opctx).await;
