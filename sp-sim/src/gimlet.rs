@@ -640,7 +640,9 @@ impl Handler {
     }
 
     fn sp_state_impl(&self) -> SpStateV2 {
-        const FAKE_GIMLET_MODEL: &[u8] = b"FAKE_SIM_GIMLET";
+        // We pretend this is a PC for the baseboard so our testbeds can make
+        // use of it.
+        const FAKE_GIMLET_MODEL: &[u8] = b"i86pc";
 
         let mut model = [0; 32];
         model[..FAKE_GIMLET_MODEL.len()].copy_from_slice(FAKE_GIMLET_MODEL);

@@ -13,7 +13,7 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 [[simulated_sps.gimlet]]
 multicast_addr = "ff15:0:1de::1"
 bind_addrs = ["[::]:33310", "[::]:33311"]
-serial_number = "SimGimlet0"
+serial_number = "g0"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000001"
 
@@ -28,7 +28,7 @@ serial_console = "[::1]:33312"
 [[simulated_sps.gimlet]]
 multicast_addr = "ff15:0:1de::2"
 bind_addrs = ["[::]:33320", "[::]:33321"]
-serial_number = "SimGimlet1"
+serial_number = "g1"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000002"
 
@@ -39,6 +39,36 @@ description = "FAKE host cpu"
 capabilities.bits = 0
 presence = "Present"
 serial_console = "[::1]:33322"
+
+[[simulated_sps.gimlet]]
+multicast_addr = "ff15:0:1de::3"
+bind_addrs = ["[::]:33330", "[::]:33331"]
+serial_number = "g2"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000003"
+
+[[simulated_sps.gimlet.components]]
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+capabilities.bits = 0
+presence = "Present"
+serial_console = "[::1]:33332"
+
+[[simulated_sps.gimlet]]
+multicast_addr = "ff15:0:1de::4"
+bind_addrs = ["[::]:33340", "[::]:33341"]
+serial_number = "g3"
+manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
+device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000004"
+
+[[simulated_sps.gimlet.components]]
+id = "sp3-host-cpu"
+device = "sp3-host-cpu"
+description = "FAKE host cpu"
+capabilities.bits = 0
+presence = "Present"
+serial_console = "[::1]:33342"
 
 [log]
 # Show log messages of this level and more severe
