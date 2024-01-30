@@ -103,17 +103,14 @@ tokio-util.workspace = true
 illumos-utils = { workspace = true, features = ["testing", "tmp_keypath"] }
 sled-storage = { workspace = true, features = ["testing"] }
 
-#
-# Disable doc builds by default for our binaries to work around issue
-# rust-lang/cargo#8373.  These docs would not be very useful anyway.
-#
 [[bin]]
 name = "sled-agent-sim"
-doc = false
 
 [[bin]]
 name = "sled-agent"
-doc = false
+
+[[bin]]
+name = "rss-init"
 
 [features]
 image-standard = []
