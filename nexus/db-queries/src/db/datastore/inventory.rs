@@ -9,6 +9,7 @@ use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
+use crate::db::pagination::{paginated, Paginator};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::TransactionError;
 use anyhow::Context;
@@ -1246,6 +1247,514 @@ impl DataStore {
             limit
         );
         Ok(collection)
+    }
+
+    pub async fn inventory_collection_read_batched(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        batch_size: NonZeroU32,
+    ) -> Result<Collection, Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let mut limit_reached = false;
+        let (time_started, time_done, collector) = {
+            use db::schema::inv_collection::dsl;
+
+            let collections = dsl::inv_collection
+                .filter(dsl::id.eq(id))
+                .limit(2)
+                .select(InvCollection::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+            bail_unless!(collections.len() == 1);
+            let collection = collections.into_iter().next().unwrap();
+            (
+                collection.time_started,
+                collection.time_done,
+                collection.collector,
+            )
+        };
+
+        let errors: Vec<String> = {
+            use db::schema::inv_collection_error::dsl;
+            let mut errors = Vec::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_collection_error,
+                    dsl::idx,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(id))
+                .order_by(dsl::idx)
+                .select(InvCollectionError::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|row: &InvCollectionError| row.idx);
+                errors.extend(batch.into_iter().map(|e| e.message));
+            }
+            errors
+        };
+
+        let sps: BTreeMap<_, _> = {
+            use db::schema::inv_service_processor::dsl;
+
+            let mut sps = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_service_processor,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvServiceProcessor::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p
+                    .found_batch(&batch, &|sp_row: &InvServiceProcessor| {
+                        sp_row.hw_baseboard_id
+                    });
+                sps.extend(batch.into_iter().map(|sp_row| {
+                    let baseboard_id = sp_row.hw_baseboard_id;
+                    (
+                        baseboard_id,
+                        nexus_types::inventory::ServiceProcessor::from(sp_row),
+                    )
+                }));
+            }
+            sps
+        };
+
+        let rots: BTreeMap<_, _> = {
+            use db::schema::inv_root_of_trust::dsl;
+
+            let mut rots = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_root_of_trust,
+                    dsl::hw_baseboard_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvRootOfTrust::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p
+                    .found_batch(&batch, &|rot_row: &InvRootOfTrust| {
+                        rot_row.hw_baseboard_id
+                    });
+                rots.extend(batch.into_iter().map(|rot_row| {
+                    let baseboard_id = rot_row.hw_baseboard_id;
+                    (
+                        baseboard_id,
+                        nexus_types::inventory::RotState::from(rot_row),
+                    )
+                }));
+            }
+            rots
+        };
+
+        let sled_agent_rows: Vec<_> = {
+            use db::schema::inv_sled_agent::dsl;
+            dsl::inv_sled_agent
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvSledAgent::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
+        // Agents.
+        let baseboard_id_ids: BTreeSet<_> = sps
+            .keys()
+            .chain(rots.keys())
+            .cloned()
+            .chain(sled_agent_rows.iter().filter_map(|s| s.hw_baseboard_id))
+            .collect();
+        // Fetch the corresponding baseboard records.
+        let baseboards_by_id: BTreeMap<_, _> = {
+            use db::schema::hw_baseboard_id::dsl;
+            dsl::hw_baseboard_id
+                .filter(dsl::id.eq_any(baseboard_id_ids))
+                .select(HwBaseboardId::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|bb| {
+                    (
+                        bb.id,
+                        Arc::new(nexus_types::inventory::BaseboardId::from(bb)),
+                    )
+                })
+                .collect()
+        };
+
+        // Having those, we can replace the keys in the maps above with
+        // references to the actual baseboard rather than the uuid.
+        let sps = sps
+            .into_iter()
+            .map(|(id, sp)| {
+                baseboards_by_id.get(&id).map(|bb| (bb.clone(), sp)).ok_or_else(
+                    || {
+                        Error::internal_error(
+                            "missing baseboard that we should have fetched",
+                        )
+                    },
+                )
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let rots = rots
+            .into_iter()
+            .map(|(id, rot)| {
+                baseboards_by_id
+                    .get(&id)
+                    .map(|bb| (bb.clone(), rot))
+                    .ok_or_else(|| {
+                        Error::internal_error(
+                            "missing baseboard that we should have fetched",
+                        )
+                    })
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
+        let sled_agents: BTreeMap<_, _> =
+            sled_agent_rows
+                .into_iter()
+                .map(|s: InvSledAgent| {
+                    let sled_id = s.sled_id;
+                    let baseboard_id = s
+                        .hw_baseboard_id
+                        .map(|id| {
+                            baseboards_by_id.get(&id).cloned().ok_or_else(
+                                || {
+                                    Error::internal_error(
+                                "missing baseboard that we should have fetched",
+                            )
+                                },
+                            )
+                        })
+                        .transpose()?;
+                    let sled_agent = nexus_types::inventory::SledAgent {
+                        time_collected: s.time_collected,
+                        source: s.source,
+                        sled_id,
+                        baseboard_id,
+                        sled_agent_address: std::net::SocketAddrV6::new(
+                            std::net::Ipv6Addr::from(s.sled_agent_ip),
+                            u16::from(s.sled_agent_port),
+                            0,
+                            0,
+                        ),
+                        sled_role: nexus_types::inventory::SledRole::from(
+                            s.sled_role,
+                        ),
+                        usable_hardware_threads: u32::from(
+                            s.usable_hardware_threads,
+                        ),
+                        usable_physical_ram: s.usable_physical_ram.into(),
+                        reservoir_size: s.reservoir_size.into(),
+                    };
+                    Ok((sled_id, sled_agent))
+                })
+                .collect::<Result<
+                    BTreeMap<Uuid, nexus_types::inventory::SledAgent>,
+                    Error,
+                >>()?;
+
+        // Fetch records of cabooses found.
+        let inv_caboose_rows = {
+            use db::schema::inv_caboose::dsl;
+            dsl::inv_caboose
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvCaboose::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        // Collect the unique sw_caboose_ids for those cabooses.
+        let sw_caboose_ids: BTreeSet<_> = inv_caboose_rows
+            .iter()
+            .map(|inv_caboose| inv_caboose.sw_caboose_id)
+            .collect();
+        // Fetch the corresponing records.
+        let cabooses_by_id: BTreeMap<_, _> = {
+            use db::schema::sw_caboose::dsl;
+            dsl::sw_caboose
+                .filter(dsl::id.eq_any(sw_caboose_ids))
+                .select(SwCaboose::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sw_caboose_row| {
+                    (
+                        sw_caboose_row.id,
+                        Arc::new(nexus_types::inventory::Caboose::from(
+                            sw_caboose_row,
+                        )),
+                    )
+                })
+                .collect()
+        };
+
+        // Assemble the lists of cabooses found.
+        let mut cabooses_found = BTreeMap::new();
+        for c in inv_caboose_rows {
+            let by_baseboard = cabooses_found
+                .entry(nexus_types::inventory::CabooseWhich::from(c.which))
+                .or_insert_with(BTreeMap::new);
+            let Some(bb) = baseboards_by_id.get(&c.hw_baseboard_id) else {
+                let msg = format!(
+                    "unknown baseboard found in inv_caboose: {}",
+                    c.hw_baseboard_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+            let Some(sw_caboose) = cabooses_by_id.get(&c.sw_caboose_id) else {
+                let msg = format!(
+                    "unknown caboose found in inv_caboose: {}",
+                    c.sw_caboose_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+
+            let previous = by_baseboard.insert(
+                bb.clone(),
+                nexus_types::inventory::CabooseFound {
+                    time_collected: c.time_collected,
+                    source: c.source,
+                    caboose: sw_caboose.clone(),
+                },
+            );
+            bail_unless!(
+                previous.is_none(),
+                "duplicate caboose found: {:?} baseboard {:?}",
+                c.which,
+                c.hw_baseboard_id
+            );
+        }
+
+        // Fetch records of RoT pages found.
+        let inv_rot_page_rows = {
+            use db::schema::inv_root_of_trust_page::dsl;
+            dsl::inv_root_of_trust_page
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvRotPage::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+
+        // Collect the unique sw_rot_page_ids for those pages.
+        let sw_rot_page_ids: BTreeSet<_> = inv_rot_page_rows
+            .iter()
+            .map(|inv_rot_page| inv_rot_page.sw_root_of_trust_page_id)
+            .collect();
+        // Fetch the corresponding records.
+        let rot_pages_by_id: BTreeMap<_, _> = {
+            use db::schema::sw_root_of_trust_page::dsl;
+            dsl::sw_root_of_trust_page
+                .filter(dsl::id.eq_any(sw_rot_page_ids))
+                .select(SwRotPage::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sw_rot_page_row| {
+                    (
+                        sw_rot_page_row.id,
+                        Arc::new(nexus_types::inventory::RotPage::from(
+                            sw_rot_page_row,
+                        )),
+                    )
+                })
+                .collect()
+        };
+
+        // Assemble the lists of rot pages found.
+        let mut rot_pages_found = BTreeMap::new();
+        for p in inv_rot_page_rows {
+            let by_baseboard = rot_pages_found
+                .entry(nexus_types::inventory::RotPageWhich::from(p.which))
+                .or_insert_with(BTreeMap::new);
+            let Some(bb) = baseboards_by_id.get(&p.hw_baseboard_id) else {
+                let msg = format!(
+                    "unknown baseboard found in inv_root_of_trust_page: {}",
+                    p.hw_baseboard_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+            let Some(sw_rot_page) =
+                rot_pages_by_id.get(&p.sw_root_of_trust_page_id)
+            else {
+                let msg = format!(
+                    "unknown rot page found in inv_root_of_trust_page: {}",
+                    p.sw_root_of_trust_page_id
+                );
+                return Err(Error::internal_error(&msg));
+            };
+
+            let previous = by_baseboard.insert(
+                bb.clone(),
+                nexus_types::inventory::RotPageFound {
+                    time_collected: p.time_collected,
+                    source: p.source,
+                    page: sw_rot_page.clone(),
+                },
+            );
+            bail_unless!(
+                previous.is_none(),
+                "duplicate rot page found: {:?} baseboard {:?}",
+                p.which,
+                p.hw_baseboard_id
+            );
+        }
+
+        // Now read the Omicron zones.
+        //
+        // In the first pass, we'll load the "inv_sled_omicron_zones" records.
+        // There's one of these per sled.  It does not contain the actual list
+        // of zones -- basically just collection metadata and the generation
+        // number.  We'll assemble these directly into the data structure we're
+        // trying to build, which maps sled ids to objects describing the zones
+        // found on each sled.
+        let mut omicron_zones: BTreeMap<_, _> = {
+            use db::schema::inv_sled_omicron_zones::dsl;
+            dsl::inv_sled_omicron_zones
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvSledOmicronZones::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|sled_zones_config| {
+                    (
+                        sled_zones_config.sled_id,
+                        sled_zones_config.into_uninit_zones_found(),
+                    )
+                })
+                .collect()
+        };
+
+        // Assemble a mutable map of all the NICs found, by NIC id.  As we
+        // match these up with the corresponding zone below, we'll remove items
+        // from this set.  That way we can tell if the same NIC was used twice
+        // or not used at all.
+        let mut omicron_zone_nics: BTreeMap<_, _> = {
+            use db::schema::inv_omicron_zone_nic::dsl;
+            dsl::inv_omicron_zone_nic
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvOmicronZoneNic::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+                .into_iter()
+                .map(|found_zone_nic| (found_zone_nic.id, found_zone_nic))
+                .collect()
+        };
+
+        // Now load the actual list of zones from all sleds.
+        let omicron_zones_list = {
+            use db::schema::inv_omicron_zone::dsl;
+            dsl::inv_omicron_zone
+                .filter(dsl::inv_collection_id.eq(id))
+                // It's not strictly necessary to order these by id.  Doing so
+                // ensures a consistent representation for `Collection`, which
+                // makes testing easier.  It's already indexed to do this, too.
+                .order_by(dsl::id)
+                .select(InvOmicronZone::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?
+        };
+        for z in omicron_zones_list {
+            let nic_row = z
+                .nic_id
+                .map(|id| {
+                    // This error means that we found a row in inv_omicron_zone
+                    // that references a NIC by id but there's no corresponding
+                    // row in inv_omicron_zone_nic with that id.  This should be
+                    // impossible and reflects either a bug or database
+                    // corruption.
+                    omicron_zone_nics.remove(&id).ok_or_else(|| {
+                        Error::internal_error(&format!(
+                            "zone {:?}: expected to find NIC {:?}, but didn't",
+                            z.id, z.nic_id
+                        ))
+                    })
+                })
+                .transpose()?;
+            let map = omicron_zones.get_mut(&z.sled_id).ok_or_else(|| {
+                // This error means that we found a row in inv_omicron_zone with
+                // no associated record in inv_sled_omicron_zones.  This should
+                // be impossible and reflects either a bug or database
+                // corruption.
+                Error::internal_error(&format!(
+                    "zone {:?}: unknown sled: {:?}",
+                    z.id, z.sled_id
+                ))
+            })?;
+            let zone_id = z.id;
+            let zone = z
+                .into_omicron_zone_config(nic_row)
+                .with_context(|| {
+                    format!("zone {:?}: parse from database", zone_id)
+                })
+                .map_err(|e| {
+                    Error::internal_error(&format!("{:#}", e.to_string()))
+                })?;
+            map.zones.zones.push(zone);
+        }
+
+        bail_unless!(
+            omicron_zone_nics.is_empty(),
+            "found extra Omicron zone NICs: {:?}",
+            omicron_zone_nics.keys()
+        );
+
+        Ok(Collection {
+            id,
+            errors,
+            time_started,
+            time_done,
+            collector,
+            baseboards: baseboards_by_id.values().cloned().collect(),
+            cabooses: cabooses_by_id.values().cloned().collect(),
+            rot_pages: rot_pages_by_id.values().cloned().collect(),
+            sps,
+            rots,
+            cabooses_found,
+            rot_pages_found,
+            sled_agents,
+            omicron_zones,
+        })
     }
 
     /// Make a best effort to read the given collection while limiting queries
