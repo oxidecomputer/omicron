@@ -249,10 +249,7 @@ mod test {
         assert!(rx.borrow().is_none());
 
         // Setting a target blueprint makes the loader see it and broadcast it
-        datastore
-            .blueprint_target_set_current(&opctx, target.clone())
-            .await
-            .unwrap();
+        datastore.blueprint_target_set_current(&opctx, target).await.unwrap();
         let value = task.activate(&opctx).await;
         let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
         assert_eq!(update.target_id, blueprint.id);
