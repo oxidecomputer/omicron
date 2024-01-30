@@ -802,6 +802,7 @@ mod test {
                         blueprints: BlueprintTasksConfig {
                             period_secs_load: Duration::from_secs(10),
                             period_secs_execute: Duration::from_secs(60)
+                        },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
                         }

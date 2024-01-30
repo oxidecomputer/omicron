@@ -194,7 +194,7 @@ impl BackgroundTasks {
 
         // Background task: blueprint executor
         let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
-            datastore,
+            datastore.clone(),
             rx_blueprint.clone(),
         );
         let task_blueprint_executor = driver.register(

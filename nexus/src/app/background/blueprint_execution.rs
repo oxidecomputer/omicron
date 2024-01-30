@@ -30,8 +30,6 @@ pub struct BlueprintExecutor {
 }
 
 impl BlueprintExecutor {
-    // Temporary until we wire up the background task
-    #[allow(unused)]
     pub fn new(
         datastore: Arc<DataStore>,
         rx_blueprint: watch::Receiver<Option<Arc<Blueprint>>>,
@@ -75,7 +73,7 @@ impl BlueprintExecutor {
     async fn realize_blueprint(
         &self,
         opctx: &OpContext,
-        blueprint: &std::sync::Arc<Blueprint>,
+        blueprint: &Blueprint,
     ) -> Result<(), Vec<anyhow::Error>> {
         let log = opctx.log.new(o!("comment" => blueprint.comment.clone()));
         self.deploy_zones(&log, opctx, &blueprint.omicron_zones).await
@@ -157,7 +155,10 @@ impl BackgroundTask for BlueprintExecutor {
                         .into_iter()
                         .map(|e| format!("{:#}", e))
                         .collect();
-                    json!({"errors": errors})
+                    json!({
+                        "target_id": blueprint.id.to_string(),
+                        "errors": errors
+                    })
                 }
             }
         }

@@ -4,8 +4,8 @@
 
 //! Background task for loading the target blueprint from the DB
 //!
-//! This task triggers the `plan_execution` background task when the blueprint
-//! changes.
+//! This task triggers the `blueprint_execution` background task when the
+//! blueprint changes.
 
 use super::common::BackgroundTask;
 use futures::future::BoxFuture;
@@ -67,13 +67,13 @@ impl BackgroundTask for TargetBlueprintLoader {
                         "failed to read target blueprint";
                         "error" => &message
                     );
-                    json!({
-                        "error": 
-                        format!("failed to read target blueprint: {message}")})
+                    let e =
+                        format!("failed to read target blueprint: {message}");
+                    json!({"error": e})
                 }
                 (None, Ok(None)) => {
                     // We haven't found a blueprint yet. Do nothing.
-                    json!({})
+                    json!({"status": "no blueprint"})
                 }
                 (Some(old), Ok(None)) => {
                     // We have transitioned from having a blueprint to not
@@ -83,11 +83,13 @@ impl BackgroundTask for TargetBlueprintLoader {
                         longer any target blueprint",
                         old.id
                     );
-                    error!(&log, "{}", message);
+                    self.last = None;
+                    self.tx.send_replace(self.last.clone());
+                    error!(&log, "{message:?}");
                     json!({"error": message})
                 }
                 (None, Ok(Some((_, new_target)))) => {
-                    // We've found a new target blueprint for the first time.
+                    // We've found a target blueprint for the first time.
                     // Save it and notify any watchers.
                     let target_id = new_target.id.to_string();
                     let time_created = new_target.time_created.to_string();
@@ -100,7 +102,10 @@ impl BackgroundTask for TargetBlueprintLoader {
                     self.last = Some(Arc::new(new_target));
                     self.tx.send_replace(self.last.clone());
                     json!({
-                        "target_id": target_id, "time_created": time_created
+                        "target_id": target_id,
+                        "time_created": time_created,
+                        "time_found": chrono::Utc::now().to_string(),
+                        "status": "first target blueprint"
                     })
                 }
                 (Some(old), Ok(Some((_, new)))) => {
@@ -118,7 +123,9 @@ impl BackgroundTask for TargetBlueprintLoader {
                         self.tx.send_replace(self.last.clone());
                         json!({
                             "target_id": target_id,
-                            "time_created": time_created
+                            "time_created": time_created,
+                            "time_found": chrono::Utc::now().to_string(),
+                            "status": "target blueprint updated"
                         })
                     } else {
                         // The new target id matches the old target id
@@ -147,7 +154,8 @@ impl BackgroundTask for TargetBlueprintLoader {
                             );
                             json!({
                                 "target_id": target_id,
-                                "time_created": time_created
+                                "time_created": time_created,
+                                "status": "target blueprint unchanged"
                             })
                         }
                     }
