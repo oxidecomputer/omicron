@@ -12,16 +12,16 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 
 pub struct TargetBlueprintLoader {
     datastore: Arc<DataStore>,
-    last: Option<Arc<Blueprint>>,
-    tx: watch::Sender<Option<Arc<Blueprint>>>,
-    rx: watch::Receiver<Option<Arc<Blueprint>>>,
+    last: Option<Arc<(BlueprintTarget, Blueprint)>>,
+    tx: watch::Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    rx: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
 }
 
 impl TargetBlueprintLoader {
@@ -31,7 +31,9 @@ impl TargetBlueprintLoader {
     }
 
     /// Expose the target blueprint
-    pub fn watcher(&self) -> watch::Receiver<Option<Arc<Blueprint>>> {
+    pub fn watcher(
+        &self,
+    ) -> watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>> {
         self.rx.clone()
     }
 }
@@ -47,8 +49,8 @@ impl BackgroundTask for TargetBlueprintLoader {
             let log = match &self.last {
                 None => opctx.log.clone(),
                 Some(old) => opctx.log.new(o!(
-                    "current_target_id" => old.id.to_string(),
-                    "current_time_created" => old.time_created.to_string(),
+                    "current_target_id" => old.1.id.to_string(),
+                    "current_time_created" => old.1.time_created.to_string(),
                 )),
             };
 
@@ -81,9 +83,9 @@ impl BackgroundTask for TargetBlueprintLoader {
                     let message = format!(
                         "target blueprint with id {} was removed. There is no \
                         longer any target blueprint",
-                        old.id
+                        old.1.id
                     );
-                    let old_id = old.id.to_string();
+                    let old_id = old.1.id.to_string();
                     self.last = None;
                     self.tx.send_replace(self.last.clone());
                     error!(&log, "{message:?}");
@@ -93,18 +95,18 @@ impl BackgroundTask for TargetBlueprintLoader {
                         "error": message
                     })
                 }
-                (None, Ok(Some((_, new_target)))) => {
+                (None, Ok(Some((new_bp_target, new_blueprint)))) => {
                     // We've found a target blueprint for the first time.
                     // Save it and notify any watchers.
-                    let target_id = new_target.id.to_string();
-                    let time_created = new_target.time_created.to_string();
+                    let target_id = new_blueprint.id.to_string();
+                    let time_created = new_blueprint.time_created.to_string();
                     info!(
                         log,
                         "found new target blueprint (first find)";
                         "target_id" => &target_id,
                         "time_created" => &time_created
                     );
-                    self.last = Some(Arc::new(new_target));
+                    self.last = Some(Arc::new((new_bp_target, new_blueprint)));
                     self.tx.send_replace(self.last.clone());
                     json!({
                         "target_id": target_id,
@@ -113,10 +115,10 @@ impl BackgroundTask for TargetBlueprintLoader {
                         "status": "first target blueprint"
                     })
                 }
-                (Some(old), Ok(Some((_, new)))) => {
-                    let target_id = new.id.to_string();
-                    let time_created = new.time_created.to_string();
-                    if old.id != new.id {
+                (Some(old), Ok(Some((new_bp_target, new_blueprint)))) => {
+                    let target_id = new_blueprint.id.to_string();
+                    let time_created = new_blueprint.time_created.to_string();
+                    if old.1.id != new_blueprint.id {
                         // The current target blueprint has been updated
                         info!(
                             log,
@@ -124,7 +126,8 @@ impl BackgroundTask for TargetBlueprintLoader {
                             "target_id" => &target_id,
                             "time_created" => &time_created
                         );
-                        self.last = Some(Arc::new(new));
+                        self.last =
+                            Some(Arc::new((new_bp_target, new_blueprint)));
                         self.tx.send_replace(self.last.clone());
                         json!({
                             "target_id": target_id,
@@ -139,7 +142,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                         // It should not be possible for the contents of a
                         // blueprint to change, but we check to catch possible
                         // bugs further up the stack.
-                        if **old != new {
+                        if old.1 != new_blueprint {
                             let message = format!(
                                 "blueprint for id {} changed. \
                                 Blueprints are supposed to be immutable.",

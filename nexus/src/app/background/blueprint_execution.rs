@@ -13,7 +13,7 @@ use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::{Blueprint, OmicronZonesConfig};
+use nexus_types::deployment::{Blueprint, BlueprintTarget, OmicronZonesConfig};
 use serde_json::json;
 use sled_agent_client::Client as SledAgentClient;
 use slog::Logger;
@@ -26,13 +26,15 @@ use uuid::Uuid;
 /// the state of the system based on the `Blueprint`.
 pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
-    rx_blueprint: watch::Receiver<Option<Arc<Blueprint>>>,
+    rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
 }
 
 impl BlueprintExecutor {
     pub fn new(
         datastore: Arc<DataStore>,
-        rx_blueprint: watch::Receiver<Option<Arc<Blueprint>>>,
+        rx_blueprint: watch::Receiver<
+            Option<Arc<(BlueprintTarget, Blueprint)>>,
+        >,
     ) -> BlueprintExecutor {
         BlueprintExecutor { datastore, rx_blueprint }
     }
@@ -136,16 +138,28 @@ impl BackgroundTask for BlueprintExecutor {
         async {
             // Get the latest blueprint, cloning to prevent holding a read lock
             // on the watch.
-            let blueprint = self.rx_blueprint.borrow_and_update().clone();
+            let update = self.rx_blueprint.borrow_and_update().clone();
 
-            let Some(blueprint) = blueprint else {
+            let Some(update) = update else {
                 warn!(&opctx.log,
-                      "Plan execution: skipped";
+                      "Blueprint execution: skipped";
                       "reason" => "no blueprint");
                 return json!({"error": "no blueprint" });
             };
 
-            let result = self.realize_blueprint(opctx, &blueprint).await;
+            let (bp_target, blueprint) = &*update;
+            if !bp_target.enabled {
+                warn!(&opctx.log,
+                      "Blueprint execution: skipped";
+                      "reason" => "blueprint disabled",
+                      "target_id" => %blueprint.id);
+                return json!({
+                    "target_id": blueprint.id.to_string(),
+                    "error": "blueprint disabled"
+                });
+            }
+
+            let result = self.realize_blueprint(opctx, blueprint).await;
 
             // Return the result as a `serde_json::Value`
             match result {
@@ -189,16 +203,24 @@ mod test {
 
     fn create_blueprint(
         omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-    ) -> Blueprint {
-        Blueprint {
-            id: Uuid::new_v4(),
-            omicron_zones,
-            zones_in_service: BTreeSet::new(),
-            parent_blueprint_id: None,
-            time_created: chrono::Utc::now(),
-            creator: "test".to_string(),
-            comment: "test blueprint".to_string(),
-        }
+    ) -> (BlueprintTarget, Blueprint) {
+        let id = Uuid::new_v4();
+        (
+            BlueprintTarget {
+                target_id: id,
+                enabled: true,
+                time_made_target: chrono::Utc::now(),
+            },
+            Blueprint {
+                id,
+                omicron_zones,
+                zones_in_service: BTreeSet::new(),
+                parent_blueprint_id: None,
+                time_created: chrono::Utc::now(),
+                creator: "test".to_string(),
+                comment: "test blueprint".to_string(),
+            },
+        )
     }
 
     #[nexus_test(server = crate::Server)]
