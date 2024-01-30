@@ -57,7 +57,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                 self.datastore.blueprint_target_get_current_full(opctx).await;
 
             // Decide what to do with the result
-            match (&self.last, result) {
+            match (&mut self.last, result) {
                 (_, Err(error)) => {
                     // We failed to read the blueprint. There's nothing to do
                     // but log an error. We'll retry when we're activated again.
@@ -73,7 +73,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                 }
                 (None, Ok(None)) => {
                     // We haven't found a blueprint yet. Do nothing.
-                    json!({"status": "no blueprint"})
+                    json!({"status": "no target blueprint"})
                 }
                 (Some(old), Ok(None)) => {
                     // We have transitioned from having a blueprint to not
@@ -83,10 +83,15 @@ impl BackgroundTask for TargetBlueprintLoader {
                         longer any target blueprint",
                         old.id
                     );
+                    let old_id = old.id.to_string();
                     self.last = None;
                     self.tx.send_replace(self.last.clone());
                     error!(&log, "{message:?}");
-                    json!({"error": message})
+                    json!({
+                        "removed_target_id": old_id,
+                        "status": "no target blueprint (removed)",
+                        "error": message
+                    })
                 }
                 (None, Ok(Some((_, new_target)))) => {
                     // We've found a target blueprint for the first time.
@@ -141,7 +146,11 @@ impl BackgroundTask for TargetBlueprintLoader {
                                 target_id
                             );
                             error!(&log, "{}", message);
-                            json!({"error": message})
+                            json!({
+                                "target_id": target_id,
+                                "status": "target blueprint unchanged (error)",
+                                "error": message
+                            })
                         } else {
                             // We found a new target blueprint that exactly matches
                             // the old target blueprint. This is the common case
