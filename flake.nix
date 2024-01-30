@@ -52,11 +52,8 @@
               name = "omicron";
               DEP_PQ_LIBDIRS = " ${postgresql.lib}/lib";
               LIBCLANG_PATH = "${libclang.lib}/lib";
-              LOCALE_ARCHIVE = "${glibcLocales}/lib/locale/locale-archive";
-              LC_ALL = "en_US.UTF-8";
               OPENSSL_DIR = "${openssl.dev}";
               OPENSSL_LIB_DIR = "${openssl.out}/lib";
-              CARGO_TERM_COLOR = "always";
             };
         }
       );
