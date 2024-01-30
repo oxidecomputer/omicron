@@ -14,6 +14,7 @@ use super::external_endpoints;
 use super::inventory_collection;
 use super::nat_cleanup;
 use super::phantom_disks;
+use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -64,6 +65,9 @@ pub struct BackgroundTasks {
 
     /// task handle for blueprint execution background task
     pub task_blueprint_executor: common::TaskHandle,
+
+    /// task handle for the service zone nat tracker
+    pub task_service_zone_nat_tracker: common::TaskHandle,
 }
 
 impl BackgroundTasks {
@@ -114,6 +118,9 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
+        let dpd_clients: Vec<_> =
+            dpd_clients.values().map(|client| client.clone()).collect();
+
         let nat_cleanup = {
             driver.register(
                 "nat_v4_garbage_collector".to_string(),
@@ -124,7 +131,7 @@ impl BackgroundTasks {
                 config.nat_cleanup.period_secs,
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
                     datastore.clone(),
-                    dpd_clients.values().map(|client| client.clone()).collect(),
+                    dpd_clients.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -199,6 +206,22 @@ impl BackgroundTasks {
             vec![Box::new(rx_blueprint)],
         );
 
+        let task_service_zone_nat_tracker = {
+            driver.register(
+                "service_zone_nat_tracker".to_string(),
+                String::from(
+                    "ensures service zone nat records are recorded in NAT RPW table",
+                ),
+                config.sync_service_zone_nat.period_secs,
+                Box::new(ServiceZoneNatTracker::new(
+                    datastore.clone(),
+                    dpd_clients.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -212,6 +235,7 @@ impl BackgroundTasks {
             task_phantom_disks,
             task_blueprint_loader,
             task_blueprint_executor,
+            task_service_zone_nat_tracker,
         }
     }
 
