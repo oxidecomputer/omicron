@@ -21,20 +21,19 @@ pub struct TargetBlueprintLoader {
     datastore: Arc<DataStore>,
     last: Option<Arc<(BlueprintTarget, Blueprint)>>,
     tx: watch::Sender<Option<Arc<(BlueprintTarget, Blueprint)>>>,
-    rx: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
 }
 
 impl TargetBlueprintLoader {
     pub fn new(datastore: Arc<DataStore>) -> TargetBlueprintLoader {
-        let (tx, rx) = watch::channel(None);
-        TargetBlueprintLoader { datastore, last: None, tx, rx }
+        let (tx, _) = watch::channel(None);
+        TargetBlueprintLoader { datastore, last: None, tx }
     }
 
     /// Expose the target blueprint
     pub fn watcher(
         &self,
     ) -> watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>> {
-        self.rx.clone()
+        self.tx.subscribe()
     }
 }
 
@@ -49,7 +48,7 @@ impl BackgroundTask for TargetBlueprintLoader {
             let log = match &self.last {
                 None => opctx.log.clone(),
                 Some(old) => opctx.log.new(o!(
-                    "current_target_id" => old.1.id.to_string(),
+                    "currentatarget_id" => old.1.id.to_string(),
                     "current_time_created" => old.1.time_created.to_string(),
                 )),
             };
