@@ -176,3 +176,119 @@ impl BackgroundTask for TargetBlueprintLoader {
         .boxed()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::app::background::common::BackgroundTask;
+    use nexus_inventory::now_db_precision;
+    use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::{Blueprint, BlueprintTarget};
+    use serde::Deserialize;
+    use std::collections::{BTreeMap, BTreeSet};
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    fn create_blueprint(
+        parent_blueprint_id: Option<Uuid>,
+    ) -> (BlueprintTarget, Blueprint) {
+        let id = Uuid::new_v4();
+        (
+            BlueprintTarget {
+                target_id: id,
+                enabled: true,
+                time_made_target: now_db_precision(),
+            },
+            Blueprint {
+                id,
+                omicron_zones: BTreeMap::new(),
+                zones_in_service: BTreeSet::new(),
+                parent_blueprint_id,
+                time_created: now_db_precision(),
+                creator: "test".to_string(),
+                comment: "test blueprint".to_string(),
+            },
+        )
+    }
+
+    #[derive(Deserialize)]
+    #[allow(unused)]
+    struct TargetUpdate {
+        pub target_id: Uuid,
+        pub time_created: chrono::DateTime<chrono::Utc>,
+        pub time_found: Option<chrono::DateTime<chrono::Utc>>,
+        pub status: String,
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_load_blueprints(cptestctx: &ControlPlaneTestContext) {
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let mut task = TargetBlueprintLoader::new(datastore.clone());
+        let mut rx = task.watcher();
+
+        // We expect an appropriate status with no blueprint in the datastore
+        let value = task.activate(&opctx).await;
+        assert_eq!(json!({"status": "no target blueprint"}), value);
+        assert!(rx.borrow().is_none());
+
+        let (target, blueprint) = create_blueprint(None);
+
+        // Inserting a blueprint, but not making it the target returns the same
+        // status
+        datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
+        let value = task.activate(&opctx).await;
+        assert_eq!(json!({"status": "no target blueprint"}), value);
+        assert!(rx.borrow().is_none());
+
+        // Setting a target blueprint makes the loader see it and broadcast it
+        datastore
+            .blueprint_target_set_current(&opctx, target.clone())
+            .await
+            .unwrap();
+        let value = task.activate(&opctx).await;
+        let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
+        assert_eq!(update.target_id, blueprint.id);
+        assert_eq!(update.status, "first target blueprint");
+        let rx_update = rx.borrow_and_update().clone().unwrap();
+        assert_eq!(rx_update.0, target);
+        assert_eq!(rx_update.1, blueprint);
+
+        // Activation without changing the target blueprint results in no update
+        let value = task.activate(&opctx).await;
+        let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
+        assert_eq!(update.target_id, blueprint.id);
+        assert_eq!(update.status, "target blueprint unchanged");
+        assert_eq!(false, rx.has_changed().unwrap());
+
+        // Adding a new blueprint and updating the target triggers a change
+        let (new_target, new_blueprint) = create_blueprint(Some(blueprint.id));
+        datastore.blueprint_insert(&opctx, &new_blueprint).await.unwrap();
+        datastore
+            .blueprint_target_set_current(&opctx, new_target.clone())
+            .await
+            .unwrap();
+        let value = task.activate(&opctx).await;
+        let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
+        assert_eq!(update.target_id, new_blueprint.id);
+        assert_eq!(update.status, "target blueprint updated");
+        let rx_update = rx.borrow_and_update().clone().unwrap();
+        assert_eq!(rx_update.0, new_target);
+        assert_eq!(rx_update.1, new_blueprint);
+
+        // Activating again without changing the target blueprint results in
+        // no update
+        let value = task.activate(&opctx).await;
+        let update = serde_json::from_value::<TargetUpdate>(value).unwrap();
+        assert_eq!(update.target_id, new_blueprint.id);
+        assert_eq!(update.status, "target blueprint unchanged");
+        assert_eq!(false, rx.has_changed().unwrap());
+    }
+}
