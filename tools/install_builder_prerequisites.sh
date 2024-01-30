@@ -105,6 +105,12 @@ HOST_OS=$(uname -s)
 
 function install_packages {
   if [[ "${HOST_OS}" == "Linux" ]]; then
+    # If Nix is in use, we don't need to install any packagess here,
+    # as they're provided by the Nix flake. 
+    if nix flake show &> /dev/null; then
+      return
+    fi
+
     packages=(
       'libpq-dev'
       'pkg-config'
