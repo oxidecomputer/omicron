@@ -111,8 +111,8 @@ zones=(
   out/clickhouse.tar.gz
   out/clickhouse_keeper.tar.gz
   out/cockroachdb.tar.gz
-  out/crucible-pantry.tar.gz
-  out/crucible.tar.gz
+  out/crucible-pantry-zone.tar.gz
+  out/crucible-zone.tar.gz
   out/external-dns.tar.gz
   out/internal-dns.tar.gz
   out/omicron-nexus.tar.gz
