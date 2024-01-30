@@ -457,6 +457,18 @@ impl TryFrom<(Ipv6Addr, Ipv6Addr)> for IpRange {
     }
 }
 
+impl From<Ipv4Range> for IpRange {
+    fn from(value: Ipv4Range) -> Self {
+        Self::V4(value)
+    }
+}
+
+impl From<Ipv6Range> for IpRange {
+    fn from(value: Ipv6Range) -> Self {
+        Self::V6(value)
+    }
+}
+
 /// A non-decreasing IPv4 address range, inclusive of both ends.
 ///
 /// The first address must be less than or equal to the last address.

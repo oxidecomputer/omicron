@@ -39,10 +39,10 @@ impl<'a> Planner<'a> {
         // NOTE: Right now, we just assume that this is the latest inventory
         // collection.  See the comment on the corresponding field in `Planner`.
         inventory: &'a Collection,
-    ) -> Planner<'a> {
+    ) -> anyhow::Result<Planner<'a>> {
         let blueprint =
-            BlueprintBuilder::new_based_on(parent_blueprint, policy, creator);
-        Planner { log, policy, blueprint, inventory }
+            BlueprintBuilder::new_based_on(parent_blueprint, policy, creator)?;
+        Ok(Planner { log, policy, blueprint, inventory })
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
@@ -133,7 +133,30 @@ impl<'a> Planner<'a> {
                 }
             }
 
-            if ncrucibles_added > 0 {
+            // TODO XXX To test Nexus zone addition, attempt to ensure every
+            // sled has a Nexus zone. This is NOT a sensible policy, and should
+            // be removed before this lands on `main`.
+            //
+            // Adding a new Nexus currently requires the parent blueprint to
+            // have had at least one Nexus. By trying to ensure a Nexus on every
+            // sled, that implicitly requires every parent_blueprint we accept
+            // to have at least one Nexus in order to successfully call this
+            // method. That should be true in production and is currently true
+            // for all tests, but might be overly restrictive? We could change
+            // this to "if at least one Nexus exists, add a Nexus on every
+            // sled", but that seems like overkill for what should be a very
+            // short-lived policy.
+            //
+            // Ensuring a Nexus zone exists will also fail if there are no
+            // external IP addresses left. We should take that into account with
+            // whatever real logic we put here, too.
+            let nexus_added =
+                match self.blueprint.sled_ensure_zone_nexus(*sled_id)? {
+                    Ensure::Added => true,
+                    Ensure::NotNeeded => false,
+                };
+
+            if ncrucibles_added > 0 || nexus_added {
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
@@ -188,6 +211,7 @@ mod test {
             "no-op?",
             &collection,
         )
+        .expect("failed to create planner")
         .plan()
         .expect("failed to plan");
 
@@ -210,6 +234,7 @@ mod test {
             "test: add NTP?",
             &collection,
         )
+        .expect("failed to create planner")
         .plan()
         .expect("failed to plan");
 
@@ -274,11 +299,12 @@ mod test {
             "test: add Crucible zones?",
             &collection,
         )
+        .expect("failed to create planner")
         .plan()
         .expect("failed to plan");
 
         let diff = blueprint3.diff(&blueprint5);
-        println!("3 -> 5 (expect Crucible zones):\n{}", diff);
+        println!("3 -> 5 (expect 3 Crucible and 1 Nexus zones):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let sleds = diff.sleds_changed().collect::<Vec<_>>();
@@ -292,14 +318,28 @@ mod test {
         assert_eq!(sled_changes.zones_removed().count(), 0);
         assert_eq!(sled_changes.zones_changed().count(), 0);
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
-        assert_eq!(zones.len(), 3);
+        let mut num_crucible_added = 0;
+        let mut num_nexus_added = 0;
         for zone in &zones {
-            let OmicronZoneType::Crucible { .. } = zone.zone_type else {
-                panic!("unexpectedly added a non-Crucible zone");
-            };
+            match zone.zone_type {
+                OmicronZoneType::Crucible { .. } => {
+                    num_crucible_added += 1;
+                }
+                OmicronZoneType::Nexus { .. } => {
+                    num_nexus_added += 1;
+                }
+                _ => panic!("unexpectedly added a non-Crucible zone: {zone:?}"),
+            }
         }
+        assert_eq!(num_crucible_added, 3);
+        assert_eq!(num_nexus_added, 1);
 
-        // Check that there are no more steps
+        // Check that there are no more steps.
+        //
+        // This also implicitly checks that the new Nexus zone added in
+        // blueprint4 did not reuse any resources from the existing Nexus zones
+        // (otherwise creation of the planner would fail due to an invalid
+        // parent blueprint).
         let blueprint6 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint5,
@@ -307,6 +347,7 @@ mod test {
             "test: no-op?",
             &collection,
         )
+        .expect("failed to create planner")
         .plan()
         .expect("failed to plan");
 

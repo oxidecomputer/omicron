@@ -12,12 +12,15 @@
 //! convenient to separate these concerns.)
 
 use crate::inventory::Collection;
+pub use crate::inventory::NetworkInterface;
+pub use crate::inventory::NetworkInterfaceKind;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
@@ -43,13 +46,19 @@ use uuid::Uuid;
 ///
 /// The current policy is pretty limited.  It's aimed primarily at supporting
 /// the add/remove sled use case.
+#[derive(Debug, Clone)]
 pub struct Policy {
     /// set of sleds that are supposed to be part of the control plane, along
     /// with information about resources available to the planner
     pub sleds: BTreeMap<Uuid, SledResources>,
+
+    /// ranges specified by the IP pool for externally-visible control plane
+    /// services (e.g., external DNS, Nexus, boundary NTP)
+    pub service_ip_pool_ranges: Vec<IpRange>,
 }
 
 /// Describes the resources available on each sled for the planner
+#[derive(Debug, Clone)]
 pub struct SledResources {
     /// zpools on this sled
     ///

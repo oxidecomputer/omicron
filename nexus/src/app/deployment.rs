@@ -18,6 +18,7 @@ use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::CreateResult;
@@ -174,6 +175,30 @@ impl super::Nexus {
             })
             .collect();
 
+        let service_ip_pool_ranges = {
+            let (authz_service_ip_pool, _) =
+                datastore.ip_pools_service_lookup(opctx).await?;
+
+            let mut ip_ranges = Vec::new();
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = datastore
+                    .ip_pool_list_ranges(
+                        opctx,
+                        &authz_service_ip_pool,
+                        &p.current_pagparams(),
+                    )
+                    .await?;
+                // The use of `last_address` here assumes `paginator` is sorting
+                // in Ascending order (which it does - see the implementation of
+                // `current_pagparams()`).
+                paginator = p.found_batch(&batch, &|r| r.last_address);
+                ip_ranges.extend(batch.iter().map(IpRange::from));
+            }
+
+            ip_ranges
+        };
+
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to
         // transient (or even persistent) errors.  It's not yet clear what
@@ -192,7 +217,11 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        Ok(PlanningContext { creator, policy: Policy { sleds }, inventory })
+        Ok(PlanningContext {
+            creator,
+            policy: Policy { sleds, service_ip_pool_ranges },
+            inventory,
+        })
     }
 
     async fn blueprint_add(
@@ -252,7 +281,12 @@ impl super::Nexus {
             &planning_context.policy,
             &planning_context.creator,
             &inventory,
-        );
+        )
+        .map_err(|error| {
+            Error::internal_error(&format!(
+                "error creating blueprint planner: {error:#}",
+            ))
+        })?;
         let blueprint = planner.plan().map_err(|error| {
             Error::internal_error(&format!(
                 "error generating blueprint: {}",

@@ -8059,6 +8059,7 @@ dependencies = [
 name = "sled-agent-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "chrono",
  "ipnetwork",
