@@ -1249,6 +1249,10 @@ impl DataStore {
         Ok(collection)
     }
 
+    /// Attempt to read the current collection.
+    ///
+    /// Queries are limited to `batch_size` records at a time, performing
+    /// multiple queries if more than `batch_size` records exist.
     pub async fn inventory_collection_read_batched(
         &self,
         opctx: &OpContext,
@@ -1256,7 +1260,6 @@ impl DataStore {
         batch_size: NonZeroU32,
     ) -> Result<Collection, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        let mut limit_reached = false;
         let (time_started, time_done, collector) = {
             use db::schema::inv_collection::dsl;
 
@@ -1312,7 +1315,7 @@ impl DataStore {
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_service_processor,
-                    dsl::hw_baseboard_id,
+                    dsl::time_collected,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(id))
@@ -1322,15 +1325,12 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p
-                    .found_batch(&batch, &|sp_row: &InvServiceProcessor| {
-                        sp_row.hw_baseboard_id
-                    });
-                sps.extend(batch.into_iter().map(|sp_row| {
-                    let baseboard_id = sp_row.hw_baseboard_id;
+                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                sps.extend(batch.into_iter().map(|row| {
+                    let baseboard_id = row.hw_baseboard_id;
                     (
                         baseboard_id,
-                        nexus_types::inventory::ServiceProcessor::from(sp_row),
+                        nexus_types::inventory::ServiceProcessor::from(row),
                     )
                 }));
             }
@@ -1346,7 +1346,7 @@ impl DataStore {
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_root_of_trust,
-                    dsl::hw_baseboard_id,
+                    dsl::time_collected,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(id))
@@ -1356,10 +1356,7 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p
-                    .found_batch(&batch, &|rot_row: &InvRootOfTrust| {
-                        rot_row.hw_baseboard_id
-                    });
+                paginator = p.found_batch(&batch, &|row| row.time_collected);
                 rots.extend(batch.into_iter().map(|rot_row| {
                     let baseboard_id = rot_row.hw_baseboard_id;
                     (
@@ -1373,14 +1370,28 @@ impl DataStore {
 
         let sled_agent_rows: Vec<_> = {
             use db::schema::inv_sled_agent::dsl;
-            dsl::inv_sled_agent
+
+            let mut rows = Vec::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let mut batch = paginated(
+                    dsl::inv_sled_agent,
+                    dsl::time_collected,
+                    &p.current_pagparams(),
+                )
                 .filter(dsl::inv_collection_id.eq(id))
                 .select(InvSledAgent::as_select())
                 .load_async(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
-                })?
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                rows.append(&mut batch);
+            }
+
+            rows
         };
 
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
@@ -1394,20 +1405,33 @@ impl DataStore {
         // Fetch the corresponding baseboard records.
         let baseboards_by_id: BTreeMap<_, _> = {
             use db::schema::hw_baseboard_id::dsl;
-            dsl::hw_baseboard_id
-                .filter(dsl::id.eq_any(baseboard_id_ids))
+
+            let mut bbs = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::hw_baseboard_id,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::id.eq_any(baseboard_id_ids.clone()))
                 .select(HwBaseboardId::as_select())
                 .load_async(&*conn)
                 .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-                .into_iter()
-                .map(|bb| {
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.id);
+                bbs.extend(batch.into_iter().map(|bb| {
                     (
                         bb.id,
                         Arc::new(nexus_types::inventory::BaseboardId::from(bb)),
                     )
-                })
-                .collect()
+                }));
+            }
+
+            bbs
         };
 
         // Having those, we can replace the keys in the maps above with
@@ -1484,14 +1508,28 @@ impl DataStore {
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
             use db::schema::inv_caboose::dsl;
-            dsl::inv_caboose
+
+            let mut cabooses = Vec::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let mut batch = paginated(
+                    dsl::inv_caboose,
+                    dsl::time_collected,
+                    &p.current_pagparams(),
+                )
                 .filter(dsl::inv_collection_id.eq(id))
                 .select(InvCaboose::as_select())
                 .load_async(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
-                })?
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                cabooses.append(&mut batch);
+            }
+
+            cabooses
         };
 
         // Collect the unique sw_caboose_ids for those cabooses.
@@ -1502,22 +1540,32 @@ impl DataStore {
         // Fetch the corresponing records.
         let cabooses_by_id: BTreeMap<_, _> = {
             use db::schema::sw_caboose::dsl;
-            dsl::sw_caboose
-                .filter(dsl::id.eq_any(sw_caboose_ids))
-                .select(SwCaboose::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-                .into_iter()
-                .map(|sw_caboose_row| {
+
+            let mut cabooses = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch =
+                    paginated(dsl::sw_caboose, dsl::id, &p.current_pagparams())
+                        .filter(dsl::id.eq_any(sw_caboose_ids.clone()))
+                        .select(SwCaboose::as_select())
+                        .load_async(&*conn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+                paginator = p.found_batch(&batch, &|row| row.id);
+                cabooses.extend(batch.into_iter().map(|sw_caboose_row| {
                     (
                         sw_caboose_row.id,
                         Arc::new(nexus_types::inventory::Caboose::from(
                             sw_caboose_row,
                         )),
                     )
-                })
-                .collect()
+                }));
+            }
+
+            cabooses
         };
 
         // Assemble the lists of cabooses found.
@@ -1560,14 +1608,28 @@ impl DataStore {
         // Fetch records of RoT pages found.
         let inv_rot_page_rows = {
             use db::schema::inv_root_of_trust_page::dsl;
-            dsl::inv_root_of_trust_page
+
+            let mut rot_pages = Vec::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let mut batch = paginated(
+                    dsl::inv_root_of_trust_page,
+                    dsl::time_collected,
+                    &p.current_pagparams(),
+                )
                 .filter(dsl::inv_collection_id.eq(id))
                 .select(InvRotPage::as_select())
                 .load_async(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
-                })?
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                rot_pages.append(&mut batch);
+            }
+
+            rot_pages
         };
 
         // Collect the unique sw_rot_page_ids for those pages.
@@ -1578,22 +1640,35 @@ impl DataStore {
         // Fetch the corresponding records.
         let rot_pages_by_id: BTreeMap<_, _> = {
             use db::schema::sw_root_of_trust_page::dsl;
-            dsl::sw_root_of_trust_page
-                .filter(dsl::id.eq_any(sw_rot_page_ids))
+
+            let mut rot_pages = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::sw_root_of_trust_page,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::id.eq_any(sw_rot_page_ids.clone()))
                 .select(SwRotPage::as_select())
                 .load_async(&*conn)
                 .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-                .into_iter()
-                .map(|sw_rot_page_row| {
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.id);
+                rot_pages.extend(batch.into_iter().map(|sw_rot_page_row| {
                     (
                         sw_rot_page_row.id,
                         Arc::new(nexus_types::inventory::RotPage::from(
                             sw_rot_page_row,
                         )),
                     )
-                })
-                .collect()
+                }))
+            }
+
+            rot_pages
         };
 
         // Assemble the lists of rot pages found.
@@ -1645,43 +1720,81 @@ impl DataStore {
         // found on each sled.
         let mut omicron_zones: BTreeMap<_, _> = {
             use db::schema::inv_sled_omicron_zones::dsl;
-            dsl::inv_sled_omicron_zones
+
+            let mut zones = BTreeMap::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_sled_omicron_zones,
+                    dsl::time_collected,
+                    &p.current_pagparams(),
+                )
                 .filter(dsl::inv_collection_id.eq(id))
                 .select(InvSledOmicronZones::as_select())
                 .load_async(&*conn)
                 .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-                .into_iter()
-                .map(|sled_zones_config| {
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                zones.extend(batch.into_iter().map(|sled_zones_config| {
                     (
                         sled_zones_config.sled_id,
                         sled_zones_config.into_uninit_zones_found(),
                     )
-                })
-                .collect()
+                }))
+            }
+
+            zones
         };
 
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
         // match these up with the corresponding zone below, we'll remove items
         // from this set.  That way we can tell if the same NIC was used twice
         // or not used at all.
-        let mut omicron_zone_nics: BTreeMap<_, _> = {
-            use db::schema::inv_omicron_zone_nic::dsl;
-            dsl::inv_omicron_zone_nic
-                .filter(dsl::inv_collection_id.eq(id))
-                .select(InvOmicronZoneNic::as_select())
-                .load_async(&*conn)
-                .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-                .into_iter()
-                .map(|found_zone_nic| (found_zone_nic.id, found_zone_nic))
-                .collect()
-        };
+        let mut omicron_zone_nics: BTreeMap<_, _> =
+            {
+                use db::schema::inv_omicron_zone_nic::dsl;
+
+                let mut nics = BTreeMap::new();
+
+                let mut paginator = Paginator::new(batch_size);
+                while let Some(p) = paginator.next() {
+                    let batch = paginated(
+                        dsl::inv_omicron_zone_nic,
+                        dsl::id,
+                        &p.current_pagparams(),
+                    )
+                    .filter(dsl::inv_collection_id.eq(id))
+                    .select(InvOmicronZoneNic::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+                    paginator = p.found_batch(&batch, &|row| row.id);
+                    nics.extend(batch.into_iter().map(|found_zone_nic| {
+                        (found_zone_nic.id, found_zone_nic)
+                    }));
+                }
+
+                nics
+            };
 
         // Now load the actual list of zones from all sleds.
         let omicron_zones_list = {
             use db::schema::inv_omicron_zone::dsl;
-            dsl::inv_omicron_zone
+
+            let mut zones = Vec::new();
+
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let mut batch = paginated(
+                    dsl::inv_omicron_zone,
+                    dsl::id,
+                    &p.current_pagparams(),
+                )
                 .filter(dsl::inv_collection_id.eq(id))
                 // It's not strictly necessary to order these by id.  Doing so
                 // ensures a consistent representation for `Collection`, which
@@ -1692,7 +1805,12 @@ impl DataStore {
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
-                })?
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.id);
+                zones.append(&mut batch);
+            }
+
+            zones
         };
         for z in omicron_zones_list {
             let nic_row = z
