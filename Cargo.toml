@@ -178,9 +178,9 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "e71b10d2f9f1fb52818b916bae83ba15a339548d" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2d4bc11232d53f177c286383926fa5f8c1b2a938" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2d4bc11232d53f177c286383926fa5f8c1b2a938" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2d4bc11232d53f177c286383926fa5f8c1b2a938" }
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
 display-error-chain = "0.2.0"
@@ -304,15 +304,15 @@ prettyplease = "0.2.16"
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "1e25649e8c2ac274bd04adfe0513dd14a482058c" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "ff6c4df2e816eee6e7b2b0488777d30ef35ee217" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "ff6c4df2e816eee6e7b2b0488777d30ef35ee217" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "ff6c4df2e816eee6e7b2b0488777d30ef35ee217" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
 ratatui = "0.25.0"
 rayon = "1.8"
-rcgen = "0.12.0"
+rcgen = "0.12.1"
 reedline = "0.28.0"
 ref-cast = "1.0"
 regex = "1.10.3"
@@ -332,7 +332,7 @@ semver = { version = "1.0.21", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.111"
+serde_json = "1.0.113"
 serde_path_to_error = "0.1.15"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
