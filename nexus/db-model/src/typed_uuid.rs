@@ -47,7 +47,7 @@ where
         &'a self,
         out: &mut serialize::Output<'a, '_, DB>,
     ) -> serialize::Result {
-        self.0.as_untyped().to_sql(out)
+        self.0.as_untyped_uuid().to_sql(out)
     }
 }
 

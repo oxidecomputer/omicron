@@ -45,11 +45,11 @@ impl<T: TypedUuidKind> TypedUuid<T> {
 
     /// Returns the inner [`Uuid`].
     ///
-    /// Generally, [`to_untyped`](Self::to_untyped) should be preferred.
-    /// However, in some cases it may be necessary to use this method to
-    /// satisfy lifetime constraints.
+    /// Generally, [`to_untyped_uuid`](ToUntypedUuid::to_untyped_uuid) should
+    /// be preferred. However, in some cases it may be necessary to use this
+    /// method to satisfy lifetime constraints.
     #[inline]
-    pub fn as_untyped(&self) -> &Uuid {
+    pub fn as_untyped_uuid(&self) -> &Uuid {
         &self.uuid
     }
 }
