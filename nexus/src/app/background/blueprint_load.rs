@@ -48,8 +48,8 @@ impl BackgroundTask for TargetBlueprintLoader {
             let log = match &self.last {
                 None => opctx.log.clone(),
                 Some(old) => opctx.log.new(o!(
-                    "currentatarget_id" => old.1.id.to_string(),
-                    "current_time_created" => old.1.time_created.to_string(),
+                    "original_target_id" => old.1.id.to_string(),
+                    "original_time_created" => old.1.time_created.to_string(),
                 )),
             };
 
