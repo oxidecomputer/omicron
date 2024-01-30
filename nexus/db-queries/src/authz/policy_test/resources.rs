@@ -10,6 +10,7 @@ use crate::authz;
 use crate::db::model::ArtifactId;
 use nexus_db_model::SemverVersion;
 use omicron_common::api::external::LookupType;
+use omicron_common::typed_uuid::ToUntypedUuid;
 use oso::PolarClass;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -160,7 +161,7 @@ pub async fn make_resources(
     builder.new_resource(authz::LoopbackAddress::new(
         authz::FLEET,
         loopback_address_id,
-        LookupType::ById(loopback_address_id),
+        LookupType::ById(loopback_address_id.to_untyped_uuid()),
     ));
 
     builder.build()

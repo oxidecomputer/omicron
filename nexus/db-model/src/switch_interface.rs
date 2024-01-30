@@ -9,6 +9,7 @@ use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Asset;
 use omicron_common::api::external;
+use omicron_common::typed_uuid::{LoopbackAddressKind, TypedUuid};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -105,6 +106,7 @@ impl Into<external::SwitchVlanInterfaceConfig> for SwitchVlanInterfaceConfig {
     Deserialize,
 )]
 #[diesel(table_name = loopback_address)]
+#[asset(uuid_kind = LoopbackAddressKind)]
 pub struct LoopbackAddress {
     #[diesel(embed)]
     pub identity: LoopbackAddressIdentity,
@@ -118,7 +120,7 @@ pub struct LoopbackAddress {
 
 impl LoopbackAddress {
     pub fn new(
-        id: Option<Uuid>,
+        id: Option<TypedUuid<LoopbackAddressKind>>,
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
         rack_id: Uuid,
@@ -128,7 +130,7 @@ impl LoopbackAddress {
     ) -> Self {
         Self {
             identity: LoopbackAddressIdentity::new(
-                id.unwrap_or(Uuid::new_v4()),
+                id.unwrap_or(TypedUuid::new_v4()),
             ),
             address_lot_block_id,
             rsvd_address_lot_block_id,

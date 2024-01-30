@@ -28,6 +28,7 @@ pub mod disk;
 pub mod ledger;
 pub mod nexus_config;
 pub mod postgres_config;
+pub mod typed_uuid;
 pub mod update;
 pub mod vlan;
 

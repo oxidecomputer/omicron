@@ -869,7 +869,8 @@ authz_resource! {
 authz_resource! {
     name = "LoopbackAddress",
     parent = "Fleet",
-    primary_key = Uuid,
+    // TODO: make it easier to specify the typed UUID kind
+    primary_key = ::omicron_common::typed_uuid::TypedUuid<::omicron_common::typed_uuid::LoopbackAddressKind>,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

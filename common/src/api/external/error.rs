@@ -8,6 +8,7 @@
 
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
+use crate::typed_uuid::ToUntypedUuid;
 use dropshot::HttpError;
 use serde::Deserialize;
 use serde::Serialize;
@@ -152,6 +153,11 @@ pub enum LookupType {
 }
 
 impl LookupType {
+    /// Constructs a `ById` lookup type from a typed or untyped UUID.
+    pub fn by_id<T: ToUntypedUuid>(id: T) -> Self {
+        LookupType::ById(id.to_untyped_uuid())
+    }
+
     /// Returns an ObjectNotFound error appropriate for the case where this
     /// lookup failed
     pub fn into_not_found(self, type_name: ResourceType) -> Error {

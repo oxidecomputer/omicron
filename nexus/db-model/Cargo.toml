@@ -10,6 +10,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+derive-where.workspace = true
 diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 hex.workspace = true
 ipnetwork.workspace = true
