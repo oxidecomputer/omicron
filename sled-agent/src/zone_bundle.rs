@@ -615,6 +615,12 @@ pub enum BundleError {
     #[error("Failed to join zone bundling task")]
     Task(#[from] tokio::task::JoinError),
 
+    #[error("Failed to send request to Instance Manager")]
+    InstanceManagerFailedSend(anyhow::Error),
+
+    #[error("Instance Manager dropped our request")]
+    InstanceManagerDroppedRequest(anyhow::Error),
+
     #[error("Failed to create bundle: {0}")]
     BundleFailed(#[from] anyhow::Error),
 

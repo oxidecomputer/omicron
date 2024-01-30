@@ -15,6 +15,8 @@ use crate::params::{
 };
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
+
+use anyhow::anyhow;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
@@ -29,7 +31,11 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
+
+// The depth of the request queue for the instance manager.
+const QUEUE_SIZE: usize = 256;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -53,32 +59,18 @@ pub enum Error {
 
     #[error("Zone bundle error")]
     ZoneBundle(#[from] BundleError),
+
+    #[error("Failed to send request to Instance Manager: Channel closed")]
+    FailedSendChannelClosed,
+
+    #[error("Instance Manager dropped our request")]
+    RequestDropped(#[from] oneshot::error::RecvError),
 }
 
 pub enum ReservoirMode {
     None,
     Size(u32),
     Percentage(u8),
-}
-
-struct InstanceManagerInternal {
-    log: Logger,
-    nexus_client: NexusClientWithResolver,
-
-    /// Last set size of the VMM reservoir (in bytes)
-    reservoir_size: Mutex<ByteCount>,
-
-    // TODO: If we held an object representing an enum of "Created OR Running"
-    // instance, we could avoid the methods within "instance.rs" that panic
-    // if the Propolis client hasn't been initialized.
-    /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
-    instances: Mutex<BTreeMap<Uuid, (Uuid, Instance)>>,
-
-    vnic_allocator: VnicAllocator<Etherstub>,
-    port_manager: PortManager,
-    storage: StorageHandle,
-    zone_bundler: ZoneBundler,
-    zone_builder_factory: ZoneBuilderFactory,
 }
 
 pub(crate) struct InstanceManagerServices {
@@ -88,6 +80,20 @@ pub(crate) struct InstanceManagerServices {
     pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
     pub zone_builder_factory: ZoneBuilderFactory,
+}
+
+pub struct InstanceManagerInternal {
+    log: Logger,
+    tx: mpsc::Sender<InstanceManagerRequest>,
+    // NOTE: Arguably, this field could be "owned" by the InstanceManagerRunner.
+    // It was not moved there, and the reservoir functions were not converted to
+    // use the message-apssing interface (see: "InstanceManagerRequest") because
+    // callers of "get/set reservoir size" are not async, and (in the case of
+    // getting the size) they also do not expect a "Result" type.
+    reservoir_size: Mutex<ByteCount>,
+
+    #[allow(dead_code)]
+    runner_handle: tokio::task::JoinHandle<Result<(), Error>>,
 }
 
 /// All instances currently running on the sled.
@@ -106,19 +112,34 @@ impl InstanceManager {
         zone_bundler: ZoneBundler,
         zone_builder_factory: ZoneBuilderFactory,
     ) -> Result<InstanceManager, Error> {
-        Ok(InstanceManager {
-            inner: Arc::new(InstanceManagerInternal {
-                log: log.new(o!("component" => "InstanceManager")),
-                nexus_client,
+        let (tx, rx) = mpsc::channel(QUEUE_SIZE);
+        let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
 
-                // no reservoir size set on startup
+        let log = log.new(o!("component" => "InstanceManager"));
+        let runner = InstanceManagerRunner {
+            log: log.clone(),
+            rx,
+            terminate_tx,
+            terminate_rx,
+            nexus_client,
+            // no reservoir size set on startup
+            instances: BTreeMap::new(),
+            vnic_allocator: VnicAllocator::new("Instance", etherstub),
+            port_manager,
+            storage,
+            zone_bundler,
+            zone_builder_factory,
+        };
+
+        let runner_handle =
+            tokio::task::spawn(async move { runner.run().await });
+
+        Ok(Self {
+            inner: Arc::new(InstanceManagerInternal {
+                log,
+                tx,
                 reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
-                instances: Mutex::new(BTreeMap::new()),
-                vnic_allocator: VnicAllocator::new("Instance", etherstub),
-                port_manager,
-                storage,
-                zone_bundler,
-                zone_builder_factory,
+                runner_handle,
             }),
         })
     }
@@ -199,6 +220,314 @@ impl InstanceManager {
         *self.inner.reservoir_size.lock().unwrap()
     }
 
+    pub async fn ensure_registered(
+        &self,
+        instance_id: Uuid,
+        propolis_id: Uuid,
+        hardware: InstanceHardware,
+        instance_runtime: InstanceRuntimeState,
+        vmm_runtime: VmmRuntimeState,
+        propolis_addr: SocketAddr,
+    ) -> Result<SledInstanceState, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::EnsureRegistered {
+                instance_id,
+                propolis_id,
+                hardware,
+                instance_runtime,
+                vmm_runtime,
+                propolis_addr,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        rx.await?
+    }
+
+    pub async fn ensure_unregistered(
+        &self,
+        instance_id: Uuid,
+    ) -> Result<InstanceUnregisterResponse, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::EnsureUnregistered {
+                instance_id,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        rx.await?
+    }
+
+    pub async fn ensure_state(
+        &self,
+        instance_id: Uuid,
+        target: InstanceStateRequested,
+    ) -> Result<InstancePutStateResponse, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::EnsureState {
+                instance_id,
+                target,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        rx.await?
+    }
+
+    pub async fn put_migration_ids(
+        &self,
+        instance_id: Uuid,
+        old_runtime: &InstanceRuntimeState,
+        migration_ids: &Option<InstanceMigrationSourceParams>,
+    ) -> Result<SledInstanceState, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::PutMigrationIds {
+                instance_id,
+                old_runtime: old_runtime.clone(),
+                migration_ids: *migration_ids,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        rx.await?
+    }
+
+    pub async fn instance_issue_disk_snapshot_request(
+        &self,
+        instance_id: Uuid,
+        disk_id: Uuid,
+        snapshot_id: Uuid,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::InstanceIssueDiskSnapshot {
+                instance_id,
+                disk_id,
+                snapshot_id,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        rx.await?
+    }
+
+    /// Create a zone bundle from a named instance zone, if it exists.
+    pub async fn create_zone_bundle(
+        &self,
+        name: &str,
+    ) -> Result<ZoneBundleMetadata, BundleError> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::CreateZoneBundle {
+                name: name.to_string(),
+                tx,
+            })
+            .await
+            .map_err(|err| {
+                BundleError::InstanceManagerFailedSend(anyhow!(err))
+            })?;
+        rx.await.map_err(|err| {
+            BundleError::InstanceManagerDroppedRequest(anyhow!(err))
+        })?
+    }
+
+    pub async fn add_external_ip(
+        &self,
+        instance_id: Uuid,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::InstanceAddExternalIp {
+                instance_id,
+                ip: *ip,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        rx.await?
+    }
+
+    pub async fn delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::InstanceDeleteExternalIp {
+                instance_id,
+                ip: *ip,
+                tx,
+            })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        rx.await?
+    }
+}
+
+enum InstanceManagerRequest {
+    EnsureRegistered {
+        instance_id: Uuid,
+        propolis_id: Uuid,
+        hardware: InstanceHardware,
+        instance_runtime: InstanceRuntimeState,
+        vmm_runtime: VmmRuntimeState,
+        propolis_addr: SocketAddr,
+        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
+    },
+    EnsureUnregistered {
+        instance_id: Uuid,
+        tx: oneshot::Sender<Result<InstanceUnregisterResponse, Error>>,
+    },
+    EnsureState {
+        instance_id: Uuid,
+        target: InstanceStateRequested,
+        tx: oneshot::Sender<Result<InstancePutStateResponse, Error>>,
+    },
+    PutMigrationIds {
+        instance_id: Uuid,
+        old_runtime: InstanceRuntimeState,
+        migration_ids: Option<InstanceMigrationSourceParams>,
+        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
+    },
+    InstanceIssueDiskSnapshot {
+        instance_id: Uuid,
+        disk_id: Uuid,
+        snapshot_id: Uuid,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    CreateZoneBundle {
+        name: String,
+        tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
+    },
+    InstanceAddExternalIp {
+        instance_id: Uuid,
+        ip: InstanceExternalIpBody,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    InstanceDeleteExternalIp {
+        instance_id: Uuid,
+        ip: InstanceExternalIpBody,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+}
+
+// Requests that the instance manager stop processing information about a
+// particular instance.
+struct InstanceDeregisterRequest {
+    id: Uuid,
+}
+
+struct InstanceManagerRunner {
+    log: Logger,
+
+    // Request channel on which most instance manager requests are made.
+    rx: mpsc::Receiver<InstanceManagerRequest>,
+
+    // Request channel for "stop tracking instances", removing instances
+    // from "self.instances".
+    //
+    // Although this is "unbounded", in practice, it cannot be larger than the
+    // number of currently running instances, and it will be cleared before
+    // new instances may be requested.
+    //
+    // We hold both sizes of this channel, and we give clones of the
+    // sender to new instance objects that are created.
+    terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
+    terminate_rx: mpsc::UnboundedReceiver<InstanceDeregisterRequest>,
+
+    nexus_client: NexusClientWithResolver,
+
+    // TODO: If we held an object representing an enum of "Created OR Running"
+    // instance, we could avoid the methods within "instance.rs" that panic
+    // if the Propolis client hasn't been initialized.
+    /// A mapping from a Sled Agent "Instance ID" to ("Propolis ID", [Instance]).
+    instances: BTreeMap<Uuid, (Uuid, Instance)>,
+
+    vnic_allocator: VnicAllocator<Etherstub>,
+    port_manager: PortManager,
+    storage: StorageHandle,
+    zone_bundler: ZoneBundler,
+    zone_builder_factory: ZoneBuilderFactory,
+}
+
+impl InstanceManagerRunner {
+    /// Run the main loop of the InstanceManager.
+    ///
+    /// This should be spawned in a tokio task.
+    pub async fn run(mut self) -> Result<(), Error> {
+        use InstanceManagerRequest::*;
+        loop {
+            tokio::select! {
+                biased;
+
+                // If anyone has made a request to remove an instance from our
+                // state tracking, we do so before processing subsequent
+                // requests. This ensure that "add, remove, add" of the same
+                // instance always works.
+                request = self.terminate_rx.recv() => {
+                    match request {
+                        Some(request) => {
+                            self.instances.remove(&request.id);
+                        }
+                        None => break,
+                    }
+                },
+                request = self.rx.recv() => {
+                    match request {
+                        Some(EnsureRegistered {
+                            instance_id,
+                            propolis_id,
+                            hardware,
+                            instance_runtime,
+                            vmm_runtime,
+                            propolis_addr,
+                            tx,
+                        }) => {
+                            let _ = tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr).await);
+                        },
+                        Some(EnsureUnregistered { instance_id, tx }) => {
+                            let _ = tx.send(self.ensure_unregistered(instance_id).await);
+                        },
+                        Some(EnsureState { instance_id, target, tx }) => {
+                            let _ = tx.send(self.ensure_state(instance_id, target).await);
+                        },
+                        Some(PutMigrationIds{ instance_id, old_runtime, migration_ids, tx }) => {
+                            let _ = tx.send(self.put_migration_ids(instance_id, &old_runtime, &migration_ids).await);
+                        },
+                        Some(InstanceIssueDiskSnapshot{ instance_id, disk_id, snapshot_id, tx }) => {
+                            let _ = tx.send(self.instance_issue_disk_snapshot_request(instance_id, disk_id, snapshot_id).await);
+                        },
+                        Some(CreateZoneBundle{ name, tx }) => {
+                            let _ = tx.send(self.create_zone_bundle(&name).await);
+                        },
+                        Some(InstanceAddExternalIp{ instance_id, ip, tx }) => {
+                            let _ = tx.send(self.add_external_ip(instance_id, &ip).await);
+                        },
+                        Some(InstanceDeleteExternalIp{ instance_id, ip, tx }) => {
+                            let _ = tx.send(self.delete_external_ip(instance_id, &ip).await);
+                        },
+                        None => break,
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Ensures that the instance manager contains a registered instance with
     /// the supplied instance ID and the Propolis ID specified in
     /// `initial_hardware`.
@@ -216,8 +545,8 @@ impl InstanceManager {
     /// (instance ID, Propolis ID) pair multiple times, but will fail if the
     /// instance is registered with a Propolis ID different from the one the
     /// caller supplied.
-    pub async fn ensure_registered(
-        &self,
+    async fn ensure_registered(
+        &mut self,
         instance_id: Uuid,
         propolis_id: Uuid,
         hardware: InstanceHardware,
@@ -226,7 +555,7 @@ impl InstanceManager {
         propolis_addr: SocketAddr,
     ) -> Result<SledInstanceState, Error> {
         info!(
-            &self.inner.log,
+            &self.log,
             "ensuring instance is registered";
             "instance_id" => %instance_id,
             "propolis_id" => %propolis_id,
@@ -237,12 +566,11 @@ impl InstanceManager {
         );
 
         let instance = {
-            let mut instances = self.inner.instances.lock().unwrap();
             if let Some((existing_propolis_id, existing_instance)) =
-                instances.get(&instance_id)
+                self.instances.get(&instance_id)
             {
                 if propolis_id != *existing_propolis_id {
-                    info!(&self.inner.log,
+                    info!(&self.log,
                           "instance already registered with another Propolis ID";
                           "instance_id" => %instance_id,
                           "existing_propolis_id" => %*existing_propolis_id);
@@ -253,29 +581,26 @@ impl InstanceManager {
                     ));
                 } else {
                     info!(
-                        &self.inner.log,
+                        &self.log,
                         "instance already registered with requested Propolis ID"
                     );
                     existing_instance.clone()
                 }
             } else {
-                info!(&self.inner.log,
+                info!(&self.log,
                       "registering new instance";
                       "instance_id" => ?instance_id);
-                let instance_log = self.inner.log.new(o!());
+                let instance_log = self.log.new(o!());
                 let ticket =
-                    InstanceTicket::new(instance_id, self.inner.clone());
+                    InstanceTicket::new(instance_id, self.terminate_tx.clone());
 
                 let services = InstanceManagerServices {
-                    nexus_client: self.inner.nexus_client.clone(),
-                    vnic_allocator: self.inner.vnic_allocator.clone(),
-                    port_manager: self.inner.port_manager.clone(),
-                    storage: self.inner.storage.clone(),
-                    zone_bundler: self.inner.zone_bundler.clone(),
-                    zone_builder_factory: self
-                        .inner
-                        .zone_builder_factory
-                        .clone(),
+                    nexus_client: self.nexus_client.clone(),
+                    vnic_allocator: self.vnic_allocator.clone(),
+                    port_manager: self.port_manager.clone(),
+                    storage: self.storage.clone(),
+                    zone_bundler: self.zone_bundler.clone(),
+                    zone_builder_factory: self.zone_builder_factory.clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {
@@ -295,7 +620,7 @@ impl InstanceManager {
                 )?;
                 let instance_clone = instance.clone();
                 let _old =
-                    instances.insert(instance_id, (propolis_id, instance));
+                    self.instances.insert(instance_id, (propolis_id, instance));
                 assert!(_old.is_none());
                 instance_clone
             }
@@ -307,13 +632,12 @@ impl InstanceManager {
     /// Idempotently ensures the instance is not registered with this instance
     /// manager. If the instance exists and has a running Propolis, that
     /// Propolis is rudely terminated.
-    pub async fn ensure_unregistered(
-        &self,
+    async fn ensure_unregistered(
+        &mut self,
         instance_id: Uuid,
     ) -> Result<InstanceUnregisterResponse, Error> {
         let instance = {
-            let instances = self.inner.instances.lock().unwrap();
-            let instance = instances.get(&instance_id);
+            let instance = self.instances.get(&instance_id);
             if let Some((_, instance)) = instance {
                 instance.clone()
             } else {
@@ -330,14 +654,13 @@ impl InstanceManager {
 
     /// Idempotently attempts to drive the supplied instance into the supplied
     /// runtime state.
-    pub async fn ensure_state(
-        &self,
+    async fn ensure_state(
+        &mut self,
         instance_id: Uuid,
         target: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
         let instance = {
-            let instances = self.inner.instances.lock().unwrap();
-            let instance = instances.get(&instance_id);
+            let instance = self.instances.get(&instance_id);
 
             if let Some((_, instance)) = instance {
                 instance.clone()
@@ -369,17 +692,14 @@ impl InstanceManager {
 
     /// Idempotently attempts to set the instance's migration IDs to the
     /// supplied IDs.
-    pub async fn put_migration_ids(
-        &self,
+    async fn put_migration_ids(
+        &mut self,
         instance_id: Uuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
     ) -> Result<SledInstanceState, Error> {
         let (_, instance) = self
-            .inner
             .instances
-            .lock()
-            .unwrap()
             .get(&instance_id)
             .ok_or_else(|| Error::NoSuchInstance(instance_id))?
             .clone();
@@ -387,15 +707,15 @@ impl InstanceManager {
         Ok(instance.put_migration_ids(old_runtime, migration_ids).await?)
     }
 
-    pub async fn instance_issue_disk_snapshot_request(
+    async fn instance_issue_disk_snapshot_request(
         &self,
         instance_id: Uuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
         let instance = {
-            let instances = self.inner.instances.lock().unwrap();
-            let (_, instance) = instances
+            let (_, instance) = self
+                .instances
                 .get(&instance_id)
                 .ok_or(Error::NoSuchInstance(instance_id))?;
             instance.clone()
@@ -408,7 +728,7 @@ impl InstanceManager {
     }
 
     /// Create a zone bundle from a named instance zone, if it exists.
-    pub async fn create_zone_bundle(
+    async fn create_zone_bundle(
         &self,
         name: &str,
     ) -> Result<ZoneBundleMetadata, BundleError> {
@@ -421,10 +741,7 @@ impl InstanceManager {
         // Instead, we cheaply clone the instance through its `Arc` around the
         // `InstanceInner`, which is ultimately what we want.
         let Some((_propolis_id, instance)) = self
-            .inner
             .instances
-            .lock()
-            .unwrap()
             .values()
             .find(|(propolis_id, _instance)| {
                 name == propolis_zone_name(propolis_id)
@@ -436,15 +753,13 @@ impl InstanceManager {
         instance.request_zone_bundle().await
     }
 
-    pub async fn add_external_ip(
+    async fn add_external_ip(
         &self,
         instance_id: Uuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        let instance = {
-            let instances = self.inner.instances.lock().unwrap();
-            instances.get(&instance_id).map(|(_id, v)| v.clone())
-        };
+        let instance =
+            { self.instances.get(&instance_id).map(|(_id, v)| v.clone()) };
 
         let Some(instance) = instance else {
             return Err(Error::NoSuchInstance(instance_id));
@@ -454,15 +769,13 @@ impl InstanceManager {
         Ok(())
     }
 
-    pub async fn delete_external_ip(
+    async fn delete_external_ip(
         &self,
         instance_id: Uuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        let instance = {
-            let instances = self.inner.instances.lock().unwrap();
-            instances.get(&instance_id).map(|(_id, v)| v.clone())
-        };
+        let instance =
+            { self.instances.get(&instance_id).map(|(_id, v)| v.clone()) };
 
         let Some(instance) = instance else {
             return Err(Error::NoSuchInstance(instance_id));
@@ -476,22 +789,26 @@ impl InstanceManager {
 /// Represents membership of an instance in the [`InstanceManager`].
 pub struct InstanceTicket {
     id: Uuid,
-    inner: Option<Arc<InstanceManagerInternal>>,
+    terminate_tx: Option<mpsc::UnboundedSender<InstanceDeregisterRequest>>,
 }
 
 impl InstanceTicket {
     // Creates a new instance ticket for instance "id" to be removed
-    // from "inner" on destruction.
-    fn new(id: Uuid, inner: Arc<InstanceManagerInternal>) -> Self {
-        InstanceTicket { id, inner: Some(inner) }
+    // from the manger on destruction.
+    fn new(
+        id: Uuid,
+        terminate_tx: mpsc::UnboundedSender<InstanceDeregisterRequest>,
+    ) -> Self {
+        InstanceTicket { id, terminate_tx: Some(terminate_tx) }
     }
 
     /// Idempotently removes this instance from the tracked set of
     /// instances. This acts as an "upcall" for instances to remove
     /// themselves after stopping.
     pub fn terminate(&mut self) {
-        if let Some(inner) = self.inner.take() {
-            inner.instances.lock().unwrap().remove(&self.id);
+        if let Some(terminate_tx) = self.terminate_tx.take() {
+            let _ =
+                terminate_tx.send(InstanceDeregisterRequest { id: self.id });
         }
     }
 }
