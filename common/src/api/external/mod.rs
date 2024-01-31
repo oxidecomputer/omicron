@@ -723,7 +723,7 @@ impl Hostname {
 //
 // Note that we need to use a regex engine capable of lookbehind to support
 // this, since we need to check that labels don't end with a `-`.
-const HOSTNAME_REGEX: &str = r#"^([a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))(\.[a-zA-Z1-9]+[a-zA-Z0-9\-]*(?<!-))*$"#;
+const HOSTNAME_REGEX: &str = r#"^([a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))(\.[a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))*$"#;
 
 // Labels need to be encoded on the wire, and prefixed with a signel length
 // octet. They also need to end with a length octet of 0 when encoded. So the
@@ -773,7 +773,7 @@ impl JsonSchema for Hostname {
                     "A hostname identifies a host on a network, and \
                     is usually a dot-delimited sequence of labels, \
                     where each label contains only letters, digits, \
-                    or the hyphen. See RFCs 1035 an 952 for more details."
+                    or the hyphen. See RFCs 1035 and 952 for more details."
                         .to_string(),
                 ),
                 ..Default::default()
