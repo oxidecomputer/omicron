@@ -1914,10 +1914,8 @@ impl DataStoreInventoryTest for DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::context::OpContext;
     use crate::db::datastore::datastore_test;
     use crate::db::datastore::inventory::DataStoreInventoryTest;
-    use crate::db::datastore::DataStore;
     use crate::db::datastore::DataStoreConnection;
     use crate::db::schema;
     use anyhow::Context;
@@ -1932,12 +1930,10 @@ mod test {
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
-    use nexus_types::inventory::Collection;
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
-    use uuid::Uuid;
 
     struct CollectionCounts {
         baseboards: usize,
