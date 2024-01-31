@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(30, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(31, 0, 0);
 
 table! {
     disk (id) {
@@ -1482,6 +1482,21 @@ table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
+    }
+}
+
+table! {
+    bfd_session (remote, switch) {
+        id -> Uuid,
+        local -> Nullable<Inet>,
+        remote -> Inet,
+        detection_threshold -> Int8,
+        required_rx -> Int8,
+        switch -> Text,
+        mode -> crate::BfdModeEnum,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 
