@@ -52,10 +52,11 @@ impl DataStore {
         }
         .select(SiloUtilization::as_select())
         .filter(
-            dsl::silo_discoverable.eq(true).or(dsl::cpus_allocated
-                .gt(0)
+            dsl::silo_discoverable
+                .eq(true)
+                .or(dsl::cpus_allocated.gt(0))
                 .or(dsl::memory_allocated.gt(0))
-                .or(dsl::storage_allocated.gt(0))),
+                .or(dsl::storage_allocated.gt(0)),
         )
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
