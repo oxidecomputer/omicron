@@ -335,12 +335,8 @@ impl InstanceManager {
                 tx,
             })
             .await
-            .map_err(|err| {
-                BundleError::InstanceManagerFailedSend(anyhow!(err))
-            })?;
-        rx.await.map_err(|err| {
-            BundleError::InstanceManagerDroppedRequest(anyhow!(err))
-        })?
+            .map_err(|err| BundleError::FailedSend(anyhow!(err)))?;
+        rx.await.map_err(|err| BundleError::DroppedRequest(anyhow!(err)))?
     }
 
     pub async fn add_external_ip(
@@ -508,25 +504,25 @@ impl InstanceManagerRunner {
                             let _ = tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr).await);
                         },
                         Some(EnsureUnregistered { instance_id, tx }) => {
-                            let _ = tx.send(self.ensure_unregistered(instance_id).await);
+                            let _ = self.ensure_unregistered(tx, instance_id).await;
                         },
                         Some(EnsureState { instance_id, target, tx }) => {
-                            let _ = tx.send(self.ensure_state(instance_id, target).await);
+                            let _ = self.ensure_state(tx, instance_id, target).await;
                         },
                         Some(PutMigrationIds{ instance_id, old_runtime, migration_ids, tx }) => {
-                            let _ = tx.send(self.put_migration_ids(instance_id, &old_runtime, &migration_ids).await);
+                            let _ = self.put_migration_ids(tx, instance_id, &old_runtime, &migration_ids).await;
                         },
                         Some(InstanceIssueDiskSnapshot{ instance_id, disk_id, snapshot_id, tx }) => {
-                            let _ = tx.send(self.instance_issue_disk_snapshot_request(instance_id, disk_id, snapshot_id).await);
+                            let _ = self.instance_issue_disk_snapshot_request(tx, instance_id, disk_id, snapshot_id).await;
                         },
                         Some(CreateZoneBundle{ name, tx }) => {
-                            let _ = tx.send(self.create_zone_bundle(&name).await);
+                            let _ = self.create_zone_bundle(tx, &name).await;
                         },
                         Some(InstanceAddExternalIp{ instance_id, ip, tx }) => {
-                            let _ = tx.send(self.add_external_ip(instance_id, &ip).await);
+                            let _ = self.add_external_ip(tx, instance_id, &ip).await;
                         },
                         Some(InstanceDeleteExternalIp{ instance_id, ip, tx }) => {
-                            let _ = tx.send(self.delete_external_ip(instance_id, &ip).await);
+                            let _ = self.delete_external_ip(tx, instance_id, &ip).await;
                         },
                         None => break,
                     }
@@ -592,7 +588,7 @@ impl InstanceManagerRunner {
                         &self.log,
                         "instance already registered with requested Propolis ID"
                     );
-                    existing_instance.clone()
+                    existing_instance
                 }
             } else {
                 info!(&self.log,
@@ -626,15 +622,14 @@ impl InstanceManagerRunner {
                     state,
                     services,
                 )?;
-                let instance_clone = instance.clone();
                 let _old =
                     self.instances.insert(instance_id, (propolis_id, instance));
                 assert!(_old.is_none());
-                instance_clone
+                &self.instances.get(&instance_id).unwrap().1
             }
         };
 
-        Ok(instance.current_state().await)
+        Ok(instance.current_state().await?)
     }
 
     /// Idempotently ensures the instance is not registered with this instance
@@ -642,36 +637,35 @@ impl InstanceManagerRunner {
     /// Propolis is rudely terminated.
     async fn ensure_unregistered(
         &mut self,
+        tx: oneshot::Sender<Result<InstanceUnregisterResponse, Error>>,
         instance_id: Uuid,
-    ) -> Result<InstanceUnregisterResponse, Error> {
-        let instance = {
-            let instance = self.instances.get(&instance_id);
-            if let Some((_, instance)) = instance {
-                instance.clone()
-            } else {
-                return Ok(InstanceUnregisterResponse {
-                    updated_runtime: None,
-                });
-            }
+    ) -> Result<(), Error> {
+        // If the instance does not exist, we response immediately.
+        let Some((_, instance)) = self.instances.get(&instance_id) else {
+            tx.send(Ok(InstanceUnregisterResponse { updated_runtime: None }))
+                .map_err(|_| Error::FailedSendChannelClosed)?;
+            return Ok(());
         };
 
-        Ok(InstanceUnregisterResponse {
-            updated_runtime: Some(instance.terminate().await?),
-        })
+        // Otherwise, we pipeline the request, and send it to the instance,
+        // where it can receive an appropriate response.
+        instance.terminate(tx).await?;
+        Ok(())
     }
 
     /// Idempotently attempts to drive the supplied instance into the supplied
     /// runtime state.
     async fn ensure_state(
         &mut self,
+        tx: oneshot::Sender<Result<InstancePutStateResponse, Error>>,
         instance_id: Uuid,
         target: InstanceStateRequested,
-    ) -> Result<InstancePutStateResponse, Error> {
+    ) -> Result<(), Error> {
         let instance = {
             let instance = self.instances.get(&instance_id);
 
             if let Some((_, instance)) = instance {
-                instance.clone()
+                instance
             } else {
                 match target {
                     // If the instance isn't registered, then by definition it
@@ -683,40 +677,45 @@ impl InstanceManagerRunner {
                     // instance, and only then did a second stop request
                     // arrive.
                     InstanceStateRequested::Stopped => {
-                        return Ok(InstancePutStateResponse {
+                        tx.send(Ok(InstancePutStateResponse {
                             updated_runtime: None,
-                        });
+                        }))
+                        .map_err(|_| Error::FailedSendChannelClosed)?;
                     }
                     _ => {
-                        return Err(Error::NoSuchInstance(instance_id));
+                        tx.send(Err(Error::NoSuchInstance(instance_id)))
+                            .map_err(|_| Error::FailedSendChannelClosed)?;
                     }
                 }
+                return Ok(());
             }
         };
-
-        let new_state = instance.put_state(target).await?;
-        Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+        instance.put_state(tx, target).await?;
+        Ok(())
     }
 
     /// Idempotently attempts to set the instance's migration IDs to the
     /// supplied IDs.
     async fn put_migration_ids(
         &mut self,
+        tx: oneshot::Sender<Result<SledInstanceState, Error>>,
         instance_id: Uuid,
         old_runtime: &InstanceRuntimeState,
         migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<(), Error> {
         let (_, instance) = self
             .instances
             .get(&instance_id)
-            .ok_or_else(|| Error::NoSuchInstance(instance_id))?
-            .clone();
-
-        Ok(instance.put_migration_ids(old_runtime, migration_ids).await?)
+            .ok_or_else(|| Error::NoSuchInstance(instance_id))?;
+        instance
+            .put_migration_ids(tx, old_runtime.clone(), *migration_ids)
+            .await?;
+        Ok(())
     }
 
     async fn instance_issue_disk_snapshot_request(
         &self,
+        tx: oneshot::Sender<Result<(), Error>>,
         instance_id: Uuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
@@ -726,11 +725,11 @@ impl InstanceManagerRunner {
                 .instances
                 .get(&instance_id)
                 .ok_or(Error::NoSuchInstance(instance_id))?;
-            instance.clone()
+            instance
         };
 
         instance
-            .issue_snapshot_request(disk_id, snapshot_id)
+            .issue_snapshot_request(tx, disk_id, snapshot_id)
             .await
             .map_err(Error::from)
     }
@@ -738,58 +737,48 @@ impl InstanceManagerRunner {
     /// Create a zone bundle from a named instance zone, if it exists.
     async fn create_zone_bundle(
         &self,
+        tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
         name: &str,
-    ) -> Result<ZoneBundleMetadata, BundleError> {
-        // We need to find the instance and take its lock, but:
-        //
-        // 1. The instance-map lock is sync, and
-        // 2. we don't want to hold the instance-map lock for the entire
-        //    bundling duration.
-        //
-        // Instead, we cheaply clone the instance through its `Arc` around the
-        // `InstanceInner`, which is ultimately what we want.
-        let Some((_propolis_id, instance)) = self
-            .instances
-            .values()
-            .find(|(propolis_id, _instance)| {
+    ) -> Result<(), BundleError> {
+        let Some((_propolis_id, instance)) =
+            self.instances.values().find(|(propolis_id, _instance)| {
                 name == propolis_zone_name(propolis_id)
             })
-            .cloned()
         else {
             return Err(BundleError::NoSuchZone { name: name.to_string() });
         };
-        instance.request_zone_bundle().await
+        instance.request_zone_bundle(tx).await
     }
 
     async fn add_external_ip(
         &self,
+        tx: oneshot::Sender<Result<(), Error>>,
         instance_id: Uuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        let instance =
-            { self.instances.get(&instance_id).map(|(_id, v)| v.clone()) };
+        let instance = { self.instances.get(&instance_id).map(|(_id, v)| v) };
 
         let Some(instance) = instance else {
             return Err(Error::NoSuchInstance(instance_id));
         };
 
-        instance.add_external_ip(ip).await?;
+        instance.add_external_ip(tx, ip).await?;
         Ok(())
     }
 
     async fn delete_external_ip(
         &self,
+        tx: oneshot::Sender<Result<(), Error>>,
         instance_id: Uuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        let instance =
-            { self.instances.get(&instance_id).map(|(_id, v)| v.clone()) };
+        let instance = { self.instances.get(&instance_id).map(|(_id, v)| v) };
 
         let Some(instance) = instance else {
             return Err(Error::NoSuchInstance(instance_id));
         };
 
-        instance.delete_external_ip(ip).await?;
+        instance.delete_external_ip(tx, ip).await?;
         Ok(())
     }
 }
@@ -813,7 +802,7 @@ impl InstanceTicket {
     /// Idempotently removes this instance from the tracked set of
     /// instances. This acts as an "upcall" for instances to remove
     /// themselves after stopping.
-    pub fn terminate(&mut self) {
+    pub fn deregister(&mut self) {
         if let Some(terminate_tx) = self.terminate_tx.take() {
             let _ =
                 terminate_tx.send(InstanceDeregisterRequest { id: self.id });
@@ -823,6 +812,6 @@ impl InstanceTicket {
 
 impl Drop for InstanceTicket {
     fn drop(&mut self) {
-        self.terminate();
+        self.deregister();
     }
 }
