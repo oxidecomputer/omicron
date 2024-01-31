@@ -78,6 +78,7 @@ impl DataStore {
         diesel::update(dsl::bfd_session)
             .filter(dsl::remote.eq(IpNetwork::from(config.remote)))
             .filter(dsl::switch.eq(config.switch.to_string()))
+            .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(chrono::Utc::now()))
             .execute_async(&*conn)
             .await
