@@ -1077,6 +1077,8 @@ impl Instance {
         Ok(())
     }
 
+    /// Rudely terminates this instance's Propolis (if it has one) and
+    /// immediately transitions the instance to the Destroyed state.
     pub async fn terminate(
         &self,
         tx: oneshot::Sender<Result<InstanceUnregisterResponse, ManagerError>>,
@@ -1133,7 +1135,6 @@ impl Instance {
 // TODO: Move this implementation higher. I'm just keeping it here to make the
 // incremental diff smaller.
 impl InstanceRunner {
-    /// Create bundle from an instance zone.
     async fn request_zone_bundle(
         &self,
     ) -> Result<ZoneBundleMetadata, BundleError> {
@@ -1203,17 +1204,6 @@ impl InstanceRunner {
         Ok(())
     }
 
-    /// Attempts to update the current state of the instance by launching a
-    /// Propolis process for the instance (if needed) and issuing an appropriate
-    /// request to Propolis to change state.
-    ///
-    /// Returns the instance's state after applying any changes required by this
-    /// call. Note that if the instance's Propolis is in the middle of its own
-    /// state transition, it may publish states that supersede the state
-    /// published by this routine in perhaps-surprising ways. For example, if an
-    /// instance begins to stop when Propolis has just begun to handle a prior
-    /// request to reboot, the instance's state may proceed from Stopping to
-    /// Rebooting to Running to Stopping to Stopped.
     async fn put_state(
         &mut self,
         state: crate::params::InstanceStateRequested,
@@ -1431,8 +1421,6 @@ impl InstanceRunner {
         Ok(PropolisSetup { client, running_zone })
     }
 
-    /// Rudely terminates this instance's Propolis (if it has one) and
-    /// immediately transitions the instance to the Destroyed state.
     async fn terminate(&mut self) -> Result<SledInstanceState, Error> {
         self.terminate_inner().await?;
         self.state.terminate_rudely();
