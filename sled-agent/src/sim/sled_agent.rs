@@ -12,9 +12,10 @@ use super::storage::CrucibleData;
 use super::storage::Storage;
 use crate::nexus::NexusClient;
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, SledRole,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
@@ -41,7 +42,7 @@ use propolis_client::{
 };
 use propolis_mock_server::Context as PropolisContext;
 use slog::Logger;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -69,6 +70,8 @@ pub struct SledAgent {
     pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
+    /// lists of external IPs assigned to instances
+    pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
@@ -162,6 +165,7 @@ impl SledAgent {
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashMap::new()),
+            external_ips: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
             config: config.clone(),
             fake_zones: Mutex::new(OmicronZonesConfig {
@@ -623,6 +627,58 @@ impl SledAgent {
         if vec.is_empty() {
             v2p_mappings.remove(&interface_id);
         }
+
+        Ok(())
+    }
+
+    pub async fn instance_put_external_ip(
+        &self,
+        instance_id: Uuid,
+        body_args: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        if !self.instances.contains_key(&instance_id).await {
+            return Err(Error::internal_error(
+                "can't alter IP state for nonexistent instance",
+            ));
+        }
+
+        let mut eips = self.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+
+        // High-level behaviour: this should always succeed UNLESS
+        // trying to add a double ephemeral.
+        if let InstanceExternalIpBody::Ephemeral(curr_ip) = &body_args {
+            if my_eips.iter().any(|v| {
+                if let InstanceExternalIpBody::Ephemeral(other_ip) = v {
+                    curr_ip != other_ip
+                } else {
+                    false
+                }
+            }) {
+                return Err(Error::invalid_request("cannot replace existing ephemeral IP without explicit removal"));
+            }
+        }
+
+        my_eips.insert(*body_args);
+
+        Ok(())
+    }
+
+    pub async fn instance_delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        body_args: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        if !self.instances.contains_key(&instance_id).await {
+            return Err(Error::internal_error(
+                "can't alter IP state for nonexistent instance",
+            ));
+        }
+
+        let mut eips = self.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+
+        my_eips.remove(&body_args);
 
         Ok(())
     }

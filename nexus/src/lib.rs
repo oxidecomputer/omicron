@@ -20,7 +20,6 @@ pub mod external_api; // Public for testing
 mod internal_api;
 mod populate;
 mod saga_interface;
-mod updates; // public for testing
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;

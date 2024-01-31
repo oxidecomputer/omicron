@@ -15,12 +15,16 @@ use crate::app::sagas::{
 };
 use anyhow::Error;
 use dpd_client::types::PortId;
-use mg_admin_client::types::DeleteNeighborRequest;
+use mg_admin_client::types::{
+    AddStaticRoute4Request, DeleteNeighborRequest, DeleteStaticRoute4Request,
+    Prefix4, StaticRoute4, StaticRoute4List,
+};
 use nexus_db_model::NETWORK_KEY;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use omicron_common::api::external::{self, NameOrId, SwitchLocation};
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::Arc;
 use steno::ActionError;
@@ -42,6 +46,10 @@ declare_saga_actions! {
     CLEAR_SWITCH_PORT_SETTINGS -> "switch_port_settings" {
         + spa_clear_switch_port_settings
         - spa_undo_clear_switch_port_settings
+    }
+    CLEAR_SWITCH_PORT_ROUTES -> "clear_switch_port_routes" {
+        + spa_clear_switch_port_routes
+        - spa_undo_clear_switch_port_routes
     }
     CLEAR_SWITCH_PORT_UPLINK -> "clear_switch_port_uplink" {
         + spa_clear_switch_port_uplink
@@ -179,7 +187,7 @@ async fn spa_undo_clear_switch_port_settings(
     let log = sagactx.user_data().log();
 
     let port_id: PortId = PortId::from_str(&params.port_name)
-        .map_err(|e| external::Error::internal_error(e))?;
+        .map_err(|e| external::Error::internal_error(e.to_string().as_str()))?;
 
     let orig_port_settings_id = sagactx
         .lookup::<Option<Uuid>>("original_switch_port_settings_id")
@@ -349,6 +357,108 @@ async fn spa_undo_clear_switch_port_bgp_settings(
         params.switch_port_id,
     )
     .await?)
+}
+
+async fn spa_clear_switch_port_routes(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let nexus = osagactx.nexus();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let orig_port_settings_id =
+        sagactx.lookup::<Option<Uuid>>("original_switch_port_settings_id")?;
+
+    let id = match orig_port_settings_id {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    let settings = nexus
+        .switch_port_settings_get(&opctx, &NameOrId::Id(id))
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let mut rq = DeleteStaticRoute4Request {
+        routes: StaticRoute4List { list: Vec::new() },
+    };
+
+    for r in settings.routes {
+        let nexthop = match r.gw.ip() {
+            IpAddr::V4(v4) => v4,
+            IpAddr::V6(_) => continue,
+        };
+        let prefix = match r.gw.ip() {
+            IpAddr::V4(v4) => Prefix4 { value: v4, length: r.gw.prefix() },
+            IpAddr::V6(_) => continue,
+        };
+        let sr = StaticRoute4 { nexthop, prefix };
+        rq.routes.list.push(sr);
+    }
+
+    let mg_client: Arc<mg_admin_client::Client> =
+        select_mg_client(&sagactx, &opctx, params.switch_port_id).await?;
+
+    mg_client.inner.static_remove_v4_route(&rq).await.map_err(|e| {
+        ActionError::action_failed(format!("mgd static route remove {e}"))
+    })?;
+
+    Ok(())
+}
+
+async fn spa_undo_clear_switch_port_routes(
+    sagactx: NexusActionContext,
+) -> Result<(), Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let nexus = osagactx.nexus();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let orig_port_settings_id =
+        sagactx.lookup::<Option<Uuid>>("original_switch_port_settings_id")?;
+
+    let id = match orig_port_settings_id {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    let settings = nexus
+        .switch_port_settings_get(&opctx, &NameOrId::Id(id))
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let mut rq = AddStaticRoute4Request {
+        routes: StaticRoute4List { list: Vec::new() },
+    };
+
+    for r in settings.routes {
+        let nexthop = match r.gw.ip() {
+            IpAddr::V4(v4) => v4,
+            IpAddr::V6(_) => continue,
+        };
+        let prefix = match r.gw.ip() {
+            IpAddr::V4(v4) => Prefix4 { value: v4, length: r.gw.prefix() },
+            IpAddr::V6(_) => continue,
+        };
+        let sr = StaticRoute4 { nexthop, prefix };
+        rq.routes.list.push(sr);
+    }
+
+    let mg_client: Arc<mg_admin_client::Client> =
+        select_mg_client(&sagactx, &opctx, params.switch_port_id).await?;
+
+    mg_client.inner.static_add_v4_route(&rq).await.map_err(|e| {
+        ActionError::action_failed(format!("mgd static route remove {e}"))
+    })?;
+
+    Ok(())
 }
 
 async fn spa_clear_switch_port_bootstore_network_settings(

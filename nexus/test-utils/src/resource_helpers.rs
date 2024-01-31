@@ -246,9 +246,9 @@ pub async fn link_ip_pool(
     is_default: bool,
 ) {
     let link =
-        params::IpPoolSiloLink { silo: NameOrId::Id(*silo_id), is_default };
+        params::IpPoolLinkSilo { silo: NameOrId::Id(*silo_id), is_default };
     let url = format!("/v1/system/ip-pools/{pool_name}/silos");
-    object_create::<params::IpPoolSiloLink, views::IpPoolSilo>(
+    object_create::<params::IpPoolLinkSilo, views::IpPoolSiloLink>(
         client, &url, &link,
     )
     .await;
@@ -492,6 +492,7 @@ pub async fn create_instance(
         Vec::<params::InstanceDiskAttachment>::new(),
         // External IPs=
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await
 }
@@ -504,6 +505,7 @@ pub async fn create_instance_with(
     nics: &params::InstanceNetworkInterfaceAttachment,
     disks: Vec<params::InstanceDiskAttachment>,
     external_ips: Vec<params::ExternalIpCreate>,
+    start: bool,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
     object_create(
@@ -523,7 +525,7 @@ pub async fn create_instance_with(
             network_interfaces: nics.clone(),
             external_ips,
             disks,
-            start: true,
+            start,
         },
     )
     .await

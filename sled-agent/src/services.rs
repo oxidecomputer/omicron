@@ -61,7 +61,6 @@ use illumos_utils::zone::Zones;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
-use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
@@ -75,6 +74,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
+use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
@@ -198,6 +198,24 @@ pub enum Error {
 
     #[error("Failed to get address: {0}")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
+
+    #[error(
+        "Failed to launch zone {zone} because ZFS value cannot be accessed"
+    )]
+    GetZfsValue {
+        zone: String,
+        #[source]
+        source: illumos_utils::zfs::GetValueError,
+    },
+
+    #[error("Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})")]
+    DatasetNotReady {
+        zone: String,
+        dataset: String,
+        prop_name: String,
+        prop_value: String,
+        prop_value_expected: String,
+    },
 
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
@@ -1474,7 +1492,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(zone_config) => zone_config
                 .zone
                 .dataset_name()
-                .map(|n| zone::Dataset { name: n.full() })
+                .map(|n| zone::Dataset { name: n.full_name() })
                 .into_iter()
                 .collect(),
             ZoneArgs::Switch(_) => vec![],
@@ -1711,7 +1729,7 @@ impl ServiceManager {
                     dataset.pool_name.clone(),
                     DatasetKind::Crucible,
                 )
-                .full();
+                .full_name();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("datalink", "astring", datalink)
@@ -1780,7 +1798,55 @@ impl ServiceManager {
                 let running_zone = RunningZone::boot(installed_zone).await?;
                 return Ok(running_zone);
             }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        id,
+                        zone_type: OmicronZoneType::Oximeter { .. },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
 
+                // Configure the Oximeter service.
+                let address = SocketAddr::new(
+                    IpAddr::V6(*underlay_address),
+                    OXIMETER_PORT,
+                );
+
+                let listen_addr = &address.ip().to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
+                let oximeter_config = PropertyGroupBuilder::new("config")
+                    .add_property("id", "astring", &id.to_string())
+                    .add_property("address", "astring", &address.to_string());
+                let oximeter_service = ServiceBuilder::new("oxide/oximeter")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(oximeter_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(oximeter_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup Oximeter profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
             _ => {}
         }
 
@@ -2136,14 +2202,6 @@ impl ServiceManager {
                         // service is enabled.
                         smfh.refresh()?;
                     }
-
-                    OmicronZoneType::Oximeter { address } => {
-                        info!(self.inner.log, "Setting up oximeter service");
-                        smfh.setprop("config/id", zone_config.zone.id)?;
-                        smfh.setprop("config/address", address.to_string())?;
-                        smfh.refresh()?;
-                    }
-
                     OmicronZoneType::BoundaryNtp {
                         ntp_servers,
                         dns_servers,
@@ -2209,7 +2267,8 @@ impl ServiceManager {
                     | OmicronZoneType::ClickhouseKeeper { .. }
                     | OmicronZoneType::CockroachDb { .. }
                     | OmicronZoneType::Crucible { .. }
-                    | OmicronZoneType::CruciblePantry { .. } => {
+                    | OmicronZoneType::CruciblePantry { .. }
+                    | OmicronZoneType::Oximeter { .. } => {
                         panic!(
                             "{} is a service which exists as part of a \
                             self-assembling zone",
@@ -2930,6 +2989,35 @@ impl ServiceManager {
             // Currently, the zone filesystem should be destroyed between
             // reboots, so it's fine to make this decision locally.
             let root = if let Some(dataset) = zone.dataset_name() {
+                // Check that the dataset is actually ready to be used.
+                let [zoned, canmount, encryption] =
+                    illumos_utils::zfs::Zfs::get_values(
+                        &dataset.full_name(),
+                        &["zoned", "canmount", "encryption"],
+                    )
+                    .map_err(|err| Error::GetZfsValue {
+                        zone: zone.zone_name(),
+                        source: err,
+                    })?;
+
+                let check_property = |name, actual, expected| {
+                    if actual != expected {
+                        return Err(Error::DatasetNotReady {
+                            zone: zone.zone_name(),
+                            dataset: dataset.full_name(),
+                            prop_name: String::from(name),
+                            prop_value: actual,
+                            prop_value_expected: String::from(expected),
+                        });
+                    }
+                    return Ok(());
+                };
+                check_property("zoned", zoned, "on")?;
+                check_property("canmount", canmount, "on")?;
+                if dataset.dataset().dataset_should_be_encrypted() {
+                    check_property("encryption", encryption, "aes-256-gcm")?;
+                }
+
                 // If the zone happens to already manage a dataset, then
                 // we co-locate the zone dataset on the same zpool.
                 //
@@ -3682,7 +3770,7 @@ mod test {
     const GLOBAL_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
-    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_oximeter";
+    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_ntp";
     const EXPECTED_PORT: u16 = 12223;
 
     fn make_bootstrap_networking_config() -> BootstrapNetworking {
@@ -3859,7 +3947,12 @@ mod test {
             mgr,
             id,
             generation,
-            OmicronZoneType::Oximeter { address },
+            OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         )
         .await
         .expect("Could not create service");
@@ -3898,7 +3991,12 @@ mod test {
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
-                zone_type: OmicronZoneType::Oximeter { address },
+                zone_type: OmicronZoneType::InternalNtp {
+                    address,
+                    ntp_servers: vec![],
+                    dns_servers: vec![],
+                    domain: None,
+                },
             }],
         })
         .await
@@ -4267,7 +4365,12 @@ mod test {
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
+            zone_type: OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         }];
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
             generation: v2,
@@ -4288,7 +4391,12 @@ mod test {
         zones.push(OmicronZoneConfig {
             id: id2,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
+            zone_type: OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         });
 
         // Now try to apply that list with an older generation number.  This
@@ -4461,7 +4569,12 @@ mod test {
         zones.push(OmicronZoneConfig {
             id,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
+            zone_type: OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         });
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
             generation: vv,
