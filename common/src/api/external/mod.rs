@@ -783,7 +783,7 @@ impl JsonSchema for Hostname {
             )),
             string: Some(Box::new(schemars::schema::StringValidation {
                 max_length: Some(HOSTNAME_MAX_LEN),
-                min_length: None,
+                min_length: Some(1),
                 pattern: Some(HOSTNAME_REGEX.to_string()),
             })),
             ..Default::default()
