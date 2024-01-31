@@ -522,7 +522,7 @@ pub async fn create_instance_with(
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
-            ssh_keys: Some(Vec::new()),
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces: nics.clone(),
             external_ips,
             disks,
