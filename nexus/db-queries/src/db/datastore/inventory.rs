@@ -2068,7 +2068,11 @@ mod test {
             )
             .await
             .expect("failed to read back with batch size 1");
-        assert_eq!(collection_read, batch_read);
+        assert_eq!(
+            collection_read, batched_read,
+            "read with default batch size and read with batch size 1 must \
+            return the same results"
+        );
 
         // Now insert an equivalent collection again.  Verify the distinct
         // baseboards, cabooses, and RoT pages again.  This is important: the
