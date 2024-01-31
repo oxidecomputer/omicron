@@ -367,8 +367,10 @@ impl InstanceRunner {
                     // If we receive a request to terminate, we are guaranteed
                     // to not process any further requests, and to leave
                     // immediately.
+                    self.publish_state_to_nexus().await;
                     return Ok(());
                 },
+                // Handle messages from our own "Monitor the VMM" task.
                 request = self.rx_monitor.recv() => {
                     use InstanceMonitorRequest::*;
                     match request {
@@ -391,6 +393,7 @@ impl InstanceRunner {
                     }
 
                 },
+                // Handle external requests to act upon the instance.
                 request = self.rx.recv() => {
                     use InstanceRequest::*;
                     match request {
