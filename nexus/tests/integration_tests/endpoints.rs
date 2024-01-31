@@ -423,7 +423,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         memory: ByteCount::from_gibibytes_u32(16),
         hostname: String::from("demo-instance"),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_public_keys: Some(Vec::new()),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
             pool: Some(DEMO_IP_POOL_NAME.clone().into()),

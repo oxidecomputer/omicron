@@ -330,7 +330,7 @@ impl super::Nexus {
             .lookup_for(authz::Action::ListChildren)
             .await?;
 
-        let ssh_keys = match &params.ssh_keys {
+        let ssh_keys = match &params.ssh_public_keys {
             Some(keys) => Some(
                 self.db_datastore
                     .ssh_keys_batch_lookup(opctx, &authz_user, keys)
@@ -354,7 +354,7 @@ impl super::Nexus {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
             create_params: params::InstanceCreate {
-                ssh_keys,
+                ssh_public_keys: ssh_keys,
                 ..params.clone()
             },
             boundary_switches: self

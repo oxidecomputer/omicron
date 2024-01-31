@@ -331,7 +331,7 @@ async fn sic_associate_ssh_keys(
             &opctx,
             &authz_user,
             instance_id,
-            &saga_params.create_params.ssh_keys.map(|k| {
+            &saga_params.create_params.ssh_public_keys.map(|k| {
                 // Before the instance_create saga is kicked off all entries
                 // in `ssh_keys` are validated and converted to `Uuids`.
                 k.iter()
@@ -1104,7 +1104,7 @@ pub mod test {
                 memory: ByteCount::from_gibibytes_u32(4),
                 hostname: String::from("inst"),
                 user_data: vec![],
-                ssh_keys: None,
+                ssh_public_keys: None,
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
