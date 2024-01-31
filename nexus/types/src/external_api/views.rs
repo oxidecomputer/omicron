@@ -558,7 +558,9 @@ pub struct Role {
 // SSH KEYS
 
 /// View of an SSH Key
-#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq,
+)]
 pub struct SshKey {
     #[serde(flatten)]
     pub identity: IdentityMetadata,

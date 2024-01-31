@@ -71,7 +71,7 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
-ALL_BOARDS=(gimlet-{c..e} psc-{b..c} sidecar-{b..c})
+ALL_BOARDS=(gimlet-{c..f} psc-{b..c} sidecar-{b..c})
 
 TOP=$PWD
 VERSION=$(< /input/package/work/version.txt)

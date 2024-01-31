@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(29, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(30, 0, 0);
 
 table! {
     disk (id) {
@@ -710,6 +710,13 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         silo_user_id -> Uuid,
         public_key -> Text,
+    }
+}
+
+table! {
+    instance_ssh_key (instance_id, ssh_key_id) {
+        instance_id -> Uuid,
+        ssh_key_id -> Uuid,
     }
 }
 
@@ -1559,3 +1566,7 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
 
 allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
+
+allow_tables_to_appear_in_same_query!(ssh_key, instance_ssh_key, instance);
+joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
+joinable!(instance_ssh_key -> instance (instance_id));

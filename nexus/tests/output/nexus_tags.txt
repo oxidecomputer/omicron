@@ -55,6 +55,7 @@ instance_network_interface_view          GET      /v1/network-interfaces/{interf
 instance_reboot                          POST     /v1/instances/{instance}/reboot
 instance_serial_console                  GET      /v1/instances/{instance}/serial-console
 instance_serial_console_stream           GET      /v1/instances/{instance}/serial-console/stream
+instance_ssh_public_key_list             GET      /v1/instances/{instance}/ssh-public-keys
 instance_start                           POST     /v1/instances/{instance}/start
 instance_stop                            POST     /v1/instances/{instance}/stop
 instance_view                            GET      /v1/instances/{instance}
