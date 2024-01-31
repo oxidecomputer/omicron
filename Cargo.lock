@@ -4784,7 +4784,6 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "derive-where",
  "dropshot",
  "expectorate",
  "futures",
