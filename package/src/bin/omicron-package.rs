@@ -384,6 +384,7 @@ async fn ensure_package(
     package_name: &String,
     package: &Package,
     output_directory: &Utf8Path,
+    disable_cache: bool,
 ) -> Result<()> {
     let target = &config.target;
     let progress = ui.add_package(package_name.to_string());
@@ -446,6 +447,7 @@ async fn ensure_package(
             let build_config = omicron_zone_package::package::BuildConfig {
                 target,
                 progress: &progress,
+                cache_disabled: disable_cache,
                 ..Default::default()
             };
             package
@@ -468,6 +470,7 @@ async fn ensure_package(
 async fn do_package(
     config: &Config,
     output_directory: &Utf8Path,
+    disable_cache: bool,
 ) -> Result<()> {
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
@@ -493,6 +496,7 @@ async fn do_package(
                         package_name,
                         package,
                         output_directory,
+                        disable_cache,
                     )
                     .await
                 },
@@ -978,8 +982,9 @@ async fn main() -> Result<()> {
         SubCommand::Build(BuildCommand::Dot) => {
             do_dot(&get_config()?).await?;
         }
-        SubCommand::Build(BuildCommand::Package) => {
-            do_package(&get_config()?, &args.artifact_dir).await?;
+        SubCommand::Build(BuildCommand::Package { disable_cache }) => {
+            do_package(&get_config()?, &args.artifact_dir, *disable_cache)
+                .await?;
         }
         SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
             do_stamp(&get_config()?, &args.artifact_dir, package_name, version)
