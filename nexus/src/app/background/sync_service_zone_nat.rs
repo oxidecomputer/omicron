@@ -18,7 +18,6 @@ use omicron_common::api::external;
 use serde_json::json;
 use sled_agent_client::types::OmicronZoneType;
 use std::net::{IpAddr, SocketAddr};
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 // Minumum number of boundary NTP zones that should be present in a valid
@@ -62,7 +61,6 @@ impl BackgroundTask for ServiceZoneNatTracker {
                 .datastore
                 .inventory_get_latest_collection(
                     opctx,
-                    NonZeroU32::new(u32::MAX).unwrap(),
                 )
                 .await
             {
