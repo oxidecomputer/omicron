@@ -66,6 +66,14 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
+/// "limit" used in SQL queries that paginate through all SPs, RoTs, sleds,
+/// omicron zones, etc.
+///
+/// We use a [`Paginator`] to guard against single queries returning an
+/// unchecked number of rows.
+// unsafe: `new_unchecked` is only unsound if the argument is 0.
+const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
+
 impl DataStore {
     /// Store a complete inventory collection into the database
     pub async fn inventory_insert_collection(
@@ -1196,14 +1204,12 @@ impl DataStore {
             })
     }
 
-    /// Attempt to read the latest collection while limiting queries to `batch_size`
-    /// records at a time.
+    /// Attempt to read the latest collection.
     ///
     /// If there aren't any collections, return `Ok(None)`.
     pub async fn inventory_get_latest_collection(
         &self,
         opctx: &OpContext,
-        batch_size: NonZeroU32,
     ) -> Result<Option<Collection>, Error> {
         opctx.authorize(authz::Action::Read, &authz::INVENTORY).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1220,21 +1226,31 @@ impl DataStore {
             return Ok(None);
         };
 
-        Ok(Some(
-            self.inventory_collection_read_batched(
-                opctx,
-                collection_id,
-                batch_size,
-            )
-            .await?,
-        ))
+        Ok(Some(self.inventory_collection_read(opctx, collection_id).await?))
     }
 
-    /// Attempt to read the current collection.
+    /// Attempt to read the current collection
+    pub async fn inventory_collection_read(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> Result<Collection, Error> {
+        self.inventory_collection_read_batched(opctx, id, SQL_BATCH_SIZE).await
+    }
+
+    /// Attempt to read the current collection with the provided batch size.
     ///
     /// Queries are limited to `batch_size` records at a time, performing
     /// multiple queries if more than `batch_size` records exist.
-    pub async fn inventory_collection_read_batched(
+    ///
+    /// In general, we don't want to permit downstream code to determine the
+    /// batch size; instead, we would like to always use `SQL_BATCH_SIZE`.
+    /// However, in order to facilitate testing of the batching logic itself,
+    /// this private method is separated from the public APIs
+    /// [`Self::inventory_get_latest_collection`] and
+    /// [`Self::inventory_collection_read`], so that we can test with smaller
+    /// batch sizes.
+    async fn inventory_collection_read_batched(
         &self,
         opctx: &OpContext,
         id: Uuid,

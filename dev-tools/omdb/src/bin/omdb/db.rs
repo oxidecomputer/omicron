@@ -2291,7 +2291,6 @@ async fn cmd_db_inventory(
                 opctx,
                 datastore,
                 id,
-                limit,
                 long_string_formatter,
             )
             .await
@@ -2496,11 +2495,10 @@ async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
     id: Uuid,
-    limit: NonZeroU32,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
     let collection = datastore
-        .inventory_collection_read_batched(opctx, id, limit)
+        .inventory_collection_read(opctx, id)
         .await
         .context("reading collection")?;
 
