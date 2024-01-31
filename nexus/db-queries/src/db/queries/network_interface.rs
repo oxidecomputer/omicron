@@ -1740,6 +1740,7 @@ mod tests {
             memory: ByteCount::from_gibibytes_u32(4),
             hostname: "inst".to_string(),
             user_data: vec![],
+            ssh_keys: Some(Vec::new()),
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],

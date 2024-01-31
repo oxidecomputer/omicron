@@ -1036,6 +1036,14 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
+    /// An allowlist of SSH public keys to be transferred to the instance via
+    /// cloud-init during instance creation.
+    ///
+    /// If not provided, all SSH public keys from the user's profile will be sent.
+    /// If an empty list is provided, no public keys will be transmitted to the
+    /// instance.
+    pub ssh_keys: Option<Vec<NameOrId>>,
+
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,
