@@ -54,6 +54,10 @@
               LIBCLANG_PATH = "${libclang.lib}/lib";
               OPENSSL_DIR = "${openssl.dev}";
               OPENSSL_LIB_DIR = "${openssl.out}/lib";
+
+              # Needed by rustfmt-wrapper, see:
+              # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
+              RUSTFMT = "${rustToolchain}/bin/rustfmt";
             };
         }
       );
