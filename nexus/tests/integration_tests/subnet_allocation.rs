@@ -58,7 +58,7 @@ async fn create_instance_expect_failure(
         memory: ByteCount::from_gibibytes_u32(1),
         hostname: name.to_string(),
         user_data: vec![],
-        ssh_keys: Some(Vec::new()),
+        ssh_public_keys: Some(Vec::new()),
         network_interfaces,
         external_ips: vec![],
         disks: vec![],
