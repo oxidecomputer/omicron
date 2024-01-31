@@ -4193,6 +4193,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "newtype-uuid"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "40ea6931c6121ed9346ae7b7a6fc413af6e1ab203faa83bca1738cf09edc6f5b"
+dependencies = [
+ "schemars",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "newtype_derive"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4235,6 +4246,7 @@ dependencies = [
  "hex",
  "ipnetwork",
  "macaddr",
+ "newtype-uuid",
  "newtype_derive",
  "nexus-defaults",
  "nexus-types",
@@ -4289,6 +4301,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.12.0",
  "macaddr",
+ "newtype-uuid",
  "newtype_derive",
  "nexus-db-model",
  "nexus-deployment",
@@ -4467,6 +4480,7 @@ dependencies = [
  "dns-service-client",
  "futures",
  "gateway-client",
+ "newtype-uuid",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
@@ -4779,6 +4793,7 @@ dependencies = [
  "ipnetwork",
  "libc",
  "macaddr",
+ "newtype-uuid",
  "omicron-workspace-hack",
  "once_cell",
  "parse-display",

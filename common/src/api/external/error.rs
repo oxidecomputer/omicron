@@ -8,8 +8,8 @@
 
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
-use crate::typed_uuid::ToUntypedUuid;
 use dropshot::HttpError;
+use newtype_uuid::GenericUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Display;
@@ -154,7 +154,7 @@ pub enum LookupType {
 
 impl LookupType {
     /// Constructs a `ById` lookup type from a typed or untyped UUID.
-    pub fn by_id<T: ToUntypedUuid>(id: T) -> Self {
+    pub fn by_id<T: GenericUuid>(id: T) -> Self {
         LookupType::ById(id.to_untyped_uuid())
     }
 

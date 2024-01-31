@@ -6,10 +6,11 @@ use crate::schema::{loopback_address, switch_vlan_interface_config};
 use crate::SqlU16;
 use db_macros::Asset;
 use ipnetwork::IpNetwork;
+use newtype_uuid::TypedUuid;
 use nexus_types::external_api::params;
 use nexus_types::identity::Asset;
 use omicron_common::api::external;
-use omicron_common::typed_uuid::{LoopbackAddressKind, TypedUuid};
+use omicron_common::typed_uuid::LoopbackAddressKind;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

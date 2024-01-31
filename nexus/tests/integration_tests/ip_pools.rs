@@ -11,6 +11,7 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
+use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -339,10 +340,8 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
         StatusCode::NOT_FOUND,
     )
     .await;
-    assert_eq!(
-        error.message,
-        "not found: ip-pool with name \"oxide-service-pool\""
-    );
+    let not_found_name = "not found: ip-pool with name \"oxide-service-pool\"";
+    assert_eq!(error.message, not_found_name);
 
     let not_found_id =
         format!("not found: ip-pool with id \"{}\"", pool.identity.id);
@@ -370,23 +369,62 @@ async fn test_ip_pool_service_no_cud(cptestctx: &ControlPlaneTestContext) {
     .await;
     assert_eq!(error.message, not_found_id);
 
-    // linking not allowed
+    let error = object_put_error(
+        client,
+        &internal_pool_name_url,
+        &put_body,
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_eq!(error.message, not_found_name);
 
-    // let link_body = params::IpPoolLinkSilo {
-    //     silo: NameOrId::Name(cptestctx.silo_name.clone()),
-    //     is_default: false,
-    // };
-    // let link_url = format!("{}/silos", internal_pool_id_url);
-    // let error = object_create_error(
-    //     client,
-    //     &link_url,
-    //     &link_body,
-    //     StatusCode::NOT_FOUND,
-    // )
-    // .await;
-    // assert_eq!(error.message, not_found_id);
+    // add range not allowed by name or ID
+    let range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 2),
+            std::net::Ipv4Addr::new(10, 0, 0, 5),
+        )
+        .unwrap(),
+    );
+    let url = format!("{}/ranges/add", internal_pool_id_url);
+    let error =
+        object_create_error(client, &url, &range, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, not_found_id);
 
-    // TODO: link, unlink, add/remove range by name or ID should all fail
+    let url = format!("{}/ranges/add", internal_pool_name_url);
+    let error =
+        object_create_error(client, &url, &range, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, not_found_name);
+
+    // remove range not allowed by name or ID
+    let url = format!("{}/ranges/add", internal_pool_id_url);
+    let error =
+        object_create_error(client, &url, &range, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, not_found_id);
+
+    let url = format!("{}/ranges/remove", internal_pool_name_url);
+    let error =
+        object_create_error(client, &url, &range, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, not_found_name);
+
+    // linking not allowed by name or ID
+    let body = params::IpPoolLinkSilo {
+        silo: NameOrId::Name(cptestctx.silo_name.clone()),
+        is_default: false,
+    };
+    let url = format!("{}/silos", internal_pool_id_url);
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, not_found_id);
+
+    // unlink not allowed by name or ID
+    let url = format!("{}/silos/{}", internal_pool_id_url, *INTERNAL_SILO_ID);
+    let error = object_delete_error(client, &url, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, not_found_id);
+
+    let url = format!("{}/silos/{}", internal_pool_name_url, *INTERNAL_SILO_ID);
+    let error = object_delete_error(client, &url, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, not_found_name);
 }
 
 #[nexus_test]

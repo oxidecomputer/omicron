@@ -17,13 +17,14 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
+use newtype_uuid::TypedUuid;
 use nexus_db_model::to_db_typed_uuid;
 use nexus_types::external_api::params::LoopbackAddressCreate;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, ResourceType,
 };
-use omicron_common::typed_uuid::{LoopbackAddressKind, TypedUuid};
+use omicron_common::typed_uuid::LoopbackAddressKind;
 use uuid::Uuid;
 
 impl DataStore {

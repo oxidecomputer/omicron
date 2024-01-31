@@ -132,7 +132,7 @@ impl MacroInput {
         }, {
             |v| {
                 let kind_param = &**v;
-                let external = parse_quote!(::omicron_common::typed_uuid::TypedUuid<::omicron_common::typed_uuid::#kind_param>);
+                let external = parse_quote!(::newtype_uuid::TypedUuid<::omicron_common::typed_uuid::#kind_param>);
                 let db = parse_quote!(crate::typed_uuid::DbTypedUuid<::omicron_common::typed_uuid::#kind_param>);
                 UuidTy::Typed { external, db }
             }

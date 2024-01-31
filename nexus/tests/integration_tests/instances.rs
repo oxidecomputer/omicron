@@ -3692,6 +3692,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     stop_instance(&cptestctx, "pool1-inst").await;
     stop_instance(&cptestctx, "pool2-inst").await;
 
+    // now unlink works
     object_delete(client, &pool1_silo_url).await;
 
     // create instance with pool1, expecting allocation to fail

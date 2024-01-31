@@ -9,9 +9,7 @@ use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
-use omicron_common::typed_uuid::{
-    ToUntypedUuid, TypedUuid, TypedUuidKind, TypedUuidParseError,
-};
+use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -59,7 +57,7 @@ where
     #[inline]
     fn from_sql(bytes: DB::RawValue<'_>) -> deserialize::Result<Self> {
         let id = Uuid::from_sql(bytes)?;
-        Ok(TypedUuid::from_untyped(id).into())
+        Ok(TypedUuid::from_untyped_uuid(id).into())
     }
 }
 
@@ -78,7 +76,7 @@ impl<T: TypedUuidKind> fmt::Display for DbTypedUuid<T> {
 }
 
 impl<T: TypedUuidKind> FromStr for DbTypedUuid<T> {
-    type Err = TypedUuidParseError;
+    type Err = newtype_uuid::ParseError;
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -100,9 +98,19 @@ impl<T: TypedUuidKind> From<DbTypedUuid<T>> for TypedUuid<T> {
     }
 }
 
-impl<T: TypedUuidKind> ToUntypedUuid for DbTypedUuid<T> {
+impl<T: TypedUuidKind> GenericUuid for DbTypedUuid<T> {
+    #[inline]
+    fn from_untyped_uuid(uuid: Uuid) -> Self {
+        TypedUuid::from_untyped_uuid(uuid).into()
+    }
+
     #[inline]
     fn to_untyped_uuid(self) -> Uuid {
         self.0.to_untyped_uuid()
+    }
+
+    #[inline]
+    fn as_untyped_uuid(&self) -> &Uuid {
+        self.0.as_untyped_uuid()
     }
 }

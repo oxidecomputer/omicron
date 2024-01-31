@@ -9,6 +9,7 @@ anyhow.workspace = true
 chrono.workspace = true
 base64.workspace = true
 futures.workspace = true
+newtype-uuid.workspace = true
 openssl.workspace = true
 parse-display.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }

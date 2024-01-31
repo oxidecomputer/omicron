@@ -7,9 +7,9 @@
 // Copyright 2021 Oxide Computer Company
 
 use chrono::{DateTime, Utc};
+use newtype_uuid::GenericUuid;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::Name;
-use omicron_common::typed_uuid::ToUntypedUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,7 +24,7 @@ use uuid::Uuid;
 ///
 /// May be derived from [`macro@db-macros::Resource`].
 pub trait Resource {
-    type IdType: ToUntypedUuid;
+    type IdType: GenericUuid;
 
     fn id(&self) -> Self::IdType;
     fn name(&self) -> &Name;
@@ -63,7 +63,7 @@ pub struct AssetIdentityMetadata {
 ///
 /// May be derived from [`macro@db-macros::Asset`].
 pub trait Asset {
-    type IdType: ToUntypedUuid;
+    type IdType: GenericUuid;
 
     fn id(&self) -> Self::IdType;
     fn time_created(&self) -> DateTime<Utc>;
