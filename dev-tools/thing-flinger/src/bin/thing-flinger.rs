@@ -936,7 +936,7 @@ fn main() -> Result<()> {
         SubCommand::Builder(BuildCommand::Target { .. }) => {
             todo!("Setting target not supported through thing-flinger")
         }
-        SubCommand::Builder(BuildCommand::Package) => {
+        SubCommand::Builder(BuildCommand::Package { .. }) => {
             do_package(&config, args.artifact_dir)?;
         }
         SubCommand::Builder(BuildCommand::Stamp { .. }) => {
