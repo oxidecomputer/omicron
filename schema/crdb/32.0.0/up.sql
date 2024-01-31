@@ -1,7 +1,8 @@
-ALTER VIEW omicron.public.silo_utilization 
+CREATE OR REPLACE VIEW omicron.public.silo_utilization 
 AS SELECT
     c.id AS silo_id,
     s.name AS silo_name,
+    -- This is the added column
     s.discoverable as silo_discoverable,
     c.cpus_provisioned AS cpus_provisioned,
     c.ram_provisioned AS memory_provisioned,
