@@ -9,7 +9,7 @@ use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::public_error_from_diesel_lookup;
 use crate::db::error::ErrorHandler;
-use crate::db::pagination::{paginated, Paginator};
+use crate::db::pagination::{paginated, paginated_multicolumn, Paginator};
 use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use crate::db::TransactionError;
 use anyhow::Context;
@@ -1312,7 +1312,7 @@ impl DataStore {
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_service_processor,
-                    dsl::time_collected,
+                    dsl::hw_baseboard_id,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(id))
@@ -1322,7 +1322,7 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 sps.extend(batch.into_iter().map(|row| {
                     let baseboard_id = row.hw_baseboard_id;
                     (
@@ -1343,7 +1343,7 @@ impl DataStore {
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_root_of_trust,
-                    dsl::time_collected,
+                    dsl::hw_baseboard_id,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(id))
@@ -1353,7 +1353,7 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                paginator = p.found_batch(&batch, &|row| row.hw_baseboard_id);
                 rots.extend(batch.into_iter().map(|rot_row| {
                     let baseboard_id = rot_row.hw_baseboard_id;
                     (
@@ -1374,7 +1374,7 @@ impl DataStore {
             while let Some(p) = paginator.next() {
                 let mut batch = paginated(
                     dsl::inv_sled_agent,
-                    dsl::time_collected,
+                    dsl::sled_id,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(id))
@@ -1384,7 +1384,7 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                paginator = p.found_batch(&batch, &|row| row.sled_id);
                 rows.append(&mut batch);
             }
 
@@ -1510,9 +1510,9 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
+                let mut batch = paginated_multicolumn(
                     dsl::inv_caboose,
-                    dsl::time_collected,
+                    (dsl::hw_baseboard_id, dsl::which),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(id))
@@ -1522,7 +1522,9 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.hw_baseboard_id, row.which)
+                });
                 cabooses.append(&mut batch);
             }
 
@@ -1610,9 +1612,9 @@ impl DataStore {
 
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                let mut batch = paginated(
+                let mut batch = paginated_multicolumn(
                     dsl::inv_root_of_trust_page,
-                    dsl::time_collected,
+                    (dsl::hw_baseboard_id, dsl::which),
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(id))
@@ -1622,7 +1624,9 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.hw_baseboard_id, row.which)
+                });
                 rot_pages.append(&mut batch);
             }
 
@@ -1724,7 +1728,7 @@ impl DataStore {
             while let Some(p) = paginator.next() {
                 let batch = paginated(
                     dsl::inv_sled_omicron_zones,
-                    dsl::time_collected,
+                    dsl::sled_id,
                     &p.current_pagparams(),
                 )
                 .filter(dsl::inv_collection_id.eq(id))
@@ -1734,7 +1738,7 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator = p.found_batch(&batch, &|row| row.time_collected);
+                paginator = p.found_batch(&batch, &|row| row.sled_id);
                 zones.extend(batch.into_iter().map(|sled_zones_config| {
                     (
                         sled_zones_config.sled_id,
