@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 #
 # ci_download_maghemite_mgd: fetches the maghemite mgd binary tarball, unpacks

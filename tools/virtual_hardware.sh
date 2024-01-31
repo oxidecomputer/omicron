@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 MARKER=/etc/opt/oxide/NO_INSTALL
 if [[ -f "$MARKER" ]]; then

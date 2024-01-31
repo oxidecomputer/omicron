@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 #
 # Small tool to install OPTE and the xde kernel driver and ONU bits.
 

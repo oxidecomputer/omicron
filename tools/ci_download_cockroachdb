@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 #
 # ci_download_cockroachdb: fetches the appropriate CockroachDB binary tarball
