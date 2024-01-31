@@ -209,6 +209,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         external_ips: vec![],
         disks: vec![],
         start: false,
+        ssh_public_keys: None,
     };
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
@@ -3405,7 +3406,7 @@ async fn test_instance_create_with_ssh_keys(
         // By default should transfer all profile keys
         ssh_public_keys: None,
         start: false,
-        hostname: instance_name.to_string(),
+        hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
@@ -3451,7 +3452,7 @@ async fn test_instance_create_with_ssh_keys(
         // Should only transfer the first key
         ssh_public_keys: Some(vec![user_keys[0].identity.name.clone().into()]),
         start: false,
-        hostname: instance_name.to_string(),
+        hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
@@ -3496,7 +3497,7 @@ async fn test_instance_create_with_ssh_keys(
         // Should transfer no keys
         ssh_public_keys: Some(vec![]),
         start: false,
-        hostname: instance_name.to_string(),
+        hostname: instance_name.parse().unwrap(),
         user_data: vec![],
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
