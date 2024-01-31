@@ -73,7 +73,7 @@ async fn instance_launch() -> Result<()> {
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
             user_data: String::new(),
-            ssh_keys: Some(vec![oxide_client::types::NameOrId::Name(
+            ssh_public_keys: Some(vec![oxide_client::types::NameOrId::Name(
                 ssh_key_name.clone(),
             )]),
             start: true,
