@@ -1936,6 +1936,7 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use std::num::NonZeroU32;
     use uuid::Uuid;
 
     struct CollectionCounts {
@@ -2054,6 +2055,20 @@ mod test {
         assert_eq!(collection2.baseboards.len(), coll_counts.baseboards);
         assert_eq!(collection2.cabooses.len(), coll_counts.cabooses);
         assert_eq!(collection2.rot_pages.len(), coll_counts.rot_pages);
+
+        // Try another read with a batch size of 1, and assert we got all the
+        // same data as the previous read with the default batch size. This
+        // ensures that we correctly handle queries over the batch size, without
+        // having to actually read 1000s of records.
+        let batched_read = datastore
+            .inventory_collection_read_batched(
+                &opctx,
+                collection2.id,
+                NonZeroU32::new(1).unwrap(),
+            )
+            .await
+            .expect("failed to read back with batch size 1");
+        assert_eq!(collection_read, batch_read);
 
         // Now insert an equivalent collection again.  Verify the distinct
         // baseboards, cabooses, and RoT pages again.  This is important: the
