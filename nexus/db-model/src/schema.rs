@@ -431,6 +431,7 @@ table! {
     silo_utilization(silo_id) {
         silo_id -> Uuid,
         silo_name -> Text,
+        silo_discoverable -> Bool,
         cpus_provisioned -> Int8,
         memory_provisioned -> Int8,
         storage_provisioned -> Int8,

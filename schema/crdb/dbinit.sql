@@ -857,6 +857,7 @@ CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization
 AS SELECT
     c.id AS silo_id,
     s.name AS silo_name,
+    s.discoverable as silo_discoverable,
     c.cpus_provisioned AS cpus_provisioned,
     c.ram_provisioned AS memory_provisioned,
     c.virtual_disk_bytes_provisioned AS storage_provisioned,
