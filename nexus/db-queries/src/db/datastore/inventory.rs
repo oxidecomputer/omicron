@@ -1936,19 +1936,7 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
-    use std::num::NonZeroU32;
     use uuid::Uuid;
-
-    async fn read_collection(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        id: Uuid,
-    ) -> anyhow::Result<Collection> {
-        let batch_size = NonZeroU32::new(1000).unwrap();
-        Ok(datastore
-            .inventory_collection_read_batched(opctx, id, batch_size)
-            .await?)
-    }
 
     struct CollectionCounts {
         baseboards: usize,
@@ -2027,10 +2015,10 @@ mod test {
 
         // Read it back.
         let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let collection_read =
-            read_collection(&opctx, &datastore, collection1.id)
-                .await
-                .expect("failed to read collection back");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection1.id)
+            .await
+            .expect("failed to read collection back");
         assert_eq!(collection1, collection_read);
 
         // There ought to be no baseboards, cabooses, or RoT pages in the
@@ -2051,10 +2039,10 @@ mod test {
             .inventory_insert_collection(&opctx, &collection2)
             .await
             .expect("failed to insert collection");
-        let collection_read =
-            read_collection(&opctx, &datastore, collection2.id)
-                .await
-                .expect("failed to read collection back");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection2.id)
+            .await
+            .expect("failed to read collection back");
         assert_eq!(collection2, collection_read);
         // Verify that we have exactly the set of cabooses, baseboards, and RoT
         // pages in the databases that came from this first non-empty
@@ -2077,10 +2065,10 @@ mod test {
             .inventory_insert_collection(&opctx, &collection3)
             .await
             .expect("failed to insert collection");
-        let collection_read =
-            read_collection(&opctx, &datastore, collection3.id)
-                .await
-                .expect("failed to read collection back");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection3.id)
+            .await
+            .expect("failed to read collection back");
         assert_eq!(collection3, collection_read);
         // Verify that we have the same number of cabooses, baseboards, and RoT
         // pages, since those didn't change.
@@ -2131,10 +2119,10 @@ mod test {
             .inventory_insert_collection(&opctx, &collection4)
             .await
             .expect("failed to insert collection");
-        let collection_read =
-            read_collection(&opctx, &datastore, collection4.id)
-                .await
-                .expect("failed to read collection back");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection4.id)
+            .await
+            .expect("failed to read collection back");
         assert_eq!(collection4, collection_read);
         // Verify the number of baseboards and collections again.
         assert_eq!(
@@ -2160,10 +2148,10 @@ mod test {
             .inventory_insert_collection(&opctx, &collection5)
             .await
             .expect("failed to insert collection");
-        let collection_read =
-            read_collection(&opctx, &datastore, collection5.id)
-                .await
-                .expect("failed to read collection back");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection5.id)
+            .await
+            .expect("failed to read collection back");
         assert_eq!(collection5, collection_read);
         assert_eq!(collection5.baseboards.len(), collection3.baseboards.len());
         assert_eq!(collection5.cabooses.len(), collection3.cabooses.len());
@@ -2294,19 +2282,26 @@ mod test {
         );
 
         // If we try to fetch a pruned collection, we should get nothing.
-        let _ = read_collection(&opctx, &datastore, collection4.id)
+        let _ = datastore
+            .inventory_collection_read(&opctx, collection4.id)
             .await
             .expect_err("unexpectedly read pruned collection");
 
         // But we should still be able to fetch the collections that do exist.
-        let collection_read =
-            read_collection(&opctx, &datastore, collection5.id).await.unwrap();
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection5.id)
+            .await
+            .unwrap();
         assert_eq!(collection5, collection_read);
-        let collection_read =
-            read_collection(&opctx, &datastore, collection6.id).await.unwrap();
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection6.id)
+            .await
+            .unwrap();
         assert_eq!(collection6, collection_read);
-        let collection_read =
-            read_collection(&opctx, &datastore, collection7.id).await.unwrap();
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection7.id)
+            .await
+            .unwrap();
         assert_eq!(collection7, collection_read);
 
         // We should prune more than one collection, if needed.  We'll wind up
