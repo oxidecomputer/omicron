@@ -208,6 +208,7 @@ gateway-client = { path = "clients/gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = ["std"] }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9" }
 gateway-test-utils = { path = "gateway-test-utils" }
+gethostname = "0.4.3"
 glob = "0.3.1"
 guppy = "0.17.4"
 headers = "0.3.9"
