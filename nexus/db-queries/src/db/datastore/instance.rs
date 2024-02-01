@@ -465,6 +465,8 @@ impl DataStore {
                 }
             })?;
 
+        self.instance_ssh_keys_delete(opctx, authz_instance.id()).await?;
+
         Ok(())
     }
 }

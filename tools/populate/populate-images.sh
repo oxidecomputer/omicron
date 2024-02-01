@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Populate an Oxide host running Omicron with images from server catacomb.
 #
 # Note that the default tunnel IP of `fd00:...` will only be available _after_

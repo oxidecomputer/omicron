@@ -41,6 +41,7 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
+use nexus_types::external_api::shared::BfdStatus;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -168,6 +169,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_disk_detach)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
+        api.register(instance_ssh_public_key_list)?;
 
         api.register(image_list)?;
         api.register(image_create)?;
@@ -272,6 +274,10 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_create)?;
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
+
+        api.register(networking_bfd_enable)?;
+        api.register(networking_bfd_disable)?;
+        api.register(networking_bfd_status)?;
 
         api.register(utilization_view)?;
 
@@ -2666,6 +2672,50 @@ async fn instance_serial_console_stream(
     }
 }
 
+/// List the SSH public keys added to the instance via cloud-init during instance creation
+///
+/// Note that this list is a snapshot in time and will not reflect updates made after
+/// the instance is created.
+#[endpoint {
+    method = GET,
+    path = "/v1/instances/{instance}/ssh-public-keys",
+    tags = ["instances"],
+}]
+async fn instance_ssh_public_key_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project: scan_params.selector.project.clone(),
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let ssh_keys = nexus
+            .instance_ssh_keys_list(&opctx, &instance_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|k| k.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            ssh_keys,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// List an instance's disks
 #[endpoint {
     method = GET,
@@ -3485,6 +3535,68 @@ async fn networking_bgp_announce_set_delete(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.bgp_delete_announce_set(&opctx, &sel).await?;
         Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Enable a BFD session.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/bfd-enable",
+    tags = ["system/networking"],
+}]
+async fn networking_bfd_enable(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    session: TypedBody<params::BfdSessionEnable>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        nexus.bfd_enable(&opctx, session.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Disable a BFD session.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/bfd-disable",
+    tags = ["system/networking"],
+}]
+async fn networking_bfd_disable(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    session: TypedBody<params::BfdSessionDisable>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        nexus.bfd_disable(&opctx, session.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get BFD status.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bfd-status",
+    tags = ["system/networking"],
+}]
+async fn networking_bfd_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<BfdStatus>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let status = nexus.bfd_status(&opctx).await?;
+        Ok(HttpResponseOk(status))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -17,11 +17,11 @@ use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicEr
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
 use ref_cast::RefCast;
 use serde::Deserialize;
@@ -80,6 +80,10 @@ declare_saga_actions! {
         + sic_create_instance_record
         - sic_delete_instance_record
     }
+    ASSOCIATE_SSH_KEYS -> "output" {
+        + sic_associate_ssh_keys
+        - sic_associate_ssh_keys_undo
+    }
     CREATE_NETWORK_INTERFACE -> "output" {
         + sic_create_network_interface
         - sic_create_network_interface_undo
@@ -129,6 +133,8 @@ impl NexusSaga for SagaInstanceCreate {
         ));
 
         builder.append(create_instance_record_action());
+
+        builder.append(associate_ssh_keys_action());
 
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
@@ -289,6 +295,77 @@ impl NexusSaga for SagaInstanceCreate {
         builder.append(move_to_stopped_action());
         Ok(builder.build()?)
     }
+}
+
+async fn sic_associate_ssh_keys(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params::<Params>()?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+
+    // Gather the SSH public keys of the actor making the request so
+    // that they may be injected into the new image via cloud-init.
+    // TODO-security: this should be replaced with a lookup based on
+    // on `SiloUser` role assignments once those are in place.
+    let actor = opctx
+        .authn
+        .actor_required()
+        .internal_context("loading current user's ssh keys for new Instance")
+        .map_err(ActionError::action_failed)?;
+
+    let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+        .silo_user_id(actor.actor_id())
+        .lookup_for(authz::Action::ListChildren)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    datastore
+        .ssh_keys_batch_assign(
+            &opctx,
+            &authz_user,
+            instance_id,
+            &saga_params.create_params.ssh_public_keys.map(|k| {
+                // Before the instance_create saga is kicked off all entries
+                // in `ssh_keys` are validated and converted to `Uuids`.
+                k.iter()
+                    .filter_map(|n| match n {
+                        omicron_common::api::external::NameOrId::Id(id) => {
+                            Some(*id)
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            }),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sic_associate_ssh_keys_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params::<Params>()?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    datastore
+        .instance_ssh_keys_delete(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
 }
 
 /// Create a network interface for an instance, using the parameters at index
@@ -1027,6 +1104,7 @@ pub mod test {
                 memory: ByteCount::from_gibibytes_u32(4),
                 hostname: String::from("inst"),
                 user_data: vec![],
+                ssh_public_keys: None,
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {

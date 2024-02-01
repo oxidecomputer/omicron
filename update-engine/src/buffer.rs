@@ -113,7 +113,7 @@ impl<S: StepSpec> EventBuffer<S> {
         // XXX: more efficient algorithm
         let root_execution_id = self.root_execution_id()?;
         let mut summary = self.steps().summarize();
-        summary.remove(&root_execution_id)
+        summary.swap_remove(&root_execution_id)
     }
 
     /// Returns information about each step, as currently tracked by the buffer,

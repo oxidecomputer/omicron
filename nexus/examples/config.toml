@@ -97,6 +97,7 @@ dns_external.max_concurrent_server_updates = 5
 # them (on a sunny day).
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
+bfd_manager.period_secs = 30
 # How frequently to collect hardware/software inventory from the whole system
 # (even if we don't have reason to believe anything has changed).
 inventory.period_secs = 600
@@ -105,6 +106,8 @@ inventory.nkeep = 5
 # Disable inventory collection altogether (for emergencies)
 inventory.disable = false
 phantom_disks.period_secs = 30
+blueprints.period_secs_load = 10
+blueprints.period_secs_execute = 60
 sync_service_zone_nat.period_secs = 30
 region_replacement.period_secs = 30
 

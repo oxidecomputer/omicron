@@ -36,6 +36,7 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 pub(crate) mod background;
+mod bfd;
 mod bgp;
 mod certificate;
 mod deployment;
@@ -61,6 +62,7 @@ mod silo;
 mod sled;
 mod sled_instance;
 mod snapshot;
+mod ssh_key;
 mod switch;
 mod switch_interface;
 mod switch_port;
@@ -100,6 +102,9 @@ pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 256 * (1 << 30); // 256 GiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
+
+/// This value is aribtrary
+pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -365,6 +370,7 @@ impl Nexus {
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
             &dpd_clients,
+            &mg_clients,
             config.deployment.id,
             resolver.clone(),
             saga_request,

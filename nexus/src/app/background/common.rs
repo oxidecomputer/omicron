@@ -408,7 +408,7 @@ impl TaskExec {
                 start_time,
                 start_instant,
                 reason,
-                iteration: iteration,
+                iteration,
             });
         });
 

@@ -48,6 +48,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod address_lot;
+mod bfd;
 mod bgp;
 mod bootstore;
 mod certificate;

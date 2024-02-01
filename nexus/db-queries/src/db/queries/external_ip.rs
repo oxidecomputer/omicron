@@ -999,6 +999,7 @@ mod tests {
                 ncpus: InstanceCpuCount(omicron_common::api::external::InstanceCpuCount(1)).into(),
                 memory: ByteCount(omicron_common::api::external::ByteCount::from_gibibytes_u32(1)).into(),
                 hostname: "test".into(),
+                ssh_public_keys: None,
                 user_data: vec![],
                 network_interfaces: Default::default(),
                 external_ips: vec![],
