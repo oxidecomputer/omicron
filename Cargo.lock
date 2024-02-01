@@ -352,6 +352,7 @@ dependencies = [
 name = "authz-macros"
 version = "0.1.0"
 dependencies = [
+ "expectorate",
  "heck 0.4.1",
  "omicron-workspace-hack",
  "prettyplease",
@@ -1511,6 +1512,7 @@ dependencies = [
 name = "db-macros"
 version = "0.1.0"
 dependencies = [
+ "expectorate",
  "heck 0.4.1",
  "omicron-workspace-hack",
  "prettyplease",
