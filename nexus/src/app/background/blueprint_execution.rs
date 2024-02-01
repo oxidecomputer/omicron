@@ -86,6 +86,7 @@ impl BackgroundTask for BlueprintExecutor {
         .boxed()
     }
 }
+
 #[cfg(test)]
 mod test {
     use super::BlueprintExecutor;

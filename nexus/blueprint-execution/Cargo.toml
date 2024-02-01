@@ -14,3 +14,13 @@ slog.workspace = true
 uuid.workspace = true
 
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+chrono.workspace = true
+httptest.workspace = true
+nexus-db-model.workspace = true
+nexus-test-utils.workspace = true
+nexus-test-utils-macros.workspace = true
+omicron-common.workspace = true
+omicron-nexus.workspace = true
+tokio.workspace = true
