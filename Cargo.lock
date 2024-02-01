@@ -2733,7 +2733,7 @@ dependencies = [
  "fixedbitset",
  "guppy-workspace-hack",
  "indexmap 2.2.2",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "nested",
  "once_cell",
  "pathdiff",
@@ -3425,7 +3425,7 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-common",
  "ipcc",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "libc",
  "omicron-common",
  "omicron-test-utils",
@@ -3648,9 +3648,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -4286,7 +4286,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "macaddr",
  "newtype_derive",
  "nexus-db-model",
@@ -4932,7 +4932,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "macaddr",
  "mg-admin-client",
  "mime_guess",
@@ -5150,7 +5150,7 @@ dependencies = [
  "installinator-common",
  "internal-dns",
  "ipnetwork",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "key-manager",
  "libc",
  "macaddr",
@@ -5677,7 +5677,7 @@ dependencies = [
  "futures",
  "highway",
  "indexmap 2.2.2",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -6789,7 +6789,7 @@ dependencies = [
  "cassowary",
  "crossterm",
  "indoc 2.0.3",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "lru",
  "paste",
  "stability",
@@ -6886,7 +6886,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "fd-lock 3.0.13",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "nu-ansi-term",
  "serde",
  "strip-ansi-escapes",
@@ -8422,7 +8422,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce81b7bd7c4493975347ef60d8c7e8b742d4694f4c49f93e0a12ea263938176c"
 dependencies = [
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "nom",
  "unicode_categories",
 ]
@@ -9505,7 +9505,7 @@ dependencies = [
  "futures",
  "hex",
  "hubtools",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -10167,7 +10167,7 @@ dependencies = [
  "humantime",
  "indexmap 2.2.2",
  "indicatif",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
@@ -10273,7 +10273,7 @@ dependencies = [
  "installinator-common",
  "internal-dns",
  "ipnetwork",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "maplit",
  "omicron-certificates",
  "omicron-common",
