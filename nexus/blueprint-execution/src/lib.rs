@@ -13,6 +13,8 @@ use slog::o;
 
 mod omicron_zones;
 
+pub use omicron_zones::example_zones_minimal;
+
 /// Make one attempt to realize the given blueprint, meaning to take actions to
 /// alter the real system to match the blueprint
 ///

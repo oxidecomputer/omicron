@@ -10,7 +10,10 @@ use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::OmicronZonesConfig;
+use nexus_types::deployment::{
+    OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, OmicronZonesConfig,
+};
+use omicron_common::api::external::Generation;
 use sled_agent_client::Client as SledAgentClient;
 use slog::info;
 use slog::warn;
@@ -100,7 +103,12 @@ async fn sled_client(
 }
 
 /// Returns an example set of Omicron zones for testing
-pub fn example_minimal(generation: Generation) -> OmicronZonesConfig {
+pub fn example_zones_minimal(generation: Generation) -> OmicronZonesConfig {
+    // The particular dataset doesn't matter for this test.
+    let dataset = OmicronZoneDataset {
+        pool_name: format!("oxp_{}", Uuid::new_v4()).parse().unwrap(),
+    };
+
     OmicronZonesConfig {
         generation,
         zones: vec![OmicronZoneConfig {
@@ -114,7 +122,7 @@ pub fn example_minimal(generation: Generation) -> OmicronZonesConfig {
                 http_address: "some-ipv6-address".into(),
             },
         }],
-    };
+    }
 }
 
 #[cfg(test)]
@@ -217,18 +225,11 @@ mod test {
                 .expect("Failed to insert sled to db");
         }
 
-        // The particular dataset doesn't matter for this test.
-        // We re-use the same one to not obfuscate things
-        let dataset = OmicronZoneDataset {
-            pool_name: format!("oxp_{}", Uuid::new_v4()).parse().unwrap(),
-        };
-
-        let generation = Generation::new();
-
         // Zones are updated in a particular order, but each request contains
         // the full set of zones that must be running.
         // See `rack_setup::service::ServiceInner::run` for more details.
-        let mut zones = example_minimal();
+        let generation = Generation::new();
+        let mut zones = example_minimal(generation);
 
         // Create a blueprint with only the `InternalDns` zone for both servers
         // We reuse the same `OmicronZonesConfig` because the details don't
