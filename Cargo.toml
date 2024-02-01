@@ -235,7 +235,7 @@ internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
 ipnetwork = { version = "0.20", features = ["schemars"] }
-itertools = "0.12.0"
+itertools = "0.12.1"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.3"
 libc = "0.2.152"
