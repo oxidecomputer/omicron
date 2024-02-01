@@ -5,6 +5,8 @@
 //! Background task initialization
 
 use super::bfd;
+use super::blueprint_execution;
+use super::blueprint_load;
 use super::common;
 use super::dns_config;
 use super::dns_propagation;
@@ -61,6 +63,12 @@ pub struct BackgroundTasks {
 
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
+
+    /// task handle for blueprint target loader
+    pub task_blueprint_loader: common::TaskHandle,
+
+    /// task handle for blueprint execution background task
+    pub task_blueprint_executor: common::TaskHandle,
 
     /// task handle for the service zone nat tracker
     pub task_service_zone_nat_tracker: common::TaskHandle,
@@ -192,6 +200,33 @@ impl BackgroundTasks {
             task
         };
 
+        // Background task: blueprint loader
+        let blueprint_loader =
+            blueprint_load::TargetBlueprintLoader::new(datastore.clone());
+        let rx_blueprint = blueprint_loader.watcher();
+        let task_blueprint_loader = driver.register(
+            String::from("blueprint_loader"),
+            String::from("Loads the current target blueprint from the DB"),
+            config.blueprints.period_secs_load,
+            Box::new(blueprint_loader),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
+
+        // Background task: blueprint executor
+        let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
+            datastore.clone(),
+            rx_blueprint.clone(),
+        );
+        let task_blueprint_executor = driver.register(
+            String::from("blueprint_executor"),
+            String::from("Executes the target blueprint"),
+            config.blueprints.period_secs_execute,
+            Box::new(blueprint_executor),
+            opctx.child(BTreeMap::new()),
+            vec![Box::new(rx_blueprint)],
+        );
+
         let task_service_zone_nat_tracker = {
             driver.register(
                 "service_zone_nat_tracker".to_string(),
@@ -220,6 +255,8 @@ impl BackgroundTasks {
             bfd_manager,
             task_inventory_collection,
             task_phantom_disks,
+            task_blueprint_loader,
+            task_blueprint_executor,
             task_service_zone_nat_tracker,
         }
     }

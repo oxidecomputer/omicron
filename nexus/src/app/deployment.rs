@@ -186,7 +186,7 @@ impl super::Nexus {
         // forward progress in the planner until the next time we try this.
         // (Critically, it won't cause the planner to do anything wrong.)
         let inventory = datastore
-            .inventory_get_latest_collection(opctx, SQL_LIMIT_INVENTORY)
+            .inventory_get_latest_collection(opctx)
             .await
             .internal_context(
                 "fetching latest inventory collection for blueprint planner",
