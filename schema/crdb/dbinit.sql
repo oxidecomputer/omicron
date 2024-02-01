@@ -862,7 +862,8 @@ AS SELECT
     c.virtual_disk_bytes_provisioned AS storage_provisioned,
     q.cpus AS cpus_allocated,
     q.memory_bytes AS memory_allocated,
-    q.storage_bytes AS storage_allocated
+    q.storage_bytes AS storage_allocated,
+    s.discoverable as silo_discoverable
 FROM
     omicron.public.virtual_provisioning_collection AS c
     RIGHT JOIN omicron.public.silo_quotas AS q 
@@ -3442,7 +3443,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '31.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '32.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
