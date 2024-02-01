@@ -1349,6 +1349,14 @@ mod tests {
         assert_eq!(ip1.first_port.0, 0);
         assert_eq!(ip1.last_port.0, u16::MAX);
         assert_eq!(ip1.parent_id, Some(service1_id));
+        assert_eq!(
+            context
+                .db_datastore
+                .service_lookup_external_ips(&context.opctx, service1_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            vec![ip1],
+        );
 
         // Allocate an SNat IP
         let service2_id = Uuid::new_v4();
@@ -1364,6 +1372,14 @@ mod tests {
         assert_eq!(ip2.first_port.0, 0);
         assert_eq!(ip2.last_port.0, 16383);
         assert_eq!(ip2.parent_id, Some(service2_id));
+        assert_eq!(
+            context
+                .db_datastore
+                .service_lookup_external_ips(&context.opctx, service2_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            vec![ip2],
+        );
 
         // Allocate the next IP address
         let service3_id = Uuid::new_v4();
@@ -1385,6 +1401,14 @@ mod tests {
         assert_eq!(ip3.first_port.0, 0);
         assert_eq!(ip3.last_port.0, u16::MAX);
         assert_eq!(ip3.parent_id, Some(service3_id));
+        assert_eq!(
+            context
+                .db_datastore
+                .service_lookup_external_ips(&context.opctx, service3_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            vec![ip3],
+        );
 
         // Once we're out of IP addresses, test that we see the right error.
         let service3_id = Uuid::new_v4();
@@ -1422,6 +1446,14 @@ mod tests {
         assert_eq!(ip4.first_port.0, 16384);
         assert_eq!(ip4.last_port.0, 32767);
         assert_eq!(ip4.parent_id, Some(service4_id));
+        assert_eq!(
+            context
+                .db_datastore
+                .service_lookup_external_ips(&context.opctx, service4_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            vec![ip4],
+        );
 
         context.success().await;
     }

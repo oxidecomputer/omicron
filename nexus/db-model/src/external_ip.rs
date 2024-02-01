@@ -33,7 +33,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "ip_kind", schema = "public"))]
      pub struct IpKindEnum;
 
-     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Deserialize, Serialize)]
+     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Deserialize, Serialize)]
      #[diesel(sql_type = IpKindEnum)]
      pub enum IpKind;
 
@@ -47,7 +47,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "ip_attach_state"))]
      pub struct IpAttachStateEnum;
 
-     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Deserialize, Serialize)]
+     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Deserialize, Serialize)]
      #[diesel(sql_type = IpAttachStateEnum)]
      pub enum IpAttachState;
 
@@ -89,7 +89,15 @@ impl std::fmt::Display for IpKind {
 /// API at all, and only provide outbound connectivity to instances, not
 /// inbound.
 #[derive(
-    Debug, Clone, Selectable, Queryable, Insertable, Deserialize, Serialize,
+    Debug,
+    Clone,
+    Selectable,
+    Queryable,
+    Insertable,
+    Deserialize,
+    Serialize,
+    PartialEq,
+    Eq,
 )]
 #[diesel(table_name = external_ip)]
 pub struct ExternalIp {
