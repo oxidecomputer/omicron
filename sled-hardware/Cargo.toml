@@ -10,6 +10,7 @@ anyhow.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
 futures.workspace = true
+gethostname.workspace = true
 illumos-utils.workspace = true
 libc.workspace = true
 macaddr.workspace = true

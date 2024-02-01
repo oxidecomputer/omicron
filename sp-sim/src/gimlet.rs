@@ -57,6 +57,22 @@ use tokio::task::{self, JoinHandle};
 
 pub const SIM_GIMLET_BOARD: &str = "SimGimletSp";
 
+/// Type of request most recently handled by a simulated SP.
+///
+/// Many request types are not covered by this enum. This only exists to enable
+/// certain particular tests.
+// If you need an additional request type to be reported by this enum, feel free
+// to add it and update the appropriate `Handler` function below (see
+// `update_status()`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimSpHandledRequest {
+    /// The most recent request was for the update status of a component.
+    ComponentUpdateStatus(SpComponent),
+    /// The most recent request was some other type that is currently not
+    /// implemented in this tracker.
+    NotImplemented,
+}
+
 pub struct Gimlet {
     rot: Mutex<RotSprocket>,
     manufacturing_public_key: Ed25519PublicKey,
@@ -66,6 +82,7 @@ pub struct Gimlet {
     commands: mpsc::UnboundedSender<Command>,
     inner_tasks: Vec<JoinHandle<()>>,
     responses_sent_count: Option<watch::Receiver<usize>>,
+    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
 }
 
 impl Drop for Gimlet {
@@ -168,6 +185,7 @@ impl Gimlet {
         let mut serial_console_addrs = HashMap::new();
         let mut inner_tasks = Vec::new();
         let (commands, commands_rx) = mpsc::unbounded_channel();
+        let last_request_handled = Arc::default();
 
         let (manufacturing_public_key, rot) =
             RotSprocket::bootstrap_from_config(&gimlet.common);
@@ -185,6 +203,7 @@ impl Gimlet {
                 commands,
                 inner_tasks,
                 responses_sent_count: None,
+                last_request_handled,
             });
         };
 
@@ -257,6 +276,7 @@ impl Gimlet {
             gimlet.common.serial_number.clone(),
             incoming_console_tx,
             commands_rx,
+            Arc::clone(&last_request_handled),
             log,
         );
         inner_tasks
@@ -271,11 +291,16 @@ impl Gimlet {
             commands,
             inner_tasks,
             responses_sent_count: Some(responses_sent_count),
+            last_request_handled,
         })
     }
 
     pub fn serial_console_addr(&self, component: &str) -> Option<SocketAddrV6> {
         self.serial_console_addrs.get(component).copied()
+    }
+
+    pub fn last_request_handled(&self) -> Option<SimSpHandledRequest> {
+        *self.last_request_handled.lock().unwrap()
     }
 }
 
@@ -459,9 +484,11 @@ struct UdpTask {
     handler: Arc<TokioMutex<Handler>>,
     commands: mpsc::UnboundedReceiver<Command>,
     responses_sent_count: watch::Sender<usize>,
+    last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
 }
 
 impl UdpTask {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         servers: [UdpServer; 2],
         components: Vec<SpComponentConfig>,
@@ -469,6 +496,7 @@ impl UdpTask {
         serial_number: String,
         incoming_serial_console: HashMap<SpComponent, UnboundedSender<Vec<u8>>>,
         commands: mpsc::UnboundedReceiver<Command>,
+        last_request_handled: Arc<Mutex<Option<SimSpHandledRequest>>>,
         log: Logger,
     ) -> (Self, Arc<TokioMutex<Handler>>, watch::Receiver<usize>) {
         let [udp0, udp1] = servers;
@@ -488,6 +516,7 @@ impl UdpTask {
                 handler: Arc::clone(&handler),
                 commands,
                 responses_sent_count,
+                last_request_handled,
             },
             handler,
             responses_sent_count_rx,
@@ -513,16 +542,27 @@ impl UdpTask {
                 }
 
                 recv0 = self.udp0.recv_from(), if throttle_count > 0 => {
-                    if let Some((resp, addr)) = server::handle_request(
-                        &mut *self.handler.lock().await,
-                        recv0,
-                        &mut out_buf,
-                        responsiveness,
-                        SpPort::One,
-                    ).await? {
+                    let (result, handled_request) = {
+                        let mut handler = self.handler.lock().await;
+                        handler.last_request_handled = None;
+                        let result = server::handle_request(
+                            &mut *handler,
+                            recv0,
+                            &mut out_buf,
+                            responsiveness,
+                            SpPort::One,
+                        ).await?;
+                        (result,
+                         handler.last_request_handled.unwrap_or(
+                             SimSpHandledRequest::NotImplemented,
+                        ))
+                    };
+                    if let Some((resp, addr)) = result {
                         throttle_count -= 1;
                         self.udp0.send_to(resp, addr).await?;
                         self.responses_sent_count.send_modify(|n| *n += 1);
+                        *self.last_request_handled.lock().unwrap() =
+                            Some(handled_request);
                     }
                 }
 
@@ -594,6 +634,8 @@ struct Handler {
     update_state: SimSpUpdate,
     reset_pending: Option<SpComponent>,
 
+    last_request_handled: Option<SimSpHandledRequest>,
+
     // To simulate an SP reset, we should (after doing whatever housekeeping we
     // need to track the reset) intentionally _fail_ to respond to the request,
     // simulating a `-> !` function on the SP that triggers a reset. To provide
@@ -635,6 +677,7 @@ impl Handler {
             startup_options: StartupOptions::empty(),
             update_state: SimSpUpdate::default(),
             reset_pending: None,
+            last_request_handled: None,
             should_fail_to_respond_signal: None,
         }
     }
@@ -1003,6 +1046,8 @@ impl SpHandler for Handler {
             "port" => ?port,
             "component" => ?component,
         );
+        self.last_request_handled =
+            Some(SimSpHandledRequest::ComponentUpdateStatus(component));
         Ok(self.update_state.status())
     }
 

@@ -35,6 +35,7 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 pub(crate) mod background;
+mod bfd;
 mod bgp;
 mod certificate;
 mod deployment;
@@ -365,6 +366,7 @@ impl Nexus {
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
             &dpd_clients,
+            &mg_clients,
             config.deployment.id,
             resolver.clone(),
         );

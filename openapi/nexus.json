@@ -5904,6 +5904,97 @@
         }
       }
     },
+    "/v1/system/networking/bfd-disable": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Disable a BFD session.",
+        "operationId": "networking_bfd_disable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BfdSessionDisable"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bfd-enable": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Enable a BFD session.",
+        "operationId": "networking_bfd_enable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BfdSessionEnable"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bfd-status": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BFD status.",
+        "operationId": "networking_bfd_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BfdStatus",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BfdStatus"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/bgp": {
       "get": {
         "tags": [
@@ -8563,6 +8654,161 @@
           "part",
           "revision",
           "serial"
+        ]
+      },
+      "BfdMode": {
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdSessionDisable": {
+        "description": "Information needed to disable a BFD session",
+        "type": "object",
+        "properties": {
+          "remote": {
+            "description": "Address of the remote peer to disable a BFD session for.",
+            "type": "string",
+            "format": "ip"
+          },
+          "switch": {
+            "description": "The switch to enable this session on. Must be `switch0` or `switch1`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "remote",
+          "switch"
+        ]
+      },
+      "BfdSessionEnable": {
+        "description": "Information about a bidirectional forwarding detection (BFD) session.",
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "description": "The negotiated Control packet transmission interval, multiplied by this variable, will be the Detection Time for this session (as seen by the remote system)",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "description": "Address the Oxide switch will listen on for BFD traffic. If `None` then the unspecified address (0.0.0.0 or ::) is used.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "description": "Select either single-hop (RFC 5881) or multi-hop (RFC 5883)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BfdMode"
+              }
+            ]
+          },
+          "remote": {
+            "description": "Address of the remote peer to establish a BFD session with.",
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "description": "The minimum interval, in microseconds, between received BFD Control packets that this system requires",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "description": "The switch to enable this session on. Must be `switch0` or `switch1`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
+        ]
+      },
+      "BfdState": {
+        "oneOf": [
+          {
+            "description": "A stable down state. Non-responsive to incoming messages.",
+            "type": "string",
+            "enum": [
+              "admin_down"
+            ]
+          },
+          {
+            "description": "The initial state.",
+            "type": "string",
+            "enum": [
+              "down"
+            ]
+          },
+          {
+            "description": "The peer has detected a remote peer in the down state.",
+            "type": "string",
+            "enum": [
+              "init"
+            ]
+          },
+          {
+            "description": "The peer has detected a remote peer in the up or init state while in the init state.",
+            "type": "string",
+            "enum": [
+              "up"
+            ]
+          }
+        ]
+      },
+      "BfdStatus": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "peer": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/BfdState"
+          },
+          "switch": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "peer",
+          "required_rx",
+          "state",
+          "switch"
         ]
       },
       "BgpAnnounceSet": {

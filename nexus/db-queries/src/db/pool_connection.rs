@@ -39,6 +39,7 @@ pub type DbConnection = DTraceConnection<PgConnection>;
 static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "address_lot_kind",
     "authentication_mode",
+    "bfd_mode",
     "block_size",
     "caboose_which",
     "dataset_kind",

@@ -15,6 +15,7 @@ use async_trait::async_trait;
 pub use config::Config;
 use gateway_messages::SpPort;
 pub use gimlet::Gimlet;
+pub use gimlet::SimSpHandledRequest;
 pub use gimlet::SIM_GIMLET_BOARD;
 pub use server::logger;
 pub use sidecar::Sidecar;
