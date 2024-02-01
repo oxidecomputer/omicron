@@ -292,14 +292,9 @@ enum InstanceMonitorRequest {
 struct InstanceRunner {
     log: Logger,
 
-    // A oneshot which, when closed, will cause the "run" loop to terminate
-    // without processing any subsequent messages.
-    //
-    // We need the tx side of this thing to be alive to prevent "terminate_rx"
-    // from shutting down early.
-    #[allow(dead_code)]
-    terminate_tx: oneshot::Sender<()>,
-    terminate_rx: oneshot::Receiver<()>,
+    // A signal the InstanceRunner should shut down.
+    // This is currently only activated by the runner itself.
+    should_terminate: bool,
 
     // Request channel on which most instance requests are made.
     rx: mpsc::Receiver<InstanceRequest>,
@@ -359,17 +354,10 @@ struct InstanceRunner {
 
 impl InstanceRunner {
     async fn run(mut self) -> Result<(), Error> {
-        loop {
+        while !self.should_terminate {
             tokio::select! {
                 biased;
 
-                _ = &mut self.terminate_rx => {
-                    // If we receive a request to terminate, we are guaranteed
-                    // to not process any further requests, and to leave
-                    // immediately.
-                    self.publish_state_to_nexus().await;
-                    return Ok(());
-                },
                 // Handle messages from our own "Monitor the VMM" task.
                 request = self.rx_monitor.recv() => {
                     use InstanceMonitorRequest::*;
@@ -441,6 +429,8 @@ impl InstanceRunner {
                 }
             }
         }
+        self.publish_state_to_nexus().await;
+        return Ok(());
     }
 
     /// Yields this instance's ID.
@@ -960,14 +950,12 @@ impl Instance {
             }
         }
 
-        let (terminate_tx, terminate_rx) = oneshot::channel();
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
 
         let runner = InstanceRunner {
             log: log.new(o!("instance_id" => id.to_string())),
-            terminate_tx,
-            terminate_rx,
+            should_terminate: false,
             rx,
             tx_monitor,
             rx_monitor,
@@ -1426,7 +1414,7 @@ impl InstanceRunner {
         self.state.terminate_rudely();
 
         // This causes the "run" task to exit on the next iteration.
-        self.terminate_rx.close();
+        self.should_terminate = true;
         Ok(self.state.sled_instance_state())
     }
 
