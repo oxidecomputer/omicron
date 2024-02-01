@@ -5,6 +5,8 @@
 //! Background tasks
 
 mod bfd;
+mod blueprint_execution;
+mod blueprint_load;
 mod common;
 mod dns_config;
 mod dns_propagation;
