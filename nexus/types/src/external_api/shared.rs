@@ -4,6 +4,9 @@
 
 //! Types that are used as both views and params
 
+use std::net::IpAddr;
+
+use omicron_common::api::external::Name;
 use parse_display::FromStr;
 use schemars::JsonSchema;
 use serde::de::Error as _;
@@ -14,6 +17,8 @@ use strum::EnumIter;
 use uuid::Uuid;
 
 pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
+
+use super::params::BfdMode;
 
 /// Maximum number of role assignments allowed on any one resource
 // Today's implementation assumes a relatively small number of role assignments
@@ -281,6 +286,54 @@ pub struct UninitializedSled {
     pub baseboard: Baseboard,
     pub rack_id: Uuid,
     pub cubby: u16,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdState {
+    /// A stable down state. Non-responsive to incoming messages.
+    AdminDown = 0,
+
+    /// The initial state.
+    Down = 1,
+
+    /// The peer has detected a remote peer in the down state.
+    Init = 2,
+
+    /// The peer has detected a remote peer in the up or init state while in the
+    /// init state.
+    Up = 3,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+)]
+pub struct BfdStatus {
+    pub peer: IpAddr,
+    pub state: BfdState,
+    pub switch: Name,
+    pub local: Option<IpAddr>,
+    pub detection_threshold: u8,
+    pub required_rx: u64,
+    pub mode: BfdMode,
 }
 
 #[cfg(test)]

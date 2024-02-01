@@ -8,6 +8,7 @@ use crate::db::model::Name;
 use crate::db::model::SiloUtilization;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use diesel::BoolExpressionMethods;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::Error;
@@ -50,6 +51,13 @@ impl DataStore {
             ),
         }
         .select(SiloUtilization::as_select())
+        .filter(
+            dsl::silo_discoverable
+                .eq(true)
+                .or(dsl::cpus_allocated.gt(0))
+                .or(dsl::memory_allocated.gt(0))
+                .or(dsl::storage_allocated.gt(0)),
+        )
         .load_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
