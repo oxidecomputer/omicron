@@ -53,8 +53,7 @@
                 # on NixOS due to dynamically loading a bunch of libraries in a
                 # way that `nix-ld` doesn't seem to help with. Therefore, depend
                 # on the pre-built patched clickhouse package from nixpkgs,
-                # instead. We'll symlink the binary into `out/clickhouse` in the
-                # `shellHook`.
+                # instead. 
                 clickhouse
               ];
 
@@ -67,13 +66,6 @@
               # Needed by rustfmt-wrapper, see:
               # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
               RUSTFMT = "${rustToolchain}/bin/rustfmt";
-
-              shellHook = ''
-                rm -r out/clickhouse
-                mkdir -p out/clickhouse/
-                ln -s ${clickhouse.out}/bin/clickhouse out/clickhouse/clickhouse
-                ln -s ${clickhouse.out}/etc/config.xml out/clickhouse/config.xml
-              '';
             };
         }
       );
