@@ -4,6 +4,7 @@
 
 //! Background tasks
 
+mod bfd;
 mod common;
 mod dns_config;
 mod dns_propagation;

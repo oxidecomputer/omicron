@@ -39,14 +39,6 @@ use uuid::Uuid;
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
 const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 
-/// "limit" used in SQL queries that fetch inventory data.  Unlike the batch
-/// size above, this is a limit on the *total* number of records returned.  If
-/// it's too small, the whole operation will fail.  See
-/// oxidecomputer/omicron#4629.
-// unsafe: `new_unchecked` is only unsound if the argument is 0.
-const SQL_LIMIT_INVENTORY: NonZeroU32 =
-    unsafe { NonZeroU32::new_unchecked(1000) };
-
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
     policy: Policy,
@@ -218,11 +210,7 @@ impl super::Nexus {
     ) -> CreateResult<Blueprint> {
         let collection = self
             .datastore()
-            .inventory_collection_read_all_or_nothing(
-                opctx,
-                collection_id,
-                SQL_LIMIT_INVENTORY,
-            )
+            .inventory_collection_read(opctx, collection_id)
             .await?;
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let blueprint = BlueprintBuilder::build_initial_from_collection(

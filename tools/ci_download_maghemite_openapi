@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 #
 # ci_download_maghemite_openapi: fetches the appropriate maghemite openapi spec.
