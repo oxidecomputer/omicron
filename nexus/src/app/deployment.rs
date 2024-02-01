@@ -17,12 +17,14 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
+use nexus_types::inventory::Collection;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -41,6 +43,7 @@ const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 struct PlanningContext {
     policy: Policy,
     creator: String,
+    inventory: Option<Collection>,
 }
 
 impl super::Nexus {
@@ -171,7 +174,25 @@ impl super::Nexus {
             })
             .collect();
 
-        Ok(PlanningContext { creator, policy: Policy { sleds } })
+        // The choice of which inventory collection to use here is not
+        // necessarily trivial.  Inventory collections may be incomplete due to
+        // transient (or even persistent) errors.  It's not yet clear what
+        // general criteria we'll want to use in picking a collection here.  But
+        // as of this writing, this is only used for one specific case, which is
+        // to implement a gate that prevents the planner from provisioning
+        // non-NTP zones on a sled unless we know there's an NTP zone already on
+        // that sled.  For that purpose, it's okay if this collection is
+        // incomplete due to a transient error -- that would just prevent
+        // forward progress in the planner until the next time we try this.
+        // (Critically, it won't cause the planner to do anything wrong.)
+        let inventory = datastore
+            .inventory_get_latest_collection(opctx)
+            .await
+            .internal_context(
+                "fetching latest inventory collection for blueprint planner",
+            )?;
+
+        Ok(PlanningContext { creator, policy: Policy { sleds }, inventory })
     }
 
     async fn blueprint_add(
@@ -222,11 +243,15 @@ impl super::Nexus {
         };
 
         let planning_context = self.blueprint_planning_context(opctx).await?;
+        let inventory = planning_context.inventory.ok_or_else(|| {
+            Error::internal_error("no recent inventory collection found")
+        })?;
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &parent_blueprint,
             &planning_context.policy,
             &planning_context.creator,
+            &inventory,
         );
         let blueprint = planner.plan().map_err(|error| {
             Error::internal_error(&format!(
