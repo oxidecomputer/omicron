@@ -7,21 +7,14 @@
 use super::common::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns::names::ServiceName;
+use internal_dns::resolver::Resolver;
 use nexus_db_model::DnsGroup;
-use nexus_db_model::ServiceKind;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::DataStore;
-use omicron_common::api::external::DataPageParams;
 use serde::Serialize;
 use serde_json::json;
-use std::net::{SocketAddr, SocketAddrV6};
-use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::net::SocketAddr;
 use tokio::sync::watch;
-
-// This constraint could be relaxed by paginating through the list of servers,
-// but we don't expect to have this many servers any time soon.
-const MAX_DNS_SERVERS: usize = 10;
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize)]
 pub struct DnsServersList {
@@ -31,20 +24,17 @@ pub struct DnsServersList {
 /// Background task that keeps track of the latest list of DNS servers for a DNS
 /// group
 pub struct DnsServersWatcher {
-    datastore: Arc<DataStore>,
     dns_group: DnsGroup,
+    resolver: Resolver,
     last: Option<DnsServersList>,
     tx: watch::Sender<Option<DnsServersList>>,
     rx: watch::Receiver<Option<DnsServersList>>,
 }
 
 impl DnsServersWatcher {
-    pub fn new(
-        datastore: Arc<DataStore>,
-        dns_group: DnsGroup,
-    ) -> DnsServersWatcher {
+    pub fn new(dns_group: DnsGroup, resolver: Resolver) -> DnsServersWatcher {
         let (tx, rx) = watch::channel(None);
-        DnsServersWatcher { datastore, dns_group, last: None, tx, rx }
+        DnsServersWatcher { dns_group, last: None, tx, rx, resolver }
     }
 
     /// Exposes the latest list of DNS servers for this DNS group
@@ -75,58 +65,32 @@ impl BackgroundTask for DnsServersWatcher {
             };
 
             // Read the latest service configuration for this DNS group.
-            let service_kind = match self.dns_group {
-                DnsGroup::Internal => ServiceKind::InternalDns,
-                DnsGroup::External => ServiceKind::ExternalDns,
+            let service_name = match self.dns_group {
+                DnsGroup::Internal => ServiceName::InternalDns,
+                DnsGroup::External => ServiceName::ExternalDns,
             };
 
-            let pagparams = DataPageParams {
-                marker: None,
-                limit: NonZeroU32::try_from(
-                    u32::try_from(MAX_DNS_SERVERS).unwrap(),
-                )
-                .unwrap(),
-                direction: dropshot::PaginationOrder::Ascending,
+            let result = self.resolver.lookup_all_socket_v6(service_name).await;
+            let addresses = match result {
+                Err(error) => {
+                    warn!(
+                        &log,
+                        "failed to lookup DNS servers";
+                        "error" => format!("{:#}", error)
+                    );
+                    return json!({
+                        "error":
+                            format!(
+                                "failed to read list of DNS servers: {:#}",
+                                error
+                            )
+                    });
+                }
+                Ok(addresses) => addresses,
             };
 
-            let result = self
-                .datastore
-                .services_list_kind(opctx, service_kind, &pagparams)
-                .await;
-
-            if let Err(error) = result {
-                warn!(
-                    &log,
-                    "failed to read list of DNS servers";
-                    "error" => format!("{:#}", error)
-                );
-                return json!({
-                    "error":
-                        format!(
-                            "failed to read list of DNS servers: {:#}",
-                            error
-                        )
-                });
-            }
-
-            let services = result.unwrap();
-            if services.len() >= MAX_DNS_SERVERS {
-                warn!(
-                    &log,
-                    "found {} servers, which is more than MAX_DNS_SERVERS \
-                    ({}).  There may be more that will not be used.",
-                    services.len(),
-                    MAX_DNS_SERVERS
-                );
-            }
-
-            let new_config = DnsServersList {
-                addresses: services
-                    .into_iter()
-                    .map(|s| SocketAddrV6::new(*s.ip, *s.port, 0, 0).into())
-                    .collect(),
-            };
-            let new_addrs_dbg = format!("{:?}", new_config);
+            let new_config = DnsServersList { addresses };
+            let new_addrs_dbg = format!("{new_config:?}");
             let rv =
                 serde_json::to_value(&new_config).unwrap_or_else(|error| {
                     json!({
