@@ -30,6 +30,7 @@ use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
 use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::api::external::Hostname;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -1009,6 +1010,23 @@ impl super::Nexus {
         initial_vmm: &db::model::Vmm,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        // Check that the hostname is valid.
+        //
+        // TODO-cleanup: This can be removed when we are confident that no
+        // instances exist prior to the addition of strict hostname validation
+        // in the API.
+        if db_instance.hostname.parse::<Hostname>().is_err() {
+            let msg = format!(
+                "The instance hostname '{}' is no longer valid. \
+                To access the data on its disks, this instance \
+                must be deleted, and a new one created with the \
+                relevant disks. The new hostname will be validated \
+                at that time.",
+                db_instance.hostname,
+            );
+            return Err(Error::invalid_request(&msg));
+        }
 
         // Gather disk information and turn that into DiskRequests
         let disks = self

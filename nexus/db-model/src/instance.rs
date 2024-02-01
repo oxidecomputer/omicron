@@ -47,7 +47,9 @@ pub struct Instance {
 
     /// The instance's hostname.
     // TODO-cleanup: We use a validated wrapper type in the API, but not in
-    // between the database. We may want to do that here as well.
+    // between the database. This is to handle existing names that do not pass
+    // the new validation. We should swap this for a SQL-serializable validated
+    // type.
     #[diesel(column_name = hostname)]
     pub hostname: String,
 

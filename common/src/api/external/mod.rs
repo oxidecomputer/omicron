@@ -1034,7 +1034,7 @@ pub struct Instance {
     /// memory allocated for this Instance
     pub memory: ByteCount,
     /// RFC1035-compliant hostname for the Instance.
-    pub hostname: Hostname,
+    pub hostname: String,
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
