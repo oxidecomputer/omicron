@@ -10291,7 +10291,6 @@ dependencies = [
  "sled-hardware",
  "slog",
  "slog-dtrace",
- "snafu",
  "subprocess",
  "tar",
  "thiserror",
