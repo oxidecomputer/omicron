@@ -306,7 +306,7 @@ async fn test_instances_create_reboot_halt(
                 },
                 ncpus: instance.ncpus,
                 memory: instance.memory,
-                hostname: instance.hostname.clone(),
+                hostname: instance.hostname.parse().unwrap(),
                 user_data: vec![],
                 ssh_public_keys: None,
                 network_interfaces:

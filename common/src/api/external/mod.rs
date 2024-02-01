@@ -701,7 +701,7 @@ impl TryFrom<i64> for Generation {
     Clone, Debug, Deserialize, Display, Eq, PartialEq, SerializeDisplay,
 )]
 #[display("{0}")]
-#[serde(try_from = "&str", into = "String")]
+#[serde(try_from = "String", into = "String")]
 pub struct Hostname(String);
 
 impl Hostname {
@@ -753,6 +753,14 @@ impl TryFrom<&str> for Hostname {
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         s.parse()
+    }
+}
+
+impl TryFrom<String> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.as_str().parse()
     }
 }
 
