@@ -5,22 +5,14 @@
 //! Background task for realizing a plan blueprint
 
 use super::common::BackgroundTask;
-use anyhow::Context;
 use futures::future::BoxFuture;
-use futures::stream;
 use futures::FutureExt;
-use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::{Blueprint, BlueprintTarget, OmicronZonesConfig};
+use nexus_types::deployment::{Blueprint, BlueprintTarget};
 use serde_json::json;
-use sled_agent_client::Client as SledAgentClient;
-use slog::Logger;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::watch;
-use uuid::Uuid;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
 /// the state of the system based on the `Blueprint`.
@@ -37,96 +29,6 @@ impl BlueprintExecutor {
         >,
     ) -> BlueprintExecutor {
         BlueprintExecutor { datastore, rx_blueprint }
-    }
-
-    // This is a modified copy of the functionality from `nexus/src/app/sled.rs`.
-    // There's no good way to access this functionality right now since it is a
-    // method on the `Nexus` type. We want to have a more constrained type we can
-    // pass into background tasks for this type of functionality, but for now we
-    // just copy the functionality.
-    async fn sled_client(
-        &self,
-        opctx: &OpContext,
-        sled_id: &Uuid,
-    ) -> Result<SledAgentClient, anyhow::Error> {
-        let (.., sled) = LookupPath::new(opctx, &self.datastore)
-            .sled_id(*sled_id)
-            .fetch()
-            .await
-            .with_context(|| {
-                format!(
-                    "Failed to create sled_agent::Client for sled_id: {}",
-                    sled_id
-                )
-            })?;
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .unwrap();
-        Ok(SledAgentClient::new_with_client(
-            &format!("http://{}", sled.address()),
-            client,
-            opctx.log.clone(),
-        ))
-    }
-
-    async fn realize_blueprint(
-        &self,
-        opctx: &OpContext,
-        blueprint: &Blueprint,
-    ) -> Result<(), Vec<anyhow::Error>> {
-        let log = opctx.log.new(o!("comment" => blueprint.comment.clone()));
-        self.deploy_zones(&log, opctx, &blueprint.omicron_zones).await
-    }
-
-    async fn deploy_zones(
-        &self,
-        log: &Logger,
-        opctx: &OpContext,
-        zones: &BTreeMap<Uuid, OmicronZonesConfig>,
-    ) -> Result<(), Vec<anyhow::Error>> {
-        let errors: Vec<_> = stream::iter(zones.clone())
-            .filter_map(|(sled_id, config)| async move {
-                let client = match self.sled_client(&opctx, &sled_id).await {
-                    Ok(client) => client,
-                    Err(err) => {
-                        warn!(log, "{err:#}");
-                        return Some(err);
-                    }
-                };
-                let result = client
-                    .omicron_zones_put(&config)
-                    .await
-                    .with_context(|| {
-                        format!("Failed to put {config:#?} to sled {sled_id}")
-                    });
-
-                match result {
-                    Err(error) => {
-                        warn!(log, "{error:#}");
-                        Some(error)
-                    }
-                    Ok(_) => {
-                        info!(
-                            log,
-                            "Successfully deployed zones for sled agent";
-                            "sled_id" => %sled_id,
-                            "generation" => config.generation.to_string()
-                        );
-                        None
-                    }
-                }
-            })
-            .collect()
-            .await;
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
-        }
     }
 }
 
@@ -159,7 +61,12 @@ impl BackgroundTask for BlueprintExecutor {
                 });
             }
 
-            let result = self.realize_blueprint(opctx, blueprint).await;
+            let result = nexus_blueprint_execution::realize_blueprint(
+                opctx,
+                &self.datastore,
+                blueprint,
+            )
+            .await;
 
             // Return the result as a `serde_json::Value`
             match result {
@@ -181,7 +88,7 @@ impl BackgroundTask for BlueprintExecutor {
 }
 #[cfg(test)]
 mod test {
-    use super::*;
+    use super::BlueprintExecutor;
     use crate::app::background::common::BackgroundTask;
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::status_code;
@@ -189,14 +96,22 @@ mod test {
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate,
     };
+    use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::OmicronZonesConfig;
+    use nexus_types::deployment::{Blueprint, BlueprintTarget};
     use nexus_types::inventory::{
         OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
     };
     use omicron_common::api::external::Generation;
     use serde::Deserialize;
+    use serde_json::json;
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::net::SocketAddr;
+    use std::sync::Arc;
+    use tokio::sync::watch;
+    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -239,7 +154,8 @@ mod test {
         let value = task.activate(&opctx).await;
         assert_eq!(value, json!({"error": "no blueprint"}));
 
-        // Get a success (empty) result back when the blueprint has an empty set of zones
+        // Get a success (empty) result back when the blueprint has an empty set
+        // of zones
         let blueprint = Arc::new(create_blueprint(BTreeMap::new()));
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
