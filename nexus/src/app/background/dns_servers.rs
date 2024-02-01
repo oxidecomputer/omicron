@@ -150,22 +150,22 @@ impl BackgroundTask for DnsServersWatcher {
 
 #[cfg(test)]
 mod test {
-    use crate::app::background::common::BackgroundTask;
-    use crate::app::background::dns_servers::DnsServersList;
-    use crate::app::background::dns_servers::DnsServersWatcher;
-    use crate::app::background::dns_servers::MAX_DNS_SERVERS;
-    use assert_matches::assert_matches;
-    use async_bb8_diesel::AsyncRunQueryDsl;
-    use diesel::ExpressionMethods;
-    use diesel::QueryDsl;
-    use nexus_db_model::DnsGroup;
-    use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db::model::Service;
-    use nexus_db_queries::db::model::ServiceKind;
-    use nexus_test_utils_macros::nexus_test;
-    use std::net::Ipv6Addr;
-    use std::net::SocketAddrV6;
-    use uuid::Uuid;
+    // use crate::app::background::common::BackgroundTask;
+    // use crate::app::background::dns_servers::DnsServersList;
+    // use crate::app::background::dns_servers::DnsServersWatcher;
+    // use crate::app::background::dns_servers::MAX_DNS_SERVERS;
+    // use assert_matches::assert_matches;
+    // use async_bb8_diesel::AsyncRunQueryDsl;
+    // use diesel::ExpressionMethods;
+    // use diesel::QueryDsl;
+    // use nexus_db_model::DnsGroup;
+    // use nexus_db_queries::context::OpContext;
+    // use nexus_db_queries::db::model::Service;
+    // use nexus_db_queries::db::model::ServiceKind;
+    // use nexus_test_utils_macros::nexus_test;
+    // use std::net::Ipv6Addr;
+    // use std::net::SocketAddrV6;
+    // use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
