@@ -19,6 +19,7 @@ use tokio::sync::watch;
 pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    exec_impl: Box<dyn BlueprintExecutorImpl>,
 }
 
 impl BlueprintExecutor {
@@ -28,7 +29,17 @@ impl BlueprintExecutor {
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
     ) -> BlueprintExecutor {
-        BlueprintExecutor { datastore, rx_blueprint }
+        Self::new_using_impl(datastore, rx_blueprint, Box::new(RealExecutor))
+    }
+
+    fn new_using_impl(
+        datastore: Arc<DataStore>,
+        rx_blueprint: watch::Receiver<
+            Option<Arc<(BlueprintTarget, Blueprint)>>,
+        >,
+        exec_impl: Box<dyn BlueprintExecutorImpl>,
+    ) -> BlueprintExecutor {
+        BlueprintExecutor { datastore, rx_blueprint, exec_impl }
     }
 }
 
@@ -61,12 +72,10 @@ impl BackgroundTask for BlueprintExecutor {
                 });
             }
 
-            let result = nexus_blueprint_execution::realize_blueprint(
-                opctx,
-                &self.datastore,
-                blueprint,
-            )
-            .await;
+            let result = self
+                .exec_impl
+                .realize_blueprint(opctx, &self.datastore, blueprint)
+                .await;
 
             // Return the result as a `serde_json::Value`
             match result {
@@ -87,6 +96,35 @@ impl BackgroundTask for BlueprintExecutor {
     }
 }
 
+/// Abstraction over the underlying "realize_blueprint" behavior solely so that
+/// we can provide a different implementation for testing
+#[cfg_attr(test, mockall::automock)]
+trait BlueprintExecutorImpl: Send + Sync {
+    fn realize_blueprint<'a>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        blueprint: &'a Blueprint,
+    ) -> BoxFuture<'a, Result<(), Vec<anyhow::Error>>>;
+}
+
+/// Impls `BlueprintExecutorImpl` using the real implementation in
+/// the `nexus_blueprint_execution` crate.
+struct RealExecutor;
+impl BlueprintExecutorImpl for RealExecutor {
+    fn realize_blueprint<'a>(
+        &self,
+        opctx: &'a OpContext,
+        datastore: &'a DataStore,
+        blueprint: &'a Blueprint,
+    ) -> BoxFuture<'a, Result<(), Vec<anyhow::Error>>> {
+        nexus_blueprint_execution::realize_blueprint(
+            opctx, datastore, blueprint,
+        )
+        .boxed()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::BlueprintExecutor;
@@ -94,6 +132,7 @@ mod test {
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::status_code;
     use httptest::Expectation;
+    use mockall::mock;
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate,
     };
@@ -141,6 +180,7 @@ mod test {
 
     #[nexus_test(server = crate::Server)]
     async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
+        // XXX do we need the whole shebang?
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
@@ -149,7 +189,12 @@ mod test {
         );
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
-        let mut task = BlueprintExecutor::new(datastore.clone(), blueprint_rx);
+        let mock = MockBlueprintExecutorImpl::new();
+        let mut task = BlueprintExecutor::new_with_impl(
+            datastore.clone(),
+            blueprint_rx,
+            Box::new(mock),
+        );
 
         // With no blueprint we should fail with an appropriate message.
         let value = task.activate(&opctx).await;

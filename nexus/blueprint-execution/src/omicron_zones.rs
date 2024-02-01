@@ -99,24 +99,6 @@ async fn sled_client(
     ))
 }
 
-/// Returns an example set of Omicron zones for testing
-pub fn example_minimal(generation: Generation) -> OmicronZonesConfig {
-    OmicronZonesConfig {
-        generation,
-        zones: vec![OmicronZoneConfig {
-            id: Uuid::new_v4(),
-            underlay_address: "::1".parse().unwrap(),
-            zone_type: OmicronZoneType::InternalDns {
-                dataset,
-                dns_address: "oh-hello-internal-dns".into(),
-                gz_address: "::1".parse().unwrap(),
-                gz_address_index: 0,
-                http_address: "some-ipv6-address".into(),
-            },
-        }],
-    };
-}
-
 #[cfg(test)]
 mod test {
     use super::deploy_zones;
@@ -228,7 +210,20 @@ mod test {
         // Zones are updated in a particular order, but each request contains
         // the full set of zones that must be running.
         // See `rack_setup::service::ServiceInner::run` for more details.
-        let mut zones = example_minimal();
+        let mut zones = OmicronZonesConfig {
+            generation,
+            zones: vec![OmicronZoneConfig {
+                id: Uuid::new_v4(),
+                underlay_address: "::1".parse().unwrap(),
+                zone_type: OmicronZoneType::InternalDns {
+                    dataset,
+                    dns_address: "oh-hello-internal-dns".into(),
+                    gz_address: "::1".parse().unwrap(),
+                    gz_address_index: 0,
+                    http_address: "some-ipv6-address".into(),
+                },
+            }],
+        };
 
         // Create a blueprint with only the `InternalDns` zone for both servers
         // We reuse the same `OmicronZonesConfig` because the details don't
