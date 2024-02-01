@@ -9,6 +9,7 @@ use super::MAX_EPHEMERAL_IPS_PER_INSTANCE;
 use super::MAX_EXTERNAL_IPS_PER_INSTANCE;
 use super::MAX_MEMORY_BYTES_PER_INSTANCE;
 use super::MAX_NICS_PER_INSTANCE;
+use super::MAX_SSH_KEYS_PER_INSTANCE;
 use super::MAX_VCPU_PER_INSTANCE;
 use super::MIN_MEMORY_BYTES_PER_INSTANCE;
 use crate::app::sagas;
@@ -59,8 +60,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncWrite};
 use uuid::Uuid;
-
-const MAX_KEYS_PER_INSTANCE: u32 = 8;
 
 type SledAgentClientError =
     sled_agent_client::Error<sled_agent_client::types::Error>;
@@ -323,10 +322,41 @@ impl super::Nexus {
             ));
         }
 
+        let actor = opctx.authn.actor_required().internal_context(
+            "loading current user's ssh keys for new Instance",
+        )?;
+        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
+            .silo_user_id(actor.actor_id())
+            .lookup_for(authz::Action::ListChildren)
+            .await?;
+
+        let ssh_keys = match &params.ssh_public_keys {
+            Some(keys) => Some(
+                self.db_datastore
+                    .ssh_keys_batch_lookup(opctx, &authz_user, keys)
+                    .await?
+                    .iter()
+                    .map(|id| NameOrId::Id(*id))
+                    .collect::<Vec<NameOrId>>(),
+            ),
+            None => None,
+        };
+        if let Some(ssh_keys) = &ssh_keys {
+            if ssh_keys.len() > MAX_SSH_KEYS_PER_INSTANCE.try_into().unwrap() {
+                return Err(Error::invalid_request(format!(
+                    "cannot attach more than {} ssh keys to the instance",
+                    MAX_SSH_KEYS_PER_INSTANCE
+                )));
+            }
+        }
+
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
-            create_params: params.clone(),
+            create_params: params::InstanceCreate {
+                ssh_public_keys: ssh_keys,
+                ..params.clone()
+            },
             boundary_switches: self
                 .boundary_switches(&self.opctx_alloc)
                 .await?,
@@ -1118,33 +1148,23 @@ impl super::Nexus {
             vec![]
         };
 
-        // Gather the SSH public keys of the actor make the request so
-        // that they may be injected into the new image via cloud-init.
-        // TODO-security: this should be replaced with a lookup based on
-        // on `SiloUser` role assignments once those are in place.
-        let actor = opctx.authn.actor_required().internal_context(
-            "loading current user's ssh keys for new Instance",
-        )?;
-        let (.., authz_user) = LookupPath::new(opctx, &self.db_datastore)
-            .silo_user_id(actor.actor_id())
-            .lookup_for(authz::Action::ListChildren)
-            .await?;
-        let public_keys = self
+        let ssh_keys = self
             .db_datastore
-            .ssh_keys_list(
+            .instance_ssh_keys_list(
                 opctx,
-                &authz_user,
+                authz_instance,
                 &PaginatedBy::Name(DataPageParams {
                     marker: None,
                     direction: dropshot::PaginationOrder::Ascending,
-                    limit: std::num::NonZeroU32::new(MAX_KEYS_PER_INSTANCE)
+                    limit: std::num::NonZeroU32::new(MAX_SSH_KEYS_PER_INSTANCE)
                         .unwrap(),
                 }),
             )
             .await?
-            .into_iter()
-            .map(|ssh_key| ssh_key.public_key)
-            .collect::<Vec<String>>();
+            .into_iter();
+
+        let ssh_keys: Vec<String> =
+            ssh_keys.map(|ssh_key| ssh_key.public_key).collect();
 
         // Ask the sled agent to begin the state change.  Then update the
         // database to reflect the new intermediate state.  If this update is
@@ -1171,7 +1191,7 @@ impl super::Nexus {
             disks: disk_reqs,
             cloud_init_bytes: Some(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
-                db_instance.generate_cidata(&public_keys)?,
+                db_instance.generate_cidata(&ssh_keys)?,
             )),
         };
 

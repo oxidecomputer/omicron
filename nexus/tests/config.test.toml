@@ -91,6 +91,7 @@ dns_external.max_concurrent_server_updates = 5
 # them (on a sunny day).
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
+bfd_manager.period_secs = 30
 # How frequently to collect hardware/software inventory from the whole system
 # (even if we don't have reason to believe anything has changed).
 inventory.period_secs = 600

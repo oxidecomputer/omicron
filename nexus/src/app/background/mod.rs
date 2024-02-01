@@ -4,6 +4,7 @@
 
 //! Background tasks
 
+mod bfd;
 mod blueprint_execution;
 mod blueprint_load;
 mod common;

@@ -338,6 +338,8 @@ pub struct BackgroundTaskConfig {
     pub blueprints: BlueprintTasksConfig,
     /// configuration for service zone nat sync task
     pub sync_service_zone_nat: SyncServiceZoneNatConfig,
+    /// configuration for the bfd manager task
+    pub bfd_manager: BfdManagerConfig,
 }
 
 #[serde_as]
@@ -375,6 +377,14 @@ pub struct ExternalEndpointsConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct NatCleanupConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BfdManagerConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -543,7 +553,7 @@ mod test {
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
-    use crate::nexus_config::SyncServiceZoneNatConfig;
+    use crate::nexus_config::{BfdManagerConfig, SyncServiceZoneNatConfig};
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -688,6 +698,7 @@ mod test {
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
+            bfd_manager.period_secs = 30
             inventory.period_secs = 10
             inventory.nkeep = 11
             inventory.disable = false
@@ -791,6 +802,9 @@ mod test {
                         nat_cleanup: NatCleanupConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        bfd_manager: BfdManagerConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                         inventory: InventoryConfig {
                             period_secs: Duration::from_secs(10),
                             nkeep: 11,
@@ -860,6 +874,7 @@ mod test {
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
+            bfd_manager.period_secs = 30
             inventory.period_secs = 10
             inventory.nkeep = 3
             inventory.disable = false

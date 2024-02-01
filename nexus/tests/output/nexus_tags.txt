@@ -55,6 +55,7 @@ instance_network_interface_view          GET      /v1/network-interfaces/{interf
 instance_reboot                          POST     /v1/instances/{instance}/reboot
 instance_serial_console                  GET      /v1/instances/{instance}/serial-console
 instance_serial_console_stream           GET      /v1/instances/{instance}/serial-console/stream
+instance_ssh_public_key_list             GET      /v1/instances/{instance}/ssh-public-keys
 instance_start                           POST     /v1/instances/{instance}/start
 instance_stop                            POST     /v1/instances/{instance}/stop
 instance_view                            GET      /v1/instances/{instance}
@@ -163,6 +164,9 @@ networking_address_lot_block_list        GET      /v1/system/networking/address-
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
 networking_address_lot_list              GET      /v1/system/networking/address-lot
+networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
+networking_bfd_enable                    POST     /v1/system/networking/bfd-enable
+networking_bfd_status                    GET      /v1/system/networking/bfd-status
 networking_bgp_announce_set_create       POST     /v1/system/networking/bgp-announce
 networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
 networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce

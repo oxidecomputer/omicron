@@ -1036,6 +1036,14 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
+    /// An allowlist of SSH public keys to be transferred to the instance via
+    /// cloud-init during instance creation.
+    ///
+    /// If not provided, all SSH public keys from the user's profile will be sent.
+    /// If an empty list is provided, no public keys will be transmitted to the
+    /// instance.
+    pub ssh_public_keys: Option<Vec<NameOrId>>,
+
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,
@@ -1786,6 +1794,60 @@ pub struct BgpConfigCreate {
 pub struct BgpStatusSelector {
     /// A name or id of the BGP configuration to get status for
     pub name_or_id: NameOrId,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
+}
+
+/// Information about a bidirectional forwarding detection (BFD) session.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BfdSessionEnable {
+    /// Address the Oxide switch will listen on for BFD traffic. If `None` then
+    /// the unspecified address (0.0.0.0 or ::) is used.
+    pub local: Option<IpAddr>,
+
+    /// Address of the remote peer to establish a BFD session with.
+    pub remote: IpAddr,
+
+    /// The negotiated Control packet transmission interval, multiplied by this
+    /// variable, will be the Detection Time for this session (as seen by the
+    /// remote system)
+    pub detection_threshold: u8,
+
+    /// The minimum interval, in microseconds, between received BFD
+    /// Control packets that this system requires
+    pub required_rx: u64,
+
+    /// The switch to enable this session on. Must be `switch0` or `switch1`.
+    pub switch: Name,
+
+    /// Select either single-hop (RFC 5881) or multi-hop (RFC 5883)
+    pub mode: BfdMode,
+}
+
+/// Information needed to disable a BFD session
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BfdSessionDisable {
+    /// Address of the remote peer to disable a BFD session for.
+    pub remote: IpAddr,
+
+    /// The switch to enable this session on. Must be `switch0` or `switch1`.
+    pub switch: Name,
 }
 
 /// A set of addresses associated with a port configuration.
