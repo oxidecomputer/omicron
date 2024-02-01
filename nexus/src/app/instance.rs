@@ -36,7 +36,6 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::Hostname;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
@@ -1016,7 +1015,7 @@ impl super::Nexus {
         // TODO-cleanup: This can be removed when we are confident that no
         // instances exist prior to the addition of strict hostname validation
         // in the API.
-        if db_instance.hostname.parse::<Hostname>().is_err() {
+        let Ok(hostname) = db_instance.hostname.parse() else {
             let msg = format!(
                 "The instance hostname '{}' is no longer valid. \
                 To access the data on its disks, this instance \
@@ -1026,7 +1025,7 @@ impl super::Nexus {
                 db_instance.hostname,
             );
             return Err(Error::invalid_request(&msg));
-        }
+        };
 
         // Gather disk information and turn that into DiskRequests
         let disks = self
@@ -1193,7 +1192,7 @@ impl super::Nexus {
             properties: InstanceProperties {
                 ncpus: db_instance.ncpus.into(),
                 memory: db_instance.memory.into(),
-                hostname: db_instance.hostname.clone(),
+                hostname,
             },
             nics,
             source_nat,
