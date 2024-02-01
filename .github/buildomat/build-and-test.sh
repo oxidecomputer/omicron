@@ -50,18 +50,31 @@ ptime -m bash ./tools/install_builder_prerequisites.sh -y
 #
 banner build
 export RUSTFLAGS="-D warnings"
+export RUSTDOCFLAGS="-D warnings"
 # When running on illumos we need to pass an additional runpath that is
 # usually configured via ".cargo/config" but the `RUSTFLAGS` env variable
 # takes precedence. This path contains oxide specific libraries such as
 # libipcc.
 if [[ $target_os == "illumos" ]]; then
-	RUSTFLAGS="-D warnings -C link-arg=-R/usr/platform/oxide/lib/amd64"
+    RUSTFLAGS="$RUSTFLAGS -C link-arg=-R/usr/platform/oxide/lib/amd64"
 fi
-export RUSTDOCFLAGS="-D warnings"
-export TMPDIR=$TEST_TMPDIR
+export TMPDIR="$TEST_TMPDIR"
 export RUST_BACKTRACE=1
+# We're building once, so there's no need to incur the overhead of an incremental build.
 export CARGO_INCREMENTAL=0
-ptime -m cargo test --locked --verbose --no-run
+# This allows us to build with unstable options, which gives us access to some
+# timing information.
+#
+# If we remove "--timings=json" below, this would no longer be needed.
+export RUSTC_BOOTSTRAP=1
+
+# Build all the packages and tests, and keep track of how long each took to build.
+# We report build progress to stderr, and the "--timings=json" output goes to stdout.
+ptime -m cargo build -Z unstable-options --timings=json --workspace --tests --locked --verbose 1> build-timings.json
+
+# Sort the build timings by "slowest to build first", then emit emit it from the build
+# phase so it's saved.
+jq build-timings.json -c -s 'sort_by(.duration)' > "$TEST_TMPDIR/build-timings.json"
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
