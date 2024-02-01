@@ -496,9 +496,11 @@ impl Nexus {
                     match saga_request_recv.recv().await {
                         None => {
                             // If this channel is closed, then RPWs will not be
-                            // able to request that sagas be run. Panic Nexus so
-                            // that it can be restarted.
-                            panic!("saga request channel closed!");
+                            // able to request that sagas be run. This will
+                            // likely only occur when Nexus itself is shutting
+                            // down, so emit an error and exit the task.
+                            error!(&nexus.log, "saga request channel closed!");
+                            break;
                         }
 
                         Some(saga_request) => {
