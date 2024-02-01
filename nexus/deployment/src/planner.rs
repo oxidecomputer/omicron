@@ -265,6 +265,7 @@ mod test {
             "test: add nothing more",
             &collection,
         )
+        .expect("failed to create planner")
         .plan()
         .expect("failed to plan");
         let diff = blueprint3.diff(&blueprint4);

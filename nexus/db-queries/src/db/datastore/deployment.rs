@@ -1061,7 +1061,8 @@ mod tests {
     use std::mem;
     use std::net::Ipv6Addr;
 
-    static EMPTY_POLICY: Policy = Policy { sleds: BTreeMap::new() };
+    static EMPTY_POLICY: Policy =
+        Policy { sleds: BTreeMap::new(), service_ip_pool_ranges: Vec::new() };
 
     // This is a not-super-future-maintainer-friendly helper to check that all
     // the subtables related to blueprints have been pruned of a specific
@@ -1131,6 +1132,7 @@ mod tests {
                     )
                 })
                 .collect(),
+            service_ip_pool_ranges: Vec::new(),
         }
     }
 
@@ -1320,7 +1322,8 @@ mod tests {
 
         // Create a builder for a child blueprint.
         let mut builder =
-            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test");
+            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test")
+                .expect("failed to create builder");
 
         // Add zones to our new sled.
         assert_eq!(
@@ -1465,9 +1468,11 @@ mod tests {
         .unwrap();
         let blueprint2 =
             BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test2")
+                .expect("failed to create builder")
                 .build();
         let blueprint3 =
             BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test3")
+                .expect("failed to create builder")
                 .build();
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
@@ -1559,6 +1564,7 @@ mod tests {
         // with enabled=false, that status is serialized.
         let blueprint4 =
             BlueprintBuilder::new_based_on(&blueprint3, &EMPTY_POLICY, "test3")
+                .expect("failed to create builder")
                 .build();
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
