@@ -199,6 +199,7 @@ mod test {
         let blueprint = Arc::new(create_blueprint(BTreeMap::new()));
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
+        println!("activating with no zones: {:?}", value);
         assert_eq!(value, json!({}));
 
         // Create a non-empty blueprint describing two servers and verify that
@@ -247,6 +248,7 @@ mod test {
 
         // Activate the task to trigger zone configuration on the sled-agents
         let value = task.activate(&opctx).await;
+        println!("activating two sled agents: {:?}", value);
         assert_eq!(value, json!({}));
         s1.verify_and_clear();
         s2.verify_and_clear();
@@ -292,7 +294,7 @@ mod test {
         }
 
         let value = task.activate(&opctx).await;
-        println!("{:?}", value);
+        println!("after failure: {:?}", value);
         let result: ErrorResult = serde_json::from_value(value).unwrap();
         assert_eq!(result.errors.len(), 1);
         assert!(
