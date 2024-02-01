@@ -36,6 +36,7 @@ CROSS JOIN omicron.public.silo AS s
 WHERE p.time_deleted IS null 
   AND p.silo_id IS null -- means it's a fleet pool
   AND s.time_deleted IS null
+  -- TODO: AND NOT s.discoverable ???
 -- this makes it idempotent
 ON CONFLICT (ip_pool_id, resource_type, resource_id)
 DO NOTHING;

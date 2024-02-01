@@ -1511,7 +1511,12 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
+allow_tables_to_appear_in_same_query!(
+    ip_pool_range,
+    ip_pool,
+    ip_pool_resource,
+    silo
+);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 joinable!(ip_pool_resource -> ip_pool (ip_pool_id));
 
