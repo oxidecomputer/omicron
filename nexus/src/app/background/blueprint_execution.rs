@@ -19,7 +19,6 @@ use tokio::sync::watch;
 pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
-    exec_impl: Box<dyn BlueprintExecutorImpl>,
 }
 
 impl BlueprintExecutor {
@@ -29,17 +28,7 @@ impl BlueprintExecutor {
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
     ) -> BlueprintExecutor {
-        Self::new_using_impl(datastore, rx_blueprint, Box::new(RealExecutor))
-    }
-
-    fn new_using_impl(
-        datastore: Arc<DataStore>,
-        rx_blueprint: watch::Receiver<
-            Option<Arc<(BlueprintTarget, Blueprint)>>,
-        >,
-        exec_impl: Box<dyn BlueprintExecutorImpl>,
-    ) -> BlueprintExecutor {
-        BlueprintExecutor { datastore, rx_blueprint, exec_impl }
+        BlueprintExecutor { datastore, rx_blueprint }
     }
 }
 
@@ -72,10 +61,12 @@ impl BackgroundTask for BlueprintExecutor {
                 });
             }
 
-            let result = self
-                .exec_impl
-                .realize_blueprint(opctx, &self.datastore, blueprint)
-                .await;
+            let result = nexus_blueprint_execution::realize_blueprint(
+                opctx,
+                &self.datastore,
+                blueprint,
+            )
+            .await;
 
             // Return the result as a `serde_json::Value`
             match result {
@@ -96,43 +87,13 @@ impl BackgroundTask for BlueprintExecutor {
     }
 }
 
-/// Abstraction over the underlying "realize_blueprint" behavior solely so that
-/// we can provide a different implementation for testing
-#[cfg_attr(test, mockall::automock)]
-trait BlueprintExecutorImpl: Send + Sync {
-    fn realize_blueprint<'a>(
-        &self,
-        opctx: &'a OpContext,
-        datastore: &'a DataStore,
-        blueprint: &'a Blueprint,
-    ) -> BoxFuture<'a, Result<(), Vec<anyhow::Error>>>;
-}
-
-/// Impls `BlueprintExecutorImpl` using the real implementation in
-/// the `nexus_blueprint_execution` crate.
-struct RealExecutor;
-impl BlueprintExecutorImpl for RealExecutor {
-    fn realize_blueprint<'a>(
-        &self,
-        opctx: &'a OpContext,
-        datastore: &'a DataStore,
-        blueprint: &'a Blueprint,
-    ) -> BoxFuture<'a, Result<(), Vec<anyhow::Error>>> {
-        nexus_blueprint_execution::realize_blueprint(
-            opctx, datastore, blueprint,
-        )
-        .boxed()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::BlueprintExecutor;
     use crate::app::background::common::BackgroundTask;
-    use httptest::matchers::{all_of, json_decoded, request};
+    use httptest::matchers::{all_of, request};
     use httptest::responders::status_code;
     use httptest::Expectation;
-    use mockall::mock;
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate,
     };
@@ -180,32 +141,13 @@ mod test {
 
     #[nexus_test(server = crate::Server)]
     async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
-        // XXX do we need the whole shebang?
+        // Set up the test.
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-
-        let (blueprint_tx, blueprint_rx) = watch::channel(None);
-        let mock = MockBlueprintExecutorImpl::new();
-        let mut task = BlueprintExecutor::new_with_impl(
-            datastore.clone(),
-            blueprint_rx,
-            Box::new(mock),
-        );
-
-        // With no blueprint we should fail with an appropriate message.
-        let value = task.activate(&opctx).await;
-        assert_eq!(value, json!({"error": "no blueprint"}));
-
-        // Get a success (empty) result back when the blueprint has an empty set
-        // of zones
-        let blueprint = Arc::new(create_blueprint(BTreeMap::new()));
-        blueprint_tx.send(Some(blueprint)).unwrap();
-        let value = task.activate(&opctx).await;
-        assert_eq!(value, json!({}));
 
         // Create some fake sled-agent servers to respond to zone puts and add
         // sleds to CRDB.
@@ -242,24 +184,39 @@ mod test {
                 .expect("Failed to insert sled to db");
         }
 
-        // The particular dataset doesn't matter for this test.
-        // We re-use the same one to not obfuscate things
-        let dataset = OmicronZoneDataset {
-            pool_name: format!("oxp_{}", Uuid::new_v4()).parse().unwrap(),
-        };
+        let (blueprint_tx, blueprint_rx) = watch::channel(None);
+        let mut task = BlueprintExecutor::new(datastore.clone(), blueprint_rx);
 
-        let generation = Generation::new();
+        // Now we're ready.
+        //
+        // With no target blueprint, the task should fail with an appropriate
+        // message.
+        let value = task.activate(&opctx).await;
+        assert_eq!(value, json!({"error": "no blueprint"}));
 
-        // Zones are updated in a particular order, but each request contains
-        // the full set of zones that must be running.
-        // See `rack_setup::service::ServiceInner::run` for more details.
-        let mut zones = OmicronZonesConfig {
-            generation,
+        // With a target blueprint having no zones, the task should trivially
+        // complete and report a successful (empty) summary.
+        let blueprint = Arc::new(create_blueprint(BTreeMap::new()));
+        blueprint_tx.send(Some(blueprint)).unwrap();
+        let value = task.activate(&opctx).await;
+        assert_eq!(value, json!({}));
+
+        // Create a non-empty blueprint describing two servers and verify that
+        // the task correctly winds up making requests to both of them and
+        // reporting success.  We reuse the same `OmicronZonesConfig` in
+        // constructing the blueprint because the details don't matter for this
+        // test.
+        let zones = OmicronZonesConfig {
+            generation: Generation::new(),
             zones: vec![OmicronZoneConfig {
                 id: Uuid::new_v4(),
                 underlay_address: "::1".parse().unwrap(),
                 zone_type: OmicronZoneType::InternalDns {
-                    dataset,
+                    dataset: OmicronZoneDataset {
+                        pool_name: format!("oxp_{}", Uuid::new_v4())
+                            .parse()
+                            .unwrap(),
+                    },
                     dns_address: "oh-hello-internal-dns".into(),
                     gz_address: "::1".parse().unwrap(),
                     gz_address_index: 0,
@@ -268,28 +225,22 @@ mod test {
             }],
         };
 
-        // Create a blueprint with only the `InternalDns` zone for both servers
-        // We reuse the same `OmicronZonesConfig` because the details don't
-        // matter for this test.
-        let blueprint = Arc::new(create_blueprint(BTreeMap::from([
+        let mut blueprint = create_blueprint(BTreeMap::from([
             (sled_id1, zones.clone()),
             (sled_id2, zones.clone()),
-        ])));
+        ]));
 
-        // Send the blueprint with the first set of zones to the task
-        blueprint_tx.send(Some(blueprint)).unwrap();
+        blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
 
-        // Check that the initial requests were sent to the fake sled-agents
+        // Make sure that requests get made to the sled agent.  This is not a
+        // careful check of exactly what gets sent.  For that, see the tests in
+        // nexus-blueprint-execution.
         for s in [&mut s1, &mut s2] {
             s.expect(
-                Expectation::matching(all_of![
-                    request::method_path("PUT", "/omicron-zones",),
-                    // Our generation number should be 1 and there should
-                    // be only a single zone.
-                    request::body(json_decoded(|c: &OmicronZonesConfig| {
-                        c.generation == 1u32.into() && c.zones.len() == 1
-                    }))
-                ])
+                Expectation::matching(all_of![request::method_path(
+                    "PUT",
+                    "/omicron-zones"
+                ),])
                 .respond_with(status_code(204)),
             );
         }
@@ -300,23 +251,26 @@ mod test {
         s1.verify_and_clear();
         s2.verify_and_clear();
 
-        // Do it again. This should trigger the same request.
-        for s in [&mut s1, &mut s2] {
-            s.expect(
-                Expectation::matching(request::method_path(
-                    "PUT",
-                    "/omicron-zones",
-                ))
-                .respond_with(status_code(204)),
-            );
-        }
+        // Now, disable the target and make sure that we _don't_ invoke the sled
+        // agent.  It's enough to just not set expectations.
+        blueprint.0.enabled = false;
+        blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
         let value = task.activate(&opctx).await;
-        assert_eq!(value, json!({}));
+        println!("when disabled: {:?}", value);
+        assert_eq!(
+            value,
+            json!({
+                "error": "blueprint disabled",
+                "target_id": blueprint.1.id.to_string()
+            })
+        );
         s1.verify_and_clear();
         s2.verify_and_clear();
 
-        // Take another lap, but this time, have one server fail the request and
-        // try again.
+        // Do it all again, but configure one of the servers to fail so we can
+        // verify the task's returned summary of what happened.
+        blueprint.0.enabled = true;
+        blueprint_tx.send(Some(Arc::new(blueprint))).unwrap();
         s1.expect(
             Expectation::matching(request::method_path(
                 "PUT",
@@ -332,7 +286,6 @@ mod test {
             .respond_with(status_code(500)),
         );
 
-        // Define a type we can use to pick stuff out of error objects.
         #[derive(Deserialize)]
         struct ErrorResult {
             errors: Vec<String>,
@@ -345,47 +298,6 @@ mod test {
         assert!(
             result.errors[0].starts_with("Failed to put OmicronZonesConfig")
         );
-        s1.verify_and_clear();
-        s2.verify_and_clear();
-
-        // Add an `InternalNtp` zone for our next update
-        zones.generation = generation.next();
-        zones.zones.push(OmicronZoneConfig {
-            id: Uuid::new_v4(),
-            underlay_address: "::1".parse().unwrap(),
-            zone_type: OmicronZoneType::InternalNtp {
-                address: "::1".into(),
-                dns_servers: vec!["::1".parse().unwrap()],
-                domain: None,
-                ntp_servers: vec!["some-ntp-server-addr".into()],
-            },
-        });
-
-        // Update our watch channel
-        let blueprint = Arc::new(create_blueprint(BTreeMap::from([
-            (sled_id1, zones.clone()),
-            (sled_id2, zones.clone()),
-        ])));
-        blueprint_tx.send(Some(blueprint)).unwrap();
-
-        // Set our new expectations
-        for s in [&mut s1, &mut s2] {
-            s.expect(
-                Expectation::matching(all_of![
-                    request::method_path("PUT", "/omicron-zones",),
-                    // Our generation number should be bumped and there should
-                    // be two zones.
-                    request::body(json_decoded(|c: &OmicronZonesConfig| {
-                        c.generation == 2u32.into() && c.zones.len() == 2
-                    }))
-                ])
-                .respond_with(status_code(204)),
-            );
-        }
-
-        // Activate the task
-        let value = task.activate(&opctx).await;
-        assert_eq!(value, json!({}));
         s1.verify_and_clear();
         s2.verify_and_clear();
     }

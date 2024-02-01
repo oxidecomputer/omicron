@@ -4,7 +4,7 @@
 
 //! Execution of Nexus blueprints
 //!
-//! See [`nexus_deployment`] crate-level docs for background.
+//! See `nexus_deployment` crate-level docs for background.
 
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
