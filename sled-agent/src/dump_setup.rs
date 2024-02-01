@@ -112,11 +112,11 @@ const ARCHIVAL_INTERVAL: Duration = Duration::from_secs(300);
 
 // we sure are passing a lot of Utf8PathBufs around, let's be careful about it
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
-pub(self) struct DumpSlicePath(Utf8PathBuf);
+struct DumpSlicePath(Utf8PathBuf);
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
-pub(self) struct DebugDataset(Utf8PathBuf);
+struct DebugDataset(Utf8PathBuf);
 #[derive(AsRef, Clone, Debug, Eq, From, Hash, Ord, PartialEq, PartialOrd)]
-pub(self) struct CoreDataset(Utf8PathBuf);
+struct CoreDataset(Utf8PathBuf);
 
 #[derive(AsRef, Clone, From)]
 pub(super) struct CoreZpool(pub ZpoolName);
@@ -299,7 +299,7 @@ impl DumpSetup {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(self) enum ZfsGetError {
+enum ZfsGetError {
     #[error("Error executing 'zfs get' command: {0}")]
     IoError(#[from] std::io::Error),
     #[error("Output of 'zfs get' was not only not an integer string, it wasn't even UTF-8: {0}")]
@@ -1005,7 +1005,6 @@ impl DumpSetupWorker {
     }
 }
 
-#[cfg_attr(test, allow(dead_code))] // mock doesn't construct Tokio variant
 #[derive(thiserror::Error, Debug)]
 pub enum ArchiveLogsError {
     #[error("I/O error: {0}")]
