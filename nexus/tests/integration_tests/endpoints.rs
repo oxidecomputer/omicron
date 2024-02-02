@@ -421,7 +421,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
-        hostname: String::from("demo-instance"),
+        hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
@@ -577,6 +577,31 @@ pub const DEMO_BGP_STATUS_URL: &'static str =
     "/v1/system/networking/bgp-status";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
     "/v1/system/networking/bgp-routes-ipv4?asn=47";
+
+pub const DEMO_BFD_STATUS_URL: &'static str =
+    "/v1/system/networking/bfd-status";
+
+pub const DEMO_BFD_ENABLE_URL: &'static str =
+    "/v1/system/networking/bfd-enable";
+
+pub const DEMO_BFD_DISABLE_URL: &'static str =
+    "/v1/system/networking/bfd-disable";
+
+pub static DEMO_BFD_ENABLE: Lazy<params::BfdSessionEnable> =
+    Lazy::new(|| params::BfdSessionEnable {
+        local: None,
+        remote: "10.0.0.1".parse().unwrap(),
+        detection_threshold: 3,
+        required_rx: 1000000,
+        switch: "switch0".parse().unwrap(),
+        mode: params::BfdMode::MultiHop,
+    });
+
+pub static DEMO_BFD_DISABLE: Lazy<params::BfdSessionDisable> =
+    Lazy::new(|| params::BfdSessionDisable {
+        remote: "10.0.0.1".parse().unwrap(),
+        switch: "switch0".parse().unwrap(),
+    });
 
 // Project Images
 pub static DEMO_IMAGE_NAME: Lazy<Name> =
@@ -2200,6 +2225,37 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BFD_STATUS_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BFD_ENABLE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BFD_ENABLE).unwrap()
+                )
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BFD_DISABLE_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_BFD_DISABLE).unwrap()
+                )
             ],
         },
 

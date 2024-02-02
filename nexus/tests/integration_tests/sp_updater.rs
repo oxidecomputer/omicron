@@ -12,9 +12,9 @@ use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 use omicron_nexus::app::test_interfaces::{
     MgsClients, SpUpdater, UpdateProgress,
 };
-use sp_sim::SimulatedSp;
 use sp_sim::SIM_GIMLET_BOARD;
 use sp_sim::SIM_SIDECAR_BOARD;
+use sp_sim::{SimSpHandledRequest, SimulatedSp};
 use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -471,16 +471,37 @@ async fn test_sp_updater_delivers_progress() {
     let target_sp = &mgstestctx.simrack.gimlets[sp_slot as usize];
     let sp_accept_sema = target_sp.install_udp_accept_semaphore().await;
     let mut sp_responses = target_sp.responses_sent_count().unwrap();
+    let num_prior_sp_response = *sp_responses.borrow_and_update();
 
     // Spawn the update on a background task so we can watch `progress` as it is
     // applied.
     let do_update_task =
         tokio::spawn(async move { sp_updater.update(&mut mgs_clients).await });
 
-    // Allow the SP to respond to 2 messages: the caboose check and the "prepare
-    // update" messages that triggers the start of an update, then ensure we see
-    // the "started" progress.
-    sp_accept_sema.send(2).unwrap();
+    // Allow the SP to respond to 3 messages: the caboose check, "prepare
+    // update" message, and the status check that preparation is complete. These
+    // are all triggered by the start of an update.
+    sp_accept_sema.send(3).unwrap();
+
+    // Wait until this 3-packet initial update setup/handshake is complete.
+    let mut sp_responses = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::spawn(async move {
+            loop {
+                sp_responses.changed().await.expect("sender dropped");
+                if *sp_responses.borrow_and_update() - num_prior_sp_response
+                    == 3
+                {
+                    return sp_responses;
+                }
+            }
+        }),
+    )
+    .await
+    .expect("timeout waiting for SP update to start")
+    .expect("task panic");
+
+    // Ensure our updater reports that the update has started.
     progress.changed().await.unwrap();
     assert_eq!(*progress.borrow_and_update(), Some(UpdateProgress::Started));
 
@@ -495,11 +516,6 @@ async fn test_sp_updater_delivers_progress() {
         })
     );
 
-    // Record the number of responses the SP has sent; we'll use
-    // `sp_responses.changed()` in the loop below, and want to mark whatever
-    // value this watch channel currently has as seen.
-    sp_responses.borrow_and_update();
-
     // At this point, there are two clients racing each other to talk to our
     // simulated SP:
     //
@@ -509,8 +525,9 @@ async fn test_sp_updater_delivers_progress() {
     // and we want to ensure that we see any relevant progress reports from
     // `sp_updater`. We'll let one MGS -> SP message through at a time (waiting
     // until our SP has responded by waiting for a change to `sp_responses`)
-    // then check its update state: if it changed, the packet we let through was
-    // data from MGS; otherwise, it was a status request from `sp_updater`.
+    // then check whether that message was a request for update status. If it
+    // was, we wait and ensure we see a new progress report from `sp_updater`.
+    // If it wasn't, we move on and allow the next message through.
     //
     // This loop will continue until either:
     //
@@ -519,9 +536,13 @@ async fn test_sp_updater_delivers_progress() {
     // 2. We time out waiting for the previous step (by timing out for either
     //    the SP to process a request or `sp_updater` to realize there's been
     //    progress), at which point we panic and fail this test.
-    let mut prev_bytes_received = 0;
-    let mut expect_progress_change = false;
+    let mut prev_progress = 0.0;
     loop {
+        debug!(
+            mgstestctx.logctx.log, "unblocking one SP packet";
+            "prev_progress" => %prev_progress,
+        );
+
         // Allow the SP to accept and respond to a single UDP packet.
         sp_accept_sema.send(1).unwrap();
 
@@ -534,56 +555,49 @@ async fn test_sp_updater_delivers_progress() {
             .expect("timeout waiting for SP response count to change")
             .expect("sp response count sender dropped");
 
-        // Inspec the SP's in-memory update state; we expect only `InProgress`
-        // or `Complete`, and in either case we note whether we expect to see
-        // status changes from `sp_updater`.
-        match target_sp.current_update_status().await {
-            UpdateStatus::InProgress(sp_progress) => {
-                if sp_progress.bytes_received > prev_bytes_received {
-                    prev_bytes_received = sp_progress.bytes_received;
-                    expect_progress_change = true;
-                    continue;
-                }
+        // Check what our simulated SP just got. If it was an update status
+        // request, that was `sp_updater`, and we'll fall through to check on
+        // the progress we should see. Otherwise, we'll move on to the next
+        // packet.
+        match target_sp.last_request_handled() {
+            request @ (None | Some(SimSpHandledRequest::NotImplemented)) => {
+                debug!(
+                    mgstestctx.logctx.log, "irrelevant previous request";
+                    "request" => ?request,
+                );
+                continue;
             }
-            UpdateStatus::Complete(_) => {
-                if prev_bytes_received < sp_image_len {
-                    prev_bytes_received = sp_image_len;
-                }
-            }
-            status @ (UpdateStatus::None
-            | UpdateStatus::Preparing(_)
-            | UpdateStatus::SpUpdateAuxFlashChckScan { .. }
-            | UpdateStatus::Aborted(_)
-            | UpdateStatus::Failed { .. }
-            | UpdateStatus::RotError { .. }) => {
-                panic!("unexpected status {status:?}");
+            Some(SimSpHandledRequest::ComponentUpdateStatus(_)) => {
+                debug!(mgstestctx.logctx.log, "saw update status request");
             }
         }
 
-        // If we get here, the most recent packet did _not_ change the SP's
-        // internal update state, so it was a status request from `sp_updater`.
-        // If we expect the updater to see new progress, wait for that change
-        // here.
-        if expect_progress_change || prev_bytes_received == sp_image_len {
-            // Safety rail that we haven't screwed up our untangle-the-race
-            // logic: if we don't see a new progress after several seconds, our
-            // test is broken, so fail.
-            tokio::time::timeout(Duration::from_secs(10), progress.changed())
-                .await
-                .expect("progress timeout")
-                .expect("progress watch sender dropped");
-            let status = progress.borrow_and_update().clone().unwrap();
-            expect_progress_change = false;
+        // Safety rail that we haven't screwed up our untangle-the-race
+        // logic: if we don't see a new progress after several seconds, our
+        // test is broken, so fail.
+        tokio::time::timeout(Duration::from_secs(10), progress.changed())
+            .await
+            .expect("progress timeout")
+            .expect("progress watch sender dropped");
+        let status = progress.borrow_and_update().clone().unwrap();
+        debug!(
+            mgstestctx.logctx.log, "got new status from SpUpdater";
+            "status" => ?status,
+        );
 
-            // We're done if we've observed the final progress message.
-            if let UpdateProgress::InProgress { progress: Some(value) } = status
-            {
-                if value == 1.0 {
-                    break;
-                }
-            } else {
-                panic!("unexpected progerss status {status:?}");
+        // We're done if we've observed the final progress message.
+        if let UpdateProgress::InProgress { progress: Some(value) } = status {
+            assert!(
+                value >= prev_progress,
+                "new progress {value} \
+                 less than previous progress {prev_progress}"
+            );
+            prev_progress = value;
+            if value == 1.0 {
+                break;
             }
+        } else {
+            panic!("unexpected progerss status {status:?}");
         }
     }
 
