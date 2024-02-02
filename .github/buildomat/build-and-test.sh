@@ -23,9 +23,9 @@ TEST_TMPDIR='/var/tmp/omicron_tmp'
 echo "tests will store ephemeral output in $TEST_TMPDIR" >&2
 mkdir "$TEST_TMPDIR"
 
-OUTPUT_DIR='/work/'
+OUTPUT_DIR='/work'
 echo "tests will store non-ephemeral output in $OUTPUT_DIR" >&2
-mkdir "$OUTPUT_DIR"
+mkdir -p "$OUTPUT_DIR"
 
 #
 # Set up our PATH for the test suite.
