@@ -133,7 +133,7 @@ pub async fn make_resources(
     builder.new_resource(authz::TufRepo::new(
         authz::FLEET,
         tuf_repo_id,
-        LookupType::ById(tuf_repo_id),
+        LookupType::ById(tuf_repo_id.to_untyped_uuid()),
     ));
 
     let artifact_id = ArtifactId {

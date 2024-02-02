@@ -870,7 +870,7 @@ authz_resource! {
     name = "LoopbackAddress",
     parent = "Fleet",
     // TODO: make it easier to specify the typed UUID kind
-    primary_key = ::newtype_uuid::TypedUuid<::omicron_common::typed_uuid::LoopbackAddressKind>,
+    primary_key = { uuid_kind = LoopbackAddressKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -1069,7 +1069,7 @@ authz_resource! {
 authz_resource! {
     name = "TufRepo",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = TufRepoKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }

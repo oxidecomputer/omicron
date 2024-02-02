@@ -26,10 +26,11 @@ async fn instance_launch() -> Result<()> {
         Arc::new(KeyPair::generate_ed25519().context("key generation failed")?);
     let public_key_str = format!("ssh-ed25519 {}", key.public_key_base64());
     eprintln!("create SSH key: {}", public_key_str);
+    let ssh_key_name = generate_name("key")?;
     ctx.client
         .current_user_ssh_key_create()
         .body(SshKeyCreate {
-            name: generate_name("key")?,
+            name: ssh_key_name.clone(),
             description: String::new(),
             public_key: public_key_str,
         })
@@ -63,7 +64,7 @@ async fn instance_launch() -> Result<()> {
         .body(InstanceCreate {
             name: generate_name("instance")?,
             description: String::new(),
-            hostname: "localshark".into(), // 🦈
+            hostname: "localshark".parse().unwrap(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
             disks: vec![InstanceDiskAttachment::Attach {
@@ -72,6 +73,9 @@ async fn instance_launch() -> Result<()> {
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
             user_data: String::new(),
+            ssh_public_keys: Some(vec![oxide_client::types::NameOrId::Name(
+                ssh_key_name.clone(),
+            )]),
             start: true,
         })
         .send()

@@ -17,10 +17,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
+use newtype_uuid::TypedUuid;
 use nexus_db_model::Name;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_common::typed_uuid::TufRepoKind;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
@@ -431,7 +433,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type TufRepo, identified by its UUID.
-    pub fn tuf_repo_id(self, id: Uuid) -> TufRepo<'a> {
+    pub fn tuf_repo_id(self, id: TypedUuid<TufRepoKind>) -> TufRepo<'a> {
         TufRepo::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -863,7 +865,7 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufRepoKind } ]
 }
 
 lookup_resource! {

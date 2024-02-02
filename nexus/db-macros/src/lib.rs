@@ -13,6 +13,7 @@
 
 extern crate proc_macro;
 
+use nexus_macros_common::PrimaryKeyType;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
@@ -68,8 +69,24 @@ mod test_helpers;
 /// }
 /// ```
 ///
-/// These define `Project<'a>` and `Instance<'a>`.  For more on these structs
-/// and how they're used, see nexus/src/db/lookup.rs.
+/// These define `Project<'a>` and `Instance<'a>`.
+///
+/// It is also possible to use a `TypedUuid` as a key column, by specifying
+/// `uuid_kind` rather than `rust_type`. For example:
+///
+/// ```ignore
+/// lookup_resource! {
+///     name = "Sled",
+///     ancestors = [ "Organization", "Project" ],
+///     children = [],
+///     lookup_by_name = true,
+///     soft_deletes = true,
+///     primary_key_columns = [ { column_name = "id", uuid_kind = SledType } ]
+/// }
+/// ```
+///
+/// For more on these structs and how they're used, see
+/// nexus/db-queries/src/lookup.rs.
 // Allow private intra-doc links.  This is useful because the `Input` struct
 // cannot be exported (since we're a proc macro crate, and we can't expose
 // a struct), but its documentation is very useful.
@@ -103,9 +120,9 @@ fn get_nv_attr(
 #[derive(serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct MacroInput {
-    /// The UUID type parameter.
+    /// The `TypedUuid` type parameter.
     #[serde(default)]
-    pub uuid_kind: Option<ParseWrapper<syn::Path>>,
+    pub uuid_kind: Option<ParseWrapper<syn::Ident>>,
 }
 
 impl MacroInput {
@@ -126,47 +143,11 @@ impl MacroInput {
         serde_tokenstream::from_tokenstream(&tokens)
     }
 
-    fn uuid_ty(&self) -> UuidTy {
-        self.uuid_kind.as_ref().map_or_else(|| {
-            UuidTy::Untyped(parse_quote!(::uuid::Uuid))
-        }, {
-            |v| {
-                let kind_param = &**v;
-                let external = parse_quote!(::newtype_uuid::TypedUuid<::omicron_common::typed_uuid::#kind_param>);
-                let db = parse_quote!(crate::typed_uuid::DbTypedUuid<::omicron_common::typed_uuid::#kind_param>);
-                UuidTy::Typed { external, db }
-            }
-        })
-    }
-}
-
-enum UuidTy {
-    Untyped(syn::Path),
-    Typed { external: syn::Path, db: syn::Path },
-}
-
-impl UuidTy {
-    fn external(&self) -> &syn::Path {
-        match self {
-            UuidTy::Untyped(path) => path,
-            UuidTy::Typed { external, .. } => external,
-        }
-    }
-
-    fn db(&self) -> &syn::Path {
-        match self {
-            UuidTy::Untyped(path) => path,
-            UuidTy::Typed { db, .. } => db,
-        }
-    }
-
-    /// Returns token for both a conversion from external to db, and from db to
-    /// external types.
-    fn convert(&self, var_name: TokenStream) -> TokenStream {
-        match self {
-            UuidTy::Untyped(_) => var_name,
-            UuidTy::Typed { .. } => quote! { #var_name.into() },
-        }
+    fn uuid_ty(&self) -> PrimaryKeyType {
+        self.uuid_kind.as_ref().map_or_else(
+            || PrimaryKeyType::Standard(parse_quote!(::uuid::Uuid)),
+            |v| PrimaryKeyType::new_typed_uuid(v),
+        )
     }
 }
 
@@ -340,7 +321,7 @@ fn build(
     struct_name: &Ident,
     table_name: &syn::Path,
     observed_identity_ty: &syn::Type,
-    uuid_ty: &UuidTy,
+    uuid_ty: &PrimaryKeyType,
     flavor: IdentityVariant,
 ) -> TokenStream {
     let (identity_struct, resource_impl) = {
@@ -365,7 +346,7 @@ fn build(
 fn build_resource_identity(
     struct_name: &Ident,
     table_name: &syn::Path,
-    uuid_ty: &UuidTy,
+    uuid_ty: &PrimaryKeyType,
 ) -> TokenStream {
     let identity_doc = format!(
         "Auto-generated identity for [`{}`] from deriving [`macro@Resource`].",
@@ -375,7 +356,8 @@ fn build_resource_identity(
 
     let external_uuid_ty = uuid_ty.external();
     let db_uuid_ty = uuid_ty.db();
-    let convert = uuid_ty.convert(quote! { id });
+    let convert_external_to_db =
+        uuid_ty.external_to_db_nexus_db_model(quote! { id });
 
     quote! {
         #[doc = #identity_doc]
@@ -397,7 +379,7 @@ fn build_resource_identity(
             ) -> Self {
                 let now = ::chrono::Utc::now();
                 Self {
-                    id: #convert,
+                    id: #convert_external_to_db,
                     name: params.name.into(),
                     description: params.description,
                     time_created: now,
@@ -413,7 +395,7 @@ fn build_resource_identity(
 fn build_asset_identity(
     struct_name: &Ident,
     table_name: &syn::Path,
-    uuid_ty: &UuidTy,
+    uuid_ty: &PrimaryKeyType,
 ) -> TokenStream {
     let identity_doc = format!(
         "Auto-generated identity for [`{}`] from deriving [`macro@Asset`].",
@@ -423,7 +405,8 @@ fn build_asset_identity(
 
     let external_uuid_ty = uuid_ty.external();
     let db_uuid_ty = uuid_ty.db();
-    let convert = uuid_ty.convert(quote! { id });
+    let convert_external_to_db =
+        uuid_ty.external_to_db_nexus_db_model(quote! { id });
 
     quote! {
         #[doc = #identity_doc]
@@ -441,7 +424,7 @@ fn build_asset_identity(
             ) -> Self {
                 let now = ::chrono::Utc::now();
                 Self {
-                    id: #convert,
+                    id: #convert_external_to_db,
                     time_created: now,
                     time_modified: now,
                 }
@@ -454,13 +437,14 @@ fn build_asset_identity(
 fn build_resource_impl(
     struct_name: &Ident,
     observed_identity_type: &syn::Type,
-    uuid_ty: &UuidTy,
+    uuid_ty: &PrimaryKeyType,
 ) -> TokenStream {
     let identity_trait = format_ident!("__{}IdentityMarker", struct_name);
     let identity_name = format_ident!("{}Identity", struct_name);
 
     let external_uuid_ty = uuid_ty.external();
-    let convert = uuid_ty.convert(quote! { self.identity.id });
+    let convert_db_to_external =
+        uuid_ty.db_to_external(quote! { self.identity.id });
 
     quote! {
         // Verify that the field named "identity" is actually the generated
@@ -478,7 +462,7 @@ fn build_resource_impl(
             type IdType = #external_uuid_ty;
 
             fn id(&self) -> #external_uuid_ty {
-                #convert
+                #convert_db_to_external
             }
 
             fn name(&self) -> &::omicron_common::api::external::Name {
@@ -508,13 +492,14 @@ fn build_resource_impl(
 fn build_asset_impl(
     struct_name: &Ident,
     observed_identity_type: &syn::Type,
-    uuid_ty: &UuidTy,
+    uuid_ty: &PrimaryKeyType,
 ) -> TokenStream {
     let identity_trait = format_ident!("__{}IdentityMarker", struct_name);
     let identity_name = format_ident!("{}Identity", struct_name);
 
     let external_uuid_ty = uuid_ty.external();
-    let convert = uuid_ty.convert(quote! { self.identity.id });
+    let convert_db_to_external =
+        uuid_ty.db_to_external(quote! { self.identity.id });
 
     quote! {
         // Verify that the field named "identity" is actually the generated
@@ -532,7 +517,7 @@ fn build_asset_impl(
             type IdType = #external_uuid_ty;
 
             fn id(&self) -> #external_uuid_ty {
-                #convert
+                #convert_db_to_external
             }
 
             fn time_created(&self) -> ::chrono::DateTime<::chrono::Utc> {

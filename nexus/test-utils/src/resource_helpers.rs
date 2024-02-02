@@ -518,10 +518,11 @@ pub async fn create_instance_with(
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: String::from("the_host"),
+            hostname: "the-host".parse().unwrap(),
             user_data:
                 b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                     .to_vec(),
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces: nics.clone(),
             external_ips,
             disks,
@@ -529,6 +530,23 @@ pub async fn create_instance_with(
         },
     )
     .await
+}
+
+/// Creates an instance, asserting a status code and returning the error.
+///
+/// Note that this accepts any serializable body, which allows users to create
+/// invalid inputs to test our parameter validation.
+pub async fn create_instance_with_error<T>(
+    client: &ClientTestContext,
+    project_name: &str,
+    body: &T,
+    status: StatusCode,
+) -> HttpErrorResponseBody
+where
+    T: serde::Serialize,
+{
+    let url = format!("/v1/instances?project={project_name}");
+    object_create_error(client, &url, body, status).await
 }
 
 pub async fn create_vpc(

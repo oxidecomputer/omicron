@@ -729,6 +729,7 @@ impl Instance {
                 hardware
                     .properties
                     .hostname
+                    .as_str()
                     .parse()
                     .map_err(Error::InvalidHostname)?,
             ),
@@ -760,7 +761,7 @@ impl Instance {
             // NOTE: Mostly lies.
             properties: propolis_client::types::InstanceProperties {
                 id,
-                name: hardware.properties.hostname.clone(),
+                name: hardware.properties.hostname.to_string(),
                 description: "Test description".to_string(),
                 image_id: Uuid::nil(),
                 bootrom_id: Uuid::nil(),

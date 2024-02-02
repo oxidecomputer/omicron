@@ -14,7 +14,9 @@ macro_rules! impl_typed_uuid_kind {
             impl TypedUuidKind for $kind {
                 #[inline]
                 fn tag() -> TypedUuidTag {
-                    TypedUuidTag::new($tag)
+                    // `const` ensures that tags are validated at compile-time.
+                    const TAG: TypedUuidTag = TypedUuidTag::new($tag);
+                    TAG
                 }
             }
         )*
@@ -23,4 +25,5 @@ macro_rules! impl_typed_uuid_kind {
 
 impl_typed_uuid_kind! {
     LoopbackAddressKind => "loopback_address",
+    TufRepoKind => "tuf_repo",
 }

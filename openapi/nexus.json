@@ -2252,6 +2252,83 @@
         "x-dropshot-websocket": {}
       }
     },
+    "/v1/instances/{instance}/ssh-public-keys": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List the SSH public keys added to the instance via cloud-init during instance creation",
+        "description": "Note that this list is a snapshot in time and will not reflect updates made after the instance is created.",
+        "operationId": "instance_ssh_public_key_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKeyResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/instances/{instance}/start": {
       "post": {
         "tags": [
@@ -5827,6 +5904,97 @@
         }
       }
     },
+    "/v1/system/networking/bfd-disable": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Disable a BFD session.",
+        "operationId": "networking_bfd_disable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BfdSessionDisable"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bfd-enable": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Enable a BFD session.",
+        "operationId": "networking_bfd_enable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BfdSessionEnable"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bfd-status": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BFD status.",
+        "operationId": "networking_bfd_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BfdStatus",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BfdStatus"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/bgp": {
       "get": {
         "tags": [
@@ -8486,6 +8654,161 @@
           "part",
           "revision",
           "serial"
+        ]
+      },
+      "BfdMode": {
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdSessionDisable": {
+        "description": "Information needed to disable a BFD session",
+        "type": "object",
+        "properties": {
+          "remote": {
+            "description": "Address of the remote peer to disable a BFD session for.",
+            "type": "string",
+            "format": "ip"
+          },
+          "switch": {
+            "description": "The switch to enable this session on. Must be `switch0` or `switch1`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "remote",
+          "switch"
+        ]
+      },
+      "BfdSessionEnable": {
+        "description": "Information about a bidirectional forwarding detection (BFD) session.",
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "description": "The negotiated Control packet transmission interval, multiplied by this variable, will be the Detection Time for this session (as seen by the remote system)",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "description": "Address the Oxide switch will listen on for BFD traffic. If `None` then the unspecified address (0.0.0.0 or ::) is used.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "description": "Select either single-hop (RFC 5881) or multi-hop (RFC 5883)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BfdMode"
+              }
+            ]
+          },
+          "remote": {
+            "description": "Address of the remote peer to establish a BFD session with.",
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "description": "The minimum interval, in microseconds, between received BFD Control packets that this system requires",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "description": "The switch to enable this session on. Must be `switch0` or `switch1`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
+        ]
+      },
+      "BfdState": {
+        "oneOf": [
+          {
+            "description": "A stable down state. Non-responsive to incoming messages.",
+            "type": "string",
+            "enum": [
+              "admin_down"
+            ]
+          },
+          {
+            "description": "The initial state.",
+            "type": "string",
+            "enum": [
+              "down"
+            ]
+          },
+          {
+            "description": "The peer has detected a remote peer in the down state.",
+            "type": "string",
+            "enum": [
+              "init"
+            ]
+          },
+          {
+            "description": "The peer has detected a remote peer in the up or init state while in the init state.",
+            "type": "string",
+            "enum": [
+              "up"
+            ]
+          }
+        ]
+      },
+      "BfdStatus": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "peer": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/BfdState"
+          },
+          "switch": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "peer",
+          "required_rx",
+          "state",
+          "switch"
         ]
       },
       "BgpAnnounceSet": {
@@ -11898,6 +12221,14 @@
           "start_time"
         ]
       },
+      "Hostname": {
+        "title": "An RFC-1035-compliant hostname",
+        "description": "A hostname identifies a host on a network, and is usually a dot-delimited sequence of labels, where each label contains only letters, digits, or the hyphen. See RFCs 1035 and 952 for more details.",
+        "type": "string",
+        "pattern": "^([a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))(\\.[a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))*$",
+        "minLength": 1,
+        "maxLength": 253
+      },
       "IdentityProvider": {
         "description": "View of an Identity Provider",
         "type": "object",
@@ -12331,7 +12662,7 @@
             }
           },
           "hostname": {
-            "type": "string"
+            "$ref": "#/components/schemas/Hostname"
           },
           "memory": {
             "$ref": "#/components/schemas/ByteCount"
@@ -12352,6 +12683,14 @@
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
               }
             ]
+          },
+          "ssh_public_keys": {
+            "nullable": true,
+            "description": "An allowlist of SSH public keys to be transferred to the instance via cloud-init during instance creation.\n\nIf not provided, all SSH public keys from the user's profile will be sent. If an empty list is provided, no public keys will be transmitted to the instance.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
           },
           "start": {
             "description": "Should this instance be started upon creation; true by default.",

@@ -352,7 +352,9 @@ dependencies = [
 name = "authz-macros"
 version = "0.1.0"
 dependencies = [
+ "expectorate",
  "heck 0.4.1",
+ "nexus-macros-common",
  "omicron-workspace-hack",
  "prettyplease",
  "proc-macro2",
@@ -1511,7 +1513,9 @@ dependencies = [
 name = "db-macros"
 version = "0.1.0"
 dependencies = [
+ "expectorate",
  "heck 0.4.1",
+ "nexus-macros-common",
  "omicron-workspace-hack",
  "prettyplease",
  "proc-macro2",
@@ -1939,7 +1943,7 @@ dependencies = [
  "hostname",
  "http 0.2.11",
  "hyper 0.14.27",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "multer",
  "openapiv3",
  "paste",
@@ -2630,6 +2634,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gethostname"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0176e0459c2e4a1fe232f984bca6890e681076abb9934f6cea7c326f3fc47818"
+dependencies = [
+ "libc",
+ "windows-targets 0.48.5",
+]
+
+[[package]]
 name = "getopts"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2732,8 +2746,8 @@ dependencies = [
  "debug-ignore",
  "fixedbitset",
  "guppy-workspace-hack",
- "indexmap 2.1.0",
- "itertools 0.12.0",
+ "indexmap 2.2.2",
+ "itertools 0.12.1",
  "nested",
  "once_cell",
  "pathdiff",
@@ -2764,7 +2778,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.11",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "slab",
  "tokio",
  "tokio-util",
@@ -3359,9 +3373,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.1.0"
+version = "2.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d530e1a18b1cb4c484e6e34556a0d948706958449fca0cab753d649f2bce3d1f"
+checksum = "824b2ae422412366ba479e8111fd301f7b5faece8149317bb81925979a53f520"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.2",
@@ -3425,7 +3439,7 @@ dependencies = [
  "installinator-artifact-client",
  "installinator-common",
  "ipcc",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "libc",
  "omicron-common",
  "omicron-test-utils",
@@ -3648,9 +3662,9 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.12.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25db6b064527c5d482d0423354fcd07a89a2dfe07b67892e62411946db7f07b0"
+checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -3759,9 +3773,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.152"
+version = "0.2.153"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13e3bf6590cbc649f4d1a3eefc9d5d6eb746f5200ffb04e5e142700b8faa56e7"
+checksum = "9c198f91728a82281a64e1f4f9eeb25d82cb32a5de251c6bd1b5154d63a8e7bd"
 
 [[package]]
 name = "libdlpi-sys"
@@ -4194,9 +4208,9 @@ dependencies = [
 
 [[package]]
 name = "newtype-uuid"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40ea6931c6121ed9346ae7b7a6fc413af6e1ab203faa83bca1738cf09edc6f5b"
+checksum = "cab418c132d469e5eb02f642b0cf9cf1702118738eba05bc89bf70d28f44afdd"
 dependencies = [
  "schemars",
  "serde",
@@ -4210,6 +4224,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac8cd24d9f185bb7223958d8c1ff7a961b74b1953fd05dba7cc568a63b3861ec"
 dependencies = [
  "rustc_version 0.1.7",
+]
+
+[[package]]
+name = "nexus-blueprint-execution"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "httptest",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
+ "nexus-types",
+ "omicron-common",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "reqwest",
+ "sled-agent-client",
+ "slog",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -4299,7 +4338,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "macaddr",
  "newtype-uuid",
  "newtype_derive",
@@ -4405,6 +4444,16 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "nexus-macros-common"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -4948,10 +4997,11 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnetwork",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "macaddr",
  "mg-admin-client",
  "mime_guess",
+ "nexus-blueprint-execution",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
@@ -5166,7 +5216,7 @@ dependencies = [
  "installinator-common",
  "internal-dns",
  "ipnetwork",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "key-manager",
  "libc",
  "macaddr",
@@ -5304,7 +5354,7 @@ dependencies = [
  "hex",
  "hmac",
  "hyper 0.14.27",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
@@ -5423,7 +5473,7 @@ version = "0.4.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ef442ee4343e97b6d9c217d3e7533962fe7d7236"
 dependencies = [
  "heck 0.4.1",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "lazy_static",
  "openapiv3",
  "regex",
@@ -5435,7 +5485,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc02deea53ffe807708244e5914f6b099ad7015a207ee24317c22112e17d9c5c"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "serde",
  "serde_json",
 ]
@@ -5692,8 +5742,8 @@ dependencies = [
  "expectorate",
  "futures",
  "highway",
- "indexmap 2.1.0",
- "itertools 0.12.0",
+ "indexmap 2.2.2",
+ "itertools 0.12.1",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -6068,7 +6118,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "serde",
  "serde_derive",
 ]
@@ -6485,7 +6535,7 @@ dependencies = [
  "getopts",
  "heck 0.4.1",
  "http 0.2.11",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -6507,7 +6557,7 @@ dependencies = [
  "getopts",
  "heck 0.4.1",
  "http 0.2.11",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -6805,7 +6855,7 @@ dependencies = [
  "cassowary",
  "crossterm",
  "indoc 2.0.3",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "lru",
  "paste",
  "stability",
@@ -6902,7 +6952,7 @@ dependencies = [
  "chrono",
  "crossterm",
  "fd-lock 3.0.13",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "nu-ansi-term",
  "serde",
  "strip-ansi-escapes",
@@ -7876,7 +7926,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "serde",
  "serde_json",
  "serde_with_macros",
@@ -7901,7 +7951,7 @@ version = "0.9.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a49e178e4452f45cb61d0cd8cebc1b0fafd3e41929e996cef79aa3aca91f574"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "itoa",
  "ryu",
  "serde",
@@ -8087,6 +8137,7 @@ dependencies = [
  "camino",
  "cfg-if",
  "futures",
+ "gethostname",
  "illumos-devinfo",
  "illumos-utils",
  "libc",
@@ -8438,7 +8489,7 @@ version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce81b7bd7c4493975347ef60d8c7e8b742d4694f4c49f93e0a12ea263938176c"
 dependencies = [
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "nom",
  "unicode_categories",
 ]
@@ -9236,7 +9287,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9249,7 +9300,7 @@ version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
 dependencies = [
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9521,7 +9572,7 @@ dependencies = [
  "futures",
  "hex",
  "hubtools",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -9768,7 +9819,7 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "indicatif",
  "libsw",
  "linear-map",
@@ -10181,9 +10232,9 @@ dependencies = [
  "crossterm",
  "futures",
  "humantime",
- "indexmap 2.1.0",
+ "indexmap 2.2.2",
  "indicatif",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
@@ -10289,7 +10340,7 @@ dependencies = [
  "installinator-common",
  "internal-dns",
  "ipnetwork",
- "itertools 0.12.0",
+ "itertools 0.12.1",
  "maplit",
  "omicron-certificates",
  "omicron-common",
@@ -10307,7 +10358,6 @@ dependencies = [
  "sled-hardware",
  "slog",
  "slog-dtrace",
- "snafu",
  "subprocess",
  "tar",
  "thiserror",

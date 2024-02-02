@@ -38,12 +38,14 @@ members = [
     "key-manager",
     "nexus",
     "nexus/authz-macros",
+    "nexus/blueprint-execution",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
     "nexus/deployment",
     "nexus/inventory",
+    "nexus/macros-common",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -113,12 +115,14 @@ default-members = [
     "key-manager",
     "nexus",
     "nexus/authz-macros",
+    "nexus/blueprint-execution",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
     "nexus/deployment",
     "nexus/inventory",
+    "nexus/macros-common",
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
@@ -208,6 +212,7 @@ gateway-client = { path = "clients/gateway-client" }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = ["std"] }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9" }
 gateway-test-utils = { path = "gateway-test-utils" }
+gethostname = "0.4.3"
 glob = "0.3.1"
 guppy = "0.17.4"
 headers = "0.3.9"
@@ -224,7 +229,7 @@ hyper = "0.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
-indexmap = "2.1.0"
+indexmap = "2.2.2"
 indicatif = { version = "0.17.7", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
@@ -234,10 +239,10 @@ internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
 ipnetwork = { version = "0.20", features = ["schemars"] }
-itertools = "0.12.0"
+itertools = "0.12.1"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.3"
-libc = "0.2.152"
+libc = "0.2.153"
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
@@ -245,17 +250,19 @@ mime_guess = "2.0.4"
 mockall = "0.12"
 newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
+nexus-blueprint-execution = { path = "nexus/blueprint-execution" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-deployment = { path = "nexus/deployment" }
 nexus-inventory = { path = "nexus/inventory" }
+nexus-macros-common = { path = "nexus/macros-common" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
 oxlog = { path = "dev-tools/oxlog" }
-newtype-uuid = { version = "0.1.0", features = ["schemars08", "serde", "v4"] }
+newtype-uuid = { version = "0.2.0", features = ["schemars08", "serde", "v4"] }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
@@ -301,7 +308,7 @@ postgres-protocol = "0.6.6"
 predicates = "3.1.0"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
-prettyplease = "0.2.16"
+prettyplease = { version = "0.2.16", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -355,7 +362,6 @@ slog-envlogger = "2.2"
 slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
 slog-term = "2.9"
 smf = "0.2"
-snafu = "0.7"
 sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
@@ -409,7 +415,7 @@ wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
-zone = { version = "0.3", default-features = false, features = ["async"] }
+zone = { version = "0.3", default-features = false, features = ["async", "sync"] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that

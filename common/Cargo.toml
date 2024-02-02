@@ -39,6 +39,7 @@ parse-display.workspace = true
 progenitor.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true
+regress.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

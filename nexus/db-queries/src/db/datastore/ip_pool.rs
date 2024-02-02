@@ -330,6 +330,7 @@ impl DataStore {
     ) -> ListResultVec<IpPoolResource> {
         use db::schema::ip_pool;
         use db::schema::ip_pool_resource;
+        use db::schema::silo;
 
         paginated(
             ip_pool_resource::table,
@@ -337,8 +338,11 @@ impl DataStore {
             pagparams,
         )
         .inner_join(ip_pool::table)
+        .inner_join(silo::table.on(silo::id.eq(ip_pool_resource::resource_id)))
         .filter(ip_pool::id.eq(authz_pool.id()))
         .filter(ip_pool::time_deleted.is_null())
+        .filter(silo::time_deleted.is_null())
+        .filter(silo::discoverable.eq(true))
         .select(IpPoolResource::as_select())
         .load_async::<IpPoolResource>(
             &*self.pool_connection_authorized(opctx).await?,

@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(29, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(32, 0, 0);
 
 table! {
     disk (id) {
@@ -431,6 +431,7 @@ table! {
     silo_utilization(silo_id) {
         silo_id -> Uuid,
         silo_name -> Text,
+        silo_discoverable -> Bool,
         cpus_provisioned -> Int8,
         memory_provisioned -> Int8,
         storage_provisioned -> Int8,
@@ -710,6 +711,13 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         silo_user_id -> Uuid,
         public_key -> Text,
+    }
+}
+
+table! {
+    instance_ssh_key (instance_id, ssh_key_id) {
+        instance_id -> Uuid,
+        ssh_key_id -> Uuid,
     }
 }
 
@@ -1479,6 +1487,21 @@ table! {
 }
 
 table! {
+    bfd_session (remote, switch) {
+        id -> Uuid,
+        local -> Nullable<Inet>,
+        remote -> Inet,
+        detection_threshold -> Int8,
+        required_rx -> Int8,
+        switch -> Text,
+        mode -> crate::BfdModeEnum,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,
@@ -1488,7 +1511,12 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(ip_pool_range, ip_pool, ip_pool_resource);
+allow_tables_to_appear_in_same_query!(
+    ip_pool_range,
+    ip_pool,
+    ip_pool_resource,
+    silo
+);
 joinable!(ip_pool_range -> ip_pool (ip_pool_id));
 joinable!(ip_pool_resource -> ip_pool (ip_pool_id));
 
@@ -1559,3 +1587,7 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
 
 allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
+
+allow_tables_to_appear_in_same_query!(ssh_key, instance_ssh_key, instance);
+joinable!(instance_ssh_key -> ssh_key (ssh_key_id));
+joinable!(instance_ssh_key -> instance (instance_id));

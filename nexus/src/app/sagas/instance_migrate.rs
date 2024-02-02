@@ -568,8 +568,9 @@ mod tests {
                 },
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(2),
-                hostname: String::from(INSTANCE_NAME),
+                hostname: INSTANCE_NAME.parse().unwrap(),
                 user_data: b"#cloud-config".to_vec(),
+                ssh_public_keys: Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],

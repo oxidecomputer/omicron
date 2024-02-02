@@ -71,19 +71,6 @@ use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
 
-// A limit for querying the last inventory collection
-//
-// We set a limit of 200 here to give us some breathing room when
-// querying for cabooses and RoT pages, each of which is "4 per SP/RoT",
-// which in a single fully populated rack works out to (32 sleds + 2
-// switches + 1 psc) * 4 = 140.
-//
-// This feels bad and probably needs more thought; see
-// https://github.com/oxidecomputer/omicron/issues/4621 where this limit
-// being too low bit us, and it will link to a more general followup
-// issue.
-const INVENTORY_COLLECTION_LIMIT: u32 = 200;
-
 impl super::Nexus {
     pub(crate) async fn racks_list(
         &self,
@@ -812,11 +799,8 @@ impl super::Nexus {
     ) -> ListResultVec<UninitializedSled> {
         debug!(self.log, "Getting latest collection");
         // Grab the SPs from the last collection
-        let limit = NonZeroU32::new(INVENTORY_COLLECTION_LIMIT).unwrap();
-        let collection = self
-            .db_datastore
-            .inventory_get_latest_collection(opctx, limit)
-            .await?;
+        let collection =
+            self.db_datastore.inventory_get_latest_collection(opctx).await?;
 
         // There can't be any uninitialized sleds we know about
         // if there is no inventory.
@@ -888,11 +872,8 @@ impl super::Nexus {
             .await?;
 
         // Grab the SPs from the last collection
-        let limit = NonZeroU32::new(INVENTORY_COLLECTION_LIMIT).unwrap();
-        let collection = self
-            .db_datastore
-            .inventory_get_latest_collection(opctx, limit)
-            .await?;
+        let collection =
+            self.db_datastore.inventory_get_latest_collection(opctx).await?;
 
         // If there isn't a collection, we don't know about the sled
         let Some(collection) = collection else {
