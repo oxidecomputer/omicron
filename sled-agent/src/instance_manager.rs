@@ -61,7 +61,12 @@ pub enum Error {
     ZoneBundle(#[from] BundleError),
 
     #[error("Failed to send request to Instance Manager: Channel closed")]
-    FailedSendChannelClosed,
+    FailedSendInstanceManagerClosed,
+
+    #[error(
+        "Failed to send request from Instance Manager: Client Channel closed"
+    )]
+    FailedSendClientClosed,
 
     #[error("Instance Manager dropped our request")]
     RequestDropped(#[from] oneshot::error::RecvError),
@@ -244,7 +249,7 @@ impl InstanceManager {
                 tx,
             })
             .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
 
@@ -260,7 +265,7 @@ impl InstanceManager {
                 tx,
             })
             .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
 
@@ -278,7 +283,7 @@ impl InstanceManager {
                 tx,
             })
             .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
 
@@ -298,7 +303,7 @@ impl InstanceManager {
                 tx,
             })
             .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
 
@@ -318,7 +323,7 @@ impl InstanceManager {
                 tx,
             })
             .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
 
@@ -353,7 +358,7 @@ impl InstanceManager {
                 tx,
             })
             .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
 
@@ -371,7 +376,7 @@ impl InstanceManager {
                 tx,
             })
             .await
-            .map_err(|_| Error::FailedSendChannelClosed)?;
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
     }
 }
@@ -382,6 +387,7 @@ impl InstanceManager {
 // the runner task.
 //
 // By convention, responses are sent on the "tx" oneshot.
+#[derive(strum::Display)]
 enum InstanceManagerRequest {
     EnsureRegistered {
         instance_id: Uuid,
@@ -494,7 +500,8 @@ impl InstanceManagerRunner {
                     }
                 },
                 request = self.rx.recv() => {
-                    match request {
+                    let request_variant = request.as_ref().map(|r| r.to_string());
+                    let result = match request {
                         Some(EnsureRegistered {
                             instance_id,
                             propolis_id,
@@ -504,33 +511,42 @@ impl InstanceManagerRunner {
                             propolis_addr,
                             tx,
                         }) => {
-                            let _ = tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr).await);
+                            tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr).await).map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(EnsureUnregistered { instance_id, tx }) => {
-                            let _ = self.ensure_unregistered(tx, instance_id).await;
+                            self.ensure_unregistered(tx, instance_id).await
                         },
                         Some(EnsureState { instance_id, target, tx }) => {
-                            let _ = self.ensure_state(tx, instance_id, target).await;
+                            self.ensure_state(tx, instance_id, target).await
                         },
-                        Some(PutMigrationIds{ instance_id, old_runtime, migration_ids, tx }) => {
-                            let _ = self.put_migration_ids(tx, instance_id, &old_runtime, &migration_ids).await;
+                        Some(PutMigrationIds { instance_id, old_runtime, migration_ids, tx }) => {
+                            self.put_migration_ids(tx, instance_id, &old_runtime, &migration_ids).await
                         },
-                        Some(InstanceIssueDiskSnapshot{ instance_id, disk_id, snapshot_id, tx }) => {
-                            let _ = self.instance_issue_disk_snapshot_request(tx, instance_id, disk_id, snapshot_id).await;
+                        Some(InstanceIssueDiskSnapshot { instance_id, disk_id, snapshot_id, tx }) => {
+                            self.instance_issue_disk_snapshot_request(tx, instance_id, disk_id, snapshot_id).await
                         },
-                        Some(CreateZoneBundle{ name, tx }) => {
-                            let _ = self.create_zone_bundle(tx, &name).await.map_err(Error::from);
+                        Some(CreateZoneBundle { name, tx }) => {
+                            self.create_zone_bundle(tx, &name).await.map_err(Error::from)
                         },
-                        Some(InstanceAddExternalIp{ instance_id, ip, tx }) => {
-                            let _ = self.add_external_ip(tx, instance_id, &ip).await;
+                        Some(InstanceAddExternalIp { instance_id, ip, tx }) => {
+                            self.add_external_ip(tx, instance_id, &ip).await
                         },
-                        Some(InstanceDeleteExternalIp{ instance_id, ip, tx }) => {
-                            let _ = self.delete_external_ip(tx, instance_id, &ip).await;
+                        Some(InstanceDeleteExternalIp { instance_id, ip, tx }) => {
+                            self.delete_external_ip(tx, instance_id, &ip).await
                         },
                         None => {
                             warn!(self.log, "InstanceManager's request channel closed; shutting down");
                             break;
                         },
+                    };
+
+                    if let Err(err) = result {
+                        warn!(
+                            self.log,
+                            "Error handling request";
+                            "request" => request_variant.unwrap(),
+                            "err" => ?err
+                        );
                     }
                 }
             }
@@ -652,7 +668,7 @@ impl InstanceManagerRunner {
         // If the instance does not exist, we response immediately.
         let Some(instance) = self.get_instance(instance_id) else {
             tx.send(Ok(InstanceUnregisterResponse { updated_runtime: None }))
-                .map_err(|_| Error::FailedSendChannelClosed)?;
+                .map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
 
@@ -684,11 +700,11 @@ impl InstanceManagerRunner {
                     tx.send(Ok(InstancePutStateResponse {
                         updated_runtime: None,
                     }))
-                    .map_err(|_| Error::FailedSendChannelClosed)?;
+                    .map_err(|_| Error::FailedSendClientClosed)?;
                 }
                 _ => {
                     tx.send(Err(Error::NoSuchInstance(instance_id)))
-                        .map_err(|_| Error::FailedSendChannelClosed)?;
+                        .map_err(|_| Error::FailedSendClientClosed)?;
                 }
             }
             return Ok(());

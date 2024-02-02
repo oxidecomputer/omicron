@@ -118,6 +118,11 @@ pub enum Error {
     #[error("Failed to send request to Instance: Channel closed")]
     FailedSendChannelClosed,
 
+    #[error(
+        "Failed to send request from Instance Runner: Client Channel closed"
+    )]
+    FailedSendClientClosed,
+
     #[error("Instance dropped our request")]
     RequestDropped(#[from] oneshot::error::RecvError),
 }
@@ -199,6 +204,7 @@ struct PropolisSetup {
 }
 
 // Requests that can be made of instances
+#[derive(strum::Display)]
 enum InstanceRequest {
     RequestZoneBundle {
         tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
@@ -372,7 +378,9 @@ impl InstanceRunner {
                             // InstanceMonitorRunner has stopped running for
                             // some reason. We'd presumably handle that on the
                             // next iteration of the loop.
-                            let _ = tx.send(reaction);
+                            if let Err(_) = tx.send(reaction) {
+                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
+                            }
                         },
                         // NOTE: This case shouldn't really happen, as we keep a copy
                         // of the sender alive in "self.tx_monitor".
@@ -386,52 +394,72 @@ impl InstanceRunner {
                 // Handle external requests to act upon the instance.
                 request = self.rx.recv() => {
                     use InstanceRequest::*;
-                    match request {
+                    let request_variant = request.as_ref().map(|r| r.to_string());
+                    let result = match request {
                         Some(RequestZoneBundle { tx }) => {
-                            let _ = tx.send(self.request_zone_bundle().await);
+                            tx.send(self.request_zone_bundle().await)
+                                .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(CurrentState{ tx }) => {
-                            let _ = tx.send(self.current_state().await);
+                            tx.send(self.current_state().await)
+                                .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(PutState{ state, tx }) => {
-                            let _ = tx.send(self.put_state(state).await
+                             tx.send(self.put_state(state).await
                                 .map(|r| InstancePutStateResponse { updated_runtime: Some(r) })
-                                .map_err(|e| e.into()));
+                                .map_err(|e| e.into()))
+                                .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(PutMigrationIds{ old_runtime, migration_ids, tx }) => {
-                            let _ = tx.send(
+                            tx.send(
                                 self.put_migration_ids(
                                     &old_runtime,
                                     &migration_ids
                                 ).await.map_err(|e| e.into())
-                            );
+                            )
+                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(Terminate { tx }) => {
-                            let _ = tx.send(Ok(InstanceUnregisterResponse {
+                            tx.send(Ok(InstanceUnregisterResponse {
                                 updated_runtime: Some(self.terminate().await)
-                            }));
+                            }))
+                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(IssueSnapshotRequest { disk_id, snapshot_id, tx }) => {
-                            let _ = tx.send(
+                            tx.send(
                                 self.issue_snapshot_request(
                                     disk_id,
                                     snapshot_id
                                 ).await.map_err(|e| e.into())
-                            );
+                            )
+                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(AddExternalIp { ip, tx }) => {
-                            let _ = tx.send(self.add_external_ip(&ip).await.map_err(|e| e.into()));
+                            tx.send(self.add_external_ip(&ip).await.map_err(|e| e.into()))
+                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(DeleteExternalIp { ip, tx }) => {
-                            let _ = tx.send(self.delete_external_ip(&ip).await.map_err(|e| e.into()));
+                            tx.send(self.delete_external_ip(&ip).await.map_err(|e| e.into()))
+                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         None => {
                             warn!(self.log, "Instance request channel closed; shutting down");
                             self.terminate().await;
                             break;
                         },
+                    };
+
+                    if let Err(err) = result {
+                        warn!(
+                            self.log,
+                            "Error handling request";
+                            "request" => request_variant.unwrap(),
+                            "err" => ?err,
+
+                        );
                     }
                 }
+
             }
         }
         self.publish_state_to_nexus().await;
