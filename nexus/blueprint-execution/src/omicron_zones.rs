@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
-pub async fn deploy_zones(
+pub(crate) async fn deploy_zones(
     log: &Logger,
     opctx: &OpContext,
     datastore: &DataStore,
@@ -50,7 +50,7 @@ pub async fn deploy_zones(
                         log,
                         "Successfully deployed zones for sled agent";
                         "sled_id" => %sled_id,
-                        "generation" => config.generation.to_string()
+                        "generation" => %config.generation,
                     );
                     None
                 }
@@ -249,7 +249,7 @@ mod test {
             );
         }
 
-        // Executre it.
+        // Execute it.
         deploy_zones(&log, &opctx, &datastore, &blueprint.1.omicron_zones)
             .await
             .expect("failed to deploy initial zones");
