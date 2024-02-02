@@ -460,12 +460,17 @@ fn do_authz_resource(
     })
 }
 
-// See the test for lookup_resource.
 #[cfg(test)]
 mod tests {
     use super::*;
+    use expectorate::assert_contents;
+
+    /// Ensures that generated code is as expected.
+    ///
+    /// For more information, see `test_lookup_snapshots` in
+    /// nexus/db-macros/src/lookup.rs.
     #[test]
-    fn test_authz_dump() {
+    fn test_authz_snapshots() {
         let output = do_authz_resource(quote! {
             name = "Organization",
             parent = "Fleet",
@@ -474,7 +479,7 @@ mod tests {
             polar_snippet = Custom,
         })
         .unwrap();
-        println!("{}", pretty_format(output));
+        assert_contents("outputs/organization.txt", &pretty_format(output));
 
         let output = do_authz_resource(quote! {
             name = "Instance",
@@ -487,7 +492,7 @@ mod tests {
             polar_snippet = InProject,
         })
         .unwrap();
-        println!("{}", pretty_format(output));
+        assert_contents("outputs/instance.txt", &pretty_format(output));
     }
 
     fn pretty_format(input: TokenStream) -> String {

@@ -17,4 +17,5 @@ syn.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+expectorate.workspace = true
 prettyplease.workspace = true

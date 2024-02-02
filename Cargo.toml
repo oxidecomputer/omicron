@@ -38,6 +38,7 @@ members = [
     "key-manager",
     "nexus",
     "nexus/authz-macros",
+    "nexus/blueprint-execution",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -113,6 +114,7 @@ default-members = [
     "key-manager",
     "nexus",
     "nexus/authz-macros",
+    "nexus/blueprint-execution",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -158,7 +160,7 @@ atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.7"
-bb8 = "0.8.1"
+bb8 = "0.8.3"
 bcs = "0.1.6"
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
@@ -246,6 +248,7 @@ mime_guess = "2.0.4"
 mockall = "0.12"
 newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
+nexus-blueprint-execution = { path = "nexus/blueprint-execution" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
@@ -301,7 +304,7 @@ postgres-protocol = "0.6.6"
 predicates = "3.1.0"
 pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
-prettyplease = "0.2.16"
+prettyplease = { version = "0.2.16", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -387,7 +390,7 @@ tokio-stream = "0.1.14"
 tokio-tungstenite = "0.20"
 tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
 toml = "0.8.8"
-toml_edit = "0.21.0"
+toml_edit = "0.21.1"
 tough = { version = "0.16.0", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"

@@ -46,7 +46,10 @@ pub struct Instance {
     pub memory: ByteCount,
 
     /// The instance's hostname.
-    // TODO-cleanup: Different type?
+    // TODO-cleanup: We use a validated wrapper type in the API, but not in
+    // between the database. This is to handle existing names that do not pass
+    // the new validation. We should swap this for a SQL-serializable validated
+    // type.
     #[diesel(column_name = hostname)]
     pub hostname: String,
 
@@ -81,7 +84,7 @@ impl Instance {
             user_data: params.user_data.clone(),
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
-            hostname: params.hostname.clone(),
+            hostname: params.hostname.to_string(),
             boot_on_fault: false,
             runtime_state,
         }
