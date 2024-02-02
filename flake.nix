@@ -34,39 +34,42 @@
             libxml2
           ];
 
-          downloadOpenAPI = { name, apiFile, versionPath }: with pkgs.lib; let
+          downloadBuildomat = let baseURL = "https://buildomat.eng.oxide.computer/public/file/oxidecomputer"; in kind: ({ repo, file, versionPath }: with pkgs.lib; let
             versionFile = strings.fileContents versionPath;
             parts = strings.splitString "\n" versionFile;
 
             extractHash = prefix: (line: trivial.pipe (elemAt parts line) [
               (strings.removeSuffix "\"")
               (strings.removePrefix "${prefix}=\"")
-              (debug.traceValFn (v: "${name} ${apiFile} ${prefix}=${v}"))
+              (debug.traceValFn (v: "${repo} ${file} ${prefix}=${v}"))
             ]);
 
             commit = extractHash "COMMIT" 0;
             sha = extractHash "SHA2" 1;
+            path = "${repo}/${kind}/${commit}/${file}";
           in
           builtins.fetchurl {
-            url = "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/${name}/openapi/${commit}/${apiFile}.json";
+            url = "${baseURL}/${path}";
             sha256 = sha;
-          };
+          });
+
+          downloadOpenAPI = downloadBuildomat "openapi";
 
           dendriteOpenAPI = downloadOpenAPI {
-            name = "dendrite";
-            apiFile = "dpd";
+            repo = "dendrite";
+            file = "dpd.json";
             versionPath = ./tools/dendrite_openapi_version;
           };
 
           ddmOpenAPI = downloadOpenAPI {
-            name = "maghemite";
-            apiFile = "ddm-admin";
+            repo = "maghemite";
+            file = "ddm-admin.json";
             versionPath = ./tools/maghemite_ddm_openapi_version;
           };
 
           mgOpenAPI = downloadOpenAPI {
-            name = "maghemite";
-            apiFile = "mg-admin";
+            repo = "maghemite";
+            file = "mg-admin.json";
             versionPath = ./tools/maghemite_mg_openapi_version;
           };
 
@@ -107,14 +110,6 @@
               # Needed by rustfmt-wrapper, see:
               # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
               RUSTFMT = "${rustToolchain}/bin/rustfmt";
-
-              # shellHook = ''
-              #   rm -r out/downloads
-              #   mkdir -p out/downloads
-              #   ln -s ${dendriteOpenAPI.file} out/downloads/${dendriteOpenAPI.filename}
-              #   ln -s ${mgOpenAPI.file} out/downloads/${mgOpenAPI.filename}
-              #   ln -s ${ddmOpenAPI.file} out/downloads/${ddmOpenAPI.filename}
-              # '';
             };
         }
       );
