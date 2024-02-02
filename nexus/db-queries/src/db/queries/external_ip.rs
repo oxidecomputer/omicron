@@ -1331,6 +1331,18 @@ mod tests {
         // Allocate an IP address as we would for an external, rack-associated
         // service.
         let service1_id = Uuid::new_v4();
+
+        // Check that `service_lookup_external_ips` returns an empty vector for
+        // a service with no external IPs.
+        assert_eq!(
+            context
+                .db_datastore
+                .service_lookup_external_ips(&context.opctx, service1_id)
+                .await
+                .expect("Failed to look up service external IPs"),
+            Vec::new(),
+        );
+
         let id1 = Uuid::new_v4();
         let ip1 = context
             .db_datastore

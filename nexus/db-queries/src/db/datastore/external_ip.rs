@@ -354,7 +354,8 @@ impl DataStore {
         service_id: Uuid,
         ip: IpAddr,
     ) -> CreateResult<ExternalIp> {
-        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
         let data = IncompleteExternalIp::for_service_explicit(
             ip_id,
             name,
@@ -378,7 +379,8 @@ impl DataStore {
         ip: IpAddr,
         port_range: (u16, u16),
     ) -> CreateResult<ExternalIp> {
-        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
         let data = IncompleteExternalIp::for_service_explicit_snat(
             ip_id,
             service_id,
