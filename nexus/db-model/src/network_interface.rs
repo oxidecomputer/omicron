@@ -84,7 +84,7 @@ pub struct InstanceNetworkInterface {
 /// The underlying "table" (`service_network_interface`) is actually a view
 /// over the `network_interface` table, that contains only rows with
 /// `kind = 'service'`.
-#[derive(Selectable, Queryable, Clone, Debug, Resource)]
+#[derive(Selectable, Queryable, Clone, Debug, PartialEq, Eq, Resource)]
 #[diesel(table_name = service_network_interface)]
 pub struct ServiceNetworkInterface {
     #[diesel(embed)]
