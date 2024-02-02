@@ -35,22 +35,21 @@
           ];
 
           downloadOpenAPI = { name, apiFile, versionPath }: with pkgs.lib; let
-            extractHash = { line, prefix }: strings.removeSuffix "\"" (strings.removePrefix "${prefix}=\"" line);
             versionFile = strings.fileContents versionPath;
             parts = strings.splitString "\n" versionFile;
-            commit = extractHash { line = elemAt parts 0; prefix = "COMMIT"; };
-            sha = extractHash { line = elemAt parts 1; prefix = "SHA2"; };
+
+            extractHash = prefix: (line: trivial.pipe (elemAt parts line) [
+              (strings.removeSuffix "\"")
+              (strings.removePrefix "${prefix}=\"")
+              (debug.traceValFn (v: "${name} ${apiFile} ${prefix}=${v}"))
+            ]);
+
+            commit = extractHash "COMMIT" 0;
+            sha = extractHash "SHA2" 1;
           in
-          {
-            file = builtins.fetchurl {
-              url = "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/${name}/openapi/${commit}/${apiFile}.json";
-              sha256 = sha;
-            };
-            filename =
-              let
-                f = "${apiFile}-${commit}.json";
-              in
-              debug.traceValFn (v: " downloaded ${name} OpenAPI: ${v}") f;
+          builtins.fetchurl {
+            url = "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/${name}/openapi/${commit}/${apiFile}.json";
+            sha256 = sha;
           };
 
           dendriteOpenAPI = downloadOpenAPI {
@@ -101,17 +100,21 @@
               OPENSSL_DIR = "${openssl.dev}";
               OPENSSL_LIB_DIR = "${openssl.out}/lib";
 
+              MG_OPENAPI_PATH = mgOpenAPI;
+              DDM_OPENAPI_PATH = ddmOpenAPI;
+              DENDRITE_OPENAPI_PATH = dendriteOpenAPI;
+
               # Needed by rustfmt-wrapper, see:
               # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
               RUSTFMT = "${rustToolchain}/bin/rustfmt";
 
-              shellHook = ''
-                rm -r out/downloads
-                mkdir -p out/downloads
-                ln -s ${dendriteOpenAPI.file} out/downloads/${dendriteOpenAPI.filename}
-                ln -s ${mgOpenAPI.file} out/downloads/${mgOpenAPI.filename}
-                ln -s ${ddmOpenAPI.file} out/downloads/${ddmOpenAPI.filename}
-              '';
+              # shellHook = ''
+              #   rm -r out/downloads
+              #   mkdir -p out/downloads
+              #   ln -s ${dendriteOpenAPI.file} out/downloads/${dendriteOpenAPI.filename}
+              #   ln -s ${mgOpenAPI.file} out/downloads/${mgOpenAPI.filename}
+              #   ln -s ${ddmOpenAPI.file} out/downloads/${ddmOpenAPI.filename}
+              # '';
             };
         }
       );
