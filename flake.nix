@@ -125,13 +125,24 @@
           {
             name = "dendrite-stub";
             src = tarball;
-            installPhase = ''
-              mkdir -p $out/bin
-              cp ${swadm} $out/bin/swadm
-              chmod +x $out/bin/swadm
-              cp ${dpd} $out/bin/dpd
-              chmod +x $out/bin/dpd
-            '';
+
+            phases = [ "unpackPhase" "installPhase" ];
+            installPhase =
+              let
+                binPath = "root/opt/oxide/dendrite/bin";
+              in
+              ''
+                mkdir -p $out/${binPath}
+                cp -r . $out/root
+                cp ${swadm} $out/${binPath}/swadm
+                chmod +x $out/${binPath}/swadm
+                cp ${dpd} $out/${binPath}/dpd
+                chmod +x $out/${binPath}/dpd
+
+                mkdir -p $out/bin
+                ln -s $out/${binPath}/swadm $out/bin/swadm
+                ln -s $out/${binPath}/dpd $out/bin/dpd
+              '';
           };
 
       maghemiteMgd = with pkgs.lib;
@@ -161,11 +172,19 @@
           {
             name = "mgd";
             src = tarball;
-            installPhase = ''
-              mkdir -p $out/bin
-              cp ${linuxBin} $out/bin/mgd
-              chmod +x $out/bin/mgd
-            '';
+            installPhase =
+              let
+                binPath = "root/opt/oxide/mgd/bin";
+              in
+              ''
+                mkdir -p $out/${binPath}
+                cp -r . $out/root
+                cp ${linuxBin} $out/${binPath}/mgd
+                chmod +x $out/${binPath}/mgd
+
+                mkdir -p $out/bin
+                ln -s $out/${binPath}/mgd $out/bin/mgd
+              '';
           };
 
       # omicronDrv = with pkgs; clangStdenv.mkDerivation {
@@ -197,12 +216,19 @@
             cmake
             stdenv
             pkg-config
+            # Dendrite and maghemite, for running tests.
             dendriteStub
             maghemiteMgd
+            # The Clickhouse binary downloaded by
+            # `tools/install_builder_prerequisites.sh` doesn't work nicely
+            # on NixOS due to dynamically loading a bunch of libraries in a
+            # way that `nix-ld` doesn't seem to help with. Therefore, depend
+            # on the pre-built patched clickhouse package from nixpkgs,
+            # instead.
+            clickhouse
           ];
 
           name = "omicron";
-          src = ./.;
           DEP_PQ_LIBDIRS = "${postgresql.lib}/lib";
           LIBCLANG_PATH = "${libclang.lib}/lib";
           OPENSSL_DIR = "${openssl.dev}";
@@ -210,7 +236,17 @@
 
           MG_OPENAPI_PATH = mgOpenAPI;
           DDM_OPENAPI_PATH = ddmOpenAPI;
-          DENDRITE_OPENAPI_PATH = dendriteOpenAPI;
+          DPD_OPENAPI_PATH = dendriteOpenAPI;
+
+          shellHook = ''
+            rm out/mgd
+            rm out/dendrite-stub
+
+            mkdir out
+
+            ln -s ${maghemiteMgd.out} -T out/mgd
+            ln -s ${dendriteStub.out} -T out/dendrite-stub
+          '';
 
           # Needed by rustfmt-wrapper, see:
           # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
