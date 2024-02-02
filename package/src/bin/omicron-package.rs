@@ -448,7 +448,6 @@ async fn ensure_package(
                 target,
                 progress: &progress,
                 cache_disabled: disable_cache,
-                ..Default::default()
             };
             package
                 .create(package_name, &output_directory, &build_config)
