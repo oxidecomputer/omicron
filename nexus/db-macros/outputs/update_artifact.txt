@@ -188,7 +188,10 @@ impl<'a> UpdateArtifact<'a> {
                         ResourceType::UpdateArtifact,
                         LookupType::ByCompositeId(
                             format!(
-                                "name = {:?}, version = {:?}, kind = {:?}", v0, v1, v2,
+                                "name = {:?}, version = {:?}, kind = {:?}",
+                                v0,
+                                v1,
+                                v2,
                             ),
                         ),
                     ),
@@ -198,7 +201,7 @@ impl<'a> UpdateArtifact<'a> {
             &&authz::FLEET,
             &db_row,
             LookupType::ByCompositeId(
-                format!("name = {:?}, version = {:?}, kind = {:?}", v0, v1, v2,),
+                format!("name = {:?}, version = {:?}, kind = {:?}", v0, v1, v2),
             ),
         );
         Ok((authz_update_artifact, db_row))
