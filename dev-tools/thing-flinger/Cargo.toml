@@ -7,6 +7,7 @@ license = "MPL-2.0"
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 clap.workspace = true
 crossbeam.workspace = true
 omicron-package.workspace = true
