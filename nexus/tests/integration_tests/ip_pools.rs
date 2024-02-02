@@ -438,8 +438,13 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     let assocs_p0 = silos_for_pool(client, "p0").await;
     assert_eq!(assocs_p0.items.len(), 0);
 
-    let silo_name = cptestctx.silo_name.as_str();
-    let silo_pools = pools_for_silo(client, silo_name).await;
+    // we need to use a discoverable silo because non-discoverable silos, while
+    // linkable, are filtered out of the list of linked silos for a pool. the
+    // test silo at cptestctx.silo_name is non-discoverable.
+    let silo =
+        create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
+
+    let silo_pools = pools_for_silo(client, silo.name().as_str()).await;
     assert_eq!(silo_pools.len(), 0);
 
     // expect 404 on association if the specified silo doesn't exist
@@ -466,9 +471,10 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.message, not_found);
 
     // associate by name with silo that exists
-    let silo = NameOrId::Name(cptestctx.silo_name.clone());
-    let params =
-        params::IpPoolLinkSilo { silo: silo.clone(), is_default: false };
+    let params = params::IpPoolLinkSilo {
+        silo: NameOrId::Name(silo.name().clone()),
+        is_default: false,
+    };
     let _: IpPoolSiloLink =
         object_create(client, "/v1/system/ip-pools/p0/silos", &params).await;
 
@@ -483,7 +489,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
 
     // get silo ID so we can test association by ID as well
-    let silo_url = format!("/v1/system/silos/{}", cptestctx.silo_name);
+    let silo_url = format!("/v1/system/silos/{}", silo.name());
     let silo_id = object_get::<Silo>(client, &silo_url).await.identity.id;
 
     let assocs_p0 = silos_for_pool(client, "p0").await;
@@ -495,7 +501,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(assocs_p0.items.len(), 1);
     assert_eq!(assocs_p0.items[0], silo_link);
 
-    let silo_pools = pools_for_silo(client, silo_name).await;
+    let silo_pools = pools_for_silo(client, silo.name().as_str()).await;
     assert_eq!(silo_pools.len(), 1);
     assert_eq!(silo_pools[0].identity.id, p0.identity.id);
     assert_eq!(silo_pools[0].is_default, false);
@@ -519,7 +525,7 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
         }
     );
 
-    let silo_pools = pools_for_silo(client, silo_name).await;
+    let silo_pools = pools_for_silo(client, silo.name().as_str()).await;
     assert_eq!(silo_pools.len(), 2);
     assert_eq!(silo_pools[0].id(), p0.id());
     assert_eq!(silo_pools[0].is_default, false);
@@ -539,20 +545,49 @@ async fn test_ip_pool_silo_link(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(error.error_code.unwrap(), "ObjectAlreadyExists");
 
     // unlink p1 from silo (doesn't matter that it's a default)
-    let url = format!("/v1/system/ip-pools/p1/silos/{}", cptestctx.silo_name);
+    let url = format!("/v1/system/ip-pools/p1/silos/{}", silo.name().as_str());
     object_delete(client, &url).await;
 
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 0);
 
     // after unlinking p1, only p0 is left
-    let silo_pools = pools_for_silo(client, silo_name).await;
+    let silo_pools = pools_for_silo(client, silo.name().as_str()).await;
     assert_eq!(silo_pools.len(), 1);
     assert_eq!(silo_pools[0].identity.id, p0.identity.id);
     assert_eq!(silo_pools[0].is_default, false);
 
     // now we can delete the pool too
     object_delete(client, "/v1/system/ip-pools/p1").await;
+}
+
+/// Non-discoverable silos can be linked to a pool, but they do not show up
+/// in the list of silos for that pool, just as they do not show up in the
+/// top-level list of silos
+#[nexus_test]
+async fn test_ip_pool_silo_list_only_discoverable(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    create_pool(client, "p0").await;
+
+    // there should be no linked silos
+    let silos_p0 = silos_for_pool(client, "p0").await;
+    assert_eq!(silos_p0.items.len(), 0);
+
+    let silo_disc =
+        create_silo(&client, "silo-disc", true, SiloIdentityMode::SamlJit)
+            .await;
+    link_ip_pool(client, "p0", &silo_disc.id(), false).await;
+
+    let silo_non_disc =
+        create_silo(&client, "silo-non-disc", false, SiloIdentityMode::SamlJit)
+            .await;
+    link_ip_pool(client, "p0", &silo_non_disc.id(), false).await;
+
+    let silos_p0 = silos_for_pool(client, "p0").await;
+    assert_eq!(silos_p0.items.len(), 1);
+    assert_eq!(silos_p0.items[0].silo_id, silo_disc.id());
 }
 
 #[nexus_test]
@@ -569,10 +604,15 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     let silos_p1 = silos_for_pool(client, "p1").await;
     assert_eq!(silos_p1.items.len(), 0);
 
+    // we need to use a discoverable silo because non-discoverable silos, while
+    // linkable, are filtered out of the list of linked silos for a pool. the
+    // test silo at cptestctx.silo_name is non-discoverable.
+    let silo =
+        create_silo(&client, "my-silo", true, SiloIdentityMode::SamlJit).await;
+
     // put 404s if link doesn't exist yet
     let params = IpPoolSiloUpdate { is_default: true };
-    let p0_silo_url =
-        format!("/v1/system/ip-pools/p0/silos/{}", cptestctx.silo_name);
+    let p0_silo_url = format!("/v1/system/ip-pools/p0/silos/{}", silo.name());
     let error =
         object_put_error(client, &p0_silo_url, &params, StatusCode::NOT_FOUND)
             .await;
@@ -582,9 +622,10 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
     );
 
     // associate both pools with the test silo
-    let silo = NameOrId::Name(cptestctx.silo_name.clone());
-    let params =
-        params::IpPoolLinkSilo { silo: silo.clone(), is_default: false };
+    let params = params::IpPoolLinkSilo {
+        silo: NameOrId::Name(silo.name().clone()),
+        is_default: false,
+    };
     let _: IpPoolSiloLink =
         object_create(client, "/v1/system/ip-pools/p0/silos", &params).await;
     let _: IpPoolSiloLink =
@@ -620,8 +661,7 @@ async fn test_ip_pool_update_default(cptestctx: &ControlPlaneTestContext) {
 
     // set p1 default
     let params = IpPoolSiloUpdate { is_default: true };
-    let p1_silo_url =
-        format!("/v1/system/ip-pools/p1/silos/{}", cptestctx.silo_name);
+    let p1_silo_url = format!("/v1/system/ip-pools/p1/silos/{}", silo.name());
     let _: IpPoolSiloLink = object_put(client, &p1_silo_url, &params).await;
 
     // p1 is now default

@@ -862,7 +862,8 @@ AS SELECT
     c.virtual_disk_bytes_provisioned AS storage_provisioned,
     q.cpus AS cpus_allocated,
     q.memory_bytes AS memory_allocated,
-    q.storage_bytes AS storage_allocated
+    q.storage_bytes AS storage_allocated,
+    s.discoverable as silo_discoverable
 FROM
     omicron.public.virtual_provisioning_collection AS c
     RIGHT JOIN omicron.public.silo_quotas AS q 
@@ -3371,6 +3372,30 @@ STORING (
     time_deleted
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.bfd_mode AS ENUM (
+    'single_hop',
+    'multi_hop'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.bfd_session (
+    id UUID PRIMARY KEY,
+    local INET,
+    remote INET NOT NULL,
+    detection_threshold INT8 NOT NULL,
+    required_rx INT8 NOT NULL,
+    switch TEXT NOT NULL,
+    mode  omicron.public.bfd_mode,
+
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_session (
+    remote,
+    switch
+) WHERE time_deleted IS NULL;
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -3418,7 +3443,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '30.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '32.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
