@@ -89,13 +89,13 @@ struct InstanceManagerInternal {
     tx: mpsc::Sender<InstanceManagerRequest>,
     // NOTE: Arguably, this field could be "owned" by the InstanceManagerRunner.
     // It was not moved there, and the reservoir functions were not converted to
-    // use the message-apssing interface (see: "InstanceManagerRequest") because
+    // use the message-passing interface (see: "InstanceManagerRequest") because
     // callers of "get/set reservoir size" are not async, and (in the case of
     // getting the size) they also do not expect a "Result" type.
     reservoir_size: Mutex<ByteCount>,
 
     #[allow(dead_code)]
-    runner_handle: tokio::task::JoinHandle<Result<(), Error>>,
+    runner_handle: tokio::task::JoinHandle<()>,
 }
 
 /// All instances currently running on the sled.
@@ -472,7 +472,7 @@ impl InstanceManagerRunner {
     /// Run the main loop of the InstanceManager.
     ///
     /// This should be spawned in a tokio task.
-    pub async fn run(mut self) -> Result<(), Error> {
+    pub async fn run(mut self) {
         use InstanceManagerRequest::*;
         loop {
             tokio::select! {
@@ -486,8 +486,11 @@ impl InstanceManagerRunner {
                     match request {
                         Some(request) => {
                             self.instances.remove(&request.id);
-                        }
-                        None => break,
+                        },
+                        None => {
+                            warn!(self.log, "InstanceManager's 'instance terminate' channel closed; shutting down");
+                            break;
+                        },
                     }
                 },
                 request = self.rx.recv() => {
@@ -516,7 +519,7 @@ impl InstanceManagerRunner {
                             let _ = self.instance_issue_disk_snapshot_request(tx, instance_id, disk_id, snapshot_id).await;
                         },
                         Some(CreateZoneBundle{ name, tx }) => {
-                            let _ = self.create_zone_bundle(tx, &name).await;
+                            let _ = self.create_zone_bundle(tx, &name).await.map_err(Error::from);
                         },
                         Some(InstanceAddExternalIp{ instance_id, ip, tx }) => {
                             let _ = self.add_external_ip(tx, instance_id, &ip).await;
@@ -524,12 +527,18 @@ impl InstanceManagerRunner {
                         Some(InstanceDeleteExternalIp{ instance_id, ip, tx }) => {
                             let _ = self.delete_external_ip(tx, instance_id, &ip).await;
                         },
-                        None => break,
+                        None => {
+                            warn!(self.log, "InstanceManager's request channel closed; shutting down");
+                            break;
+                        },
                     }
                 }
             }
         }
-        Ok(())
+    }
+
+    fn get_instance(&self, instance_id: Uuid) -> Option<&Instance> {
+        self.instances.get(&instance_id).map(|(_id, v)| v)
     }
 
     /// Ensures that the instance manager contains a registered instance with
@@ -641,7 +650,7 @@ impl InstanceManagerRunner {
         instance_id: Uuid,
     ) -> Result<(), Error> {
         // If the instance does not exist, we response immediately.
-        let Some((_, instance)) = self.instances.get(&instance_id) else {
+        let Some(instance) = self.get_instance(instance_id) else {
             tx.send(Ok(InstanceUnregisterResponse { updated_runtime: None }))
                 .map_err(|_| Error::FailedSendChannelClosed)?;
             return Ok(());
@@ -661,34 +670,28 @@ impl InstanceManagerRunner {
         instance_id: Uuid,
         target: InstanceStateRequested,
     ) -> Result<(), Error> {
-        let instance = {
-            let instance = self.instances.get(&instance_id);
-
-            if let Some((_, instance)) = instance {
-                instance
-            } else {
-                match target {
-                    // If the instance isn't registered, then by definition it
-                    // isn't running here. Allow requests to stop or destroy the
-                    // instance to succeed to provide idempotency. This has to
-                    // be handled here (that is, on the "instance not found"
-                    // path) to handle the case where a stop request arrived,
-                    // Propolis handled it, sled agent unregistered the
-                    // instance, and only then did a second stop request
-                    // arrive.
-                    InstanceStateRequested::Stopped => {
-                        tx.send(Ok(InstancePutStateResponse {
-                            updated_runtime: None,
-                        }))
-                        .map_err(|_| Error::FailedSendChannelClosed)?;
-                    }
-                    _ => {
-                        tx.send(Err(Error::NoSuchInstance(instance_id)))
-                            .map_err(|_| Error::FailedSendChannelClosed)?;
-                    }
+        let Some(instance) = self.get_instance(instance_id) else {
+            match target {
+                // If the instance isn't registered, then by definition it
+                // isn't running here. Allow requests to stop or destroy the
+                // instance to succeed to provide idempotency. This has to
+                // be handled here (that is, on the "instance not found"
+                // path) to handle the case where a stop request arrived,
+                // Propolis handled it, sled agent unregistered the
+                // instance, and only then did a second stop request
+                // arrive.
+                InstanceStateRequested::Stopped => {
+                    tx.send(Ok(InstancePutStateResponse {
+                        updated_runtime: None,
+                    }))
+                    .map_err(|_| Error::FailedSendChannelClosed)?;
                 }
-                return Ok(());
+                _ => {
+                    tx.send(Err(Error::NoSuchInstance(instance_id)))
+                        .map_err(|_| Error::FailedSendChannelClosed)?;
+                }
             }
+            return Ok(());
         };
         instance.put_state(tx, target).await?;
         Ok(())
@@ -756,12 +759,9 @@ impl InstanceManagerRunner {
         instance_id: Uuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        let instance = { self.instances.get(&instance_id).map(|(_id, v)| v) };
-
-        let Some(instance) = instance else {
+        let Some(instance) = self.get_instance(instance_id) else {
             return Err(Error::NoSuchInstance(instance_id));
         };
-
         instance.add_external_ip(tx, ip).await?;
         Ok(())
     }
@@ -772,9 +772,7 @@ impl InstanceManagerRunner {
         instance_id: Uuid,
         ip: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        let instance = { self.instances.get(&instance_id).map(|(_id, v)| v) };
-
-        let Some(instance) = instance else {
+        let Some(instance) = self.get_instance(instance_id) else {
             return Err(Error::NoSuchInstance(instance_id));
         };
 
