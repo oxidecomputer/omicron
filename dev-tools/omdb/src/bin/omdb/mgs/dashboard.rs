@@ -904,12 +904,7 @@ pub(crate) async fn cmd_mgs_dashboard(
     Ok(())
 }
 
-fn draw_graph(
-    f: &mut Frame,
-    parent: Rect,
-    graph: &mut Graph,
-    now: u64,
-) {
+fn draw_graph(f: &mut Frame, parent: Rect, graph: &mut Graph, now: u64) {
     //
     // We want the right panel to be 31 characters wide (a left-justified 20
     // and a right justified 8 + margins), but we don't want it to consume
@@ -1046,11 +1041,7 @@ fn draw_graph(
     f.render_stateful_widget(list, chunks[1], &mut graph.legend.state);
 }
 
-fn draw_graphs(
-    f: &mut Frame,
-    parent: Rect,
-    dashboard: &mut Dashboard,
-) {
+fn draw_graphs(f: &mut Frame, parent: Rect, dashboard: &mut Dashboard) {
     let screen = Layout::default()
         .direction(Direction::Vertical)
         .constraints(
@@ -1079,11 +1070,7 @@ fn draw_graphs(
     }
 }
 
-fn draw_status(
-    f: &mut Frame,
-    parent: Rect,
-    status: &[(&str, &str)],
-) {
+fn draw_status(f: &mut Frame, parent: Rect, status: &[(&str, &str)]) {
     let mut bar = vec![];
 
     for i in 0..status.len() {
