@@ -95,6 +95,13 @@ pub struct ArtifactId {
     pub kind: ArtifactKind,
 }
 
+/// Used for user-friendly messages.
+impl fmt::Display for ArtifactId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} v{} ({})", self.name, self.version, self.kind)
+    }
+}
+
 /// A hash-based identifier for an artifact.
 ///
 /// Some places, e.g. the installinator, request artifacts by hash rather than

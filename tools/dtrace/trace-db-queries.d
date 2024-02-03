@@ -9,19 +9,19 @@ dtrace:::BEGIN
     printf("Tracing all database queries for nexus PID %d, use Ctrl-C to exit\n", $target);
 }
 
-diesel-db$target:::query-start
+diesel_db$target:::query-start
 {
     this->conn_id = json(copyinstr(arg1), "ok");
     ts[this->conn_id] = timestamp;
     query[this->conn_id] = copyinstr(arg2);
 }
 
-diesel-db$target:::query-done
+diesel_db$target:::query-done
 {
     this->conn_id = json(copyinstr(arg1), "ok");
 }
 
-diesel-db$target:::query-done
+diesel_db$target:::query-done
 /ts[this->conn_id]/
 {
     this->latency = (timestamp - ts[this->conn_id]) / 1000;

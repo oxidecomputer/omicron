@@ -113,7 +113,7 @@ impl<S: StepSpec> EventBuffer<S> {
         // XXX: more efficient algorithm
         let root_execution_id = self.root_execution_id()?;
         let mut summary = self.steps().summarize();
-        summary.remove(&root_execution_id)
+        summary.swap_remove(&root_execution_id)
     }
 
     /// Returns information about each step, as currently tracked by the buffer,
@@ -262,45 +262,59 @@ impl<S: StepSpec> EventStore<S> {
             root_event_index,
             event.total_elapsed,
         );
+
         if let Some(new_execution) = actions.new_execution {
             if new_execution.nest_level == 0 {
                 self.root_execution_id = Some(new_execution.execution_id);
             }
-            // If there's a parent key, then what's the child index?
-            let parent_key_and_child_index =
-                if let Some(parent_key) = new_execution.parent_key {
-                    match self.map.get_mut(&parent_key) {
-                        Some(parent_data) => {
-                            let child_index = parent_data.child_executions_seen;
-                            parent_data.child_executions_seen += 1;
-                            Some((parent_key, child_index))
-                        }
-                        None => {
-                            // This should never happen -- it indicates that the
-                            // parent key was unknown. This can happen if we
-                            // didn't receive an event regarding a parent
-                            // execution being started.
+
+            if let Some((first_step_key, ..)) =
+                new_execution.steps_to_add.first()
+            {
+                // Do we already know about this execution? If so, grab the parent
+                // key and child index from the first step.
+                let parent_key_and_child_index =
+                    if let Some(data) = self.map.get(first_step_key) {
+                        data.parent_key_and_child_index
+                    } else {
+                        if let Some(parent_key) = new_execution.parent_key {
+                            match self.map.get_mut(&parent_key) {
+                                Some(parent_data) => {
+                                    let child_index =
+                                        parent_data.child_executions_seen;
+                                    parent_data.child_executions_seen += 1;
+                                    Some((parent_key, child_index))
+                                }
+                                None => {
+                                    // This should never happen -- it indicates that the
+                                    // parent key was unknown. This can happen if we
+                                    // didn't receive an event regarding a parent
+                                    // execution being started.
+                                    None
+                                }
+                            }
+                        } else {
                             None
                         }
-                    }
-                } else {
-                    None
-                };
-            let total_steps = new_execution.steps_to_add.len();
-            for (new_step_key, new_step, sort_key) in new_execution.steps_to_add
-            {
-                // These are brand new steps so their keys shouldn't exist in the
-                // map. But if they do, don't overwrite them.
-                self.map.entry(new_step_key).or_insert_with(|| {
-                    EventBufferStepData::new(
-                        new_step,
-                        parent_key_and_child_index,
-                        sort_key,
-                        new_execution.nest_level,
-                        total_steps,
-                        root_event_index,
-                    )
-                });
+                    };
+
+                let total_steps = new_execution.steps_to_add.len();
+                for (new_step_key, new_step, sort_key) in
+                    new_execution.steps_to_add
+                {
+                    // These are brand new steps so their keys shouldn't exist in the
+                    // map. But if they do, don't overwrite them.
+                    self.map.entry(new_step_key).or_insert_with(|| {
+                        EventBufferStepData::new(
+                            new_step,
+                            parent_key_and_child_index,
+                            sort_key,
+                            new_execution.nest_level,
+                            total_steps,
+                            root_event_index,
+                        )
+                    });
+                }
             }
         }
 
@@ -1808,6 +1822,7 @@ mod tests {
     struct BufferTestContext {
         root_execution_id: ExecutionId,
         generated_events: Vec<Event<TestSpec>>,
+
         // Data derived from generated_events.
         generated_step_events: Vec<StepEvent<TestSpec>>,
     }
@@ -1885,7 +1900,93 @@ mod tests {
                     Event::Progress(_) => None,
                 })
                 .collect();
+
+            // Create two buffer and feed events.
+            // * The incremental buffer has each event fed into it one-by-one.
+            // * The "idempotent" buffer has events 0, 0..1, 0..2, 0..3, etc
+            //   fed into it one by one. The name is because this is really
+            //   testing the idempotency of the event buffer.
+
+            println!("** generating incremental and idempotent buffers **");
+            let mut incremental_buffer = EventBuffer::default();
+            let mut idempotent_buffer = EventBuffer::default();
+            for event in &generated_events {
+                incremental_buffer.add_event(event.clone());
+                let report = incremental_buffer.generate_report();
+                idempotent_buffer.add_event_report(report);
+            }
+
+            // Check that the two buffers above are similar.
+            Self::ensure_buffers_similar(
+                &incremental_buffer,
+                &idempotent_buffer,
+            )
+            .expect("idempotent buffer is similar to incremental buffer");
+
+            // Also generate a buffer with a single event report.
+            println!("** generating oneshot buffer **");
+            let mut oneshot_buffer = EventBuffer::default();
+            oneshot_buffer
+                .add_event_report(incremental_buffer.generate_report());
+
+            Self::ensure_buffers_similar(&incremental_buffer, &oneshot_buffer)
+                .expect("oneshot buffer is similar to incremental buffer");
+
             Self { root_execution_id, generated_events, generated_step_events }
+        }
+
+        fn ensure_buffers_similar<S: StepSpec>(
+            buf1: &EventBuffer<S>,
+            buf2: &EventBuffer<S>,
+        ) -> anyhow::Result<()> {
+            // The two should have the same step keys.
+            let buf1_steps = buf1.steps();
+            let buf2_steps = buf2.steps();
+
+            ensure!(
+                buf1_steps.as_slice().len() == buf2_steps.as_slice().len(),
+                "buffers have same number of steps ({} vs {})",
+                buf1_steps.as_slice().len(),
+                buf2_steps.as_slice().len()
+            );
+
+            for (ix, ((k1, data1), (k2, data2))) in buf1_steps
+                .as_slice()
+                .iter()
+                .zip(buf2_steps.as_slice().iter())
+                .enumerate()
+            {
+                ensure!(
+                    k1 == k2,
+                    "buffers have same step keys at index {} ({:?} vs {:?})",
+                    ix,
+                    k1,
+                    k2
+                );
+                ensure!(
+                    data1.sort_key() == data2.sort_key(),
+                    "buffers have same sort key at index {} ({:?} vs {:?})",
+                    ix,
+                    data1.sort_key(),
+                    data2.sort_key()
+                );
+                ensure!(
+                    data1.parent_key_and_child_index() == data2.parent_key_and_child_index(),
+                    "buffers have same parent key and child index at index {} ({:?} vs {:?})",
+                    ix,
+                    data1.parent_key_and_child_index(),
+                    data2.parent_key_and_child_index(),
+                );
+                ensure!(
+                    data1.nest_level() == data2.nest_level(),
+                    "buffers have same nest level at index {} ({:?} vs {:?})",
+                    ix,
+                    data1.nest_level(),
+                    data2.nest_level(),
+                );
+            }
+
+            Ok(())
         }
 
         /// Runs a test in a scenario where all elements should be seen.
@@ -2165,10 +2266,10 @@ mod tests {
                     ),
                     "this is the last event so ExecutionStatus must be completed"
                 );
-                // There are two nested engines.
+                // There are three nested engines.
                 ensure!(
-                    summary.len() == 3,
-                    "two nested engines must be defined"
+                    summary.len() == 4,
+                    "three nested engines (plus one root engine) must be defined"
                 );
 
                 let (_, nested_summary) = summary
@@ -2186,6 +2287,18 @@ mod tests {
                 let (_, nested_summary) = summary
                     .get_index(2)
                     .expect("this is the second nested engine");
+                ensure!(
+                    matches!(
+                        &nested_summary.execution_status,
+                        ExecutionStatus::Terminal(info)
+                            if info.kind == TerminalKind::Failed
+                    ),
+                    "for this engine, the ExecutionStatus must be failed"
+                );
+
+                let (_, nested_summary) = summary
+                    .get_index(3)
+                    .expect("this is the third nested engine");
                 ensure!(
                     matches!(
                         &nested_summary.execution_status,

@@ -4,6 +4,9 @@
 
 //! Background tasks
 
+mod bfd;
+mod blueprint_execution;
+mod blueprint_load;
 mod common;
 mod dns_config;
 mod dns_propagation;
@@ -14,6 +17,7 @@ mod inventory_collection;
 mod nat_cleanup;
 mod phantom_disks;
 mod status;
+mod sync_service_zone_nat;
 
 pub use common::Driver;
 pub use common::TaskHandle;

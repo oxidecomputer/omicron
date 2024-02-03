@@ -25,6 +25,10 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -34,10 +38,11 @@ use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
+use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::SledInstanceState;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::update::ArtifactId;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -73,6 +78,14 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(bgtask_list)?;
         api.register(bgtask_view)?;
+
+        api.register(blueprint_list)?;
+        api.register(blueprint_view)?;
+        api.register(blueprint_delete)?;
+        api.register(blueprint_target_view)?;
+        api.register(blueprint_target_set)?;
+        api.register(blueprint_generate_from_collection)?;
+        api.register(blueprint_regenerate)?;
 
         Ok(())
     }
@@ -426,15 +439,16 @@ async fn cpapi_metrics_collect(
 }]
 async fn cpapi_artifact_download(
     request_context: RequestContext<Arc<ServerContext>>,
-    path_params: Path<UpdateArtifactId>,
+    path_params: Path<ArtifactId>,
 ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
     let context = request_context.context();
     let nexus = &context.nexus;
     let opctx =
         crate::context::op_context_for_internal_api(&request_context).await;
     // TODO: return 404 if the error we get here says that the record isn't found
-    let body =
-        nexus.download_artifact(&opctx, path_params.into_inner()).await?;
+    let body = nexus
+        .updates_download_artifact(&opctx, path_params.into_inner())
+        .await?;
 
     Ok(HttpResponseOk(Body::from(body).into()))
 }
@@ -588,6 +602,170 @@ async fn ipv4_nat_changeset(
             .await?;
         changeset.sort_by_key(|e| e.gen);
         Ok(HttpResponseOk(changeset))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// APIs for managing blueprints
+//
+// These are not (yet) intended for use by any other programs.  Eventually, we
+// will want this functionality part of the public API.  But we don't want to
+// commit to any of this yet.  These properly belong in an RFD 399-style
+// "Service and Support API".  Absent that, we stick them here.
+
+/// Lists blueprints
+#[endpoint {
+    method = GET,
+    path = "/deployment/blueprints/all",
+}]
+async fn blueprint_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<BlueprintMetadata>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        let blueprints = nexus.blueprint_list(&opctx, &pagparams).await?;
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            blueprints,
+            &|_, blueprint: &BlueprintMetadata| blueprint.id,
+        )?))
+    };
+
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetches one blueprint
+#[endpoint {
+    method = GET,
+    path = "/deployment/blueprints/all/{blueprint_id}",
+}]
+async fn blueprint_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let blueprint = nexus.blueprint_view(&opctx, path.blueprint_id).await?;
+        Ok(HttpResponseOk(blueprint))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Deletes one blueprint
+#[endpoint {
+    method = DELETE,
+    path = "/deployment/blueprints/all/{blueprint_id}",
+}]
+async fn blueprint_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<nexus_types::external_api::params::BlueprintPath>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        nexus.blueprint_delete(&opctx, path.blueprint_id).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Managing the current target blueprint
+
+/// Fetches the current target blueprint, if any
+#[endpoint {
+    method = GET,
+    path = "/deployment/blueprints/target",
+}]
+async fn blueprint_target_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let target =
+            nexus.blueprint_target_view(&opctx).await?.ok_or_else(|| {
+                Error::conflict("no target blueprint has been configured")
+            })?;
+        Ok(HttpResponseOk(target))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Make the specified blueprint the new target
+#[endpoint {
+    method = POST,
+    path = "/deployment/blueprints/target",
+}]
+async fn blueprint_target_set(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    target: TypedBody<BlueprintTargetSet>,
+) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let target = target.into_inner();
+        let target = nexus.blueprint_target_set(&opctx, target).await?;
+        Ok(HttpResponseOk(target))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+// Generating blueprints
+
+#[derive(Debug, Deserialize, JsonSchema)]
+struct CollectionId {
+    collection_id: Uuid,
+}
+
+/// Generates a new blueprint matching the specified inventory collection
+#[endpoint {
+    method = POST,
+    path = "/deployment/blueprints/generate-from-collection",
+}]
+async fn blueprint_generate_from_collection(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    params: TypedBody<CollectionId>,
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let collection_id = params.into_inner().collection_id;
+        let result = nexus
+            .blueprint_generate_from_collection(&opctx, collection_id)
+            .await?;
+        Ok(HttpResponseOk(result))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Generates a new blueprint for the current system, re-evaluating anything
+/// that's changed since the last one was generated
+#[endpoint {
+    method = POST,
+    path = "/deployment/blueprints/regenerate",
+}]
+async fn blueprint_regenerate(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Blueprint>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let result = nexus.blueprint_create_regenerate(&opctx).await?;
+        Ok(HttpResponseOk(result))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

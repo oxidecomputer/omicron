@@ -40,9 +40,13 @@ external_dns_servers = [ "1.1.1.1", "9.9.9.9" ]
 [deployment.dropshot_external]
 # IP Address and TCP port on which to listen for the external API
 bind_address = "127.0.0.1:12220"
-# Allow larger request bodies (1MiB) to accomodate firewall endpoints (one
-# rule is ~500 bytes)
-request_body_max_bytes = 1048576
+# Allow large request bodies to support uploading TUF archives. The number here
+# is picked based on the typical size for tuf-mupdate.zip as of 2024-01
+# (~1.5GiB) and multiplying it by 2.
+#
+# This should be brought back down to a more reasonable value once per-endpoint
+# request body limits are implemented.
+request_body_max_bytes = 3221225472
 # To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
 # will also need to provide an initial TLS certificate during rack
 # initialization.  If you're using this config file, you're probably running a
@@ -93,6 +97,7 @@ dns_external.max_concurrent_server_updates = 5
 # them (on a sunny day).
 external_endpoints.period_secs = 60
 nat_cleanup.period_secs = 30
+bfd_manager.period_secs = 30
 # How frequently to collect hardware/software inventory from the whole system
 # (even if we don't have reason to believe anything has changed).
 inventory.period_secs = 600
@@ -101,6 +106,9 @@ inventory.nkeep = 5
 # Disable inventory collection altogether (for emergencies)
 inventory.disable = false
 phantom_disks.period_secs = 30
+blueprints.period_secs_load = 10
+blueprints.period_secs_execute = 60
+sync_service_zone_nat.period_secs = 30
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

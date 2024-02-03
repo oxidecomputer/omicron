@@ -33,7 +33,7 @@ use nexus_types::external_api::params::RouteConfig;
 use nexus_types::external_api::params::SwitchPortConfigCreate;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::params::{
-    AddressLotCreate, BgpPeerConfig, LoopbackAddressCreate, Route, SiloCreate,
+    AddressLotCreate, BgpPeerConfig, Route, SiloCreate,
     SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::shared::Baseboard;
@@ -70,19 +70,6 @@ use std::net::Ipv4Addr;
 use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
-
-// A limit for querying the last inventory collection
-//
-// We set a limit of 200 here to give us some breathing room when
-// querying for cabooses and RoT pages, each of which is "4 per SP/RoT",
-// which in a single fully populated rack works out to (32 sleds + 2
-// switches + 1 psc) * 4 = 140.
-//
-// This feels bad and probably needs more thought; see
-// https://github.com/oxidecomputer/omicron/issues/4621 where this limit
-// being too low bit us, and it will link to a more general followup
-// issue.
-const INVENTORY_COLLECTION_LIMIT: u32 = 200;
 
 impl super::Nexus {
     pub(crate) async fn racks_list(
@@ -150,9 +137,6 @@ impl super::Nexus {
                 }
             })
             .collect();
-
-        // internally ignores ObjectAlreadyExists, so will not error on repeat runs
-        let _ = self.populate_mock_system_updates(&opctx).await?;
 
         let dns_zone = request
             .internal_dns_zone_config
@@ -375,24 +359,7 @@ impl super::Nexus {
             let ipv4_block =
                 AddressLotBlockCreate { first_address, last_address };
 
-            let first_address =
-                IpAddr::from_str("fd00:99::1").map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to parse `fd00:99::1` as `IpAddr`: {e}"
-                    ))
-                })?;
-
-            let last_address =
-                IpAddr::from_str("fd00:99::ffff").map_err(|e| {
-                    Error::internal_error(&format!(
-                        "failed to parse `fd00:99::ffff` as `IpAddr`: {e}"
-                    ))
-                })?;
-
-            let ipv6_block =
-                AddressLotBlockCreate { first_address, last_address };
-
-            let blocks = vec![ipv4_block, ipv6_block];
+            let blocks = vec![ipv4_block];
 
             let address_lot_params =
                 AddressLotCreate { identity, kind, blocks };
@@ -411,24 +378,6 @@ impl super::Nexus {
                     _ => Err(e),
                 },
             }?;
-
-            let address_lot_lookup = self
-                .address_lot_lookup(
-                    &opctx,
-                    NameOrId::Name(address_lot_name.clone()),
-                )
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to lookup infra address_lot: {e}"
-                    ))
-                })?;
-
-            let (.., authz_address_lot) = address_lot_lookup
-                .lookup_for(authz::Action::Modify)
-                .await
-                .map_err(|e| {
-                    Error::internal_error(&format!("unable to retrieve authz_address_lot for infra address_lot: {e}"))
-                })?;
 
             let mut bgp_configs = HashMap::new();
 
@@ -542,43 +491,6 @@ impl super::Nexus {
                     ))
                 })?;
 
-                // TODO: #3603 Use separate address lots for loopback addresses and infra ips
-                let loopback_address_params = LoopbackAddressCreate {
-                    address_lot: NameOrId::Name(address_lot_name.clone()),
-                    rack_id,
-                    switch_location: switch_location.clone(),
-                    address: first_address,
-                    mask: 64,
-                    anycast: true,
-                };
-
-                if self
-                    .loopback_address_lookup(
-                        &opctx,
-                        rack_id,
-                        switch_location.clone().into(),
-                        ipnetwork::IpNetwork::new(
-                            loopback_address_params.address,
-                            loopback_address_params.mask,
-                        )
-                        .map_err(|_| {
-                            Error::invalid_request("invalid loopback address")
-                        })?
-                        .into(),
-                    )?
-                    .lookup_for(authz::Action::Read)
-                    .await
-                    .is_err()
-                {
-                    self.db_datastore
-                        .loopback_address_create(
-                            opctx,
-                            &loopback_address_params,
-                            None,
-                            &authz_address_lot,
-                        )
-                        .await?;
-                }
                 let uplink_name = format!("default-uplink{idx}");
                 let name = Name::from_str(&uplink_name).unwrap();
 
@@ -887,11 +799,8 @@ impl super::Nexus {
     ) -> ListResultVec<UninitializedSled> {
         debug!(self.log, "Getting latest collection");
         // Grab the SPs from the last collection
-        let limit = NonZeroU32::new(INVENTORY_COLLECTION_LIMIT).unwrap();
-        let collection = self
-            .db_datastore
-            .inventory_get_latest_collection(opctx, limit)
-            .await?;
+        let collection =
+            self.db_datastore.inventory_get_latest_collection(opctx).await?;
 
         // There can't be any uninitialized sleds we know about
         // if there is no inventory.
@@ -963,11 +872,8 @@ impl super::Nexus {
             .await?;
 
         // Grab the SPs from the last collection
-        let limit = NonZeroU32::new(INVENTORY_COLLECTION_LIMIT).unwrap();
-        let collection = self
-            .db_datastore
-            .inventory_get_latest_collection(opctx, limit)
-            .await?;
+        let collection =
+            self.db_datastore.inventory_get_latest_collection(opctx).await?;
 
         // If there isn't a collection, we don't know about the sled
         let Some(collection) = collection else {

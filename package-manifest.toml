@@ -116,8 +116,15 @@ setup_hint = """
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
 
-[package.oximeter-collector]
+[package.oximeter]
 service_name = "oximeter"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz" ]
+output.type = "zone"
+
+[package.oximeter-collector]
+service_name = "oximeter-collector"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["oximeter", "clickhouse-schema-updater"]
@@ -127,6 +134,7 @@ source.paths = [
     { from = "oximeter/db/schema", to = "/opt/oxide/oximeter/schema" },
 ]
 output.type = "zone"
+output.intermediate_only = true
 
 [package.clickhouse]
 service_name = "clickhouse"
@@ -348,6 +356,7 @@ source.paths = [
   { from = "smf/switch_zone_setup/manifest.xml", to = "/var/svc/manifest/site/switch_zone_setup/manifest.xml" },
   { from = "smf/switch_zone_setup/switch_zone_setup", to = "/opt/oxide/bin/switch_zone_setup" },
   { from = "smf/switch_zone_setup/support_authorized_keys", to = "/opt/oxide/support/authorized_keys" },
+  { from = "/opt/ooce/pgsql-13/lib/amd64", to = "/opt/ooce/pgsql-13/lib/amd64" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -396,10 +405,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "e71b10d2f9f1fb52818b916bae83ba15a339548d"
+source.commit = "2d4bc11232d53f177c286383926fa5f8c1b2a938"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "030a02551e487f561bcfad47426b953d15c4430d77770765c7fc03afd8d61bd9"
+source.sha256 = "88ec93657a644e8f10a32d1d22cc027db901aea81027f49ce7bee58fc4a35755"
 output.type = "zone"
 
 [package.crucible-pantry]
@@ -407,10 +416,10 @@ service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "e71b10d2f9f1fb52818b916bae83ba15a339548d"
+source.commit = "2d4bc11232d53f177c286383926fa5f8c1b2a938"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "c74e23e7f7995ba3a69a9ec3a31f1db517ec15cd3a9942c2c07621b219b743b2"
+source.sha256 = "e2c3ed2d4cd6b5da3d38dd52df6d4a259280be7d45c30a363e9c71b174ecc6f8"
 output.type = "zone"
 
 # Refer to
@@ -421,10 +430,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "1e25649e8c2ac274bd04adfe0513dd14a482058c"
+source.commit = "ff6c4df2e816eee6e7b2b0488777d30ef35ee217"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "09c124315da3e434c85fe1ddb16459c36d8302e15705ff18fe6bbc7b4876f5f9"
+source.sha256 = "aa10aa245a92e657fc074bd588ef6bbddaad2d9c946a8e1b91c02dce7e057561"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -437,10 +446,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "2fd39b75df696961e5ea190c7d74dd91f4849cd3"
+source.commit = "712b2487d9b141234af98b6578bc5f77420bdb03"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "38851c79c85d53e997db748520fb27c82299ce7e58a550e35646a548498f1271"
+source.sha256 = "36e976ae9b1517b358ec7eadd5fb03f5d40d54074ff830a79895f8fc3e643935"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -453,10 +462,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "2fd39b75df696961e5ea190c7d74dd91f4849cd3"
+source.commit = "712b2487d9b141234af98b6578bc5f77420bdb03"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "8cd94e9a6f6175081ce78f0281085a08a5306cde453d8e21deb28050945b1d88"
+source.sha256 = "bc3137751db24d2e44eca7118f6ca825ed3e9df736480fc210392802cd063dd8"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -468,10 +477,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "2fd39b75df696961e5ea190c7d74dd91f4849cd3"
+source.commit = "712b2487d9b141234af98b6578bc5f77420bdb03"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "802636775fa77dc6eec193e65fde87e403f6a11531745d47ef5e7ff13b242890"
+source.sha256 = "2c54146a133b5f12587d9fb89f85ef0a0ca6278efc8c6fe4859782e886e6c774"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -488,8 +497,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "1c2f91a493c8b3c5fb7b853c570b2901ac3c22a7"
-source.sha256 = "052d97370515189465e4e835edb4a2d7e1e0b55ace0230ba18f045a03d975e80"
+source.commit = "fd159136c552d8b4ec4d49dd9bae7e38f6a636e6"
+source.sha256 = "1e24598ba77dc00682cdf54fc370696ef5aa49ed510ab7f72fcc91d61d679e7b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -513,8 +522,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "1c2f91a493c8b3c5fb7b853c570b2901ac3c22a7"
-source.sha256 = "3ebc1ee37c4d7a0657a78abbaad2fe81570da88128505bfdc4ea47e3e05c6277"
+source.commit = "fd159136c552d8b4ec4d49dd9bae7e38f6a636e6"
+source.sha256 = "720df8aff3aaa0f8a86ec606089ebf8b5068d7f3c243bd4c868b96ef72d13485"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -531,8 +540,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "1c2f91a493c8b3c5fb7b853c570b2901ac3c22a7"
-source.sha256 = "18079b2ce1003facb476e28499f2e31ebe092510ecd6c685fa1a91f1a34f2dda"
+source.commit = "fd159136c552d8b4ec4d49dd9bae7e38f6a636e6"
+source.sha256 = "5e34a10d9dca6c94f96075140d42b755dee1f5e6a3485fc239b12e12b89a30c5"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -566,7 +575,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "xcvradm.tar.gz"
+  "xcvradm.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -588,7 +598,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "sp-sim-stub.tar.gz"
+  "sp-sim-stub.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -610,7 +621,8 @@ source.packages = [
   "mg-ddm.tar.gz",
   "mgd.tar.gz",
   "switch_zone_setup.tar.gz",
-  "sp-sim-softnpu.tar.gz"
+  "sp-sim-softnpu.tar.gz",
+  "omicron-omdb.tar.gz"
 ]
 output.type = "zone"
 
@@ -625,3 +637,20 @@ source.paths = [
 ]
 output.type = "zone"
 output.intermediate_only = true
+
+[package.omicron-omdb]
+service_name = "omdb"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["omdb"]
+source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
+[package.oxlog]
+service_name = "oxlog"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["oxlog"]
+source.rust.release = true
+output.type = "tarball"

@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub struct SiloUtilization {
     pub silo_id: Uuid,
     pub silo_name: Name,
+    pub silo_discoverable: bool,
 
     pub cpus_allocated: i64,
     pub memory_allocated: ByteCount,

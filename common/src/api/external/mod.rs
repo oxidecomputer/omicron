@@ -13,6 +13,8 @@ use dropshot::HttpError;
 pub use error::*;
 
 pub use crate::api::internal::shared::SwitchLocation;
+use crate::update::ArtifactHash;
+use crate::update::ArtifactId;
 use anyhow::anyhow;
 use anyhow::Context;
 use api_identity::ObjectIdentity;
@@ -694,6 +696,109 @@ impl TryFrom<i64> for Generation {
     }
 }
 
+/// An RFC-1035-compliant hostname.
+#[derive(
+    Clone, Debug, Deserialize, Display, Eq, PartialEq, SerializeDisplay,
+)]
+#[display("{0}")]
+#[serde(try_from = "String", into = "String")]
+pub struct Hostname(String);
+
+impl Hostname {
+    /// Return the hostname as a string slice.
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+// Regular expression for hostnames.
+//
+// Each name is a dot-separated sequence of labels. Each label is supposed to
+// be an "LDH": letter, dash, or hyphen. Hostnames can consist of one label, or
+// many, separated by a `.`. While _domain_ names are allowed to end in a `.`,
+// making them fully-qualified, hostnames are not.
+//
+// Note that labels are allowed to contain a hyphen, but may not start or end
+// with one. See RFC 952, "Lexical grammar" section.
+//
+// Note that we need to use a regex engine capable of lookbehind to support
+// this, since we need to check that labels don't end with a `-`.
+const HOSTNAME_REGEX: &str = r#"^([a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))(\.[a-zA-Z0-9]+[a-zA-Z0-9\-]*(?<!-))*$"#;
+
+// Labels need to be encoded on the wire, and prefixed with a signel length
+// octet. They also need to end with a length octet of 0 when encoded. So the
+// longest name is a single label of 253 characters, which will be encoded as
+// `\xfd<the label>\x00`.
+const HOSTNAME_MAX_LEN: u32 = 253;
+
+impl FromStr for Hostname {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        anyhow::ensure!(
+            s.len() <= HOSTNAME_MAX_LEN as usize,
+            "Max hostname length is {HOSTNAME_MAX_LEN}"
+        );
+        let re = regress::Regex::new(HOSTNAME_REGEX).unwrap();
+        if re.find(s).is_some() {
+            Ok(Hostname(s.to_string()))
+        } else {
+            anyhow::bail!("Hostnames must comply with RFC 1035")
+        }
+    }
+}
+
+impl TryFrom<&str> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl TryFrom<String> for Hostname {
+    type Error = <Hostname as FromStr>::Err;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.as_str().parse()
+    }
+}
+
+// Custom implementation of JsonSchema for Hostname to ensure RFC-1035-style
+// validation
+impl JsonSchema for Hostname {
+    fn schema_name() -> String {
+        "Hostname".to_string()
+    }
+
+    fn json_schema(
+        _: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            metadata: Some(Box::new(schemars::schema::Metadata {
+                title: Some("An RFC-1035-compliant hostname".to_string()),
+                description: Some(
+                    "A hostname identifies a host on a network, and \
+                    is usually a dot-delimited sequence of labels, \
+                    where each label contains only letters, digits, \
+                    or the hyphen. See RFCs 1035 and 952 for more details."
+                        .to_string(),
+                ),
+                ..Default::default()
+            })),
+            instance_type: Some(schemars::schema::SingleOrVec::Single(
+                Box::new(schemars::schema::InstanceType::String),
+            )),
+            string: Some(Box::new(schemars::schema::StringValidation {
+                max_length: Some(HOSTNAME_MAX_LEN),
+                min_length: Some(1),
+                pattern: Some(HOSTNAME_REGEX.to_string()),
+            })),
+            ..Default::default()
+        })
+    }
+}
+
 // General types used to implement API resources
 
 /// Identifies a type of API resource
@@ -717,6 +822,7 @@ pub enum ResourceType {
     BackgroundTask,
     BgpConfig,
     BgpAnnounceSet,
+    Blueprint,
     Fleet,
     Silo,
     SiloUser,
@@ -759,13 +865,9 @@ pub enum ResourceType {
     Oximeter,
     MetricProducer,
     RoleBuiltin,
-    UpdateArtifact,
+    TufRepo,
+    TufArtifact,
     SwitchPort,
-    SystemUpdate,
-    ComponentUpdate,
-    SystemUpdateComponentUpdate,
-    UpdateDeployment,
-    UpdateableComponent,
     UserBuiltin,
     Zpool,
     Vmm,
@@ -940,7 +1042,7 @@ pub struct Instance {
     /// memory allocated for this Instance
     pub memory: ByteCount,
     /// RFC1035-compliant hostname for the Instance.
-    pub hostname: String, // TODO-cleanup different type?
+    pub hostname: String,
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
@@ -2624,6 +2726,101 @@ pub struct BgpImportedRouteIpv4 {
     pub switch: SwitchLocation,
 }
 
+/// A description of an uploaded TUF repository.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoDescription {
+    // Information about the repository.
+    pub repo: TufRepoMeta,
+
+    // Information about the artifacts present in the repository.
+    pub artifacts: Vec<TufArtifactMeta>,
+}
+
+impl TufRepoDescription {
+    /// Sorts the artifacts so that descriptions can be compared.
+    pub fn sort_artifacts(&mut self) {
+        self.artifacts.sort_by(|a, b| a.id.cmp(&b.id));
+    }
+}
+
+/// Metadata about a TUF repository.
+///
+/// Found within a [`TufRepoDescription`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufRepoMeta {
+    /// The hash of the repository.
+    ///
+    /// This is a slight abuse of `ArtifactHash`, since that's the hash of
+    /// individual artifacts within the repository. However, we use it here for
+    /// convenience.
+    pub hash: ArtifactHash,
+
+    /// The version of the targets role.
+    pub targets_role_version: u64,
+
+    /// The time until which the repo is valid.
+    pub valid_until: DateTime<Utc>,
+
+    /// The system version in artifacts.json.
+    pub system_version: SemverVersion,
+
+    /// The file name of the repository.
+    ///
+    /// This is purely used for debugging and may not always be correct (e.g.
+    /// with wicket, we read the file contents from stdin so we don't know the
+    /// correct file name).
+    pub file_name: String,
+}
+
+/// Metadata about an individual TUF artifact.
+///
+/// Found within a [`TufRepoDescription`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct TufArtifactMeta {
+    /// The artifact ID.
+    pub id: ArtifactId,
+
+    /// The hash of the artifact.
+    pub hash: ArtifactHash,
+
+    /// The size of the artifact in bytes.
+    pub size: u64,
+}
+
+/// Data about a successful TUF repo import into Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoInsertResponse {
+    /// The repository as present in the database.
+    pub recorded: TufRepoDescription,
+
+    /// Whether this repository already existed or is new.
+    pub status: TufRepoInsertStatus,
+}
+
+/// Status of a TUF repo import.
+///
+/// Part of [`TufRepoInsertResponse`].
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TufRepoInsertStatus {
+    /// The repository already existed in the database.
+    AlreadyExists,
+
+    /// The repository did not exist, and was inserted into the database.
+    Inserted,
+}
+
+/// Data about a successful TUF repo get from Nexus.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct TufRepoGetResponse {
+    /// The description of the repository.
+    pub description: TufRepoDescription,
+}
+
 #[cfg(test)]
 mod test {
     use serde::Deserialize;
@@ -2643,6 +2840,7 @@ mod test {
         VpcFirewallRuleUpdateParams,
     };
     use crate::api::external::Error;
+    use crate::api::external::Hostname;
     use crate::api::external::ResourceType;
     use std::convert::TryFrom;
     use std::str::FromStr;
@@ -3252,7 +3450,7 @@ mod test {
         let net_des = serde_json::from_str::<IpNet>(&ser).unwrap();
         assert_eq!(net, net_des);
 
-        let net_str = "fd00:99::1/64";
+        let net_str = "fd00:47::1/64";
         let net = IpNet::from_str(net_str).unwrap();
         let ser = serde_json::to_string(&net).unwrap();
 
@@ -3365,5 +3563,25 @@ mod test {
         assert_eq!(mac.0.as_bytes(), &[0xa8, 0x40, 0x25, 0xff, 0x00, 0x01]);
         let conv = mac.to_i64();
         assert_eq!(original, conv);
+    }
+
+    #[test]
+    fn test_hostname_from_str() {
+        assert!(Hostname::from_str("name").is_ok());
+        assert!(Hostname::from_str("a.good.name").is_ok());
+        assert!(Hostname::from_str("another.very-good.name").is_ok());
+        assert!(Hostname::from_str("0name").is_ok());
+        assert!(Hostname::from_str("name0").is_ok());
+        assert!(Hostname::from_str("0name0").is_ok());
+
+        assert!(Hostname::from_str("").is_err());
+        assert!(Hostname::from_str("no_no").is_err());
+        assert!(Hostname::from_str("no.fqdns.").is_err());
+        assert!(Hostname::from_str("empty..label").is_err());
+        assert!(Hostname::from_str("-hypen.cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.-cannot.start").is_err());
+        assert!(Hostname::from_str("hypen.cannot.end-").is_err());
+        assert!(Hostname::from_str("hyphen-cannot-end-").is_err());
+        assert!(Hostname::from_str(&"too-long".repeat(100)).is_err());
     }
 }

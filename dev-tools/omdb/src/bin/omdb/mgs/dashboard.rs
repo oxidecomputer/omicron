@@ -904,8 +904,8 @@ pub(crate) async fn cmd_mgs_dashboard(
     Ok(())
 }
 
-fn draw_graph<B: Backend>(
-    f: &mut Frame<B>,
+fn draw_graph(
+    f: &mut Frame,
     parent: Rect,
     graph: &mut Graph,
     now: u64,
@@ -1046,8 +1046,8 @@ fn draw_graph<B: Backend>(
     f.render_stateful_widget(list, chunks[1], &mut graph.legend.state);
 }
 
-fn draw_graphs<B: Backend>(
-    f: &mut Frame<B>,
+fn draw_graphs(
+    f: &mut Frame,
     parent: Rect,
     dashboard: &mut Dashboard,
 ) {
@@ -1079,8 +1079,8 @@ fn draw_graphs<B: Backend>(
     }
 }
 
-fn draw_status<B: Backend>(
-    f: &mut Frame<B>,
+fn draw_status(
+    f: &mut Frame,
     parent: Rect,
     status: &[(&str, &str)],
 ) {
@@ -1115,7 +1115,7 @@ fn draw_status<B: Backend>(
     f.render_widget(para, parent);
 }
 
-fn draw<B: Backend>(f: &mut Frame<B>, dashboard: &mut Dashboard) {
+fn draw(f: &mut Frame, dashboard: &mut Dashboard) {
     let size = f.size();
 
     let screen = Layout::default()

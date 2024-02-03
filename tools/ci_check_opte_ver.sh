@@ -1,5 +1,10 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
+
+source tools/opte_version_override
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+    exit 0
+fi
 
 # Grab all the oxidecomputer/opte dependencies' revisions
 readarray -t opte_deps_revs < <(toml get Cargo.toml workspace.dependencies | jq -r 'to_entries | .[] | select(.value.git? | contains("oxidecomputer/opte")?) | .value.rev')

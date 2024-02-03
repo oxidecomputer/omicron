@@ -9,7 +9,7 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, ByteCount, IdentityMetadataCreateParams,
+    AddressLotKind, ByteCount, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
     Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
     SemverVersion,
@@ -71,7 +71,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
-path_param!(FloatingIpPath, floating_ip, "Floating IP");
+path_param!(FloatingIpPath, floating_ip, "floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
 path_param!(ImagePath, image, "image");
@@ -87,6 +87,9 @@ id_path_param!(GroupPath, group_id, "group");
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
+
+// Internal API parameters
+id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 
 pub struct SledSelector {
     /// ID of the sled
@@ -852,7 +855,7 @@ pub struct IpPoolSiloPath {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolSiloLink {
+pub struct IpPoolLinkSilo {
     pub silo: NameOrId,
     /// When a pool is the default for a silo, floating IPs and instance
     /// ephemeral IPs will come from that pool when no other pool is specified.
@@ -885,6 +888,23 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+}
+
+/// The type of resource that a floating IP is attached to
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FloatingIpParentKind {
+    Instance,
+}
+
+/// Parameters for attaching a floating IP address to another resource
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpAttach {
+    /// Name or ID of the resource that this IP address should be attached to
+    pub parent: NameOrId,
+
+    /// The type of `parent`'s resource
+    pub kind: FloatingIpParentKind,
 }
 
 // INSTANCES
@@ -951,14 +971,30 @@ pub struct InstanceDiskAttach {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ExternalIpCreate {
     /// An IP address providing both inbound and outbound access. The address is
-    /// automatically-assigned from the provided IP Pool, or all available pools
-    /// if not specified.
-    Ephemeral { pool_name: Option<Name> },
+    /// automatically-assigned from the provided IP Pool, or the current silo's
+    /// default pool if not specified.
+    Ephemeral { pool: Option<NameOrId> },
     /// An IP address providing both inbound and outbound access. The address is
-    /// an existing Floating IP object assigned to the current project.
+    /// an existing floating IP object assigned to the current project.
     ///
     /// The floating IP must not be in use by another instance or service.
-    Floating { floating_ip_name: Name },
+    Floating { floating_ip: NameOrId },
+}
+
+/// Parameters for creating an ephemeral IP address for an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub struct EphemeralIpCreate {
+    /// Name or ID of the IP pool used to allocate an address
+    pub pool: Option<NameOrId>,
+}
+
+/// Parameters for detaching an external IP from an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ExternalIpDetach {
+    Ephemeral,
+    Floating { floating_ip: NameOrId },
 }
 
 /// Create-time parameters for an `Instance`
@@ -968,7 +1004,7 @@ pub struct InstanceCreate {
     pub identity: IdentityMetadataCreateParams,
     pub ncpus: InstanceCpuCount,
     pub memory: ByteCount,
-    pub hostname: String, // TODO-cleanup different type?
+    pub hostname: Hostname,
 
     /// User data for instance initialization systems (such as cloud-init).
     /// Must be a Base64-encoded string, as specified in RFC 4648 § 4 (+ and /
@@ -999,6 +1035,14 @@ pub struct InstanceCreate {
     /// The disks to be created or attached for this instance.
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
+
+    /// An allowlist of SSH public keys to be transferred to the instance via
+    /// cloud-init during instance creation.
+    ///
+    /// If not provided, all SSH public keys from the user's profile will be sent.
+    /// If an empty list is provided, no public keys will be transmitted to the
+    /// instance.
+    pub ssh_public_keys: Option<Vec<NameOrId>>,
 
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
@@ -1752,6 +1796,60 @@ pub struct BgpStatusSelector {
     pub name_or_id: NameOrId,
 }
 
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
+}
+
+/// Information about a bidirectional forwarding detection (BFD) session.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BfdSessionEnable {
+    /// Address the Oxide switch will listen on for BFD traffic. If `None` then
+    /// the unspecified address (0.0.0.0 or ::) is used.
+    pub local: Option<IpAddr>,
+
+    /// Address of the remote peer to establish a BFD session with.
+    pub remote: IpAddr,
+
+    /// The negotiated Control packet transmission interval, multiplied by this
+    /// variable, will be the Detection Time for this session (as seen by the
+    /// remote system)
+    pub detection_threshold: u8,
+
+    /// The minimum interval, in microseconds, between received BFD
+    /// Control packets that this system requires
+    pub required_rx: u64,
+
+    /// The switch to enable this session on. Must be `switch0` or `switch1`.
+    pub switch: Name,
+
+    /// Select either single-hop (RFC 5881) or multi-hop (RFC 5883)
+    pub mode: BfdMode,
+}
+
+/// Information needed to disable a BFD session
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BfdSessionDisable {
+    /// Address of the remote peer to disable a BFD session for.
+    pub remote: IpAddr,
+
+    /// The switch to enable this session on. Must be `switch0` or `switch1`.
+    pub switch: Name,
+}
+
 /// A set of addresses associated with a port configuration.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddressConfig {
@@ -1924,32 +2022,17 @@ pub struct ResourceMetrics {
 
 // SYSTEM UPDATE
 
+/// Parameters for PUT requests for `/v1/system/update/repository`.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdatePath {
-    pub version: SemverVersion,
+pub struct UpdatesPutRepositoryParams {
+    /// The name of the uploaded file.
+    pub file_name: String,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdateStart {
-    pub version: SemverVersion,
-}
+/// Parameters for GET requests for `/v1/system/update/repository`.
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SystemUpdateCreate {
-    pub version: SemverVersion,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct ComponentUpdateCreate {
-    pub version: SemverVersion,
-    pub component_type: shared::UpdateableComponentType,
-    pub system_update_id: Uuid,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct UpdateableComponentCreate {
-    pub version: SemverVersion,
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+pub struct UpdatesGetRepositoryParams {
+    /// The version to get.
     pub system_version: SemverVersion,
-    pub component_type: shared::UpdateableComponentType,
-    pub device_id: String,
 }

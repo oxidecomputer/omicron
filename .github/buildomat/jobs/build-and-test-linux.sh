@@ -5,6 +5,7 @@
 #: target = "ubuntu-22.04"
 #: rust_toolchain = "1.72.1"
 #: output_rules = [
+#:	"%/work/*",
 #:	"%/var/tmp/omicron_tmp/*",
 #:	"!/var/tmp/omicron_tmp/crdb-base*",
 #:	"!/var/tmp/omicron_tmp/rustc*",

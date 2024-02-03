@@ -44,6 +44,7 @@ use nexus_db_model::ExternalIp;
 use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
+use nexus_db_model::IpAttachState;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
@@ -1705,6 +1706,7 @@ async fn cmd_db_eips(
         ip: ipnetwork::IpNetwork,
         ports: PortRange,
         kind: String,
+        state: IpAttachState,
         owner: Owner,
     }
 
@@ -1789,6 +1791,7 @@ async fn cmd_db_eips(
                 first: ip.first_port.into(),
                 last: ip.last_port.into(),
             },
+            state: ip.state,
             kind: format!("{:?}", ip.kind),
             owner,
         };
@@ -2288,7 +2291,6 @@ async fn cmd_db_inventory(
                 opctx,
                 datastore,
                 id,
-                limit,
                 long_string_formatter,
             )
             .await
@@ -2493,16 +2495,12 @@ async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
     id: Uuid,
-    limit: NonZeroU32,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
-    let (collection, incomplete) = datastore
-        .inventory_collection_read_best_effort(opctx, id, limit)
+    let collection = datastore
+        .inventory_collection_read(opctx, id)
         .await
         .context("reading collection")?;
-    if incomplete {
-        limit_error(limit, || "loading collection");
-    }
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;

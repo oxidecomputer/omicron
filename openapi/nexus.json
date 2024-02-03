@@ -930,7 +930,7 @@
           {
             "in": "path",
             "name": "floating_ip",
-            "description": "Name or ID of the Floating IP",
+            "description": "Name or ID of the floating IP",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -974,7 +974,7 @@
           {
             "in": "path",
             "name": "floating_ip",
-            "description": "Name or ID of the Floating IP",
+            "description": "Name or ID of the floating IP",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -992,6 +992,108 @@
         "responses": {
           "204": {
             "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/floating-ips/{floating_ip}/attach": {
+      "post": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "Attach a floating IP to an instance or other resource",
+        "operationId": "floating_ip_attach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FloatingIpAttach"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/floating-ips/{floating_ip}/detach": {
+      "post": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "Detach a floating IP from an instance or other resource",
+        "operationId": "floating_ip_detach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -1826,6 +1928,99 @@
         }
       }
     },
+    "/v1/instances/{instance}/external-ips/ephemeral": {
+      "post": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Allocate and attach an ephemeral IP to an instance",
+        "operationId": "instance_ephemeral_ip_attach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EphemeralIpCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "successfully enqueued operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalIp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Detach and deallocate an ephemeral IP from an instance",
+        "operationId": "instance_ephemeral_ip_detach",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/instances/{instance}/migrate": {
       "post": {
         "tags": [
@@ -2057,6 +2252,83 @@
         "x-dropshot-websocket": {}
       }
     },
+    "/v1/instances/{instance}/ssh-public-keys": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "List the SSH public keys added to the instance via cloud-init during instance creation",
+        "description": "Note that this list is a snapshot in time and will not reflect updates made after the instance is created.",
+        "operationId": "instance_ssh_public_key_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SshKeyResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/v1/instances/{instance}/start": {
       "post": {
         "tags": [
@@ -2191,7 +2463,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPoolResultsPage"
+                  "$ref": "#/components/schemas/SiloIpPoolResultsPage"
                 }
               }
             }
@@ -2232,7 +2504,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPool"
+                  "$ref": "#/components/schemas/SiloIpPool"
                 }
               }
             }
@@ -5039,7 +5311,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPoolSiloResultsPage"
+                  "$ref": "#/components/schemas/IpPoolSiloLinkResultsPage"
                 }
               }
             }
@@ -5076,7 +5348,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IpPoolSiloLink"
+                "$ref": "#/components/schemas/IpPoolLinkSilo"
               }
             }
           },
@@ -5088,7 +5360,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPoolSilo"
+                  "$ref": "#/components/schemas/IpPoolSiloLink"
                 }
               }
             }
@@ -5144,7 +5416,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/IpPoolSilo"
+                  "$ref": "#/components/schemas/IpPoolSiloLink"
                 }
               }
             }
@@ -5629,6 +5901,97 @@
         },
         "x-dropshot-pagination": {
           "required": []
+        }
+      }
+    },
+    "/v1/system/networking/bfd-disable": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Disable a BFD session.",
+        "operationId": "networking_bfd_disable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BfdSessionDisable"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bfd-enable": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Enable a BFD session.",
+        "operationId": "networking_bfd_enable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BfdSessionEnable"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bfd-status": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BFD status.",
+        "operationId": "networking_bfd_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BfdStatus",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BfdStatus"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -6580,7 +6943,7 @@
           "system/silos"
         ],
         "summary": "Fetch a silo",
-        "description": "Fetch a silo by name.",
+        "description": "Fetch a silo by name or ID.",
         "operationId": "silo_view",
         "parameters": [
           {
@@ -6640,6 +7003,74 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        }
+      }
+    },
+    "/v1/system/silos/{silo}/ip-pools": {
+      "get": {
+        "tags": [
+          "system/silos"
+        ],
+        "summary": "List IP pools available within silo",
+        "operationId": "silo_ip_pool_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "silo",
+            "description": "Name or ID of the silo",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SiloIpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       }
     },
@@ -8223,6 +8654,161 @@
           "part",
           "revision",
           "serial"
+        ]
+      },
+      "BfdMode": {
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdSessionDisable": {
+        "description": "Information needed to disable a BFD session",
+        "type": "object",
+        "properties": {
+          "remote": {
+            "description": "Address of the remote peer to disable a BFD session for.",
+            "type": "string",
+            "format": "ip"
+          },
+          "switch": {
+            "description": "The switch to enable this session on. Must be `switch0` or `switch1`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "remote",
+          "switch"
+        ]
+      },
+      "BfdSessionEnable": {
+        "description": "Information about a bidirectional forwarding detection (BFD) session.",
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "description": "The negotiated Control packet transmission interval, multiplied by this variable, will be the Detection Time for this session (as seen by the remote system)",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "description": "Address the Oxide switch will listen on for BFD traffic. If `None` then the unspecified address (0.0.0.0 or ::) is used.",
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "description": "Select either single-hop (RFC 5881) or multi-hop (RFC 5883)",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BfdMode"
+              }
+            ]
+          },
+          "remote": {
+            "description": "Address of the remote peer to establish a BFD session with.",
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "description": "The minimum interval, in microseconds, between received BFD Control packets that this system requires",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "description": "The switch to enable this session on. Must be `switch0` or `switch1`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
+        ]
+      },
+      "BfdState": {
+        "oneOf": [
+          {
+            "description": "A stable down state. Non-responsive to incoming messages.",
+            "type": "string",
+            "enum": [
+              "admin_down"
+            ]
+          },
+          {
+            "description": "The initial state.",
+            "type": "string",
+            "enum": [
+              "down"
+            ]
+          },
+          {
+            "description": "The peer has detected a remote peer in the down state.",
+            "type": "string",
+            "enum": [
+              "init"
+            ]
+          },
+          {
+            "description": "The peer has detected a remote peer in the up or init state while in the init state.",
+            "type": "string",
+            "enum": [
+              "up"
+            ]
+          }
+        ]
+      },
+      "BfdStatus": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "peer": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "state": {
+            "$ref": "#/components/schemas/BfdState"
+          },
+          "switch": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "peer",
+          "required_rx",
+          "state",
+          "switch"
         ]
       },
       "BgpAnnounceSet": {
@@ -10937,6 +11523,21 @@
           }
         ]
       },
+      "EphemeralIpCreate": {
+        "description": "Parameters for creating an ephemeral IP address for an instance.",
+        "type": "object",
+        "properties": {
+          "pool": {
+            "nullable": true,
+            "description": "Name or ID of the IP pool used to allocate an address",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        }
+      },
       "Error": {
         "description": "Error information from a response.",
         "type": "object",
@@ -10957,33 +11558,105 @@
         ]
       },
       "ExternalIp": {
-        "type": "object",
-        "properties": {
-          "ip": {
-            "type": "string",
-            "format": "ip"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "ip": {
+                "type": "string",
+                "format": "ip"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "ephemeral"
+                ]
+              }
+            },
+            "required": [
+              "ip",
+              "kind"
+            ]
           },
-          "kind": {
-            "$ref": "#/components/schemas/IpKind"
+          {
+            "description": "A Floating IP is a well-known IP address which can be attached and detached from instances.",
+            "type": "object",
+            "properties": {
+              "description": {
+                "description": "human-readable free-form text about a resource",
+                "type": "string"
+              },
+              "id": {
+                "description": "unique, immutable, system-controlled identifier for each resource",
+                "type": "string",
+                "format": "uuid"
+              },
+              "instance_id": {
+                "nullable": true,
+                "description": "The ID of the instance that this Floating IP is attached to, if it is presently in use.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "ip": {
+                "description": "The IP address held by this resource.",
+                "type": "string",
+                "format": "ip"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "floating"
+                ]
+              },
+              "name": {
+                "description": "unique, mutable, user-controlled identifier for each resource",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/Name"
+                  }
+                ]
+              },
+              "project_id": {
+                "description": "The project this resource exists within.",
+                "type": "string",
+                "format": "uuid"
+              },
+              "time_created": {
+                "description": "timestamp when this resource was created",
+                "type": "string",
+                "format": "date-time"
+              },
+              "time_modified": {
+                "description": "timestamp when this resource was last modified",
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "description",
+              "id",
+              "ip",
+              "kind",
+              "name",
+              "project_id",
+              "time_created",
+              "time_modified"
+            ]
           }
-        },
-        "required": [
-          "ip",
-          "kind"
         ]
       },
       "ExternalIpCreate": {
         "description": "Parameters for creating an external IP address for instances.",
         "oneOf": [
           {
-            "description": "An IP address providing both inbound and outbound access. The address is automatically-assigned from the provided IP Pool, or all available pools if not specified.",
+            "description": "An IP address providing both inbound and outbound access. The address is automatically-assigned from the provided IP Pool, or the current silo's default pool if not specified.",
             "type": "object",
             "properties": {
-              "pool_name": {
+              "pool": {
                 "nullable": true,
                 "allOf": [
                   {
-                    "$ref": "#/components/schemas/Name"
+                    "$ref": "#/components/schemas/NameOrId"
                   }
                 ]
               },
@@ -10999,11 +11672,11 @@
             ]
           },
           {
-            "description": "An IP address providing both inbound and outbound access. The address is an existing Floating IP object assigned to the current project.\n\nThe floating IP must not be in use by another instance or service.",
+            "description": "An IP address providing both inbound and outbound access. The address is an existing floating IP object assigned to the current project.\n\nThe floating IP must not be in use by another instance or service.",
             "type": "object",
             "properties": {
-              "floating_ip_name": {
-                "$ref": "#/components/schemas/Name"
+              "floating_ip": {
+                "$ref": "#/components/schemas/NameOrId"
               },
               "type": {
                 "type": "string",
@@ -11013,7 +11686,7 @@
               }
             },
             "required": [
-              "floating_ip_name",
+              "floating_ip",
               "type"
             ]
           }
@@ -11158,6 +11831,32 @@
           "time_modified"
         ]
       },
+      "FloatingIpAttach": {
+        "description": "Parameters for attaching a floating IP address to another resource",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "The type of `parent`'s resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/FloatingIpParentKind"
+              }
+            ]
+          },
+          "parent": {
+            "description": "Name or ID of the resource that this IP address should be attached to",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "parent"
+        ]
+      },
       "FloatingIpCreate": {
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
@@ -11187,6 +11886,13 @@
         "required": [
           "description",
           "name"
+        ]
+      },
+      "FloatingIpParentKind": {
+        "description": "The type of resource that a floating IP is attached to",
+        "type": "string",
+        "enum": [
+          "instance"
         ]
       },
       "FloatingIpResultsPage": {
@@ -11514,6 +12220,14 @@
           "n_samples",
           "start_time"
         ]
+      },
+      "Hostname": {
+        "title": "An RFC-1035-compliant hostname",
+        "description": "A hostname identifies a host on a network, and is usually a dot-delimited sequence of labels, where each label contains only letters, digits, or the hyphen. See RFCs 1035 and 952 for more details.",
+        "type": "string",
+        "pattern": "^([a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))(\\.[a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))*$",
+        "minLength": 1,
+        "maxLength": 253
       },
       "IdentityProvider": {
         "description": "View of an Identity Provider",
@@ -11948,7 +12662,7 @@
             }
           },
           "hostname": {
-            "type": "string"
+            "$ref": "#/components/schemas/Hostname"
           },
           "memory": {
             "$ref": "#/components/schemas/ByteCount"
@@ -11969,6 +12683,14 @@
                 "$ref": "#/components/schemas/InstanceNetworkInterfaceAttachment"
               }
             ]
+          },
+          "ssh_public_keys": {
+            "nullable": true,
+            "description": "An allowlist of SSH public keys to be transferred to the instance via cloud-init during instance creation.\n\nIf not provided, all SSH public keys from the user's profile will be sent. If an empty list is provided, no public keys will be transmitted to the instance.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
           },
           "start": {
             "description": "Should this instance be started upon creation; true by default.",
@@ -12413,14 +13135,6 @@
           }
         ]
       },
-      "IpKind": {
-        "description": "The kind of an external IP address for an instance",
-        "type": "string",
-        "enum": [
-          "ephemeral",
-          "floating"
-        ]
-      },
       "IpNet": {
         "oneOf": [
           {
@@ -12497,6 +13211,22 @@
           "name"
         ]
       },
+      "IpPoolLinkSilo": {
+        "type": "object",
+        "properties": {
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "type": "boolean"
+          },
+          "silo": {
+            "$ref": "#/components/schemas/NameOrId"
+          }
+        },
+        "required": [
+          "is_default",
+          "silo"
+        ]
+      },
       "IpPoolRange": {
         "type": "object",
         "properties": {
@@ -12565,7 +13295,7 @@
           "items"
         ]
       },
-      "IpPoolSilo": {
+      "IpPoolSiloLink": {
         "description": "A link between an IP pool and a silo that allows one to allocate IPs from the pool within the silo",
         "type": "object",
         "properties": {
@@ -12588,23 +13318,7 @@
           "silo_id"
         ]
       },
-      "IpPoolSiloLink": {
-        "type": "object",
-        "properties": {
-          "is_default": {
-            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
-            "type": "boolean"
-          },
-          "silo": {
-            "$ref": "#/components/schemas/NameOrId"
-          }
-        },
-        "required": [
-          "is_default",
-          "silo"
-        ]
-      },
-      "IpPoolSiloResultsPage": {
+      "IpPoolSiloLinkResultsPage": {
         "description": "A single page of results",
         "type": "object",
         "properties": {
@@ -12612,7 +13326,7 @@
             "description": "list of items on this page of results",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpPoolSilo"
+              "$ref": "#/components/schemas/IpPoolSiloLink"
             }
           },
           "next_page": {
@@ -13800,6 +14514,72 @@
               "local_only"
             ]
           }
+        ]
+      },
+      "SiloIpPool": {
+        "description": "An IP pool in the context of a silo",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_default": {
+            "description": "When a pool is the default for a silo, floating IPs and instance ephemeral IPs will come from that pool when no other pool is specified. There can be at most one default for a given silo.",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "is_default",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SiloIpPoolResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SiloIpPool"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "SiloQuotas": {
