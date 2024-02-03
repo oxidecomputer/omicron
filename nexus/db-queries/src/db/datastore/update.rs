@@ -22,7 +22,7 @@ use omicron_common::api::external::{
     self, CreateResult, LookupResult, LookupType, ResourceType,
     TufRepoInsertStatus,
 };
-use omicron_common::typed_uuid::TufRepoKind;
+use omicron_uuid_kinds::TufRepoKind;
 use swrite::{swrite, SWrite};
 
 /// The return value of [`DataStore::update_tuf_repo_description_insert`].

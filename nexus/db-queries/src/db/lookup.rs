@@ -22,7 +22,7 @@ use nexus_db_model::Name;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
-use omicron_common::typed_uuid::TufRepoKind;
+use omicron_uuid_kinds::TufRepoKind;
 use uuid::Uuid;
 
 /// Look up an API resource in the database

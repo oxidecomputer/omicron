@@ -10,7 +10,7 @@ use newtype_uuid::TypedUuid;
 use nexus_types::external_api::params;
 use nexus_types::identity::Asset;
 use omicron_common::api::external;
-use omicron_common::typed_uuid::LoopbackAddressKind;
+use omicron_uuid_kinds::LoopbackAddressKind;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

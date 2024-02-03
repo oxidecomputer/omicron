@@ -68,6 +68,7 @@ members = [
     "tufaceous",
     "update-common",
     "update-engine",
+    "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -142,6 +143,7 @@ default-members = [
     "tufaceous",
     "update-common",
     "update-engine",
+    "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -162,7 +164,7 @@ atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.21.7"
-bb8 = "0.8.1"
+bb8 = "0.8.3"
 bcs = "0.1.6"
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
@@ -170,7 +172,7 @@ bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
 bytes = "1.5.0"
-camino = "1.1"
+camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
 chacha20poly1305 = "0.10.1"
@@ -262,7 +264,6 @@ omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
 oxlog = { path = "dev-tools/oxlog" }
-newtype-uuid = { version = "0.2.0", features = ["schemars08", "serde", "v4"] }
 nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
@@ -276,7 +277,7 @@ omicron-package = { path = "package" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
-omicron-zone-package = "0.10.1"
+omicron-zone-package = "0.11.0"
 oxide-client = { path = "clients/oxide-client" }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "1d29ef60a18179babfb44f0f7a3c2fe71034a2c1", features = [ "api", "std" ] }
 once_cell = "1.19.0"
@@ -357,6 +358,7 @@ sled-hardware = { path = "sled-hardware" }
 sled-storage = { path = "sled-storage" }
 slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.8"
+slog-bunyan = "2.5"
 slog-dtrace = "0.3"
 slog-envlogger = "2.2"
 slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
@@ -394,7 +396,7 @@ tokio-stream = "0.1.14"
 tokio-tungstenite = "0.20"
 tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
 toml = "0.8.8"
-toml_edit = "0.21.0"
+toml_edit = "0.21.1"
 tough = { version = "0.16.0", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
@@ -416,6 +418,14 @@ wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async", "sync"] }
+
+# newtype-uuid is set to default-features = false because we don't want to
+# depend on std in omicron-uuid-kinds (in case a no-std library wants to access
+# the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
+# std and the other features enabled because they'll refer to it via
+# omicron-uuid-kinds.workspace = true.
+newtype-uuid = { version = "0.3.0", default-features = false }
+omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that
@@ -572,6 +582,7 @@ opt-level = 3
 [profile.dev.package.keccak]
 opt-level = 3
 
+
 #
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
@@ -614,3 +625,14 @@ branch = "oxide/omicron"
 # to it.
 [patch.crates-io.omicron-workspace-hack]
 path = "workspace-hack"
+
+# We have several crates such as crucible and propolis, which have a Git
+# dependency on omicron. Omicron itself depends on these crates, which can lead
+# to two copies of crates floating around. The goal of the omicron-uuid-kinds
+# crate is to provide a unify registry of UUID kinds, and two copies of the
+# same kinds floating around is unnecessary and painful.
+#
+# This directive ensures that whenever we see omicron-uuid-kinds as a Git
+# dependency, we'll use the local copy of the crate.
+[patch."https://github.com/oxidecomputer/omicron"]
+omicron-uuid-kinds = { path = "uuid-kinds" }

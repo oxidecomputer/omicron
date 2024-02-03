@@ -263,7 +263,7 @@ impl<'de> serde::Deserialize<'de> for InputPrimaryKeyType {
 //                 &content.cursor().token_stream(),
 //             )?;
 //             let kind_param = parsed.uuid_kind.into_inner();
-//             let full_ty = parse_quote!(::newtype_uuid::TypedUuid::<::omicron_common::typed_uuid::#kind_param>);
+//             let full_ty = parse_quote!(::newtype_uuid::TypedUuid::<::omicron_uuid_kinds::#kind_param>);
 //             Ok(Self::UuidKind { full_ty })
 //         } else {
 //             Ok(Self::Standard(input.parse()?))

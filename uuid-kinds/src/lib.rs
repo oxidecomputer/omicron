@@ -3,12 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use newtype_uuid::{TypedUuidKind, TypedUuidTag};
+#[cfg(feature = "schemars08")]
 use schemars::JsonSchema;
 
 macro_rules! impl_typed_uuid_kind {
     ($($kind:ident => $tag:literal),* $(,)?) => {
         $(
-            #[derive(JsonSchema)]
+            #[cfg_attr(feature = "schemars08", derive(JsonSchema))]
             pub enum $kind {}
 
             impl TypedUuidKind for $kind {

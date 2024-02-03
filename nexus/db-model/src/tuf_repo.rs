@@ -14,12 +14,12 @@ use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
 use newtype_uuid::TypedUuid;
 use omicron_common::{
     api::external,
-    typed_uuid::TufRepoKind,
     update::{
         ArtifactHash as ExternalArtifactHash, ArtifactId as ExternalArtifactId,
         ArtifactKind,
     },
 };
+use omicron_uuid_kinds::TufRepoKind;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;

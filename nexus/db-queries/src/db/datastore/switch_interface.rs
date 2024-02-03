@@ -24,7 +24,7 @@ use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, ResourceType,
 };
-use omicron_common::typed_uuid::LoopbackAddressKind;
+use omicron_uuid_kinds::LoopbackAddressKind;
 use uuid::Uuid;
 
 impl DataStore {

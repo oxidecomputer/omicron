@@ -7,10 +7,7 @@ pub enum Sled<'a> {
     /// We're looking for a resource with the given primary key
     ///
     /// This has no parent container -- a by-id lookup is always global
-    PrimaryKey(
-        Root<'a>,
-        ::newtype_uuid::TypedUuid<::omicron_common::typed_uuid::SledKind>,
-    ),
+    PrimaryKey(Root<'a>, ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::SledKind>),
 }
 impl<'a> Sled<'a> {
     /// Fetch the record corresponding to the selected resource
@@ -135,7 +132,7 @@ impl<'a> Sled<'a> {
     async fn fetch_by_id_for(
         opctx: &OpContext,
         datastore: &DataStore,
-        v0: &::newtype_uuid::TypedUuid<::omicron_common::typed_uuid::SledKind>,
+        v0: &::newtype_uuid::TypedUuid<::omicron_uuid_kinds::SledKind>,
         action: authz::Action,
     ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
         let (authz_sled, db_row) = Self::lookup_by_id_no_authz(opctx, datastore, v0)
@@ -152,7 +149,7 @@ impl<'a> Sled<'a> {
     async fn lookup_by_id_no_authz(
         opctx: &OpContext,
         datastore: &DataStore,
-        v0: &::newtype_uuid::TypedUuid<::omicron_common::typed_uuid::SledKind>,
+        v0: &::newtype_uuid::TypedUuid<::omicron_uuid_kinds::SledKind>,
     ) -> LookupResult<(authz::Sled, nexus_db_model::Sled)> {
         use db::schema::sled::dsl;
         let db_row = dsl::sled
