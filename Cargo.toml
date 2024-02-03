@@ -668,5 +668,7 @@ path = "workspace-hack"
 #
 # This directive ensures that whenever we see omicron-uuid-kinds as a Git
 # dependency, we'll use the path dependency version of the crate instead.
+#
+# See also: uuid-kinds/README.adoc.
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
