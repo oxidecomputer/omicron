@@ -101,54 +101,19 @@ pub fn lookup_resource(
     }
 }
 
-/// Looks for a Meta-style attribute with a particular identifier.
+/// Looks for a Diesel Meta-style attribute with a particular identifier.
 ///
 /// As an example, for an attribute like `#[diesel(foo = bar)]`, we can find this
-/// attribute by calling `get_nv_attr(&item.attrs, "diesel", "foo")`.
-fn get_nv_attr(
+/// attribute by calling `get_nv_attr(&item.attrs, "foo")`.
+fn get_diesel_nv_attr(
     attrs: &[syn::Attribute],
-    path: &str,
     name: &str,
 ) -> Option<NameValue> {
     attrs
         .iter()
-        .filter(|attr| attr.path().is_ident(path))
+        .filter(|attr| attr.path().is_ident("diesel"))
         .filter_map(|attr| attr.parse_args::<NameValue>().ok())
         .find(|nv| nv.name.is_ident(name))
-}
-
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MacroInput {
-    /// The `TypedUuid` type parameter.
-    #[serde(default)]
-    pub uuid_kind: Option<ParseWrapper<syn::Ident>>,
-}
-
-impl MacroInput {
-    fn parse_from_attrs(
-        attrs: &[syn::Attribute],
-        flavor: IdentityVariant,
-    ) -> syn::Result<Self> {
-        let inner_attrs = attrs
-            .iter()
-            .filter_map(|attr| {
-                attr.path().is_ident(flavor.attr_name()).then(|| {
-                    let meta_list = attr.meta.require_list()?;
-                    Ok::<_, syn::Error>(&meta_list.tokens)
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let tokens = quote! { #(#inner_attrs,)* };
-        serde_tokenstream::from_tokenstream(&tokens)
-    }
-
-    fn uuid_ty(&self) -> PrimaryKeyType {
-        self.uuid_kind.as_ref().map_or_else(
-            || PrimaryKeyType::Standard(parse_quote!(::uuid::Uuid)),
-            |v| PrimaryKeyType::new_typed_uuid(v),
-        )
-    }
 }
 
 /// Looks up a named field within a struct.
@@ -276,8 +241,8 @@ fn derive_impl(
     let name = &item.ident;
 
     // Ensure that the "table_name" attribute exists, and get it.
-    let table_nv = get_nv_attr(&item.attrs, "diesel", "table_name")
-        .ok_or_else(|| {
+    let table_nv =
+        get_diesel_nv_attr(&item.attrs, "table_name").ok_or_else(|| {
             Error::new(
                 item.span(),
                 format!(
@@ -289,8 +254,7 @@ fn derive_impl(
         })?;
     let table_name = table_nv.value;
 
-    // Read out our own config.
-    let input = MacroInput::parse_from_attrs(&item.attrs, flavor)?;
+    let input = MacroAttributes::parse_from_attrs(&item.attrs, flavor)?;
     let uuid_ty = input.uuid_ty();
 
     // Ensure that a field named "identity" exists within this struct.
@@ -314,6 +278,41 @@ fn derive_impl(
     }
 
     Err(Error::new(item.span(), "Resource can only be derived for structs"))
+}
+
+/// Attributes specific to the `Resource` and `Asset` derive macros.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MacroAttributes {
+    /// The `TypedUuid` type parameter.
+    #[serde(default)]
+    uuid_kind: Option<ParseWrapper<syn::Ident>>,
+}
+
+impl MacroAttributes {
+    fn parse_from_attrs(
+        attrs: &[syn::Attribute],
+        flavor: IdentityVariant,
+    ) -> syn::Result<Self> {
+        let inner_attrs = attrs
+            .iter()
+            .filter_map(|attr| {
+                attr.path().is_ident(flavor.attr_name()).then(|| {
+                    let meta_list = attr.meta.require_list()?;
+                    Ok::<_, syn::Error>(&meta_list.tokens)
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let tokens = quote! { #(#inner_attrs,)* };
+        serde_tokenstream::from_tokenstream(&tokens)
+    }
+
+    fn uuid_ty(&self) -> PrimaryKeyType {
+        self.uuid_kind.as_ref().map_or_else(
+            || PrimaryKeyType::Standard(parse_quote!(::uuid::Uuid)),
+            |v| PrimaryKeyType::new_typed_uuid(v),
+        )
+    }
 }
 
 // Emits generated structures, depending on the requested flavor of identity.

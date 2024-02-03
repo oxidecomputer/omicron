@@ -162,7 +162,7 @@ async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", 
 async-trait = "0.1.77"
 atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
-backoff = { version = "0.4.0", features = [ "tokio" ] }
+backoff = { version = "0.4.0", features = ["tokio"] }
 base64 = "0.21.7"
 bb8 = "0.8.3"
 bcs = "0.1.6"
@@ -178,10 +178,10 @@ cancel-safe-futures = "0.1.5"
 chacha20poly1305 = "0.10.1"
 ciborium = "0.2.2"
 cfg-if = "1.0"
-chrono = { version = "0.4", features = [ "serde" ] }
+chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.4", features = ["cargo", "derive", "env", "wrap_help"] }
 cookie = "0.18"
-criterion = { version = "0.5.1", features = [ "async_tokio" ] }
+criterion = { version = "0.5.1", features = ["async_tokio"] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
 crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2d4bc11232d53f177c286383926fa5f8c1b2a938" }
@@ -195,12 +195,21 @@ db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
 derive-where = "1.2.7"
-diesel = { version = "2.1.4", features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.1.4", features = [
+    "postgres",
+    "r2d2",
+    "chrono",
+    "serde_json",
+    "network-address",
+    "uuid",
+] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [
+    "usdt-probes",
+] }
 either = "1.9.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
@@ -211,7 +220,9 @@ foreign-types = "0.3.2"
 fs-err = "2.11.0"
 futures = "0.3.30"
 gateway-client = { path = "clients/gateway-client" }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9", default-features = false, features = [
+    "std",
+] }
 gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "2739c18e80697aa6bc235c935176d14b4d757ee9" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gethostname = "0.4.3"
@@ -269,7 +280,7 @@ nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
 num-integer = "0.1.45"
-num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
+num = { version = "0.4.1", default-features = false, features = ["libm"] }
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
@@ -279,7 +290,10 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.11.0"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "1d29ef60a18179babfb44f0f7a3c2fe71034a2c1", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "1d29ef60a18179babfb44f0f7a3c2fe71034a2c1", features = [
+    "api",
+    "std",
+] }
 once_cell = "1.19.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.0.0"
@@ -338,7 +352,7 @@ samael = { version = "0.0.14", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.21", features = ["std", "serde"] }
-serde = { version = "1.0", default-features = false, features = [ "derive" ] }
+serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.113"
@@ -350,31 +364,37 @@ sha2 = "0.10.8"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
 signal-hook = "0.3"
-signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
+signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 similar-asserts = "1.5.0"
 sled = "0.34"
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-hardware = { path = "sled-hardware" }
 sled-storage = { path = "sled-storage" }
-slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
+slog = { version = "2.7", features = [
+    "dynamic-keys",
+    "max_level_trace",
+    "release_max_level_debug",
+] }
 slog-async = "2.8"
 slog-bunyan = "2.5"
 slog-dtrace = "0.3"
 slog-envlogger = "2.2"
-slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
+slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = [
+    "derive",
+] }
 slog-term = "2.9"
 smf = "0.2"
 sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
-sqlparser = { version = "0.43.1", features = [ "visitor" ] }
+sqlparser = { version = "0.43.1", features = ["visitor"] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
 steno = "0.4.0"
-strum = { version = "0.25", features = [ "derive" ] }
+strum = { version = "0.25", features = ["derive"] }
 subprocess = "0.2.9"
 supports-color = "2.1.0"
 swrite = "0.1.0"
@@ -391,13 +411,16 @@ test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.35.1"
-tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
+tokio-postgres = { version = "0.7", features = [
+    "with-chrono-0_4",
+    "with-uuid-1",
+] }
 tokio-stream = "0.1.14"
 tokio-tungstenite = "0.20"
 tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
 toml = "0.8.8"
 toml_edit = "0.21.1"
-tough = { version = "0.16.0", features = [ "http" ] }
+tough = { version = "0.16.0", features = ["http"] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
 trust-dns-resolver = "0.22"
@@ -416,8 +439,14 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
-zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
-zone = { version = "0.3", default-features = false, features = ["async", "sync"] }
+zip = { version = "0.6.6", default-features = false, features = [
+    "deflate",
+    "bzip2",
+] }
+zone = { version = "0.3", default-features = false, features = [
+    "async",
+    "sync",
+] }
 
 # newtype-uuid is set to default-features = false because we don't want to
 # depend on std in omicron-uuid-kinds (in case a no-std library wants to access
@@ -425,7 +454,11 @@ zone = { version = "0.3", default-features = false, features = ["async", "sync"]
 # std and the other features enabled because they'll refer to it via
 # omicron-uuid-kinds.workspace = true.
 newtype-uuid = { version = "0.3.0", default-features = false }
-omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
+omicron-uuid-kinds = { path = "uuid-kinds", features = [
+    "serde",
+    "schemars08",
+    "uuid-v4",
+] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that
@@ -626,13 +659,14 @@ branch = "oxide/omicron"
 [patch.crates-io.omicron-workspace-hack]
 path = "workspace-hack"
 
-# We have several crates such as crucible and propolis, which have a Git
-# dependency on omicron. Omicron itself depends on these crates, which can lead
-# to two copies of crates floating around. The goal of the omicron-uuid-kinds
-# crate is to provide a unify registry of UUID kinds, and two copies of the
-# same kinds floating around is unnecessary and painful.
+# Several crates such as crucible and propolis have have a Git dependency on
+# this repo. Omicron itself depends on these crates, which can lead to two
+# copies of these crates in the dependency graph. (As a Git dependency, and as
+# a path dependency.) The goal of omicron-uuid-kinds is to provide a unified
+# registry of UUID kinds. Two copies of the same kinds floating around is
+# unnecessary and painful.
 #
 # This directive ensures that whenever we see omicron-uuid-kinds as a Git
-# dependency, we'll use the local copy of the crate.
+# dependency, we'll use the path dependency version of the crate instead.
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
