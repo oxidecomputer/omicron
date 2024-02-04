@@ -532,9 +532,11 @@ fn build_asset_impl(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use crate::test_helpers::pretty_format;
 
-    use super::*;
+    use expectorate::assert_contents;
 
     #[test]
     fn test_derive_metadata_identity_fails_without_table_name() {
@@ -658,21 +660,43 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
-    fn test_derive_dump() {
+    fn test_derive_snapshots() {
         let out = derive_impl(
             quote! {
                 #[derive(Asset)]
                 #[diesel(table_name = my_target)]
-                #[asset(uuid_kind = MyTargetKind)]
-                struct MyTarget {
-                    identity: MyTargetIdentity,
+                #[asset(uuid_kind = CustomKind)]
+                struct AssetWithUuidKind {
+                    identity: AssetWithUuidKindIdentity,
                     name: String,
                     is_cool: bool,
                 }
             },
             IdentityVariant::Asset,
+        )
+        .unwrap();
+        assert_contents(
+            "outputs/asset_with_uuid_kind.txt",
+            &pretty_format(out),
         );
-        println!("{}", pretty_format(out.expect("input is valid")));
+
+        let out = derive_impl(
+            quote! {
+                #[derive(Resource)]
+                #[diesel(table_name = my_target)]
+                #[resource(uuid_kind = CustomKind)]
+                struct ResourceWithUuidKind {
+                    identity: ResourceWithUuidKindIdentity,
+                    name: String,
+                    is_cool: bool,
+                }
+            },
+            IdentityVariant::Resource,
+        )
+        .unwrap();
+        assert_contents(
+            "outputs/resource_with_uuid_kind.txt",
+            &pretty_format(out),
+        );
     }
 }
