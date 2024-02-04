@@ -466,7 +466,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=ff6c4df2e816eee6e7b2
 dependencies = [
  "bhyve_api_sys",
  "libc",
- "strum",
+ "strum 0.25.0",
 ]
 
 [[package]]
@@ -475,7 +475,7 @@ version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=ff6c4df2e816eee6e7b2b0488777d30ef35ee217#ff6c4df2e816eee6e7b2b0488777d30ef35ee217"
 dependencies = [
  "libc",
- "strum",
+ "strum 0.25.0",
 ]
 
 [[package]]
@@ -831,6 +831,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
+name = "castaway"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a17ed5635fc8536268e5d4de1e22e81ac34419e5f052d4d51f4e01dcc263fcc"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "cbc"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1047,6 +1056,19 @@ dependencies = [
  "is-terminal",
  "lazy_static",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "compact_str"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f86b9c4c00838774a6d902ef931eff7470720c51d90c2e32cfe15dc304737b3f"
+dependencies = [
+ "castaway",
+ "cfg-if",
+ "itoa",
+ "ryu",
+ "static_assertions",
 ]
 
 [[package]]
@@ -4313,7 +4335,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
- "strum",
+ "strum 0.25.0",
  "thiserror",
  "uuid",
 ]
@@ -4385,7 +4407,7 @@ dependencies = [
  "slog",
  "static_assertions",
  "steno",
- "strum",
+ "strum 0.25.0",
  "subprocess",
  "swrite",
  "term",
@@ -4448,7 +4470,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "slog",
- "strum",
+ "strum 0.25.0",
  "thiserror",
  "tokio",
  "uuid",
@@ -4537,7 +4559,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
- "strum",
+ "strum 0.25.0",
  "thiserror",
  "uuid",
 ]
@@ -4854,7 +4876,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_with",
  "slog",
- "strum",
+ "strum 0.25.0",
  "test-strategy",
  "thiserror",
  "tokio",
@@ -5057,7 +5079,7 @@ dependencies = [
  "slog-term",
  "sp-sim",
  "steno",
- "strum",
+ "strum 0.25.0",
  "subprocess",
  "tempfile",
  "term",
@@ -5110,7 +5132,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain",
- "strum",
+ "strum 0.25.0",
  "subprocess",
  "tabled",
  "textwrap 0.16.0",
@@ -5145,7 +5167,7 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "smf",
- "strum",
+ "strum 0.25.0",
  "swrite",
  "tar",
  "thiserror",
@@ -5669,7 +5691,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "strum",
+ "strum 0.25.0",
  "thiserror",
  "trybuild",
  "uuid",
@@ -5722,7 +5744,7 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-term",
- "strum",
+ "strum 0.25.0",
  "subprocess",
  "thiserror",
  "tokio",
@@ -5764,7 +5786,7 @@ dependencies = [
  "slog-term",
  "sqlformat",
  "sqlparser",
- "strum",
+ "strum 0.25.0",
  "tabled",
  "tempfile",
  "thiserror",
@@ -6862,7 +6884,26 @@ dependencies = [
  "lru",
  "paste",
  "stability",
- "strum",
+ "strum 0.25.0",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
+name = "ratatui"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "154b85ef15a5d1719bcaa193c3c81fe645cd120c156874cd660fe49fd21d1373"
+dependencies = [
+ "bitflags 2.4.0",
+ "cassowary",
+ "compact_str",
+ "indoc 2.0.3",
+ "itertools 0.12.1",
+ "lru",
+ "paste",
+ "stability",
+ "strum 0.26.1",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -6959,7 +7000,7 @@ dependencies = [
  "nu-ansi-term",
  "serde",
  "strip-ansi-escapes",
- "strum",
+ "strum 0.25.0",
  "strum_macros 0.25.2",
  "thiserror",
  "unicode-segmentation",
@@ -8664,6 +8705,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "723b93e8addf9aa965ebe2d11da6d7540fa2283fcea14b3371ff055f7ba13f5f"
+dependencies = [
+ "strum_macros 0.26.1",
+]
+
+[[package]]
 name = "strum_macros"
 version = "0.24.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8681,6 +8731,19 @@ name = "strum_macros"
 version = "0.25.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad8d03b598d3d0fff69bf533ee3ef19b8eeb342729596df84bcc7e1f96ec4059"
+dependencies = [
+ "heck 0.4.1",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.48",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a3417fc93d76740d974a01654a09777cb500428cc874ca9f45edfe0c4d4cd18"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
@@ -9597,11 +9660,11 @@ dependencies = [
 
 [[package]]
 name = "tui-tree-widget"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "136011b328c4f392499a02c4b5b78d509fb297bf9c10f2bda5d11d65cb946e4c"
+checksum = "5c317bb061f42d943a2eb118b5de0ee98fc2443f0631e54b24a19de014a28810"
 dependencies = [
- "ratatui",
+ "ratatui 0.26.0",
  "unicode-width",
 ]
 
@@ -10244,7 +10307,7 @@ dependencies = [
  "once_cell",
  "owo-colors",
  "proptest",
- "ratatui",
+ "ratatui 0.25.0",
  "reqwest",
  "rpassword",
  "serde",
