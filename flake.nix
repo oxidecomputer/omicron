@@ -201,23 +201,45 @@
           # this means that we will have to update this SHA if the clickhouse
           # version changes.
           sha256 = "1lgxwh67apgl386ilpg0iy5xkyz12q4lgnz08zswjbxv88ra0qxj";
-
-          tarball = builtins.fetchurl
+          name = "clickhouse";
+          src = builtins.fetchurl
             {
               inherit sha256;
-              url = "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com/clickhouse-${version}.linux.tar.gz";
+              url = "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com/${name}-${version}.linux.tar.gz";
             };
         in
         stdenv.mkDerivation
           {
-            name = "clickhouse";
-            src = tarball;
+            inherit src name version;
             sourceRoot = ".";
             installPhase = ''
               mkdir -p $out/bin
               mkdir -p $out/etc
-              cp ./clickhouse $out/bin/clickhouse
+              cp ./${name} $out/bin/${name}
               cp ./._config.xml $out/bin/config.xml
+            '';
+          };
+
+      cockroachdb = with pkgs;
+        let
+          binName = "cockroach";
+          version = with pkgs.lib; trivial.pipe ./tools/cockroachdb_version [
+            (builtins.readFile)
+            (strings.removeSuffix "\n")
+          ];
+          src = builtins.fetchurl
+            {
+              url = "https://binaries.cockroachdb.com/${binName}-${version}.linux-amd64.tgz";
+              sha256 = "1aglbwh27275bicyvij11s3as4zypqwc26p9gyh5zr3y1s123hr4";
+            };
+        in
+        stdenv.mkDerivation
+          {
+            name = "cockroachdb";
+            inherit src version;
+            installPhase = ''
+              mkdir -p $out/bin
+              cp ./${binName} $out/bin/${binName}
             '';
           };
     in
@@ -226,7 +248,6 @@
       packages.x86_64-linux = {
         dendrite-stub = dendriteStub;
         mgd = maghemiteMgd;
-
       };
 
       devShells.x86_64-linux.default =
@@ -281,14 +302,16 @@
               rm out/mgd
               rm out/dendrite-stub
               rm -r out/clickhouse
+              rm -r out/cockroachdb
 
-              mkdir out
               mkdir -p out/clickhouse
+              mkdir -p out/cockroachdb/
 
               ln -s ${maghemiteMgd.out} -T out/mgd
               ln -s ${dendriteStub.out} -T out/dendrite-stub
               ln -s ${clickhouseWrapped.out}/bin/clickhouse out/clickhouse/clickhouse
               ln -s ${clickhouse.out}/etc/config.xml out/clickhouse
+              ln -s ${cockroachdb.out}/bin out/cockroachdb/bin
             '';
 
             # Needed by rustfmt-wrapper, see:
