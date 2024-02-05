@@ -18,6 +18,7 @@ mod nat_cleanup;
 mod phantom_disks;
 mod status;
 mod sync_service_zone_nat;
+mod sync_switch_port_settings;
 
 pub use common::Driver;
 pub use common::TaskHandle;
