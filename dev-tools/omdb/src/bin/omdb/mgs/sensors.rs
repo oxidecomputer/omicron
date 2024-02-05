@@ -15,6 +15,7 @@ use gateway_client::types::SpType;
 use multimap::MultiMap;
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Args)]
@@ -95,8 +96,8 @@ impl SensorsArgs {
     fn matches_sp(&self, sp: &SpIdentifier) -> bool {
         match sp.type_ {
             SpType::Sled => {
-                let matched = if self.sled.len() > 0 {
-                    self.sled.iter().any(|&v| v == sp.slot)
+                let matched = if !self.sled.is_empty() {
+                    self.sled.contains(&sp.slot)
                 } else {
                     true
                 };
@@ -132,6 +133,11 @@ impl Sensor {
         } else {
             match self.kind {
                 MeasurementKind::Speed => {
+                    //
+                    // This space is deliberate:  other units (°C, V, A) look
+                    // more natural when directly attached to their value --
+                    // but RPM looks decidedly unnatural without a space.
+                    //
                     format!("{value:0} RPM")
                 }
                 _ => {
@@ -165,11 +171,7 @@ impl Sensor {
             _ => None,
         };
 
-        if let Some(kind) = k {
-            Some(Sensor { name: name.to_string(), kind })
-        } else {
-            None
-        }
+        k.map(|kind| Sensor { name: name.to_string(), kind })
     }
 }
 
@@ -208,6 +210,13 @@ pub(crate) struct SensorValues {
     pub time: u64,
 }
 
+///
+/// We identify a device as either a physical device (i.e., when connecting
+/// to MGS), or as a field in the CSV header (i.e., when processing data
+/// postmortem.  It's handy to have this as enum to allow most of the code
+/// to be agnostic to the underlying source, but callers of ['device'] and
+/// ['field'] are expected to know which of these they're dealing with.
+///
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub(crate) enum DeviceIdentifier {
     Field(usize),
@@ -303,11 +312,11 @@ async fn sp_info_mgs(
     let mut sp_list = all_sp_list
         .iter()
         .filter_map(|ignition| {
-            if matches!(ignition.details, SpIgnition::Yes { .. }) {
-                if ignition.id.type_ == SpType::Sled {
-                    if args.matches_sp(&ignition.id) {
-                        return Some(ignition.id);
-                    }
+            if matches!(ignition.details, SpIgnition::Yes { .. })
+                && ignition.id.type_ == SpType::Sled
+            {
+                if args.matches_sp(&ignition.id) {
+                    return Some(ignition.id);
                 }
             }
             None
@@ -329,12 +338,8 @@ async fn sp_info_mgs(
 
     let mut handles = vec![];
     for sp_id in sp_list {
-        let mgs_client = mgs_client.clone();
-        let type_ = sp_id.type_;
-        let slot = sp_id.slot;
-
         let handle =
-            tokio::spawn(async move { sp_info(mgs_client, type_, slot).await });
+            tokio::spawn(sp_info(mgs_client.clone(), sp_id.type_, sp_id.slot));
 
         handles.push((sp_id, handle));
     }
@@ -543,12 +548,12 @@ fn sp_info_csv<R: std::io::Read>(
 pub(crate) async fn sensor_metadata<R: std::io::Read>(
     input: &mut SensorInput<R>,
     args: &SensorsArgs,
-) -> Result<(SensorMetadata, SensorValues), anyhow::Error> {
+) -> Result<(Arc<SensorMetadata>, SensorValues), anyhow::Error> {
     let by_kind = if let Some(types) = &args.types {
         let mut h = HashSet::new();
 
         for t in types {
-            h.insert(match Sensor::from_string("", &t) {
+            h.insert(match Sensor::from_string("", t) {
                 None => bail!("invalid sensor kind {t}"),
                 Some(s) => s.kind,
             });
@@ -559,11 +564,10 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
         None
     };
 
-    let by_name = if let Some(named) = &args.named {
-        Some(named.into_iter().collect::<HashSet<_>>())
-    } else {
-        None
-    };
+    let by_name = args
+        .named
+        .as_ref()
+        .map(|named| named.into_iter().collect::<HashSet<_>>());
 
     let info = match input {
         SensorInput::MgsClient(ref mgs_client) => {
@@ -634,7 +638,7 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
     }
 
     Ok((
-        SensorMetadata {
+        Arc::new(SensorMetadata {
             sensors_by_sensor,
             sensors_by_sensor_and_sp,
             sensors_by_id,
@@ -643,12 +647,9 @@ pub(crate) async fn sensor_metadata<R: std::io::Read>(
             start_time: args.start,
             end_time: match args.end {
                 Some(end) => Some(end),
-                None => match args.duration {
-                    Some(duration) => Some(time + duration),
-                    None => None,
-                },
+                None => args.duration.map(|duration| time + duration),
             },
-        },
+        }),
         SensorValues { values, time, latencies: info.latencies },
     ))
 }
@@ -687,12 +688,12 @@ async fn sp_read_sensors(
         }
     }
 
-    Ok((rval, std::time::Instant::now().duration_since(start)))
+    Ok((rval, start.elapsed()))
 }
 
 async fn sp_data_mgs(
     mgs_client: &gateway_client::Client,
-    metadata: &'static SensorMetadata,
+    metadata: &Arc<SensorMetadata>,
 ) -> Result<SensorValues, anyhow::Error> {
     let mut values = HashMap::new();
     let mut latencies = HashMap::new();
@@ -701,9 +702,10 @@ async fn sp_data_mgs(
     for sp_id in metadata.sensors_by_sp.keys() {
         let mgs_client = mgs_client.clone();
         let id = *sp_id;
+        let metadata = Arc::clone(&metadata);
 
         let handle = tokio::spawn(async move {
-            sp_read_sensors(&mgs_client, &id, metadata).await
+            sp_read_sensors(&mgs_client, &id, &metadata).await
         });
 
         handles.push((id, handle));
@@ -729,7 +731,7 @@ async fn sp_data_mgs(
 fn sp_data_csv<R: std::io::Read + std::io::Seek>(
     reader: &mut csv::Reader<R>,
     position: &mut csv::Position,
-    metadata: &'static SensorMetadata,
+    metadata: &SensorMetadata,
 ) -> Result<SensorValues, anyhow::Error> {
     let headers = reader.headers()?;
     let hlen = headers.len();
@@ -795,14 +797,14 @@ fn sp_data_csv<R: std::io::Read + std::io::Seek>(
 
 pub(crate) async fn sensor_data<R: std::io::Read + std::io::Seek>(
     input: &mut SensorInput<R>,
-    metadata: &'static SensorMetadata,
+    metadata: &Arc<SensorMetadata>,
 ) -> Result<SensorValues, anyhow::Error> {
     match input {
         SensorInput::MgsClient(ref mgs_client) => {
             sp_data_mgs(mgs_client, metadata).await
         }
         SensorInput::CsvReader(reader, position) => {
-            sp_data_csv(reader, position, metadata)
+            sp_data_csv(reader, position, &metadata)
         }
     }
 }
@@ -817,7 +819,8 @@ pub(crate) async fn cmd_mgs_sensors(
     args: &SensorsArgs,
 ) -> Result<(), anyhow::Error> {
     let mut input = if let Some(ref input) = args.input {
-        let file = File::open(input)?;
+        let file = File::open(input)
+            .with_context(|| format!("failed to open {input}"))?;
         SensorInput::CsvReader(
             csv::Reader::from_reader(file),
             csv::Position::new(),
@@ -827,13 +830,6 @@ pub(crate) async fn cmd_mgs_sensors(
     };
 
     let (metadata, mut values) = sensor_metadata(&mut input, args).await?;
-
-    //
-    // A bit of shenangians to force metadata to be 'static -- which allows
-    // us to share it with tasks.
-    //
-    let metadata = Box::leak(Box::new(metadata));
-    let metadata: &_ = metadata;
 
     let mut sensors = metadata.sensors_by_sensor.keys().collect::<Vec<_>>();
     sensors.sort();
@@ -939,7 +935,7 @@ pub(crate) async fn cmd_mgs_sensors(
             wakeup += tokio::time::Duration::from_millis(1000);
         }
 
-        values = sensor_data(&mut input, metadata).await?;
+        values = sensor_data(&mut input, &metadata).await?;
 
         if args.input.is_some() && values.time == 0 {
             break;

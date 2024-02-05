@@ -4,7 +4,7 @@
 
 //! Code for the MGS dashboard subcommand
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{Local, Offset, TimeZone};
 use crossterm::{
     event::{
@@ -486,9 +486,9 @@ struct Dashboard {
 }
 
 impl Dashboard {
-    fn new(metadata: &'static SensorMetadata) -> Result<Dashboard> {
+    fn new(metadata: &SensorMetadata) -> Result<Dashboard> {
         let mut sps =
-            metadata.sensors_by_sp.keys().map(|m| *m).collect::<Vec<_>>();
+            metadata.sensors_by_sp.keys().copied().collect::<Vec<_>>();
         let mut graphs = HashMap::new();
         let mut sids = HashMap::new();
         sps.sort();
@@ -499,8 +499,7 @@ impl Dashboard {
             MeasurementKind::Current,
         ];
 
-        for sp in sps.iter() {
-            let sp = *sp;
+        for &sp in sps.iter() {
             let sensors = metadata.sensors_by_sp.get_vec(&sp).unwrap();
             let mut by_kind = MultiMap::new();
 
@@ -509,7 +508,7 @@ impl Dashboard {
                 by_kind.insert(s.kind, (s.name.clone(), *sid));
             }
 
-            let keys = by_kind.keys().map(|k| *k).collect::<Vec<_>>();
+            let keys = by_kind.keys().copied().collect::<Vec<_>>();
 
             for k in keys {
                 let mut v = by_kind.remove(&k).unwrap();
@@ -649,7 +648,7 @@ impl Dashboard {
         let selected_kind = self.kinds[self.selected_kind];
         let type_ = self.sps[self.selected_sp].type_;
 
-        if let Some(_) = self.flipped.remove(&selected_kind) {
+        if self.flipped.remove(&selected_kind).is_some() {
             return;
         }
 
@@ -717,7 +716,7 @@ impl Dashboard {
             let mut data = vec![];
 
             for sid in sids {
-                if let Some(value) = values.values.get(&sid) {
+                if let Some(value) = values.values.get(sid) {
                     data.push(*value);
                 } else {
                     data.push(None);
@@ -794,7 +793,8 @@ pub(crate) async fn cmd_mgs_dashboard(
     args: &DashboardArgs,
 ) -> Result<(), anyhow::Error> {
     let mut input = if let Some(ref input) = args.sensors_args.input {
-        let file = File::open(input)?;
+        let file = File::open(input)
+            .with_context(|| format!("failed to open {input}"))?;
         SensorInput::CsvReader(
             csv::Reader::from_reader(file),
             csv::Position::new(),
@@ -806,14 +806,7 @@ pub(crate) async fn cmd_mgs_dashboard(
     let (metadata, values) =
         sensor_metadata(&mut input, &args.sensors_args).await?;
 
-    //
-    // A bit of shenangians to force metadata to be 'static -- which allows
-    // us to share it with tasks.
-    //
-    let metadata = Box::leak(Box::new(metadata));
-    let metadata: &_ = metadata;
-
-    let mut dashboard = Dashboard::new(metadata)?;
+    let mut dashboard = Dashboard::new(&metadata)?;
     let mut last = values.time;
     let mut force = true;
     let mut update = true;
@@ -822,7 +815,7 @@ pub(crate) async fn cmd_mgs_dashboard(
 
     if args.sensors_args.input.is_some() && !args.simulate_realtime {
         loop {
-            let values = sensor_data(&mut input, metadata).await?;
+            let values = sensor_data(&mut input, &metadata).await?;
 
             if values.time == 0 {
                 break;
@@ -848,38 +841,38 @@ pub(crate) async fn cmd_mgs_dashboard(
 
     let res = 'outer: loop {
         match run_dashboard(&mut terminal, &mut dashboard, force) {
-            Err(err) => {
-                break Err(err);
-            }
-            Ok(true) => {
-                break Ok(());
-            }
+            Err(err) => break Err(err),
+            Ok(true) => break Ok(()),
             _ => {}
         }
 
         force = false;
-        let now = secs()?;
+
+        let now = match secs() {
+            Err(err) => break Err(err),
+            Ok(now) => now,
+        };
 
         if update && now != last {
             let kicked = Instant::now();
-            let f = sensor_data(&mut input, metadata);
+            let f = sensor_data(&mut input, &metadata);
             last = now;
 
             while Instant::now().duration_since(kicked).as_millis() < 800 {
                 tokio::time::sleep(Duration::from_millis(10)).await;
 
                 match run_dashboard(&mut terminal, &mut dashboard, force) {
-                    Err(err) => {
-                        break 'outer Err(err);
-                    }
-                    Ok(true) => {
-                        break 'outer Ok(());
-                    }
+                    Err(err) => break 'outer Err(err),
+                    Ok(true) => break 'outer Ok(()),
                     _ => {}
                 }
             }
 
-            let values = f.await?;
+            let values = match f.await {
+                Err(err) => break Err(err),
+                Ok(v) => v,
+            };
+
             dashboard.values(&values);
             force = true;
             continue;
@@ -923,6 +916,11 @@ fn draw_graph(f: &mut Frame, parent: Rect, graph: &mut Graph, now: u64) {
     let latest = now as i64 - graph.offs as i64;
     let earliest = Local.timestamp_opt(latest - graph.width as i64, 0).unwrap();
     let latest = Local.timestamp_opt(latest, 0).unwrap();
+
+    //
+    // We want a format that preserves horizontal real estate just a tad more
+    // than .to_rfc3339_opts()...
+    //
     let fmt = "%Y-%m-%d %H:%M:%S";
 
     let tz_offset = earliest.offset().fix().local_minus_utc();
