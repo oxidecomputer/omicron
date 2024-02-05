@@ -5,8 +5,8 @@
 //! APIs exposed by Nexus.
 
 use crate::api::external::{
-    ByteCount, DiskState, Generation, InstanceCpuCount, InstanceState, IpNet,
-    SemverVersion, Vni,
+    ByteCount, DiskState, Generation, Hostname, InstanceCpuCount,
+    InstanceState, IpNet, SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
 use parse_display::{Display, FromStr};
@@ -36,8 +36,7 @@ pub struct InstanceProperties {
     pub ncpus: InstanceCpuCount,
     pub memory: ByteCount,
     /// RFC1035-compliant hostname for the instance.
-    // TODO-cleanup different type?
-    pub hostname: String,
+    pub hostname: Hostname,
 }
 
 /// The dynamic runtime properties of an instance: its current VMM ID (if any),
