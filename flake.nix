@@ -15,6 +15,8 @@
       pkgs = import nixpkgs {
         inherit overlays;
         system = "x86_64-linux";
+        # needed for `steam-run`, which we use to execute Clickhouse.
+        config.allowUnfree = true;
       };
       # use the Rust toolchain defined in the `rust-toolchain.toml` file.
       rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
@@ -27,6 +29,7 @@
         sqlite
         libclang
         libxml2
+        libtool
       ];
 
       openAPIVersion = with pkgs.lib; path:
@@ -187,71 +190,111 @@
               '';
           };
 
-      # omicronDrv = with pkgs; clangStdenv.mkDerivation {
+      clickhouse = with pkgs;
+        let
+          # TODO(eliza): it would be nice if this lived in a file that was also used
+          # by `tools/ci_download_clickhouse`, so these could be kept consistent...
+          version = "v22.8.9.24";
+          # also, N.B. that unlike maghemite and dendrite, the Clickhouse hashes
+          # in `tools/clickhouse_checksums` are MD5 rather than SHA256, so we
+          # can't give Nix those hashes and must instead determine it ourselves.
+          # this means that we will have to update this SHA if the clickhouse
+          # version changes.
+          sha256 = "1lgxwh67apgl386ilpg0iy5xkyz12q4lgnz08zswjbxv88ra0qxj";
 
-      # };
-
+          tarball = builtins.fetchurl
+            {
+              inherit sha256;
+              url = "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com/clickhouse-${version}.linux.tar.gz";
+            };
+        in
+        stdenv.mkDerivation
+          {
+            name = "clickhouse";
+            src = tarball;
+            sourceRoot = ".";
+            installPhase = ''
+              mkdir -p $out/bin
+              mkdir -p $out/etc
+              cp ./clickhouse $out/bin/clickhouse
+              cp ./._config.xml $out/bin/config.xml
+            '';
+          };
     in
     with pkgs;
     {
       packages.x86_64-linux = {
         dendrite-stub = dendriteStub;
         mgd = maghemiteMgd;
-        # omicron = omicronDrv;
-        # default = omicron;
 
       };
 
+      devShells.x86_64-linux.default =
+        let
+          # a little wrapper for running Clickhouse
+          clickhouseWrapped = writeShellApplication
+            {
+              name = "clickhouse";
+              runtimeInputs = [
 
-      devShells.x86_64-linux.default = mkShell.override
-        {
-          # use Clang as the C compiler for all C libraries
-          stdenv = clangStdenv;
-        }
-        {
-          inherit buildInputs;
+                # it would probably be "more correct" to use `autoPatchelfHook`
+                # or something for clickhouse, but steam-run Just Works... see
+                # https://unix.stackexchange.com/questions/522822/different-methods-to-run-a-non-nixos-executable-on-nixos/522823#522823
+                steam-run
+                clickhouse
+              ];
+              text = ''
+                steam-run clickhouse "$@"
+              '';
+            };
+        in
+        mkShell.override
+          {
+            # use Clang as the C compiler for all C libraries
+            stdenv = clangStdenv;
+          }
+          {
+            inherit buildInputs;
 
-          nativeBuildInputs = [
-            rustToolchain
-            cmake
-            stdenv
-            pkg-config
-            # Dendrite and maghemite, for running tests.
-            dendriteStub
-            maghemiteMgd
-            # The Clickhouse binary downloaded by
-            # `tools/install_builder_prerequisites.sh` doesn't work nicely
-            # on NixOS due to dynamically loading a bunch of libraries in a
-            # way that `nix-ld` doesn't seem to help with. Therefore, depend
-            # on the pre-built patched clickhouse package from nixpkgs,
-            # instead.
-            clickhouse
-          ];
+            nativeBuildInputs = [
+              rustToolchain
+              cmake
+              stdenv
+              pkg-config
+              # Dendrite and maghemite, for running tests.
+              dendriteStub
+              maghemiteMgd
+              clickhouseWrapped
+            ];
 
-          name = "omicron";
-          DEP_PQ_LIBDIRS = "${postgresql.lib}/lib";
-          LIBCLANG_PATH = "${libclang.lib}/lib";
-          OPENSSL_DIR = "${openssl.dev}";
-          OPENSSL_LIB_DIR = "${openssl.out}/lib";
+            name = "omicron";
+            DEP_PQ_LIBDIRS = "${postgresql.lib}/lib";
+            LIBCLANG_PATH = "${libclang.lib}/lib";
+            OPENSSL_DIR = "${openssl.dev}";
+            OPENSSL_LIB_DIR = "${openssl.out}/lib";
 
-          MG_OPENAPI_PATH = mgOpenAPI;
-          DDM_OPENAPI_PATH = ddmOpenAPI;
-          DPD_OPENAPI_PATH = dendriteOpenAPI;
+            MG_OPENAPI_PATH = mgOpenAPI;
+            DDM_OPENAPI_PATH = ddmOpenAPI;
+            DPD_OPENAPI_PATH = dendriteOpenAPI;
 
-          shellHook = ''
-            rm out/mgd
-            rm out/dendrite-stub
+            shellHook = ''
+              rm out/mgd
+              rm out/dendrite-stub
+              rm -r out/clickhouse
 
-            mkdir out
+              mkdir out
+              mkdir -p out/clickhouse
 
-            ln -s ${maghemiteMgd.out} -T out/mgd
-            ln -s ${dendriteStub.out} -T out/dendrite-stub
-          '';
+              ln -s ${maghemiteMgd.out} -T out/mgd
+              ln -s ${dendriteStub.out} -T out/dendrite-stub
+              ln -s ${clickhouseWrapped.out}/bin/clickhouse out/clickhouse/clickhouse
+              ln -s ${clickhouse.out}/etc/config.xml out/clickhouse
+            '';
 
-          # Needed by rustfmt-wrapper, see:
-          # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
-          RUSTFMT = "${rustToolchain}/bin/rustfmt";
-        };
+            # Needed by rustfmt-wrapper, see:
+            # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
+            RUSTFMT = "${rustToolchain}/bin/rustfmt";
+          };
     };
 }
 
