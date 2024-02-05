@@ -869,7 +869,6 @@ authz_resource! {
 authz_resource! {
     name = "LoopbackAddress",
     parent = "Fleet",
-    // TODO: make it easier to specify the typed UUID kind
     primary_key = { uuid_kind = LoopbackAddressKind },
     roles_allowed = false,
     polar_snippet = FleetChild,

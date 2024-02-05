@@ -221,9 +221,9 @@ impl<'de> serde::Deserialize<'de> for InputPrimaryKeyType {
             {
                 let mut elements = vec![];
                 while let Some(element) =
-                    seq.next_element::<InputPrimaryKeyType>()?
+                    seq.next_element::<ParseWrapper<syn::Type>>()?
                 {
-                    elements.push(element.0.into_external());
+                    elements.push(element.into_inner());
                 }
                 Ok(PrimaryKeyType::Standard(parse_quote!((#(#elements,)*))))
             }
@@ -250,26 +250,6 @@ impl<'de> serde::Deserialize<'de> for InputPrimaryKeyType {
         deserializer.deserialize_any(PrimaryKeyVisitor).map(InputPrimaryKeyType)
     }
 }
-
-// impl syn::parse::Parse for PrimaryKey {
-//     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-//         let lookahead = input.lookahead1();
-//         // If the first element is a {, then this must be a uuid_kind.
-//         if lookahead.peek(syn::token::Brace) {
-//             let content;
-//             syn::braced!(content in input);
-//             // Once we have the content, we can parse it as a uuid_kind.
-//             let parsed = serde_tokenstream::from_tokenstream::<ParsedUuidKind>(
-//                 &content.cursor().token_stream(),
-//             )?;
-//             let kind_param = parsed.uuid_kind.into_inner();
-//             let full_ty = parse_quote!(::newtype_uuid::TypedUuid::<::omicron_uuid_kinds::#kind_param>);
-//             Ok(Self::UuidKind { full_ty })
-//         } else {
-//             Ok(Self::Standard(input.parse()?))
-//         }
-//     }
-// }
 
 /// How to generate the Polar snippet for this resource
 #[derive(serde::Deserialize, Debug)]
