@@ -52,7 +52,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::EarlyNetworkConfigBody;
