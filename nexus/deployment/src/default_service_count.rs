@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Default count of zones that should be provisioned by RSS and ensured by
-//! blueprints created by [`crate::Planner`].
+//! Default counts of Omicron service zones that should be provised by RSS and
+//! the reconfiguration system.
 
 pub const NEXUS: usize = 3;
