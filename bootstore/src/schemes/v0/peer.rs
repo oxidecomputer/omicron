@@ -15,7 +15,7 @@ use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use sled_hardware::Baseboard;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{error, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
