@@ -110,7 +110,7 @@ pub struct BlueprintBuilder<'a> {
     creator: String,
     comments: Vec<String>,
 
-    // These fields emulate how RSS choses addresses for zone NICs.
+    // These fields mirror how RSS chooses addresses for zone NICs.
     nexus_v4_ips: Box<dyn Iterator<Item = Ipv4Addr> + Send>,
     nexus_v6_ips: Box<dyn Iterator<Item = Ipv6Addr> + Send>,
 
@@ -215,38 +215,36 @@ impl<'a> BlueprintBuilder<'a> {
         // but expect this to be okay: we don't anticipate removal and addition
         // to frequently be combined into the exact same blueprint, particularly
         // in a way that expects the addition to reuse resources from the
-        // removal; we will won't want to attempt to reuse resources from a zone
+        // removal; we won't want to attempt to reuse resources from a zone
         // until we know it's been fully removed.
         let mut existing_nexus_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
         let mut existing_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
         let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
-        for zone_config in parent_blueprint.omicron_zones.values() {
-            for z in &zone_config.zones {
-                if let OmicronZoneType::Nexus { nic, .. } = &z.zone_type {
-                    match nic.ip {
-                        IpAddr::V4(ip) => {
-                            if !existing_nexus_v4_ips.insert(ip) {
-                                bail!("duplicate Nexus NIC IP: {ip}");
-                            }
+        for (_, z) in parent_blueprint.all_omicron_zones() {
+            if let OmicronZoneType::Nexus { nic, .. } = &z.zone_type {
+                match nic.ip {
+                    IpAddr::V4(ip) => {
+                        if !existing_nexus_v4_ips.insert(ip) {
+                            bail!("duplicate Nexus NIC IP: {ip}");
                         }
-                        IpAddr::V6(ip) => {
-                            if !existing_nexus_v6_ips.insert(ip) {
-                                bail!("duplicate Nexus NIC IP: {ip}");
-                            }
+                    }
+                    IpAddr::V6(ip) => {
+                        if !existing_nexus_v6_ips.insert(ip) {
+                            bail!("duplicate Nexus NIC IP: {ip}");
                         }
                     }
                 }
-                if let Some(external_ip) = z.zone_type.external_ip()? {
-                    if !used_external_ips.insert(external_ip) {
-                        bail!("duplicate external IP: {external_ip}");
-                    }
+            }
+            if let Some(external_ip) = z.zone_type.external_ip()? {
+                if !used_external_ips.insert(external_ip) {
+                    bail!("duplicate external IP: {external_ip}");
                 }
-                if let Some(nic) = z.zone_type.service_vnic() {
-                    if !used_macs.insert(nic.mac) {
-                        bail!("duplicate service vNIC MAC: {}", nic.mac);
-                    }
+            }
+            if let Some(nic) = z.zone_type.service_vnic() {
+                if !used_macs.insert(nic.mac) {
+                    bail!("duplicate service vNIC MAC: {}", nic.mac);
                 }
             }
         }
@@ -1143,15 +1141,13 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut policy = policy.clone();
             let mut used_ip_ranges = Vec::new();
-            for zones in parent.omicron_zones.values() {
-                for z in &zones.zones {
-                    if let Some(ip) = z
-                        .zone_type
-                        .external_ip()
-                        .expect("failed to check for external IP")
-                    {
-                        used_ip_ranges.push(IpRange::from(ip));
-                    }
+            for (_, z) in parent.all_omicron_zones() {
+                if let Some(ip) = z
+                    .zone_type
+                    .external_ip()
+                    .expect("failed to check for external IP")
+                {
+                    used_ip_ranges.push(IpRange::from(ip));
                 }
             }
             assert!(!used_ip_ranges.is_empty());
