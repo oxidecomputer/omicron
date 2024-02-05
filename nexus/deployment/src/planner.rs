@@ -10,7 +10,6 @@ use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
 use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
-use crate::default_service_count;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
 use nexus_types::inventory::Collection;
@@ -34,14 +33,6 @@ pub struct Planner<'a> {
     // information about all sleds that we expect), we should verify that up
     // front and update callers to ensure that it's true.
     inventory: &'a Collection,
-
-    // target number of Nexus zones that should be placed on sleds
-    //
-    // Currently, this is always set to `default_service_count::NEXUS` (i.e.,
-    // the same number that RSS places), so we will only add a Nexus if a prior
-    // Nexus instance is removed. This is stored as a property to allow unit
-    // tests to tweak the value.
-    target_num_nexus_zones: usize,
 }
 
 impl<'a> Planner<'a> {
@@ -56,13 +47,7 @@ impl<'a> Planner<'a> {
     ) -> anyhow::Result<Planner<'a>> {
         let blueprint =
             BlueprintBuilder::new_based_on(parent_blueprint, policy, creator)?;
-        Ok(Planner {
-            log,
-            policy,
-            blueprint,
-            inventory,
-            target_num_nexus_zones: default_service_count::NEXUS,
-        })
+        Ok(Planner { log, policy, blueprint, inventory })
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
@@ -209,11 +194,11 @@ impl<'a> Planner<'a> {
         // instances? For now, just log it the number of zones any time we have
         // at least the minimum number.
         let nexus_to_add =
-            self.target_num_nexus_zones.saturating_sub(num_total_nexus);
+            self.policy.target_nexus_zone_count.saturating_sub(num_total_nexus);
         if nexus_to_add == 0 {
             info!(
                 self.log, "sufficient Nexus zones exist in plan";
-                "desired_count" => self.target_num_nexus_zones,
+                "desired_count" => self.policy.target_nexus_zone_count,
                 "current_count" => num_total_nexus,
             );
             return Ok(());
@@ -484,7 +469,7 @@ mod test {
 
         // Use our example inventory collection as a starting point, but strip
         // it down to just one sled.
-        let (sled_id, collection, policy) = {
+        let (sled_id, collection, mut policy) = {
             let (mut collection, mut policy) = example();
 
             // Pick one sled ID to keep and remove the rest.
@@ -525,17 +510,17 @@ mod test {
 
         // Now run the planner.  It should add additional Nexus instances to the
         // one sled we have.
-        let target_num_nexus_zones = 5;
-        let mut planner2 = Planner::new_based_on(
+        policy.target_nexus_zone_count = 5;
+        let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
             &policy,
             "add more Nexus",
             &collection,
         )
-        .expect("failed to create planner");
-        planner2.target_num_nexus_zones = target_num_nexus_zones;
-        let blueprint2 = planner2.plan().expect("failed to plan");
+        .expect("failed to create planner")
+        .plan()
+        .expect("failed to plan");
 
         let diff = blueprint1.diff(&blueprint2);
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
@@ -548,7 +533,7 @@ mod test {
         assert_eq!(sled_changes.zones_removed().count(), 0);
         assert_eq!(sled_changes.zones_changed().count(), 0);
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
-        assert_eq!(zones.len(), target_num_nexus_zones - 1);
+        assert_eq!(zones.len(), policy.target_nexus_zone_count - 1);
         for zone in &zones {
             let OmicronZoneType::Nexus { .. } = zone.zone_type else {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
@@ -567,7 +552,7 @@ mod test {
         );
 
         // Use our example inventory collection as a starting point.
-        let (collection, policy) = example();
+        let (collection, mut policy) = example();
 
         // Build the initial blueprint.
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
@@ -591,17 +576,17 @@ mod test {
         }
 
         // Now run the planner with a high number of target Nexus zones.
-        let target_num_nexus_zones = 14;
-        let mut planner2 = Planner::new_based_on(
+        policy.target_nexus_zone_count = 14;
+        let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
             &policy,
             "add more Nexus",
             &collection,
         )
-        .expect("failed to create planner");
-        planner2.target_num_nexus_zones = target_num_nexus_zones;
-        let blueprint2 = planner2.plan().expect("failed to plan");
+        .expect("failed to create planner")
+        .plan()
+        .expect("failed to plan");
 
         let diff = blueprint1.diff(&blueprint2);
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff);

@@ -55,6 +55,13 @@ pub struct Policy {
     /// ranges specified by the IP pool for externally-visible control plane
     /// services (e.g., external DNS, Nexus, boundary NTP)
     pub service_ip_pool_ranges: Vec<IpRange>,
+
+    /// desired total number of deployed Nexus zones
+    // This number probably doesn't make sense alone once we get to a world
+    // where we're deploying multiple _versions_ of Nexus and need to ensure a
+    // minimum number in service at any given time, but for now all we know how
+    // to do is deploy a fixed number of all-the-same-version.
+    pub target_nexus_zone_count: usize,
 }
 
 /// Describes the resources available on each sled for the planner

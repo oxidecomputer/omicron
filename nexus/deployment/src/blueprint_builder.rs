@@ -740,6 +740,7 @@ pub mod test {
             )
             .unwrap()
             .into()],
+            target_nexus_zone_count: 3,
         };
         let mut service_ip_pool_range = policy.service_ip_pool_ranges[0].iter();
         let mut nexus_nic_ips = NEXUS_OPTE_IPV4_SUBNET
