@@ -913,22 +913,24 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     }
 }
 
-// This isn't so much a test (although it does make sure we don't panic on some
-// basic cases).  This is a way to dump the output of the macro for some common
-// inputs.  This is invaluable for debugging.  If there's a bug where the macro
-// generates syntactically invalid Rust, `cargo expand` will often not print the
-// macro's output.  Instead, you can paste the output of this test into
-// lookup.rs, replacing the call to the macro, then reformat the file, and then
-// build it in order to see the compiler error in context.
 #[cfg(test)]
 mod test {
     use super::lookup_resource;
+    use expectorate::assert_contents;
     use proc_macro2::TokenStream;
     use quote::quote;
 
+    /// Ensure that generated code is as expected.
+    ///
+    /// This is both a test, and a way to dump the output of the macro for some
+    /// common inputs.  This is invaluable for debugging.  If there's a bug
+    /// where the macro generates syntactically invalid Rust, `cargo expand`
+    /// will often not print the macro's output.  Instead, you can paste the
+    /// output of this test into lookup.rs, replacing the call to the macro,
+    /// then reformat the file, and then build it in order to see the compiler
+    /// error in context.
     #[test]
-    #[ignore]
-    fn test_lookup_dump() {
+    fn test_lookup_snapshots() {
         let output = lookup_resource(quote! {
             name = "Project",
             ancestors = ["Silo"],
@@ -938,7 +940,7 @@ mod test {
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
         })
         .unwrap();
-        println!("{}", pretty_format(output));
+        assert_contents("outputs/project.txt", &pretty_format(output));
 
         let output = lookup_resource(quote! {
             name = "SiloUser",
@@ -949,7 +951,7 @@ mod test {
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
         })
         .unwrap();
-        println!("{}", pretty_format(output));
+        assert_contents("outputs/silo_user.txt", &pretty_format(output));
 
         let output = lookup_resource(quote! {
             name = "UpdateArtifact",
@@ -964,7 +966,7 @@ mod test {
             ]
         })
         .unwrap();
-        println!("{}", pretty_format(output));
+        assert_contents("outputs/update_artifact.txt", &pretty_format(output));
     }
 
     fn pretty_format(input: TokenStream) -> String {

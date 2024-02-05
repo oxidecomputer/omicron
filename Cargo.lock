@@ -54,9 +54,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91429305e9f0a25f6205c5b8e0d2db09e0708a7a6df0f42212bb56c32c8ac97a"
+checksum = "77c3a9648d43b9cd48db467b3f87fdd6e146bcc88ab0180006cef2179fe11d01"
 dependencies = [
  "cfg-if",
  "getrandom 0.2.10",
@@ -352,6 +352,7 @@ dependencies = [
 name = "authz-macros"
 version = "0.1.0"
 dependencies = [
+ "expectorate",
  "heck 0.4.1",
  "omicron-workspace-hack",
  "prettyplease",
@@ -426,9 +427,9 @@ dependencies = [
 
 [[package]]
 name = "bb8"
-version = "0.8.1"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98b4b0f25f18bcdc3ac72bdb486ed0acf7e185221fd4dc985bc15db5800b0ba2"
+checksum = "df7c2093d15d6a1d33b1f972e1c5ea3177748742b97a5f392aa83a65262c6780"
 dependencies = [
  "async-trait",
  "futures-channel",
@@ -566,6 +567,21 @@ dependencies = [
  "arrayref",
  "arrayvec",
  "constant_time_eq 0.2.6",
+]
+
+[[package]]
+name = "blake3"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0231f06152bf547e9c2b5194f247cd97aacf6dcd8b15d8e5ec0663f64580da87"
+dependencies = [
+ "arrayref",
+ "arrayvec",
+ "cc",
+ "cfg-if",
+ "constant_time_eq 0.3.0",
+ "memmap2",
+ "rayon",
 ]
 
 [[package]]
@@ -799,7 +815,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "922d6ea3081d68b9e3e09557204bff47f9b5406a4a304dc917e187f8cafd582b"
 dependencies = [
  "serde",
- "toml 0.8.8",
+ "toml 0.8.9",
 ]
 
 [[package]]
@@ -843,11 +859,11 @@ dependencies = [
 
 [[package]]
 name = "cfg-expr"
-version = "0.15.5"
+version = "0.15.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03915af431787e6ffdcc74c645077518c6b6e01f80b761e0fbbfa288536311b3"
+checksum = "6100bc57b6209840798d95cb2775684849d332f7bd788db2a8c8caf7ef82a41a"
 dependencies = [
- "smallvec 1.11.2",
+ "smallvec 1.13.1",
  "target-lexicon",
 ]
 
@@ -1511,6 +1527,7 @@ dependencies = [
 name = "db-macros"
 version = "0.1.0"
 dependencies = [
+ "expectorate",
  "heck 0.4.1",
  "omicron-workspace-hack",
  "prettyplease",
@@ -1541,7 +1558,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
 ]
 
 [[package]]
@@ -1837,7 +1854,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -1917,7 +1934,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
- "toml 0.8.8",
+ "toml 0.8.9",
  "uuid",
 ]
 
@@ -1960,7 +1977,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls 0.25.0",
- "toml 0.8.8",
+ "toml 0.8.9",
  "usdt 0.3.5",
  "uuid",
  "version_check",
@@ -2132,7 +2149,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -2731,9 +2748,9 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.4"
+version = "0.17.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "114a100a9aa9f4c468a7b9e96626cdab267bb652660d8408e8f6d56d4c310edd"
+checksum = "34e99a7734579b834a076ef11789783c153c6eb5fb3520ed15bc41f483f0f317"
 dependencies = [
  "ahash",
  "camino",
@@ -2751,7 +2768,7 @@ dependencies = [
  "semver 1.0.21",
  "serde",
  "serde_json",
- "smallvec 1.11.2",
+ "smallvec 1.13.1",
  "static_assertions",
  "target-spec",
 ]
@@ -3340,7 +3357,7 @@ dependencies = [
  "smf",
  "thiserror",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
  "uuid",
  "zone",
 ]
@@ -4026,6 +4043,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "memmap2"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49388d20533534cd19360ad3d6a7dadc885944aa802ba3995040c5ec11288c6"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "memoffset"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4063,7 +4089,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
 ]
 
 [[package]]
@@ -4209,6 +4235,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac8cd24d9f185bb7223958d8c1ff7a961b74b1953fd05dba7cc568a63b3861ec"
 dependencies = [
  "rustc_version 0.1.7",
+]
+
+[[package]]
+name = "nexus-blueprint-execution"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures",
+ "httptest",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
+ "nexus-types",
+ "omicron-common",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "reqwest",
+ "sled-agent-client",
+ "slog",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
@@ -4497,7 +4548,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77a5d83df9f36fe23f0c3648c6bbb8b0298bb5f1939c8f2704431371f4b84d43"
 dependencies = [
- "smallvec 1.11.2",
+ "smallvec 1.13.1",
 ]
 
 [[package]]
@@ -4594,7 +4645,7 @@ dependencies = [
  "num-traits",
  "rand 0.8.5",
  "serde",
- "smallvec 1.11.2",
+ "smallvec 1.13.1",
  "zeroize",
 ]
 
@@ -4808,7 +4859,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.8.8",
+ "toml 0.8.9",
  "uuid",
 ]
 
@@ -4817,6 +4868,7 @@ name = "omicron-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap 4.4.3",
  "crossbeam",
  "omicron-package",
@@ -4856,7 +4908,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.8.8",
+ "toml 0.8.9",
 ]
 
 [[package]]
@@ -4898,7 +4950,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
- "toml 0.8.8",
+ "toml 0.8.9",
  "uuid",
 ]
 
@@ -4946,6 +4998,7 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "mime_guess",
+ "nexus-blueprint-execution",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
@@ -5071,6 +5124,7 @@ name = "omicron-package"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap 4.4.3",
  "expectorate",
  "futures",
@@ -5088,6 +5142,7 @@ dependencies = [
  "sled-hardware",
  "slog",
  "slog-async",
+ "slog-bunyan",
  "slog-term",
  "smf",
  "strum",
@@ -5095,7 +5150,7 @@ dependencies = [
  "tar",
  "thiserror",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
  "walkdir",
 ]
 
@@ -5205,7 +5260,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.8",
+ "toml 0.8.9",
  "usdt 0.5.0",
  "uuid",
  "zeroize",
@@ -5262,7 +5317,6 @@ dependencies = [
  "bstr 1.6.0",
  "byteorder",
  "bytes",
- "camino",
  "chrono",
  "cipher",
  "clap 4.4.3",
@@ -5352,7 +5406,7 @@ dependencies = [
  "toml 0.7.8",
  "toml_datetime",
  "toml_edit 0.19.15",
- "toml_edit 0.21.0",
+ "toml_edit 0.21.1",
  "tracing",
  "trust-dns-proto",
  "unicode-bidi",
@@ -5368,15 +5422,19 @@ dependencies = [
 
 [[package]]
 name = "omicron-zone-package"
-version = "0.10.1"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdfd257b7067e7a6aa9fba896a89b0f625bac7660213bb830db36e543bd3cdb8"
+checksum = "e75ad9eb79bb6a1ec78d2eecf36c67fffcf56264d779c456c6e2cd4b257ee9fe"
 dependencies = [
  "anyhow",
  "async-trait",
+ "blake3",
+ "camino",
+ "camino-tempfile",
  "chrono",
  "filetime",
  "flate2",
+ "futures",
  "futures-util",
  "hex",
  "reqwest",
@@ -5384,8 +5442,9 @@ dependencies = [
  "semver 1.0.21",
  "serde",
  "serde_derive",
+ "serde_json",
+ "slog",
  "tar",
- "tempfile",
  "thiserror",
  "tokio",
  "toml 0.7.8",
@@ -5667,7 +5726,7 @@ dependencies = [
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
  "uuid",
 ]
 
@@ -5854,7 +5913,7 @@ dependencies = [
  "instant",
  "libc",
  "redox_syscall 0.2.16",
- "smallvec 1.11.2",
+ "smallvec 1.13.1",
  "winapi",
 ]
 
@@ -5867,7 +5926,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "redox_syscall 0.3.5",
- "smallvec 1.11.2",
+ "smallvec 1.13.1",
  "windows-targets 0.48.5",
 ]
 
@@ -7708,9 +7767,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.195"
+version = "1.0.196"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "63261df402c67811e9ac6def069e4786148c4563f4b50fd4bf30aa370d626b02"
+checksum = "870026e60fa08c69f064aa766c10f10b1d62db9ccd4d0abb206472bee0ce3b32"
 dependencies = [
  "serde_derive",
 ]
@@ -7746,9 +7805,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.195"
+version = "1.0.196"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46fe8f8603d81ba86327b23a2e9cdf49e1255fb94a4c5f297f6ee0547178ea2c"
+checksum = "33c85360c95e7d137454dc81d9a4ed2b8efd8fbe19cee57357b32b9771fccb67"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7818,9 +7877,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12022b835073e5b11e90a14f86838ceb1c8fb0325b72416845c487ac0fa95e80"
+checksum = "eb3622f419d1296904700073ea6cc23ad690adbd66f13ea683df73298736f0c1"
 dependencies = [
  "serde",
 ]
@@ -7862,9 +7921,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "3.5.1"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5c9fdb6b00a489875b22efd4b78fe2b363b72265cc5f6eb2e2b9ee270e6140c"
+checksum = "1b0ed1662c5a68664f45b76d18deb0e234aff37207086803165c961eb695e981"
 dependencies = [
  "base64",
  "chrono",
@@ -7879,9 +7938,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "3.5.1"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dbff351eb4b33600a2e138dfa0b10b65a238ea8ff8fb2387c422c5022a3e8298"
+checksum = "568577ff0ef47b879f736cd66740e022f3672788cdf002a05a4e609ea5a6fb15"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -8262,9 +8321,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.11.2"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dccd0940a2dcdf68d092b8cbab7dc0ad8fa938bf95787e1b916b0e3d0e8e970"
+checksum = "e6ecd384b10a64542d77071bd64bd7b231f4ed5940fba55e98c3de13824cf3d7"
 
 [[package]]
 name = "smawk"
@@ -8372,7 +8431,7 @@ dependencies = [
  "sprockets-rot",
  "thiserror",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
 ]
 
 [[package]]
@@ -8766,15 +8825,15 @@ dependencies = [
 
 [[package]]
 name = "target-lexicon"
-version = "0.12.12"
+version = "0.12.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14c39fd04924ca3a864207c66fc2cd7d22d7c016007f9ce846cbb9326331930a"
+checksum = "69758bda2e78f098e4ccb393021a0963bb3442eac05f135c30f61b7370bbafae"
 
 [[package]]
 name = "target-spec"
-version = "3.0.1"
+version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48b81540ee78bd9de9f7dca2378f264cf1f4193da6e2d09b54c0d595131a48f1"
+checksum = "36a8e795b1824524d13cdf04f73cf8b4f244ce86c96b4d2a83a6ca1a753d2752"
 dependencies = [
  "cfg-expr",
  "guppy-workspace-hack",
@@ -9061,9 +9120,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.35.1"
+version = "1.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c89b4efa943be685f629b149f53829423f8f5531ea21249408e8e2f8671ec104"
+checksum = "61285f6515fa018fb2d1e46eb21223fff441ee8db5d0f1435e8ab4f5cdb80931"
 dependencies = [
  "backtrace",
  "bytes",
@@ -9206,14 +9265,14 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1a195ec8c9da26928f773888e0742ca3ca1040c6cd859c919c9f59c1954ab35"
+checksum = "c6a4b9e8023eb94392d3dca65d717c53abc5dad49c07cb65bb8fcd87115fa325"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.21.0",
+ "toml_edit 0.21.1",
 ]
 
 [[package]]
@@ -9240,9 +9299,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d34d383cd00a163b4a5b85053df514d45bc330f6de7737edfe0a93311d1eaa03"
+checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
 dependencies = [
  "indexmap 2.2.2",
  "serde",
@@ -9402,7 +9461,7 @@ dependencies = [
  "ipnet",
  "lazy_static",
  "rand 0.8.5",
- "smallvec 1.11.2",
+ "smallvec 1.13.1",
  "thiserror",
  "tinyvec",
  "tokio",
@@ -9423,7 +9482,7 @@ dependencies = [
  "lru-cache",
  "parking_lot 0.12.1",
  "resolv-conf",
- "smallvec 1.11.2",
+ "smallvec 1.13.1",
  "thiserror",
  "tokio",
  "tracing",
@@ -9530,7 +9589,7 @@ dependencies = [
  "slog",
  "tar",
  "tokio",
- "toml 0.8.8",
+ "toml 0.8.9",
  "tough",
  "url",
  "zip",
@@ -10200,8 +10259,8 @@ dependencies = [
  "textwrap 0.16.0",
  "tokio",
  "tokio-util",
- "toml 0.8.8",
- "toml_edit 0.21.0",
+ "toml 0.8.9",
+ "toml_edit 0.21.1",
  "tui-tree-widget",
  "unicode-width",
  "update-engine",
@@ -10308,7 +10367,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.8",
+ "toml 0.8.9",
  "tough",
  "trust-dns-resolver",
  "tufaceous",
