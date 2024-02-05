@@ -11,7 +11,7 @@ use crate::api::external::{self, Error, Ipv4Net, Ipv6Net};
 use ipnetwork::{Ipv4Network, Ipv6Network};
 use once_cell::sync::Lazy;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
 
 pub const AZ_PREFIX: u8 = 48;
@@ -347,7 +347,7 @@ pub fn get_64_subnet(
 ///
 /// The first address in the range is guaranteed to be no greater than the last
 /// address.
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum IpRange {
     V4(Ipv4Range),
@@ -383,6 +383,65 @@ impl JsonSchema for IpRange {
             ..Default::default()
         }
         .into()
+    }
+}
+
+/// We need a custom deserialize to get better errors on the various ways a
+/// range can be invalid
+impl<'de> Deserialize<'de> for IpRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawIpRange {
+            first: String,
+            last: String,
+        }
+
+        let raw = RawIpRange::deserialize(deserializer)?;
+
+        // Attempt to parse all the kinds
+        // TODO: this should prob be done by parsing as Ipv4Range and Ipv6Range
+        let first_v4 = raw.first.parse::<Ipv4Addr>();
+        let last_v4 = raw.last.parse::<Ipv4Addr>();
+        let first_v6 = raw.first.parse::<Ipv6Addr>();
+        let last_v6 = raw.last.parse::<Ipv6Addr>();
+
+        // Match based on successful parsing and IP version consistency.
+        // TODO: this is pretty ugly
+        match (first_v4, last_v4, first_v6, last_v6) {
+            (Ok(first), Ok(last), _, _) => {
+                if first > last {
+                    Err(de::Error::custom(
+                        "First must be less than or equal to last",
+                    ))
+                } else {
+                    Ok(IpRange::V4(Ipv4Range { first, last }))
+                }
+            }
+            (_, _, Ok(first), Ok(last)) => {
+                if first > last {
+                    Err(de::Error::custom(
+                        "First must be less than or equal to last",
+                    ))
+                } else {
+                    Ok(IpRange::V6(Ipv6Range { first, last }))
+                }
+            }
+            (Err(_), Err(_), Err(_), Err(_)) => Err(de::Error::custom(
+                "Neither first nor last is a valid IP address",
+            )),
+            (Err(_), _, Err(_), _) => {
+                Err(de::Error::custom("First is not a valid IP address"))
+            }
+            (_, Err(_), _, Err(_)) => {
+                Err(de::Error::custom("Last is not a valid IP address"))
+            }
+            _ => Err(de::Error::custom(
+                "First and last must be the same version",
+            )),
+        }
     }
 }
 
@@ -714,11 +773,30 @@ mod test {
         );
         assert_eq!(expected, serde_json::from_str(data).unwrap());
 
-        let data = r#"{"first": "fd00::3", "last": "fd00::"}"#;
-        assert!(
-            serde_json::from_str::<IpRange>(data).is_err(),
-            "Expected an error deserializing an IP range with first address \
-            greater than last address",
+        fn assert_error(data: &str, msg: &str) {
+            let error = serde_json::from_str::<IpRange>(data).unwrap_err();
+            assert_eq!(error.to_string(), msg);
+        }
+
+        assert_error(
+            r#"{"first": "fd00::3", "last": "fd00::"}"#,
+            "First must be less than or equal to last",
+        );
+        assert_error(
+            r#"{"first": "abc", "last": "123.56"}"#,
+            "Neither first nor last is a valid IP address",
+        );
+        assert_error(
+            r#"{"first": "abc", "last": "fd00::"}"#,
+            "First is not a valid IP address",
+        );
+        assert_error(
+            r#"{"first": "127.0.0.1", "last": "fd00"}"#,
+            "Last is not a valid IP address",
+        );
+        assert_error(
+            r#"{"first": "127.0.0.1", "last": "::"}"#,
+            "First and last must be the same version",
         );
     }
 
