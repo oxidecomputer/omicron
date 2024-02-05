@@ -5194,6 +5194,7 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "nexus-client",
+ "nexus-deployment",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",

@@ -8,11 +8,17 @@
 
 use crate::blueprint_builder::BlueprintBuilder;
 use crate::blueprint_builder::Ensure;
+use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
+use crate::default_service_count;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
 use nexus_types::inventory::Collection;
+use slog::warn;
 use slog::{info, Logger};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use uuid::Uuid;
 
 pub struct Planner<'a> {
     log: Logger,
@@ -28,6 +34,14 @@ pub struct Planner<'a> {
     // information about all sleds that we expect), we should verify that up
     // front and update callers to ensure that it's true.
     inventory: &'a Collection,
+
+    // target number of Nexus zones that should be placed on sleds
+    //
+    // Currently, this is always set to `default_service_count::NEXUS` (i.e.,
+    // the same number that RSS places), so we will only add a Nexus if a prior
+    // Nexus instance is removed. This is stored as a property to allow unit
+    // tests to tweak the value.
+    target_num_nexus_zones: usize,
 }
 
 impl<'a> Planner<'a> {
@@ -42,7 +56,13 @@ impl<'a> Planner<'a> {
     ) -> anyhow::Result<Planner<'a>> {
         let blueprint =
             BlueprintBuilder::new_based_on(parent_blueprint, policy, creator)?;
-        Ok(Planner { log, policy, blueprint, inventory })
+        Ok(Planner {
+            log,
+            policy,
+            blueprint,
+            inventory,
+            target_num_nexus_zones: default_service_count::NEXUS,
+        })
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
@@ -61,6 +81,17 @@ impl<'a> Planner<'a> {
         // added and where they should go.  And the blueprint builder will need
         // to grow the ability to provision one.
 
+        // After we make our initial pass through the sleds below to check for
+        // zones every sled should have (NTP, Crucible), we'll start making
+        // decisions about placing other service zones. We need to _exclude_ any
+        // sleds for which we just added an NTP zone, as we won't be able to add
+        // additional services to them until that NTP zone has been brought up.
+        //
+        // We will not mark sleds getting Crucible zones as ineligible; other
+        // control plane service zones starting concurrently with Crucible zones
+        // is fine.
+        let mut sleds_ineligible_for_services = BTreeSet::new();
+
         for (sled_id, sled_info) in &self.policy.sleds {
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
@@ -70,13 +101,14 @@ impl<'a> Planner<'a> {
                 info!(
                     &self.log,
                     "found sled missing NTP zone (will add one)";
-                    "sled_id" => ?sled_id
+                    "sled_id" => %sled_id
                 );
                 self.blueprint
                     .comment(&format!("sled {}: add NTP zone", sled_id));
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
+                sleds_ineligible_for_services.insert(*sled_id);
                 continue;
             }
 
@@ -100,7 +132,7 @@ impl<'a> Planner<'a> {
             let has_ntp_inventory = self
                 .inventory
                 .omicron_zones
-                .get(&sled_id)
+                .get(sled_id)
                 .map(|sled_zones| {
                     sled_zones.zones.zones.iter().any(|z| z.zone_type.is_ntp())
                 })
@@ -110,7 +142,7 @@ impl<'a> Planner<'a> {
                     &self.log,
                     "parent blueprint contains NTP zone, but it's not in \
                     inventory yet";
-                    "sled_id" => ?sled_id,
+                    "sled_id" => %sled_id,
                 );
                 continue;
             }
@@ -133,30 +165,7 @@ impl<'a> Planner<'a> {
                 }
             }
 
-            // TODO XXX To test Nexus zone addition, attempt to ensure every
-            // sled has a Nexus zone. This is NOT a sensible policy, and should
-            // be removed before this lands on `main`.
-            //
-            // Adding a new Nexus currently requires the parent blueprint to
-            // have had at least one Nexus. By trying to ensure a Nexus on every
-            // sled, that implicitly requires every parent_blueprint we accept
-            // to have at least one Nexus in order to successfully call this
-            // method. That should be true in production and is currently true
-            // for all tests, but might be overly restrictive? We could change
-            // this to "if at least one Nexus exists, add a Nexus on every
-            // sled", but that seems like overkill for what should be a very
-            // short-lived policy.
-            //
-            // Ensuring a Nexus zone exists will also fail if there are no
-            // external IP addresses left. We should take that into account with
-            // whatever real logic we put here, too.
-            let nexus_added =
-                match self.blueprint.sled_ensure_zone_nexus(*sled_id)? {
-                    Ensure::Added => true,
-                    Ensure::NotNeeded => false,
-                };
-
-            if ncrucibles_added > 0 || nexus_added {
+            if ncrucibles_added > 0 {
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
@@ -167,6 +176,126 @@ impl<'a> Planner<'a> {
                 continue;
             }
         }
+
+        self.ensure_correct_number_of_nexus_zones(
+            &sleds_ineligible_for_services,
+        )?;
+
+        Ok(())
+    }
+
+    fn ensure_correct_number_of_nexus_zones(
+        &mut self,
+        sleds_ineligible_for_services: &BTreeSet<Uuid>,
+    ) -> Result<(), Error> {
+        // Bin every sled by the number of Nexus zones it currently has while
+        // counting the total number of Nexus zones.
+        let mut num_total_nexus = 0;
+        let mut sleds_by_num_nexus: BTreeMap<usize, Vec<Uuid>> =
+            BTreeMap::new();
+        for &sled_id in self.policy.sleds.keys() {
+            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id)?;
+            num_total_nexus += num_nexus;
+
+            // Only bin this sled if we're allowed to use it. If we have a sled
+            // we're not allowed to use that's already running a Nexus (seems
+            // fishy!), we counted its Nexus above but will ignore it here.
+            if !sleds_ineligible_for_services.contains(&sled_id) {
+                sleds_by_num_nexus.entry(num_nexus).or_default().push(sled_id);
+            }
+        }
+
+        // TODO-correctness What should we do if we have _too many_ Nexus
+        // instances? For now, just log it the number of zones any time we have
+        // at least the minimum number.
+        let nexus_to_add =
+            self.target_num_nexus_zones.saturating_sub(num_total_nexus);
+        if nexus_to_add == 0 {
+            info!(
+                self.log, "sufficient Nexus zones exist in plan";
+                "desired_count" => self.target_num_nexus_zones,
+                "current_count" => num_total_nexus,
+            );
+            return Ok(());
+        }
+
+        // Ensure we have at least one sled on which we can add Nexus zones. If
+        // we don't, we have nothing else to do. This isn't a hard error,
+        // because we might be waiting for NTP on all eligible sleds (although
+        // it would be weird, since we're presumably running from within Nexus
+        // on some sled).
+        if sleds_by_num_nexus.is_empty() {
+            warn!(self.log, "want to add Nexus zones, but no eligible sleds");
+            return Ok(());
+        }
+
+        // Build a map of sled -> new nexus zone count.
+        let mut sleds_to_change: BTreeMap<Uuid, usize> = BTreeMap::new();
+
+        'outer: for _ in 0..nexus_to_add {
+            // `sleds_by_num_nexus` is sorted by key already, and we want to
+            // pick from the lowest-numbered bin. We can just loop over its
+            // keys, expecting to stop on the first iteration, with the only
+            // exception being when we've removed all the sleds from a bin.
+            for (&num_nexus, sleds) in sleds_by_num_nexus.iter_mut() {
+                // TODO choose more smartly than effectively ordering by
+                // sled_id? See
+                // https://github.com/oxidecomputer/omicron/pull/4959#discussion_r1476795735.
+                let Some(sled_id) = sleds.pop() else {
+                    // We already drained this bin; move on.
+                    continue;
+                };
+
+                // This insert might overwrite an old value for this sled (e.g.,
+                // in the "we have 1 sled and need to add many Nexus instances
+                // to it" case). That's fine.
+                sleds_to_change.insert(sled_id, num_nexus + 1);
+
+                // Put this sled back in our map, but now with one more Nexus.
+                sleds_by_num_nexus
+                    .entry(num_nexus + 1)
+                    .or_default()
+                    .push(sled_id);
+
+                continue 'outer;
+            }
+
+            // This should be unreachable: it's only possible if we fail to find
+            // a nonempty vec in `sleds_by_num_nexus`, and we checked above that
+            // `sleds_by_num_nexus` is not empty.
+            unreachable!("logic error finding sleds for Nexus");
+        }
+
+        // For each sled we need to change, actually do so.
+        let mut total_added = 0;
+        for (sled_id, new_nexus_count) in sleds_to_change {
+            match self
+                .blueprint
+                .sled_ensure_zone_multiple_nexus(sled_id, new_nexus_count)?
+            {
+                EnsureMultiple::Added(n) => {
+                    info!(
+                        self.log, "will add {n} Nexus zone(s) to sled";
+                        "sled_id" => %sled_id,
+                    );
+                    total_added += n;
+                }
+                // This is only possible if we asked the sled to ensure the same
+                // number of zones it already has, but that's impossible based
+                // on the way we built up `sleds_to_change`.
+                EnsureMultiple::NotNeeded => unreachable!(
+                    "sled on which we added Nexus zones did not add any"
+                ),
+            }
+        }
+
+        // Double check that we didn't make any arithmetic mistakes. If we've
+        // arrived here, we think we've added the number of Nexus zones we
+        // needed to.
+        assert_eq!(
+            total_added, nexus_to_add,
+            "internal error counting Nexus zones"
+        );
 
         Ok(())
     }
@@ -305,7 +434,7 @@ mod test {
         .expect("failed to plan");
 
         let diff = blueprint3.diff(&blueprint5);
-        println!("3 -> 5 (expect 3 Crucible and 1 Nexus zones):\n{}", diff);
+        println!("3 -> 5 (expect Crucible zones):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let sleds = diff.sleds_changed().collect::<Vec<_>>();
@@ -319,28 +448,14 @@ mod test {
         assert_eq!(sled_changes.zones_removed().count(), 0);
         assert_eq!(sled_changes.zones_changed().count(), 0);
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
-        let mut num_crucible_added = 0;
-        let mut num_nexus_added = 0;
+        assert_eq!(zones.len(), 3);
         for zone in &zones {
-            match zone.zone_type {
-                OmicronZoneType::Crucible { .. } => {
-                    num_crucible_added += 1;
-                }
-                OmicronZoneType::Nexus { .. } => {
-                    num_nexus_added += 1;
-                }
-                _ => panic!("unexpectedly added a non-Crucible zone: {zone:?}"),
-            }
+            let OmicronZoneType::Crucible { .. } = zone.zone_type else {
+                panic!("unexpectedly added a non-Crucible zone: {zone:?}");
+            };
         }
-        assert_eq!(num_crucible_added, 3);
-        assert_eq!(num_nexus_added, 1);
 
         // Check that there are no more steps.
-        //
-        // This also implicitly checks that the new Nexus zone added in
-        // blueprint4 did not reuse any resources from the existing Nexus zones
-        // (otherwise creation of the planner would fail due to an invalid
-        // parent blueprint).
         let blueprint6 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint5,
@@ -357,6 +472,167 @@ mod test {
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Check that the planner will add more Nexus zones to a single sled, if
+    /// needed
+    #[test]
+    fn test_add_multiple_nexus_to_one_sled() {
+        let logctx = test_setup_log("planner_add_multiple_nexus_to_one_sled");
+
+        // Use our example inventory collection as a starting point, but strip
+        // it down to just one sled.
+        let (sled_id, collection, policy) = {
+            let (mut collection, mut policy) = example();
+
+            // Pick one sled ID to keep and remove the rest.
+            let keep_sled_id =
+                policy.sleds.keys().next().copied().expect("no sleds");
+            policy.sleds.retain(|&k, _v| keep_sled_id == k);
+            collection.sled_agents.retain(|&k, _v| keep_sled_id == k);
+            collection.omicron_zones.retain(|&k, _v| keep_sled_id == k);
+
+            assert_eq!(collection.sled_agents.len(), 1);
+            assert_eq!(collection.omicron_zones.len(), 1);
+
+            (keep_sled_id, collection, policy)
+        };
+
+        // Build the initial blueprint.
+        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            &policy,
+            "the_test",
+        )
+        .expect("failed to create initial blueprint");
+
+        // This blueprint should only have 1 Nexus instance on the one sled we
+        // kept.
+        assert_eq!(blueprint1.omicron_zones.len(), 1);
+        assert_eq!(
+            blueprint1
+                .omicron_zones
+                .get(&sled_id)
+                .expect("missing kept sled")
+                .zones
+                .iter()
+                .filter(|z| z.zone_type.is_nexus())
+                .count(),
+            1
+        );
+
+        // Now run the planner.  It should add additional Nexus instances to the
+        // one sled we have.
+        let target_num_nexus_zones = 5;
+        let mut planner2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &policy,
+            "add more Nexus",
+            &collection,
+        )
+        .expect("failed to create planner");
+        planner2.target_num_nexus_zones = target_num_nexus_zones;
+        let blueprint2 = planner2.plan().expect("failed to plan");
+
+        let diff = blueprint1.diff(&blueprint2);
+        println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        let mut sleds = diff.sleds_changed().collect::<Vec<_>>();
+        assert_eq!(sleds.len(), 1);
+        let (changed_sled_id, sled_changes) = sleds.pop().unwrap();
+        assert_eq!(changed_sled_id, sled_id);
+        assert_eq!(sled_changes.zones_removed().count(), 0);
+        assert_eq!(sled_changes.zones_changed().count(), 0);
+        let zones = sled_changes.zones_added().collect::<Vec<_>>();
+        assert_eq!(zones.len(), target_num_nexus_zones - 1);
+        for zone in &zones {
+            let OmicronZoneType::Nexus { .. } = zone.zone_type else {
+                panic!("unexpectedly added a non-Nexus zone: {zone:?}");
+            };
+        }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Check that the planner will spread additional Nexus zones out across
+    /// sleds as it adds them
+    #[test]
+    fn test_spread_additional_nexus_zones_across_sleds() {
+        let logctx = test_setup_log(
+            "planner_spread_additional_nexus_zones_across_sleds",
+        );
+
+        // Use our example inventory collection as a starting point.
+        let (collection, policy) = example();
+
+        // Build the initial blueprint.
+        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            &policy,
+            "the_test",
+        )
+        .expect("failed to create initial blueprint");
+
+        // This blueprint should only have 3 Nexus zones: one on each sled.
+        assert_eq!(blueprint1.omicron_zones.len(), 3);
+        for sled_config in blueprint1.omicron_zones.values() {
+            assert_eq!(
+                sled_config
+                    .zones
+                    .iter()
+                    .filter(|z| z.zone_type.is_nexus())
+                    .count(),
+                1
+            );
+        }
+
+        // Now run the planner with a high number of target Nexus zones.
+        let target_num_nexus_zones = 14;
+        let mut planner2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &policy,
+            "add more Nexus",
+            &collection,
+        )
+        .expect("failed to create planner");
+        planner2.target_num_nexus_zones = target_num_nexus_zones;
+        let blueprint2 = planner2.plan().expect("failed to plan");
+
+        let diff = blueprint1.diff(&blueprint2);
+        println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        let sleds = diff.sleds_changed().collect::<Vec<_>>();
+
+        // All 3 sleds should get additional Nexus zones. We expect a total of
+        // 11 new Nexus zones, which should be spread evenly across the three
+        // sleds (two should get 4 and one should get 3).
+        assert_eq!(sleds.len(), 3);
+        let mut total_new_nexus_zones = 0;
+        for (sled_id, sled_changes) in sleds {
+            assert_eq!(sled_changes.zones_removed().count(), 0);
+            assert_eq!(sled_changes.zones_changed().count(), 0);
+            let zones = sled_changes.zones_added().collect::<Vec<_>>();
+            match zones.len() {
+                n @ (3 | 4) => {
+                    total_new_nexus_zones += n;
+                }
+                n => {
+                    panic!("unexpected number of zones added to {sled_id}: {n}")
+                }
+            }
+            for zone in &zones {
+                let OmicronZoneType::Nexus { .. } = zone.zone_type else {
+                    panic!("unexpectedly added a non-Crucible zone: {zone:?}");
+                };
+            }
+        }
+        assert_eq!(total_new_nexus_zones, 11);
 
         logctx.cleanup_successful();
     }

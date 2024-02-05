@@ -57,7 +57,7 @@
 //! The Planner
 //!
 //!     fleet policy     (latest inventory)   (latest blueprint)
-//!              \               |               /            
+//!              \               |               /
 //!               \              |              /
 //!                +----------+  |  +----------/
 //!                           |  |  |
@@ -85,7 +85,7 @@
 //! The Executor (better name?)
 //!
 //!     latest committed blueprint  latest inventory
-//!                      |             |  
+//!                      |             |
 //!                      |             |
 //!                      +----+   +----+
 //!                           |   |
@@ -118,3 +118,4 @@
 pub mod blueprint_builder;
 mod ip_allocator;
 pub mod planner;
+pub mod default_service_count;

@@ -70,6 +70,16 @@ pub enum Ensure {
     NotNeeded,
 }
 
+/// Describes whether an idempotent "ensure" operation resulted in multiple
+/// actions taken or no action was necessary
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum EnsureMultiple {
+    /// action was taken, and multiple items were added
+    Added(usize),
+    /// no action was necessary
+    NotNeeded,
+}
+
 /// Helper for assembling a blueprint
 ///
 /// There are two basic ways to assemble a new blueprint:
@@ -455,22 +465,60 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(Ensure::Added)
     }
 
-    pub fn sled_ensure_zone_nexus(
+    /// Return the number of Nexus zones that would be configured to run on the
+    /// given sled if this builder generated a blueprint
+    ///
+    /// This value may change before a blueprint is actually generated if
+    /// further changes are made to the builder.
+    pub fn sled_num_nexus_zones(&self, sled_id: Uuid) -> Result<usize, Error> {
+        // Find the current config for this sled.
+        //
+        // Start with self.omicron_zones, which contains entries for any
+        // sled whose zones config is changing in this blueprint.
+        let Some(sled_config) =
+            self.omicron_zones.get(&sled_id).or_else(|| {
+                // If it's not there, use the config from the parent
+                // blueprint.
+                self.parent_blueprint.omicron_zones.get(&sled_id)
+            })
+        else {
+            return Ok(0);
+        };
+
+        Ok(sled_config.zones.iter().filter(|z| z.zone_type.is_nexus()).count())
+    }
+
+    pub fn sled_ensure_zone_multiple_nexus(
         &mut self,
         sled_id: Uuid,
-    ) -> Result<Ensure, Error> {
-        // If there's already a Nexus zone on this sled, do nothing.
-        let has_nexus = self
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many Nexus zones are already running on this sled?
+        let nexus_count = self
             .parent_blueprint
             .omicron_zones
             .get(&sled_id)
             .map(|found_zones| {
-                found_zones.zones.iter().any(|z| z.zone_type.is_nexus())
+                found_zones
+                    .zones
+                    .iter()
+                    .filter(|z| z.zone_type.is_nexus())
+                    .count()
             })
-            .unwrap_or(false);
-        if has_nexus {
-            return Ok(Ensure::NotNeeded);
-        }
+            .unwrap_or(0);
+
+        let num_nexus_to_add = match desired_zone_count.checked_sub(nexus_count)
+        {
+            Some(0) => return Ok(EnsureMultiple::NotNeeded),
+            Some(n) => n,
+            None => {
+                return Err(Error::Planner(anyhow!(
+                    "removing a Nexus zone not yet supported \
+                     (sled {sled_id} has {nexus_count}; \
+                     planner wants {desired_zone_count})"
+                )));
+            }
+        };
 
         // Whether Nexus should use TLS and what the external DNS servers it
         // should use are currently provided at rack-setup time, and should be
@@ -499,58 +547,62 @@ impl<'a> BlueprintBuilder<'a> {
             })
             .ok_or(Error::NoNexusZonesInParentBlueprint)?;
 
-        let nexus_id = Uuid::new_v4();
-        let external_ip = self
-            .available_external_ips
-            .next()
-            .ok_or(Error::NoExternalServiceIpAvailable)?;
+        for _ in 0..num_nexus_to_add {
+            let nexus_id = Uuid::new_v4();
+            let external_ip = self
+                .available_external_ips
+                .next()
+                .ok_or(Error::NoExternalServiceIpAvailable)?;
 
-        let nic = {
-            let (ip, subnet) = match external_ip {
-                IpAddr::V4(_) => (
-                    self.nexus_v4_ips
-                        .next()
-                        .ok_or(Error::ExhaustedNexusIps)?
-                        .into(),
-                    IpNet::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
-                ),
-                IpAddr::V6(_) => (
-                    self.nexus_v6_ips
-                        .next()
-                        .ok_or(Error::ExhaustedNexusIps)?
-                        .into(),
-                    IpNet::from(*NEXUS_OPTE_IPV6_SUBNET).into(),
-                ),
+            let nic = {
+                let (ip, subnet) = match external_ip {
+                    IpAddr::V4(_) => (
+                        self.nexus_v4_ips
+                            .next()
+                            .ok_or(Error::ExhaustedNexusIps)?
+                            .into(),
+                        IpNet::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
+                    ),
+                    IpAddr::V6(_) => (
+                        self.nexus_v6_ips
+                            .next()
+                            .ok_or(Error::ExhaustedNexusIps)?
+                            .into(),
+                        IpNet::from(*NEXUS_OPTE_IPV6_SUBNET).into(),
+                    ),
+                };
+                NetworkInterface {
+                    id: Uuid::new_v4(),
+                    kind: NetworkInterfaceKind::Service(nexus_id),
+                    name: format!("nexus-{nexus_id}").parse().unwrap(),
+                    ip,
+                    mac: self.random_mac(),
+                    subnet,
+                    vni: Vni::SERVICES_VNI,
+                    primary: true,
+                    slot: 0,
+                }
             };
-            NetworkInterface {
-                id: Uuid::new_v4(),
-                kind: NetworkInterfaceKind::Service(nexus_id),
-                name: format!("nexus-{nexus_id}").parse().unwrap(),
-                ip,
-                mac: self.random_mac(),
-                subnet,
-                vni: Vni::SERVICES_VNI,
-                primary: true,
-                slot: 0,
-            }
-        };
 
-        let ip = self.sled_alloc_ip(sled_id)?;
-        let port = omicron_common::address::NEXUS_INTERNAL_PORT;
-        let internal_address = SocketAddrV6::new(ip, port, 0, 0).to_string();
-        let zone = OmicronZoneConfig {
-            id: nexus_id,
-            underlay_address: ip,
-            zone_type: OmicronZoneType::Nexus {
-                internal_address,
-                external_ip,
-                nic,
-                external_tls,
-                external_dns_servers,
-            },
-        };
-        self.sled_add_zone(sled_id, zone)?;
-        Ok(Ensure::Added)
+            let ip = self.sled_alloc_ip(sled_id)?;
+            let port = omicron_common::address::NEXUS_INTERNAL_PORT;
+            let internal_address =
+                SocketAddrV6::new(ip, port, 0, 0).to_string();
+            let zone = OmicronZoneConfig {
+                id: nexus_id,
+                underlay_address: ip,
+                zone_type: OmicronZoneType::Nexus {
+                    internal_address,
+                    external_ip,
+                    nic,
+                    external_tls,
+                    external_dns_servers: external_dns_servers.clone(),
+                },
+            };
+            self.sled_add_zone(sled_id, zone)?;
+        }
+
+        Ok(EnsureMultiple::Added(num_nexus_to_add))
     }
 
     fn random_mac(&mut self) -> MacAddr {
@@ -645,7 +697,7 @@ impl<'a> BlueprintBuilder<'a> {
                 allocator
             });
 
-        allocator.alloc().ok_or_else(|| Error::OutOfAddresses { sled_id })
+        allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
     }
 
     fn sled_resources(&self, sled_id: Uuid) -> Result<&SledResources, Error> {
@@ -1012,13 +1064,14 @@ pub mod test {
                 .expect("failed to create builder");
 
         let err = builder
-            .sled_ensure_zone_nexus(
+            .sled_ensure_zone_multiple_nexus(
                 collection
                     .omicron_zones
                     .keys()
                     .next()
                     .copied()
                     .expect("no sleds present"),
+                1,
             )
             .unwrap_err();
 
@@ -1058,16 +1111,30 @@ pub mod test {
         .expect("failed to create initial blueprint");
 
         {
-            // Attempting to add Nexus to the zone we removed it from (with no
+            // Attempting to add Nexus to the sled we removed it from (with no
             // other changes to the environment) should succeed.
             let mut builder =
                 BlueprintBuilder::new_based_on(&parent, &policy, "test")
                     .expect("failed to create builder");
             let added = builder
-                .sled_ensure_zone_nexus(sled_id)
+                .sled_ensure_zone_multiple_nexus(sled_id, 1)
                 .expect("failed to ensure nexus zone");
 
-            assert_eq!(added, Ensure::Added);
+            assert_eq!(added, EnsureMultiple::Added(1));
+        }
+
+        {
+            // Attempting to add multiple Nexus zones to the sled we removed it
+            // from (with no other changes to the environment) should also
+            // succeed.
+            let mut builder =
+                BlueprintBuilder::new_based_on(&parent, &policy, "test")
+                    .expect("failed to create builder");
+            let added = builder
+                .sled_ensure_zone_multiple_nexus(sled_id, 3)
+                .expect("failed to ensure nexus zone");
+
+            assert_eq!(added, EnsureMultiple::Added(3));
         }
 
         {
@@ -1093,7 +1160,9 @@ pub mod test {
             let mut builder =
                 BlueprintBuilder::new_based_on(&parent, &policy, "test")
                     .expect("failed to create builder");
-            let err = builder.sled_ensure_zone_nexus(sled_id).unwrap_err();
+            let err = builder
+                .sled_ensure_zone_multiple_nexus(sled_id, 1)
+                .unwrap_err();
 
             assert!(
                 matches!(err, Error::NoExternalServiceIpAvailable),
