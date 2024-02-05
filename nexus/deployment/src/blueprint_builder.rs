@@ -54,6 +54,8 @@ pub enum Error {
     NoNexusZonesInParentBlueprint,
     #[error("no external service IP addresses are available")]
     NoExternalServiceIpAvailable,
+    #[error("no system MAC addresses are available")]
+    NoSystemMacAddressAvailable,
     #[error("exhausted available Nexus IP addresses")]
     ExhaustedNexusIps,
     #[error("programming error in planner")]
@@ -117,8 +119,8 @@ pub struct BlueprintBuilder<'a> {
     // Iterator of available external IPs for service zones
     available_external_ips: Box<dyn Iterator<Item = IpAddr> + Send + 'a>,
 
-    // All MACs used by NICs in zones of the blueprint we're building.
-    used_macs: HashSet<MacAddr>,
+    // Iterator of available MAC addresses in the system address range
+    available_system_macs: Box<dyn Iterator<Item = MacAddr>>,
 }
 
 impl<'a> BlueprintBuilder<'a> {
@@ -276,6 +278,9 @@ impl<'a> BlueprintBuilder<'a> {
                 .flat_map(|r| r.iter())
                 .filter(move |ip| !used_external_ips.contains(ip)),
         );
+        let available_system_macs = Box::new(
+            MacAddr::iter_system().filter(move |mac| !used_macs.contains(mac)),
+        );
 
         Ok(BlueprintBuilder {
             parent_blueprint,
@@ -288,7 +293,7 @@ impl<'a> BlueprintBuilder<'a> {
             nexus_v4_ips,
             nexus_v6_ips,
             available_external_ips,
-            used_macs,
+            available_system_macs,
         })
     }
 
@@ -569,12 +574,16 @@ impl<'a> BlueprintBuilder<'a> {
                         IpNet::from(*NEXUS_OPTE_IPV6_SUBNET).into(),
                     ),
                 };
+                let mac = self
+                    .available_system_macs
+                    .next()
+                    .ok_or(Error::NoSystemMacAddressAvailable)?;
                 NetworkInterface {
                     id: Uuid::new_v4(),
                     kind: NetworkInterfaceKind::Service(nexus_id),
                     name: format!("nexus-{nexus_id}").parse().unwrap(),
                     ip,
-                    mac: self.random_mac(),
+                    mac,
                     subnet,
                     vni: Vni::SERVICES_VNI,
                     primary: true,
@@ -601,20 +610,6 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         Ok(EnsureMultiple::Added(num_nexus_to_add))
-    }
-
-    fn random_mac(&mut self) -> MacAddr {
-        let mut mac = MacAddr::random_system();
-
-        // TODO-performance if the size of `used_macs` starts to approach some
-        // nontrivial fraction of the total random space, we could do something
-        // smarter here (e.g., start with a random mac then increment until we
-        // find an unused value).
-        while !self.used_macs.insert(mac) {
-            mac = MacAddr::random_system();
-        }
-
-        mac
     }
 
     fn sled_add_zone(
