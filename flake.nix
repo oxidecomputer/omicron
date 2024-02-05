@@ -9,14 +9,12 @@
     };
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs = { self, nixpkgs, rust-overlay, ... }:
     let
       overlays = [ (import rust-overlay) ];
       pkgs = import nixpkgs {
         inherit overlays;
         system = "x86_64-linux";
-        # needed for `steam-run`, which we use to execute Clickhouse.
-        config.allowUnfree = true;
       };
       # use the Rust toolchain defined in the `rust-toolchain.toml` file.
       rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
@@ -252,21 +250,12 @@
 
       devShells.x86_64-linux.default =
         let
-          # a little wrapper for running Clickhouse
-          clickhouseWrapped = writeShellApplication
+          # a little wrapper for running Clickhouse in a FHS environment so that
+          # it can do whatever dynamic loading nonsense it likes.
+          clickhouseWrapped = buildFHSEnv
             {
               name = "clickhouse";
-              runtimeInputs = [
-
-                # it would probably be "more correct" to use `autoPatchelfHook`
-                # or something for clickhouse, but steam-run Just Works... see
-                # https://unix.stackexchange.com/questions/522822/different-methods-to-run-a-non-nixos-executable-on-nixos/522823#522823
-                steam-run
-                clickhouse
-              ];
-              text = ''
-                steam-run clickhouse "$@"
-              '';
+              runScript = "${clickhouse}/bin/clickhouse";
             };
         in
         mkShell.override
