@@ -1061,8 +1061,11 @@ mod tests {
     use std::mem;
     use std::net::Ipv6Addr;
 
-    static EMPTY_POLICY: Policy =
-        Policy { sleds: BTreeMap::new(), service_ip_pool_ranges: Vec::new() };
+    static EMPTY_POLICY: Policy = Policy {
+        sleds: BTreeMap::new(),
+        service_ip_pool_ranges: Vec::new(),
+        target_nexus_zone_count: 0,
+    };
 
     // This is a not-super-future-maintainer-friendly helper to check that all
     // the subtables related to blueprints have been pruned of a specific
@@ -1133,6 +1136,10 @@ mod tests {
                 })
                 .collect(),
             service_ip_pool_ranges: Vec::new(),
+            target_nexus_zone_count: collection
+                .all_omicron_zones()
+                .filter(|z| z.zone_type.is_nexus())
+                .count(),
         }
     }
 
