@@ -34,7 +34,6 @@ use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::Saga;
-use nexus_types::internal_api::views::SwitchPortSettings;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
@@ -603,37 +602,6 @@ async fn ipv4_nat_changeset(
             .await?;
         changeset.sort_by_key(|e| e.gen);
         Ok(HttpResponseOk(changeset))
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch Port Settings
-///
-#[endpoint {
-   method = GET,
-    path = "/networking/switch-port-settings"
-}]
-async fn list_switch_port_settings(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<SwitchPortSettings>>, HttpError> {
-    let apictx = rqctx.context();
-    let handler = async {
-        let nexus = &apictx.nexus;
-        let query = query_params.into_inner();
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        let pagparams = data_page_params_for(&rqctx, &query)?;
-
-        // TODO: if we follow the same approach of dendrite calling up to get
-        // changes instead of nexus pushing changes down, how do we differentiate
-        // dendrite of switch 1 from dendrite of switch 2? The caller could
-        // provide such information via a query parameter. This would require
-        // dendrite to know which switch slot it is managing (it could get this
-        // information // from `mgs`). On the other hand, Nexus already knows
-        // which dendrite is which
-
-        // If we differentiate based on
-        todo!()
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

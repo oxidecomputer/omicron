@@ -15,12 +15,6 @@ use steno::SagaResultErr;
 use steno::UndoActionError;
 use uuid::Uuid;
 
-use omicron_common::api::external::{
-    LldpServiceConfig, SwitchInterfaceConfig, SwitchPortAddressConfig,
-    SwitchPortConfig, SwitchPortLinkConfig, SwitchPortRouteConfig,
-    SwitchPortSettings, SwitchPortSettingsGroups, SwitchVlanInterfaceConfig,
-};
-
 pub async fn to_list<T, U>(object_stream: ObjectStream<T>) -> Vec<U>
 where
     T: Into<U>,
@@ -301,36 +295,4 @@ pub struct LastResultCompleted {
     pub elapsed: Duration,
     /// arbitrary datum emitted by the background task
     pub details: serde_json::Value,
-}
-
-/// This structure contains a subset of port settings needed for synchronizing
-/// switch port configurations in `dendrite` via the internal api
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct SwitchPortSettings {
-    /// The primary switch port settings handle.
-    pub settings: SwitchPortSettings,
-
-    /// Switch port settings included from other switch port settings groups.
-    pub groups: Vec<SwitchPortSettingsGroups>,
-
-    /// Layer 1 physical port settings.
-    pub port: SwitchPortConfig,
-
-    /// Layer 2 link settings.
-    pub links: Vec<SwitchPortLinkConfig>,
-
-    /// Link-layer discovery protocol (LLDP) settings.
-    pub link_lldp: Vec<LldpServiceConfig>,
-
-    /// Layer 3 interface settings.
-    pub interfaces: Vec<SwitchInterfaceConfig>,
-
-    /// Vlan interface settings.
-    pub vlan_interfaces: Vec<SwitchVlanInterfaceConfig>,
-
-    /// IP route settings.
-    pub routes: Vec<SwitchPortRouteConfig>,
-
-    /// Layer 3 IP address settings.
-    pub addresses: Vec<SwitchPortAddressConfig>,
 }
