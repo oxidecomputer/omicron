@@ -314,7 +314,7 @@ propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev 
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
-ratatui = "0.25.0"
+ratatui = "0.26.0"
 rayon = "1.8"
 rcgen = "0.12.1"
 reedline = "0.28.0"
@@ -400,7 +400,7 @@ trust-dns-server = "0.22"
 trybuild = "1.0.89"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
-tui-tree-widget = "0.16.0"
+tui-tree-widget = "0.17.0"
 unicode-width = "0.1.11"
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
