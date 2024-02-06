@@ -141,12 +141,22 @@
           dpd = fetchLinuxBin
             "dpd";
         in
-        pkgs.stdenv.mkDerivation
+        with pkgs; stdenv.mkDerivation
           {
             name = "dendrite-stub";
+            version = commit;
             src = tarball;
+            nativeBuildInputs = [
+              # patch the binary to use the right dynamic library paths.
+              autoPatchelfHook
+            ];
 
-            phases = [ "unpackPhase" "installPhase" ];
+            buildInputs = [
+              glibc
+              gcc-unwrapped
+              openssl
+            ];
+
             installPhase =
               let
                 binPath = "root/opt/oxide/dendrite/bin";
@@ -194,11 +204,22 @@
                 file = "mgd";
               };
         in
-        pkgs.stdenv.mkDerivation
+        with pkgs;
+        stdenv.mkDerivation
           {
             name = "mgd";
             src = tarball;
             version = commit;
+            nativeBuildInputs = [
+              # patch the binary to use the right dynamic library paths.
+              autoPatchelfHook
+            ];
+
+            buildInputs = [
+              glibc
+              gcc-unwrapped
+            ];
+
             installPhase =
               let
                 binPath = "root/opt/oxide/mgd/bin";
@@ -236,6 +257,15 @@
           {
             inherit src name version;
             sourceRoot = ".";
+            nativeBuildInputs = [
+              # patch the binary to use the right dynamic library paths.
+              autoPatchelfHook
+            ];
+
+            buildInputs = [
+              glibc
+              gcc-unwrapped
+            ];
             installPhase = ''
               mkdir -p $out/bin
               mkdir -p $out/etc
@@ -243,15 +273,6 @@
               cp ./._config.xml $out/bin/config.xml
             '';
           };
-
-      # a little wrapper for running Clickhouse in a FHS environment so that
-      # it can do whatever dynamic loading nonsense it likes.
-      clickhouse-wrapped = pkgs.buildFHSEnv
-        {
-          pname = "clickhouse";
-          version = clickhouse.version;
-          runScript = "${clickhouse}/bin/clickhouse";
-        };
 
       cockroachdb = with pkgs;
         let
@@ -272,22 +293,28 @@
           {
             name = "cockroachdb";
             inherit src version;
+            nativeBuildInputs = [
+              # patch the binary to use the right dynamic library paths.
+              autoPatchelfHook
+            ];
+
+            buildInputs = [
+              glibc
+              # gcc-unwrapped
+            ];
             installPhase = ''
               mkdir -p $out/bin
               cp ./${binName} $out/bin/${binName}
             '';
           };
     in
-    with pkgs;
     {
       packages.x86_64-linux = {
-        inherit dendrite-stub mgd cockroachdb;
-        clickhouse = clickhouse-wrapped;
+        inherit dendrite-stub mgd cockroachdb clickhouse;
       };
 
       checks.x86_64-linux = with pkgs;
         {
-
           clickhouseVersion =
             let
               clickhousePkg = self.packages.x86_64-linux.clickhouse;
@@ -303,14 +330,13 @@
                 exit 1
               fi
             '';
-
         };
 
       devShells.x86_64-linux.default =
-        mkShell.override
+        pkgs.mkShell.override
           {
             # use Clang as the C compiler for all C libraries
-            stdenv = clangStdenv;
+            stdenv = pkgs.clangStdenv;
           }
           {
             inherit buildInputs;
@@ -318,15 +344,15 @@
               # Dendrite and maghemite, for running tests.
               dendrite-stub
               mgd
-              clickhouse-wrapped
+              clickhouse
               cockroachdb
             ];
 
             name = "omicron";
-            DEP_PQ_LIBDIRS = "${postgresql.lib}/lib";
+            DEP_PQ_LIBDIRS = "${pkgs.postgresql.lib}/lib";
             # LIBCLANG_PATH = "${libclang.lib}/lib";
-            OPENSSL_DIR = "${openssl.dev}";
-            OPENSSL_LIB_DIR = "${openssl.out}/lib";
+            OPENSSL_DIR = "${pkgs.openssl.dev}";
+            OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
 
             MG_OPENAPI_PATH = mgOpenAPI;
             DDM_OPENAPI_PATH = ddmOpenAPI;
@@ -343,7 +369,7 @@
 
               ln -s ${mgd.out} -T out/mgd
               ln -s ${dendrite-stub.out} -T out/dendrite-stub
-              ln -s ${clickhouse-wrapped.out}/bin/clickhouse out/clickhouse/clickhouse
+              ln -s ${clickhouse.out}/bin/clickhouse out/clickhouse/clickhouse
               ln -s ${clickhouse.out}/etc/config.xml out/clickhouse
               ln -s ${cockroachdb.out}/bin out/cockroachdb/bin
             '';
