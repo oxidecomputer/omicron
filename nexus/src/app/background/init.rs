@@ -101,6 +101,7 @@ impl BackgroundTasks {
             opctx,
             datastore.clone(),
             DnsGroup::Internal,
+            resolver.clone(),
             &config.dns_internal,
         );
         let (task_external_dns_config, task_external_dns_servers) = init_dns(
@@ -108,6 +109,7 @@ impl BackgroundTasks {
             opctx,
             datastore.clone(),
             DnsGroup::External,
+            resolver.clone(),
             &config.dns_external,
         );
 
@@ -301,6 +303,7 @@ fn init_dns(
     opctx: &OpContext,
     datastore: Arc<DataStore>,
     dns_group: DnsGroup,
+    resolver: internal_dns::resolver::Resolver,
     config: &DnsTasksConfig,
 ) -> (common::TaskHandle, common::TaskHandle) {
     let dns_group_name = dns_group.to_string();
@@ -321,7 +324,7 @@ fn init_dns(
     );
 
     // Background task: DNS server list watcher
-    let dns_servers = dns_servers::DnsServersWatcher::new(datastore, dns_group);
+    let dns_servers = dns_servers::DnsServersWatcher::new(dns_group, resolver);
     let dns_servers_watcher = dns_servers.watcher();
     let task_name_servers = format!("dns_servers_{}", dns_group);
     let task_servers = driver.register(

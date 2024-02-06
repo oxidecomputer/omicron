@@ -162,7 +162,7 @@ mod test {
     // use nexus_db_queries::context::OpContext;
     // use nexus_db_queries::db::model::Service;
     // use nexus_db_queries::db::model::ServiceKind;
-    // use nexus_test_utils_macros::nexus_test;
+    use nexus_test_utils_macros::nexus_test;
     // use std::net::Ipv6Addr;
     // use std::net::SocketAddrV6;
     // use uuid::Uuid;
