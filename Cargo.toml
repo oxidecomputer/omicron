@@ -378,7 +378,7 @@ syn = { version = "2.0" }
 tabled = "0.15.0"
 tar = "0.4"
 tempdir = "0.3"
-tempfile = "3.9"
+tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
 textwrap = "0.16.0"
