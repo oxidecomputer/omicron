@@ -398,7 +398,11 @@ impl<'a> BlueprintBuilder<'a> {
 
                 // Record each of the sled's zones' underlay addresses as
                 // allocated.
-                if let Some(sled_zones) = self.omicron_zones.get(&sled_id) {
+                let sled_zones =
+                    self.omicron_zones.get(&sled_id).or_else(|| {
+                        self.parent_blueprint.omicron_zones.get(&sled_id)
+                    });
+                if let Some(sled_zones) = sled_zones {
                     for z in &sled_zones.zones {
                         allocator.reserve(z.underlay_address);
                     }
@@ -417,6 +421,38 @@ impl<'a> BlueprintBuilder<'a> {
                 sled_id
             ))
         })
+    }
+
+    /// Internal helper to iterate all the zones currently described by the
+    /// blueprint being built
+    fn all_current_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> + '_ {
+        let sled_ids: BTreeSet<&Uuid> = self
+            .omicron_zones
+            .keys()
+            .chain(self.parent_blueprint.omicron_zones.keys())
+            .collect();
+        sled_ids.into_iter().flat_map(|sled_id| {
+            self.sled_current_omicron_zones(*sled_id).map(|z| (*sled_id, z))
+        })
+    }
+
+    /// Internal helper to iterate over the zones currently described by the
+    /// blueprint on the given sled
+    fn sled_current_omicron_zones(
+        &self,
+        sled_id: Uuid,
+    ) -> Box<dyn Iterator<Item = &OmicronZoneConfig> + '_> {
+        if let Some(sled_zones) = self
+            .omicron_zones
+            .get(&sled_id)
+            .or_else(|| self.parent_blueprint.omicron_zones.get(&sled_id))
+        {
+            Box::new(sled_zones.zones.iter())
+        } else {
+            Box::new(std::iter::empty())
+        }
     }
 }
 
