@@ -410,7 +410,7 @@
 
             # Needed by rustfmt-wrapper, see:
             # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
-            RUSTFMT = "${rustToolchain} /bin/rustfmt";
+            RUSTFMT = "${rustToolchain}/bin/rustfmt";
           };
     };
 }
