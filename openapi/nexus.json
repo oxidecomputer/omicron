@@ -5331,7 +5331,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Make an IP pool available within a silo",
+        "summary": "Link an IP pool to a silo",
+        "description": "Users in linked silos can allocate external IPs from this pool for their instances. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
         "operationId": "ip_pool_silo_link",
         "parameters": [
           {
@@ -5379,8 +5380,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Make an IP pool default or not-default for a silo",
-        "description": "When a pool is made default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
+        "summary": "Make IP pool default for silo",
+        "description": "When a user asks for an IP (e.g., at instance create time) without specifying a pool, the IP comes from the default pool if a default is configured. When a pool is made the default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
         "operationId": "ip_pool_silo_update",
         "parameters": [
           {
@@ -5472,7 +5473,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Fetch the IP pool used for Oxide services",
+        "summary": "Fetch the Oxide service IP pool",
         "operationId": "ip_pool_service_view",
         "responses": {
           "200": {
@@ -5499,8 +5500,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "List ranges for the IP pool used for Oxide services",
-        "description": "List ranges for the IP pool used for Oxide services. Ranges are ordered by their first address.",
+        "summary": "List IP ranges for the Oxide service pool",
+        "description": "Ranges are ordered by their first address.",
         "operationId": "ip_pool_service_range_list",
         "parameters": [
           {
@@ -5552,7 +5553,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Add a range to an IP pool used for Oxide services",
+        "summary": "Add IP range to Oxide service pool",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -5589,7 +5590,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Remove a range from an IP pool used for Oxide services",
+        "summary": "Remove IP range from Oxide service pool",
         "operationId": "ip_pool_service_range_remove",
         "requestBody": {
           "content": {
@@ -5909,7 +5910,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Disable a BFD session.",
+        "summary": "Disable a BFD session",
         "operationId": "networking_bfd_disable",
         "requestBody": {
           "content": {
@@ -5939,7 +5940,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Enable a BFD session.",
+        "summary": "Enable a BFD session",
         "operationId": "networking_bfd_enable",
         "requestBody": {
           "content": {
@@ -5969,7 +5970,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get BFD status.",
+        "summary": "Get BFD status",
         "operationId": "networking_bfd_status",
         "responses": {
           "200": {
@@ -6980,7 +6981,7 @@
           "system/silos"
         ],
         "summary": "Delete a silo",
-        "description": "Delete a silo by name.",
+        "description": "Delete a silo by name or ID.",
         "operationId": "silo_delete",
         "parameters": [
           {
@@ -7011,7 +7012,8 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "List IP pools available within silo",
+        "summary": "List IP pools linked to silo",
+        "description": "Linked IP pools are available to users in the specified silo. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
         "operationId": "silo_ip_pool_list",
         "parameters": [
           {

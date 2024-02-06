@@ -759,7 +759,11 @@ async fn silo_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List IP pools available within silo
+/// List IP pools linked to silo
+///
+/// Linked IP pools are available to users in the specified silo. A silo can
+/// have at most one default pool. IPs are allocated from the default pool when
+/// users ask for one without specifying a pool.
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/ip-pools",
@@ -803,7 +807,7 @@ async fn silo_ip_pool_list(
 
 /// Delete a silo
 ///
-/// Delete a silo by name.
+/// Delete a silo by name or ID.
 #[endpoint {
     method = DELETE,
     path = "/v1/system/silos/{silo}",
@@ -1569,7 +1573,11 @@ async fn ip_pool_silo_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Make an IP pool available within a silo
+/// Link an IP pool to a silo
+///
+/// Users in linked silos can allocate external IPs from this pool for their
+/// instances. A silo can have at most one default pool. IPs are allocated from
+/// the default pool when users ask for one without specifying a pool.
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/silos",
@@ -1620,10 +1628,12 @@ async fn ip_pool_silo_unlink(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Make an IP pool default or not-default for a silo
+/// Make IP pool default for silo
 ///
-/// When a pool is made default for a silo, any existing default will remain
-/// linked to the silo, but will no longer be the default.
+/// When a user asks for an IP (e.g., at instance create time) without
+/// specifying a pool, the IP comes from the default pool if a default is
+/// configured. When a pool is made the default for a silo, any existing default
+/// will remain linked to the silo, but will no longer be the default.
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}/silos/{silo}",
@@ -1650,7 +1660,7 @@ async fn ip_pool_silo_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the IP pool used for Oxide services
+/// Fetch the Oxide service IP pool
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service",
@@ -1765,10 +1775,9 @@ async fn ip_pool_range_remove(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List ranges for the IP pool used for Oxide services
+/// List IP ranges for the Oxide service pool
 ///
-/// List ranges for the IP pool used for Oxide services. Ranges are ordered by
-/// their first address.
+/// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
@@ -1809,7 +1818,7 @@ async fn ip_pool_service_range_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a range to an IP pool used for Oxide services
+/// Add IP range to Oxide service pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
@@ -1830,7 +1839,7 @@ async fn ip_pool_service_range_add(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Remove a range from an IP pool used for Oxide services
+/// Remove IP range from Oxide service pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/remove",
@@ -3539,7 +3548,7 @@ async fn networking_bgp_announce_set_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Enable a BFD session.
+/// Enable a BFD session
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bfd-enable",
@@ -3560,7 +3569,7 @@ async fn networking_bfd_enable(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Disable a BFD session.
+/// Disable a BFD session
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bfd-disable",
@@ -3581,7 +3590,7 @@ async fn networking_bfd_disable(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get BFD status.
+/// Get BFD status
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/bfd-status",
