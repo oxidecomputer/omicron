@@ -4,8 +4,10 @@
 
 //! Configuration of the deployment system
 
+use nexus_db_model::DnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
@@ -24,6 +26,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -31,19 +34,15 @@ use omicron_common::api::external::LookupType;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::num::NonZeroU32;
 use std::str::FromStr;
 use uuid::Uuid;
-
-/// "limit" used in SQL queries that paginate through all sleds, zpools, etc.
-// unsafe: `new_unchecked` is only unsound if the argument is 0.
-const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
     policy: Policy,
     creator: String,
     inventory: Option<Collection>,
+    internal_dns_version: Generation,
 }
 
 impl super::Nexus {
@@ -116,18 +115,7 @@ impl super::Nexus {
         let creator = self.id.to_string();
         let datastore = self.datastore();
 
-        let sled_rows = {
-            let mut all_sleds = Vec::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-            while let Some(p) = paginator.next() {
-                let batch =
-                    datastore.sled_list(opctx, &p.current_pagparams()).await?;
-                paginator =
-                    p.found_batch(&batch, &|s: &nexus_db_model::Sled| s.id());
-                all_sleds.extend(batch);
-            }
-            all_sleds
-        };
+        let sled_rows = datastore.sled_list_all_batched(opctx).await?;
 
         let mut zpools_by_sled_id = {
             let mut zpools = BTreeMap::new();
@@ -192,7 +180,22 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        Ok(PlanningContext { creator, policy: Policy { sleds }, inventory })
+        // Fetch the current internal DNS version.  This could be made part of
+        // inventory, but it's enough of a one-off that there's no particular
+        // advantage to doing that work now.
+        let dns_version = datastore
+            .dns_group_latest_version(opctx, DnsGroup::Internal)
+            .await
+            .internal_context(
+                "fetching internal DNS version for blueprint planning",
+            )?;
+
+        Ok(PlanningContext {
+            creator,
+            policy: Policy { sleds },
+            inventory,
+            internal_dns_version: *dns_version.version,
+        })
     }
 
     async fn blueprint_add(
@@ -215,6 +218,7 @@ impl super::Nexus {
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            planning_context.internal_dns_version,
             &planning_context.policy,
             &planning_context.creator,
         )
@@ -249,6 +253,7 @@ impl super::Nexus {
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &parent_blueprint,
+            planning_context.internal_dns_version,
             &planning_context.policy,
             &planning_context.creator,
             &inventory,

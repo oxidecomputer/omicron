@@ -233,7 +233,13 @@ impl DataStore {
 
         // Read the metadata from the primary blueprint row, and ensure that it
         // exists.
-        let (parent_blueprint_id, time_created, creator, comment) = {
+        let (
+            parent_blueprint_id,
+            internal_dns_version,
+            time_created,
+            creator,
+            comment,
+        ) = {
             use db::schema::blueprint::dsl;
 
             let Some(blueprint) = dsl::blueprint
@@ -251,6 +257,7 @@ impl DataStore {
 
             (
                 blueprint.parent_blueprint_id,
+                *blueprint.internal_dns_version,
                 blueprint.time_created,
                 blueprint.creator,
                 blueprint.comment,
@@ -479,6 +486,7 @@ impl DataStore {
             omicron_zones,
             zones_in_service,
             parent_blueprint_id,
+            internal_dns_version,
             time_created,
             creator,
             comment,
@@ -1055,6 +1063,7 @@ mod tests {
     use nexus_types::deployment::SledResources;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use rand::thread_rng;
     use rand::Rng;
@@ -1160,6 +1169,7 @@ mod tests {
         let policy = policy_from_collection(&collection);
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
             &policy,
             "test",
         )
@@ -1193,6 +1203,7 @@ mod tests {
             nexus_inventory::CollectionBuilder::new("test").build();
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
             &EMPTY_POLICY,
             "test",
         )
@@ -1319,8 +1330,12 @@ mod tests {
         let new_sled_zpools = &policy.sleds.get(&new_sled_id).unwrap().zpools;
 
         // Create a builder for a child blueprint.
-        let mut builder =
-            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test");
+        let mut builder = BlueprintBuilder::new_based_on(
+            &blueprint1,
+            Generation::new(),
+            &policy,
+            "test",
+        );
 
         // Add zones to our new sled.
         assert_eq!(
@@ -1366,7 +1381,7 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        println!("diff: {}", blueprint2.diff(&blueprint_read));
+        println!("diff: {}", blueprint2.diff_sleds(&blueprint_read));
         assert_eq!(blueprint2, blueprint_read);
         {
             let mut expected_ids = [blueprint1.id, blueprint2.id];
@@ -1459,16 +1474,25 @@ mod tests {
             nexus_inventory::CollectionBuilder::new("test").build();
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
             &EMPTY_POLICY,
             "test1",
         )
         .unwrap();
-        let blueprint2 =
-            BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test2")
-                .build();
-        let blueprint3 =
-            BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test3")
-                .build();
+        let blueprint2 = BlueprintBuilder::new_based_on(
+            &blueprint1,
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test2",
+        )
+        .build();
+        let blueprint3 = BlueprintBuilder::new_based_on(
+            &blueprint1,
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test3",
+        )
+        .build();
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
@@ -1557,9 +1581,13 @@ mod tests {
 
         // Create a child of blueprint3, and ensure when we set it as the target
         // with enabled=false, that status is serialized.
-        let blueprint4 =
-            BlueprintBuilder::new_based_on(&blueprint3, &EMPTY_POLICY, "test3")
-                .build();
+        let blueprint4 = BlueprintBuilder::new_based_on(
+            &blueprint3,
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test3",
+        )
+        .build();
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {

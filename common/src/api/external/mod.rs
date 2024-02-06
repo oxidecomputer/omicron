@@ -679,6 +679,12 @@ impl From<&Generation> for i64 {
     }
 }
 
+impl From<Generation> for u64 {
+    fn from(g: Generation) -> Self {
+        g.0
+    }
+}
+
 impl From<u32> for Generation {
     fn from(value: u32) -> Self {
         Generation(u64::from(value))

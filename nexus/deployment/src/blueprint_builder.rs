@@ -70,6 +70,7 @@ pub enum Ensure {
 pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
+    internal_dns_version: Generation,
 
     // These fields are used to allocate resources from sleds.
     policy: &'a Policy,
@@ -88,6 +89,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// collection (representing no changes from the collection state)
     pub fn build_initial_from_collection(
         collection: &'a Collection,
+        internal_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
     ) -> Result<Blueprint, Error> {
@@ -134,6 +136,7 @@ impl<'a> BlueprintBuilder<'a> {
             omicron_zones,
             zones_in_service,
             parent_blueprint_id: None,
+            internal_dns_version,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("from collection {}", collection.id),
@@ -144,11 +147,13 @@ impl<'a> BlueprintBuilder<'a> {
     /// starting with no changes from that state
     pub fn new_based_on(
         parent_blueprint: &'a Blueprint,
+        internal_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
     ) -> BlueprintBuilder<'a> {
         BlueprintBuilder {
             parent_blueprint,
+            internal_dns_version,
             policy,
             sled_ip_allocators: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
@@ -199,6 +204,7 @@ impl<'a> BlueprintBuilder<'a> {
             omicron_zones,
             zones_in_service: self.zones_in_service,
             parent_blueprint_id: Some(self.parent_blueprint.id),
+            internal_dns_version: self.internal_dns_version,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self.comments.join(", "),
@@ -552,6 +558,7 @@ pub mod test {
         let blueprint_initial =
             BlueprintBuilder::build_initial_from_collection(
                 &collection,
+                Generation::new(),
                 &policy,
                 "the_test",
             )
@@ -561,7 +568,7 @@ pub mod test {
         // provide that ourselves.  For our purposes though we don't care.
         let zones_in_service = blueprint_initial.zones_in_service.clone();
         let diff = blueprint_initial
-            .diff_from_collection(&collection, &zones_in_service);
+            .diff_sleds_from_collection(&collection, &zones_in_service);
         println!(
             "collection -> initial blueprint (expected no changes):\n{}",
             diff
@@ -573,11 +580,12 @@ pub mod test {
         // Test a no-op blueprint.
         let builder = BlueprintBuilder::new_based_on(
             &blueprint_initial,
+            Generation::new(),
             &policy,
             "test_basic",
         );
         let blueprint = builder.build();
-        let diff = blueprint_initial.diff(&blueprint);
+        let diff = blueprint_initial.diff_sleds(&blueprint);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             diff
@@ -592,13 +600,18 @@ pub mod test {
         let (collection, mut policy) = example();
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
             &policy,
             "the_test",
         )
         .expect("failed to create initial blueprint");
 
-        let mut builder =
-            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test_basic");
+        let mut builder = BlueprintBuilder::new_based_on(
+            &blueprint1,
+            Generation::new(),
+            &policy,
+            "test_basic",
+        );
 
         // The initial blueprint should have internal NTP zones on all the
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
@@ -613,7 +626,7 @@ pub mod test {
         }
 
         let blueprint2 = builder.build();
-        let diff = blueprint1.diff(&blueprint2);
+        let diff = blueprint1.diff_sleds(&blueprint2);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             diff
@@ -625,8 +638,12 @@ pub mod test {
         // The next step is adding these zones to a new sled.
         let new_sled_id = Uuid::new_v4();
         let _ = policy_add_sled(&mut policy, new_sled_id);
-        let mut builder =
-            BlueprintBuilder::new_based_on(&blueprint2, &policy, "test_basic");
+        let mut builder = BlueprintBuilder::new_based_on(
+            &blueprint2,
+            Generation::new(),
+            &policy,
+            "test_basic",
+        );
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         let new_sled_resources = policy.sleds.get(&new_sled_id).unwrap();
         for pool_name in &new_sled_resources.zpools {
@@ -636,7 +653,7 @@ pub mod test {
         }
 
         let blueprint3 = builder.build();
-        let diff = blueprint2.diff(&blueprint3);
+        let diff = blueprint2.diff_sleds(&blueprint3);
         println!("expecting new NTP and Crucible zones:\n{}", diff);
 
         // No sleds were changed or removed.

@@ -105,6 +105,7 @@ pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
+use std::num::NonZeroU32;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::read_only_resources_associated_with_volume;
@@ -120,6 +121,14 @@ pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
 
 /// The name of the built-in Project and VPC for Oxide services.
 pub const SERVICES_DB_NAME: &str = "oxide-services";
+
+/// "limit" to be used in SQL queries that paginate through large result sets
+///
+/// This value is chosen to be small enough to avoid any queries being too
+/// expensive.
+// unsafe: `new_unchecked` is only unsound if the argument is 0.
+pub const SQL_BATCH_SIZE: NonZeroU32 =
+    unsafe { NonZeroU32::new_unchecked(1000) };
 
 // Represents a query that is ready to be executed.
 //

@@ -1403,6 +1403,7 @@ table! {
         id -> Uuid,
 
         parent_blueprint_id -> Nullable<Uuid>,
+        internal_dns_version -> Int8,
 
         time_created -> Timestamptz,
         creator -> Text,

@@ -9,11 +9,15 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 futures.workspace = true
+internal-dns.workspace = true
+nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-types.workspace = true
+omicron-common.workspace = true
 reqwest.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 uuid.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
@@ -26,9 +30,7 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 chrono.workspace = true
 httptest.workspace = true
-nexus-db-model.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
-omicron-common.workspace = true
 omicron-nexus.workspace = true
 tokio.workspace = true

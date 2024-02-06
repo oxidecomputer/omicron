@@ -217,6 +217,7 @@ impl BackgroundTasks {
         let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
             datastore.clone(),
             rx_blueprint.clone(),
+            nexus_id.to_string(),
         );
         let task_blueprint_executor = driver.register(
             String::from("blueprint_executor"),

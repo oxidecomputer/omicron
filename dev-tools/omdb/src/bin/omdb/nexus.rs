@@ -844,7 +844,7 @@ async fn cmd_nexus_blueprints_diff(
     let b2 = client.blueprint_view(&args.blueprint2_id).await.with_context(
         || format!("fetching blueprint {}", args.blueprint2_id),
     )?;
-    println!("{}", b1.diff(&b2));
+    println!("{}", b1.diff_sleds(&b2));
     Ok(())
 }
 

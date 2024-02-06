@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`Sled`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -14,11 +15,13 @@ use crate::db::model::Sled;
 use crate::db::model::SledResource;
 use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_types::identity::Asset;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -75,6 +78,29 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all sleds, making as many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn sled_list_all_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Sled> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.check_complex_operations_allowed()?;
+
+        let mut all_sleds = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self.sled_list(opctx, &p.current_pagparams()).await?;
+            paginator =
+                p.found_batch(&batch, &|s: &nexus_db_model::Sled| s.id());
+            all_sleds.extend(batch);
+        }
+        Ok(all_sleds)
     }
 
     pub async fn sled_reservation_create(

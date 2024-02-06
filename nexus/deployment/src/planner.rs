@@ -12,6 +12,7 @@ use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
 use nexus_types::inventory::Collection;
+use omicron_common::api::external::Generation;
 use slog::{info, Logger};
 
 pub struct Planner<'a> {
@@ -34,14 +35,19 @@ impl<'a> Planner<'a> {
     pub fn new_based_on(
         log: Logger,
         parent_blueprint: &'a Blueprint,
+        internal_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
         // NOTE: Right now, we just assume that this is the latest inventory
         // collection.  See the comment on the corresponding field in `Planner`.
         inventory: &'a Collection,
     ) -> Planner<'a> {
-        let blueprint =
-            BlueprintBuilder::new_based_on(parent_blueprint, policy, creator);
+        let blueprint = BlueprintBuilder::new_based_on(
+            parent_blueprint,
+            internal_dns_version,
+            policy,
+            creator,
+        );
         Planner { log, policy, blueprint, inventory }
     }
 
@@ -166,6 +172,9 @@ mod test {
     fn test_basic_add_sled() {
         let logctx = test_setup_log("planner_basic_add_sled");
 
+        // For our purposes, we don't care about the internal DNS generation.
+        let internal_dns_version = Generation::new();
+
         // Use our example inventory collection.
         let (mut collection, mut policy) = example();
 
@@ -173,6 +182,7 @@ mod test {
         // because there's a separate test for that.
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            internal_dns_version,
             &policy,
             "the_test",
         )
@@ -184,6 +194,7 @@ mod test {
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
+            internal_dns_version,
             &policy,
             "no-op?",
             &collection,
@@ -191,7 +202,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint1.diff(&blueprint2);
+        let diff = blueprint1.diff_sleds(&blueprint2);
         println!("1 -> 2 (expected no changes):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
@@ -206,6 +217,7 @@ mod test {
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint2,
+            internal_dns_version,
             &policy,
             "test: add NTP?",
             &collection,
@@ -213,7 +225,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff(&blueprint3);
+        let diff = blueprint2.diff_sleds(&blueprint3);
         println!("2 -> 3 (expect new NTP zone on new sled):\n{}", diff);
         let sleds = diff.sleds_added().collect::<Vec<_>>();
         let (sled_id, sled_zones) = sleds[0];
@@ -236,13 +248,14 @@ mod test {
         let blueprint4 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint3,
+            internal_dns_version,
             &policy,
             "test: add nothing more",
             &collection,
         )
         .plan()
         .expect("failed to plan");
-        let diff = blueprint3.diff(&blueprint4);
+        let diff = blueprint3.diff_sleds(&blueprint4);
         println!("3 -> 4 (expected no changes):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
@@ -270,6 +283,7 @@ mod test {
         let blueprint5 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint3,
+            internal_dns_version,
             &policy,
             "test: add Crucible zones?",
             &collection,
@@ -277,7 +291,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint3.diff(&blueprint5);
+        let diff = blueprint3.diff_sleds(&blueprint5);
         println!("3 -> 5 (expect Crucible zones):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
@@ -303,6 +317,7 @@ mod test {
         let blueprint6 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint5,
+            internal_dns_version,
             &policy,
             "test: no-op?",
             &collection,
@@ -310,7 +325,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint5.diff(&blueprint6);
+        let diff = blueprint5.diff_sleds(&blueprint6);
         println!("5 -> 6 (expect no changes):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);

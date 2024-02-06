@@ -4245,6 +4245,7 @@ dependencies = [
  "chrono",
  "futures",
  "httptest",
+ "internal-dns",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-test-utils",
@@ -4258,6 +4259,7 @@ dependencies = [
  "reqwest",
  "sled-agent-client",
  "slog",
+ "slog-error-chain",
  "tokio",
  "uuid",
 ]
