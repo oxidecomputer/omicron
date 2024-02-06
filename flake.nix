@@ -314,22 +314,56 @@
       };
 
       checks.x86_64-linux = with pkgs;
+        let
+          # produces a check derivation that ensures a package's executable has
+          # the expected version.
+          mkVersionCheck = { pkg, cmd }: runCommand "check-${pkg.name}-version"
+            {
+              PATH = "${pkg.out}";
+            } ''
+            actualVersion=$(${pkg.out}/bin/${cmd})
+            if [ "$actualVersion" != "${pkg.version}" ]; then
+              echo "expected ${pkg.name} version \"${pkg.version}\", got \"$actualVersion\""
+              exit 1
+            fi
+
+            # the check derivation must have an output.
+            touch $out
+          '';
+          # produces a check derivation that ensures a package's executable
+          # runs.
+          mkExecCheck = { pkg, cmd }: runCommand "check-${pkg.name}-${cmd}-exec"
+            { } ''
+            ${pkg.out}/bin/${cmd} && touch $out
+          '';
+        in
         {
-          clickhouseVersion =
-            let
-              clickhousePkg = self.packages.x86_64-linux.clickhouse;
-              version = clickhousePkg.version;
-              bin = clickhousePkg.out + "/bin/clickhouse";
-            in
-            runCommand "clickhouse-version-test" { } ''
-              # the check derivation must have an output.
-              touch $out
-              actualVersion=$(${bin} server --version | cut -d ' ' -f 4)
-              if [ "$actualVersion" != "${version}" ]; then
-                echo "expected ClickHouse version ${version}, got $actualVersion"
-                exit 1
-              fi
-            '';
+          clickhouseVersion = mkVersionCheck
+            {
+              pkg = clickhouse;
+              cmd = "clickhouse server --version | cut -d ' ' -f 4";
+            };
+
+          cockroachdbVersion = mkVersionCheck
+            {
+              pkg = cockroachdb;
+              cmd = "cockroach version --build-tag";
+            };
+
+          mgdCanExec = mkExecCheck {
+            pkg = mgd;
+            cmd = "mgd help";
+          };
+
+          dpdCanExec = mkExecCheck {
+            pkg = dendrite-stub;
+            cmd = "dpd help";
+          };
+
+          swadmCanExec = mkExecCheck {
+            pkg = dendrite-stub;
+            cmd = "swadm help";
+          };
         };
 
       devShells.x86_64-linux.default =
@@ -380,6 +414,7 @@
           };
     };
 }
+
 
 
 
