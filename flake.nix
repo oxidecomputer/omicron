@@ -384,7 +384,7 @@
 
             name = "omicron";
             DEP_PQ_LIBDIRS = "${pkgs.postgresql.lib}/lib";
-            # LIBCLANG_PATH = "${libclang.lib}/lib";
+            LIBCLANG_PATH = "${libclang.lib}/lib";
             OPENSSL_DIR = "${pkgs.openssl.dev}";
             OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
 
