@@ -466,10 +466,11 @@ impl<'a> OmicronZonesDiff<'a> {
         for z in &bbsledzones.zones {
             writeln!(
                 f,
-                "{}         zone {} type {} ({})",
+                "{}         zone {} type {} underlay IP {} ({})",
                 prefix,
                 z.id,
                 z.zone_type.label(),
+                z.underlay_address,
                 label
             )?;
         }
@@ -529,44 +530,65 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                     DiffZoneChangedHow::DetailsChanged => {
                         writeln!(
                             f,
-                            "-         zone {} type {} (changed)",
-                            zone_id, zone_type,
+                            "-         zone {} type {} underlay IP {} \
+                                (changed)",
+                            zone_id,
+                            zone_type,
+                            zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
                             f,
-                            "+         zone {} type {} (changed)",
-                            zone_id, zone2_type,
+                            "+         zone {} type {} underlay IP {} \
+                                (changed)",
+                            zone_id,
+                            zone2_type,
+                            zone_changes.zone_after.underlay_address,
                         )?;
                     }
                     DiffZoneChangedHow::RemovedFromService => {
                         writeln!(
                             f,
-                            "-         zone {} type {} (in service)",
-                            zone_id, zone_type,
+                            "-         zone {} type {} underlay IP {} \
+                                (in service)",
+                            zone_id,
+                            zone_type,
+                            zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
                             f,
-                            "+         zone {} type {} (removed from service)",
-                            zone_id, zone2_type,
+                            "+         zone {} type {} underlay IP {} \
+                                (removed from service)",
+                            zone_id,
+                            zone2_type,
+                            zone_changes.zone_after.underlay_address,
                         )?;
                     }
                     DiffZoneChangedHow::AddedToService => {
                         writeln!(
                             f,
-                            "-         zone {} type {} (not in service)",
-                            zone_id, zone_type,
+                            "-         zone {} type {} underlay IP {} \
+                                (not in service)",
+                            zone_id,
+                            zone_type,
+                            zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
                             f,
-                            "+         zone {} type {} (added to service)",
-                            zone_id, zone2_type,
+                            "+         zone {} type {} underlay IP {} \
+                                (added to service)",
+                            zone_id,
+                            zone2_type,
+                            zone_changes.zone_after.underlay_address,
                         )?;
                     }
                     DiffZoneChangedHow::NoChanges => {
                         writeln!(
                             f,
-                            "         zone {} type {} (unchanged)",
-                            zone_id, zone_type,
+                            "         zone {} type {} underlay IP {} \
+                                (unchanged)",
+                            zone_id,
+                            zone_type,
+                            zone_changes.zone_before.underlay_address,
                         )?;
                     }
                 }
@@ -575,8 +597,9 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
             for zone in sled_changes.zones_added() {
                 writeln!(
                     f,
-                    "+        zone {} type {} (added)",
+                    "+        zone {} type {} underlay IP {} (added)",
                     zone.id,
+                    zone.underlay_address,
                     zone.zone_type.label(),
                 )?;
             }

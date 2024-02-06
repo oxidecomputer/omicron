@@ -424,6 +424,7 @@ impl<'a> BlueprintBuilder<'a> {
 pub mod test {
     use super::BlueprintBuilder;
     use ipnet::IpAdd;
+    use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::ZpoolName;
@@ -544,6 +545,25 @@ pub mod test {
         sled_ip
     }
 
+    /// Checks various conditions that should be true for all blueprints
+    pub fn verify_blueprint(blueprint: &Blueprint) {
+        let mut underlay_ips: BTreeMap<Ipv6Addr, &OmicronZoneConfig> =
+            BTreeMap::new();
+        for sled_zones in blueprint.omicron_zones.values() {
+            for zone in &sled_zones.zones {
+                if let Some(previous) =
+                    underlay_ips.insert(zone.underlay_address, zone)
+                {
+                    panic!(
+                        "found duplicate underlay IP {} in zones {} and \
+                        {}\n\nblueprint: {:#?}",
+                        zone.underlay_address, zone.id, previous.id, blueprint
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
@@ -556,6 +576,7 @@ pub mod test {
                 "the_test",
             )
             .expect("failed to create initial blueprint");
+        verify_blueprint(&blueprint_initial);
 
         // Since collections don't include what was in service, we have to
         // provide that ourselves.  For our purposes though we don't care.
@@ -577,6 +598,7 @@ pub mod test {
             "test_basic",
         );
         let blueprint = builder.build();
+        verify_blueprint(&blueprint);
         let diff = blueprint_initial.diff(&blueprint);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
@@ -596,6 +618,7 @@ pub mod test {
             "the_test",
         )
         .expect("failed to create initial blueprint");
+        verify_blueprint(&blueprint1);
 
         let mut builder =
             BlueprintBuilder::new_based_on(&blueprint1, &policy, "test_basic");
@@ -613,6 +636,7 @@ pub mod test {
         }
 
         let blueprint2 = builder.build();
+        verify_blueprint(&blueprint2);
         let diff = blueprint1.diff(&blueprint2);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
@@ -636,6 +660,7 @@ pub mod test {
         }
 
         let blueprint3 = builder.build();
+        verify_blueprint(&blueprint3);
         let diff = blueprint2.diff(&blueprint3);
         println!("expecting new NTP and Crucible zones:\n{}", diff);
 
