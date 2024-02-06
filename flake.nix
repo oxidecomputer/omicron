@@ -30,6 +30,13 @@
         libtool
       ];
 
+      nativeBuildInputs = with pkgs; [
+        rustToolchain
+        cmake
+        stdenv
+        pkg-config
+      ];
+
       openAPIVersion = with pkgs.lib; path:
         let
           file = strings.fileContents path;
@@ -64,26 +71,31 @@
             sha = version.sha;
           };
 
-      dendriteVersion = openAPIVersion ./tools/dendrite_openapi_version;
-      mgVersion = openAPIVersion ./tools/maghemite_mg_openapi_version;
+      dendriteVersion = openAPIVersion
+        ./tools/dendrite_openapi_version;
+      mgVersion = openAPIVersion
+        ./tools/maghemite_mg_openapi_version;
 
-      dendriteOpenAPI = downloadOpenAPI {
-        repo = "dendrite";
-        file = "dpd.json";
-        version = dendriteVersion;
-      };
+      dendriteOpenAPI = downloadOpenAPI
+        {
+          repo = "dendrite";
+          file = "dpd.json";
+          version = dendriteVersion;
+        };
 
-      ddmOpenAPI = downloadOpenAPI {
-        repo = "maghemite";
-        file = "ddm-admin.json";
-        version = openAPIVersion ./tools/maghemite_ddm_openapi_version;
-      };
+      ddmOpenAPI = downloadOpenAPI
+        {
+          repo = "maghemite";
+          file = "ddm-admin.json";
+          version = openAPIVersion ./tools/maghemite_ddm_openapi_version;
+        };
 
-      mgOpenAPI = downloadOpenAPI {
-        repo = "maghemite";
-        file = "mg-admin.json";
-        version = mgVersion;
-      };
+      mgOpenAPI = downloadOpenAPI
+        {
+          repo = "maghemite";
+          file = "mg-admin.json";
+          version = mgVersion;
+        };
 
       findSha = with pkgs.lib; shas: (name:
         let
@@ -96,13 +108,18 @@
           (strings.removeSuffix "\"")
         ]);
 
-      dendriteStub = with pkgs.lib;
+      dendrite-stub = with pkgs.lib;
         let
           commit = dendriteVersion.commit;
           repo = "dendrite";
           stubShas =
-            let file = builtins.readFile ./tools/dendrite_stub_checksums;
-            in strings.splitString "\n" file;
+            let
+              file = builtins.readFile
+                ./tools/dendrite_stub_checksums;
+            in
+            strings.splitString
+              "\n"
+              file;
           findStubSha = name: findSha stubShas "CIDL_SHA256_${name}";
           fetchLinuxBin = file:
             downloadBuildomat {
@@ -119,8 +136,10 @@
               kind = "image";
               file = "dendrite-stub.tar.gz";
             };
-          swadm = fetchLinuxBin "swadm";
-          dpd = fetchLinuxBin "dpd";
+          swadm = fetchLinuxBin
+            "swadm";
+          dpd = fetchLinuxBin
+            "dpd";
         in
         pkgs.stdenv.mkDerivation
           {
@@ -146,13 +165,18 @@
               '';
           };
 
-      maghemiteMgd = with pkgs.lib;
+      mgd = with pkgs.lib;
         let
           commit = mgVersion.commit;
           repo = "maghemite";
           shas =
-            let file = builtins.readFile ./tools/maghemite_mgd_checksums;
-            in strings.splitString "\n" file;
+            let
+              file = builtins.readFile
+                ./tools/maghemite_mgd_checksums;
+            in
+            strings.splitString
+              "\n"
+              file;
           # get stuff
           tarball = downloadBuildomat
             {
@@ -162,12 +186,13 @@
               file = "mgd.tar.gz";
             };
           linuxBin =
-            downloadBuildomat {
-              inherit commit repo;
-              sha = findSha shas "MGD_LINUX_SHA256";
-              kind = "linux";
-              file = "mgd";
-            };
+            downloadBuildomat
+              {
+                inherit commit repo;
+                sha = findSha shas "MGD_LINUX_SHA256";
+                kind = "linux";
+                file = "mgd";
+              };
         in
         pkgs.stdenv.mkDerivation
           {
@@ -218,13 +243,23 @@
             '';
           };
 
+      # a little wrapper for running Clickhouse in a FHS environment so that
+      # it can do whatever dynamic loading nonsense it likes.
+      clickhouse-wrapped = pkgs.buildFHSEnv
+        {
+          name = "clickhouse";
+          runScript = "${clickhouse}/bin/clickhouse";
+        };
+
       cockroachdb = with pkgs;
         let
           binName = "cockroach";
-          version = with pkgs.lib; trivial.pipe ./tools/cockroachdb_version [
-            (builtins.readFile)
-            (strings.removeSuffix "\n")
-          ];
+          version = with pkgs.lib; trivial.pipe
+            ./tools/cockroachdb_version
+            [
+              (builtins.readFile)
+              (strings.removeSuffix "\n")
+            ];
           src = builtins.fetchurl
             {
               url = "https://binaries.cockroachdb.com/${binName}-${version}.linux-amd64.tgz";
@@ -244,20 +279,11 @@
     with pkgs;
     {
       packages.x86_64-linux = {
-        dendrite-stub = dendriteStub;
-        mgd = maghemiteMgd;
+        inherit dendrite-stub mgd cockroachdb;
+        clickhouse = clickhouse-wrapped;
       };
 
       devShells.x86_64-linux.default =
-        let
-          # a little wrapper for running Clickhouse in a FHS environment so that
-          # it can do whatever dynamic loading nonsense it likes.
-          clickhouseWrapped = buildFHSEnv
-            {
-              name = "clickhouse";
-              runScript = "${clickhouse}/bin/clickhouse";
-            };
-        in
         mkShell.override
           {
             # use Clang as the C compiler for all C libraries
@@ -265,16 +291,12 @@
           }
           {
             inherit buildInputs;
-
-            nativeBuildInputs = [
-              rustToolchain
-              cmake
-              stdenv
-              pkg-config
+            nativeBuildInputs = nativeBuildInputs ++ [
               # Dendrite and maghemite, for running tests.
-              dendriteStub
-              maghemiteMgd
-              clickhouseWrapped
+              dendrite-stub
+              mgd
+              clickhouse-wrapped
+              cockroachdb
             ];
 
             name = "omicron";
@@ -296,9 +318,9 @@
               mkdir -p out/clickhouse
               mkdir -p out/cockroachdb/
 
-              ln -s ${maghemiteMgd.out} -T out/mgd
-              ln -s ${dendriteStub.out} -T out/dendrite-stub
-              ln -s ${clickhouseWrapped.out}/bin/clickhouse out/clickhouse/clickhouse
+              ln -s ${mgd.out} -T out/mgd
+              ln -s ${dendrite-stub.out} -T out/dendrite-stub
+              ln -s ${clickhouse-wrapped.out}/bin/clickhouse out/clickhouse/clickhouse
               ln -s ${clickhouse.out}/etc/config.xml out/clickhouse
               ln -s ${cockroachdb.out}/bin out/cockroachdb/bin
             '';
