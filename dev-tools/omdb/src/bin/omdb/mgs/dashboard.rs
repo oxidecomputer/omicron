@@ -960,7 +960,7 @@ fn draw_graph(f: &mut Frame, parent: Rect, graph: &mut Graph, now: u64) {
 
         datasets.push(
             Dataset::default()
-                .name(&s.name)
+                .name(&*s.name)
                 .marker(symbols::Marker::Braille)
                 .style(Style::default().fg(s.color))
                 .data(&s.data),
