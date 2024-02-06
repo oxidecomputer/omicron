@@ -93,7 +93,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         error!(
                             &log,
                             "failed to get switch port settings";
-                            "switch_port_id" => ?id,
+                            "switch_port_settings_id" => ?id,
                             "error" => format!("{:#}", e)
                         );
                         return json!({
