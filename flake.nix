@@ -198,6 +198,7 @@
           {
             name = "mgd";
             src = tarball;
+            version = commit;
             installPhase =
               let
                 binPath = "root/opt/oxide/mgd/bin";
@@ -217,7 +218,7 @@
         let
           # TODO(eliza): it would be nice if this lived in a file that was also used
           # by `tools/ci_download_clickhouse`, so these could be kept consistent...
-          version = "v22.8.9.24";
+          version = "22.8.9.24";
           # also, N.B. that unlike maghemite and dendrite, the Clickhouse hashes
           # in `tools/clickhouse_checksums` are MD5 rather than SHA256, so we
           # can't give Nix those hashes and must instead determine it ourselves.
@@ -228,7 +229,7 @@
           src = builtins.fetchurl
             {
               inherit sha256;
-              url = "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com/${name}-${version}.linux.tar.gz";
+              url = "https://oxide-clickhouse-build.s3.us-west-2.amazonaws.com/${name}-v${version}.linux.tar.gz";
             };
         in
         stdenv.mkDerivation
@@ -247,7 +248,8 @@
       # it can do whatever dynamic loading nonsense it likes.
       clickhouse-wrapped = pkgs.buildFHSEnv
         {
-          name = "clickhouse";
+          pname = "clickhouse";
+          version = clickhouse.version;
           runScript = "${clickhouse}/bin/clickhouse";
         };
 
@@ -283,6 +285,27 @@
         clickhouse = clickhouse-wrapped;
       };
 
+      checks.x86_64-linux = with pkgs;
+        {
+
+          clickhouseVersion =
+            let
+              clickhousePkg = self.packages.x86_64-linux.clickhouse;
+              version = clickhousePkg.version;
+              bin = clickhousePkg.out + "/bin/clickhouse";
+            in
+            runCommand "clickhouse-version-test" { } ''
+              # the check derivation must have an output.
+              touch $out
+              actualVersion=$(${bin} server --version | cut -d ' ' -f 4)
+              if [ "$actualVersion" != "${version}" ]; then
+                echo "expected ClickHouse version ${version}, got $actualVersion"
+                exit 1
+              fi
+            '';
+
+        };
+
       devShells.x86_64-linux.default =
         mkShell.override
           {
@@ -301,7 +324,7 @@
 
             name = "omicron";
             DEP_PQ_LIBDIRS = "${postgresql.lib}/lib";
-            LIBCLANG_PATH = "${libclang.lib}/lib";
+            # LIBCLANG_PATH = "${libclang.lib}/lib";
             OPENSSL_DIR = "${openssl.dev}";
             OPENSSL_LIB_DIR = "${openssl.out}/lib";
 
@@ -327,10 +350,11 @@
 
             # Needed by rustfmt-wrapper, see:
             # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
-            RUSTFMT = "${rustToolchain}/bin/rustfmt";
+            RUSTFMT = "${rustToolchain} /bin/rustfmt";
           };
     };
 }
+
 
 
 
