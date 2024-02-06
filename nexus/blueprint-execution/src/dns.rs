@@ -153,6 +153,10 @@ pub fn blueprint_dns_config(
     // the errors, even though they should never happen.
     // See oxidecomputer/omicron#4988.
     for (_, omicron_zone) in blueprint.all_omicron_zones() {
+        if !blueprint.zones_in_service.contains(&omicron_zone.id) {
+            continue;
+        }
+
         let (service_name, port) = match omicron_zone.zone_type {
             OmicronZoneType::BoundaryNtp { .. } => {
                 (ServiceName::BoundaryNtp, NTP_PORT)
