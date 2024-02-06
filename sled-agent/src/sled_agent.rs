@@ -9,7 +9,7 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkSetupError,
 };
-use crate::bootstrap::params::StartSledAgentRequest;
+use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
 use crate::instance_manager::{InstanceManager, ReservoirMode};
 use crate::long_running_tasks::LongRunningTaskHandles;
@@ -1187,8 +1187,8 @@ pub enum AddSledError {
     },
     #[error("Failed to connect to DDM")]
     DdmAdminClient(#[source] ddm_admin_client::DdmError),
-    #[error("Failed to learn bootstrap ip for {0}")]
-    NotFound(Baseboard),
+    #[error("Failed to learn bootstrap ip for {0:?}")]
+    NotFound(BaseboardId),
     #[error("Failed to initialize {sled_id}: {err}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
@@ -1199,7 +1199,7 @@ pub enum AddSledError {
 /// Add a sled to an initialized rack.
 pub async fn sled_add(
     log: Logger,
-    sled_id: Baseboard,
+    sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
     // Get all known bootstrap addresses via DDM
@@ -1227,16 +1227,20 @@ pub async fn sled_add(
         })
         .collect::<FuturesUnordered<_>>();
 
-    // Execute the futures until we find our matching sled or done searching
+    // Execute the futures until we find our matching sled or are done searching
     let mut target_ip = None;
+    let mut found_baseboard = None;
     while let Some((ip, result)) = addrs_to_sleds.next().await {
         match result {
             Ok(baseboard) => {
                 // Convert from progenitor type back to `sled-hardware`
                 // type.
-                let found = baseboard.into_inner().into();
-                if sled_id == found {
+                let found: Baseboard = baseboard.into_inner().into();
+                if sled_id.serial_number == found.identifier()
+                    && sled_id.part_number == found.model()
+                {
                     target_ip = Some(ip);
+                    found_baseboard = Some(found);
                     break;
                 }
             }
@@ -1259,10 +1263,14 @@ pub async fn sled_add(
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
+    // Safe to unwrap, because we would have bailed when checking target_ip
+    // above otherwise. baseboard and target_ip are set together.
+    let baseboard = found_baseboard.unwrap();
+
     client.start_sled_agent(&request).await.map_err(|err| {
-        AddSledError::BootstrapTcpClient { sled_id: sled_id.clone(), err }
+        AddSledError::BootstrapTcpClient { sled_id: baseboard.clone(), err }
     })?;
 
-    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %sled_id);
+    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %baseboard);
     Ok(())
 }

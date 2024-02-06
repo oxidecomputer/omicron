@@ -174,10 +174,21 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
 pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
+/// A representation of a Baseboard ID as used in the inventory subsystem
+/// This type is essentially the same as a `Baseboard` except it doesn't have a
+/// revision or HW type (Gimlet, PC, Unknown).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct BaseboardId {
+    /// Oxide Part Number
+    pub part_number: String,
+    /// Serial number (unique for a given part number)
+    pub serial_number: String,
+}
+
 /// A request to Add a given sled after rack initialization has occurred
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct AddSledRequest {
-    pub sled_id: Baseboard,
+    pub sled_id: BaseboardId,
     pub start_request: StartSledAgentRequest,
 }
 
@@ -255,9 +266,6 @@ pub struct StartSledAgentRequestBody {
     /// true.
     pub is_lrtq_learner: bool,
 
-    // Note: The order of these fields is load bearing, because we serialize
-    // `SledAgentRequest`s as toml. `subnet` serializes as a TOML table, so it
-    // must come after non-table fields.
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
