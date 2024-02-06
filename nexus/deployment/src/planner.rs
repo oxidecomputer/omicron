@@ -12,6 +12,7 @@ use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
+use nexus_types::external_api::views::SledProvisionState;
 use nexus_types::inventory::Collection;
 use slog::warn;
 use slog::{info, Logger};
@@ -95,6 +96,16 @@ impl<'a> Planner<'a> {
                 // so we can "continue" here rather than "break".
                 sleds_ineligible_for_services.insert(*sled_id);
                 continue;
+            }
+
+            // Before adding any additional services, check whether this sled is
+            // marked as non-provisionable.
+            match sled_info.provision_state {
+                SledProvisionState::Provisionable => (),
+                SledProvisionState::NonProvisionable => {
+                    sleds_ineligible_for_services.insert(*sled_id);
+                    continue;
+                }
             }
 
             // Now we've established that the current blueprint _says_ there's
@@ -293,6 +304,7 @@ mod test {
     use crate::blueprint_builder::test::policy_add_sled;
     use crate::blueprint_builder::BlueprintBuilder;
     use nexus_inventory::now_db_precision;
+    use nexus_types::external_api::views::SledProvisionState;
     use nexus_types::inventory::OmicronZoneType;
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
@@ -605,6 +617,95 @@ mod test {
             let zones = sled_changes.zones_added().collect::<Vec<_>>();
             match zones.len() {
                 n @ (3 | 4) => {
+                    total_new_nexus_zones += n;
+                }
+                n => {
+                    panic!("unexpected number of zones added to {sled_id}: {n}")
+                }
+            }
+            for zone in &zones {
+                let OmicronZoneType::Nexus { .. } = zone.zone_type else {
+                    panic!("unexpectedly added a non-Crucible zone: {zone:?}");
+                };
+            }
+        }
+        assert_eq!(total_new_nexus_zones, 11);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Check that the planner will skip non-provisionable sleds when allocating
+    /// extra Nexus zones
+    #[test]
+    fn test_nexus_allocation_skips_nonprovisionable_sleds() {
+        let logctx = test_setup_log(
+            "planner_nexus_allocation_skips_nonprovisionable_sleds",
+        );
+
+        // Use our example inventory collection as a starting point.
+        let (collection, mut policy) = example();
+
+        // Build the initial blueprint.
+        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            &policy,
+            "the_test",
+        )
+        .expect("failed to create initial blueprint");
+
+        // This blueprint should only have 3 Nexus zones: one on each sled.
+        assert_eq!(blueprint1.omicron_zones.len(), 3);
+        for sled_config in blueprint1.omicron_zones.values() {
+            assert_eq!(
+                sled_config
+                    .zones
+                    .iter()
+                    .filter(|z| z.zone_type.is_nexus())
+                    .count(),
+                1
+            );
+        }
+
+        // Arbitrarily choose one of the sleds and mark it non-provisionable.
+        let nonprovisionable_sled_id = {
+            let (sled_id, resources) =
+                policy.sleds.iter_mut().next().expect("no sleds");
+            resources.provision_state = SledProvisionState::NonProvisionable;
+            *sled_id
+        };
+
+        // Now run the planner with a high number of target Nexus zones.
+        policy.target_nexus_zone_count = 14;
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &policy,
+            "add more Nexus",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint1.diff(&blueprint2);
+        println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
+        assert_eq!(diff.sleds_added().count(), 0);
+        assert_eq!(diff.sleds_removed().count(), 0);
+        let sleds = diff.sleds_changed().collect::<Vec<_>>();
+
+        // Only 2 of the 3 sleds should get additional Nexus zones. We expect a
+        // total of 11 new Nexus zones, which should be spread evenly across the
+        // two sleds (one gets 6 and the other gets 5), while the
+        // non-provisionable sled should be unchanged.
+        assert_eq!(sleds.len(), 2);
+        let mut total_new_nexus_zones = 0;
+        for (sled_id, sled_changes) in sleds {
+            assert!(sled_id != nonprovisionable_sled_id);
+            assert_eq!(sled_changes.zones_removed().count(), 0);
+            assert_eq!(sled_changes.zones_changed().count(), 0);
+            let zones = sled_changes.zones_added().collect::<Vec<_>>();
+            match zones.len() {
+                n @ (5 | 6) => {
                     total_new_nexus_zones += n;
                 }
                 n => {

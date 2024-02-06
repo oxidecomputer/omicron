@@ -171,7 +171,11 @@ impl super::Nexus {
                 let zpools = zpools_by_sled_id
                     .remove(&sled_id)
                     .unwrap_or_else(BTreeSet::new);
-                let sled_info = SledResources { subnet, zpools };
+                let sled_info = SledResources {
+                    provision_state: sled_row.provision_state().into(),
+                    subnet,
+                    zpools,
+                };
                 (sled_id, sled_info)
             })
             .collect();

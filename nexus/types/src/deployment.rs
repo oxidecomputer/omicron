@@ -11,6 +11,7 @@
 //! nexus/deployment does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::views::SledProvisionState;
 use crate::inventory::Collection;
 pub use crate::inventory::NetworkInterface;
 pub use crate::inventory::NetworkInterfaceKind;
@@ -67,6 +68,9 @@ pub struct Policy {
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone)]
 pub struct SledResources {
+    /// provision state of this sled
+    pub provision_state: SledProvisionState,
+
     /// zpools on this sled
     ///
     /// (used to allocate storage for control plane zones with persistent

@@ -1053,6 +1053,7 @@ mod tests {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
+    use nexus_types::external_api::views::SledProvisionState;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev;
@@ -1115,7 +1116,11 @@ mod tests {
             })
             .collect();
         let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
-        SledResources { zpools, subnet: Ipv6Subnet::new(ip) }
+        SledResources {
+            provision_state: SledProvisionState::Provisionable,
+            zpools,
+            subnet: Ipv6Subnet::new(ip),
+        }
     }
 
     // Create a `Policy` that contains all the sleds found in `collection`

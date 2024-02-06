@@ -706,6 +706,7 @@ impl<'a> BlueprintBuilder<'a> {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use nexus_types::external_api::views::SledProvisionState;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv4Range;
     use omicron_common::address::Ipv6Subnet;
@@ -877,7 +878,14 @@ pub mod test {
         .collect();
 
         let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_ip);
-        policy.sleds.insert(sled_id, SledResources { zpools, subnet });
+        policy.sleds.insert(
+            sled_id,
+            SledResources {
+                provision_state: SledProvisionState::Provisionable,
+                zpools,
+                subnet,
+            },
+        );
         sled_ip
     }
 
