@@ -58,6 +58,7 @@ use illumos_utils::running_zone::{
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zone::Zones;
+use illumos_utils::zpool::ZpoolName;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
@@ -159,6 +160,12 @@ pub enum Error {
         #[source]
         err: illumos_utils::running_zone::RunCommandError,
     },
+
+    #[error("Cannot list zones")]
+    ZoneList(#[from] illumos_utils::zone::AdmError),
+
+    #[error("Cannot remove zone: {0}")]
+    ZoneRemoval(String),
 
     #[error("Failed to boot zone: {0}")]
     ZoneBoot(#[from] illumos_utils::running_zone::BootError),
@@ -597,6 +604,13 @@ pub(crate) enum TimeSyncConfig {
     // Fails timesync unconditionally.
     #[cfg(test)]
     Fail,
+}
+
+// The only valid zone states which we consider from
+// "ServiceManager::ensure_running_or_stopped".
+enum ValidZoneState {
+    Running,
+    Stopped,
 }
 
 #[derive(Clone)]
@@ -2691,7 +2705,7 @@ impl ServiceManager {
     // Populates `existing_zones` according to the requests in `services`.
     async fn initialize_omicron_zones_locked(
         &self,
-        existing_zones: &mut BTreeMap<String, RunningZone>,
+        existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
         requests: &Vec<OmicronZoneConfigLocal>,
     ) -> Result<(), Error> {
         if let Some(name) = requests
@@ -2951,112 +2965,50 @@ impl ServiceManager {
 
         let mut new_zones = Vec::new();
         for zone in zones_to_be_added {
-            // Check if we think the zone should already be running
-            let name = zone.zone_name();
-            if existing_zones.contains_key(&name) {
-                // Make sure the zone actually exists in the right state too
-                match Zones::find(&name).await {
-                    Ok(Some(zone)) if zone.state() == zone::State::Running => {
-                        info!(log, "skipping running zone"; "zone" => &name);
-                        continue;
-                    }
-                    _ => {
-                        // Mismatch between SA's view and reality, let's try to
-                        // clean up any remanants and try initialize it again
-                        warn!(
-                            log,
-                            "expected to find existing zone in running state";
-                            "zone" => &name,
-                        );
-                        if let Err(e) =
-                            existing_zones.remove(&name).unwrap().stop().await
-                        {
-                            error!(
-                                log,
-                                "Failed to stop zone";
-                                "zone" => &name,
-                                "error" => %e,
-                            );
-                        }
-                    }
-                }
-            }
+            // Ensure the zone either is already running (in which case we do
+            // nothing) or fully stopped.
+            match self.ensure_running_or_stopped(existing_zones, &zone).await? {
+                ValidZoneState::Running => continue,
+                ValidZoneState::Stopped => (),
+            };
 
-            // For each new zone request, we pick a U.2 to store the zone
-            // filesystem. Note: This isn't known to Nexus right now, so it's a
-            // local-to-sled decision.
+            // TODO(https://github.com/oxidecomputer/omicron/issues/5002):
             //
-            // Currently, the zone filesystem should be destroyed between
-            // reboots, so it's fine to make this decision locally.
-            let root = if let Some(dataset) = zone.dataset_name() {
-                // Check that the dataset is actually ready to be used.
-                let [zoned, canmount, encryption] =
-                    illumos_utils::zfs::Zfs::get_values(
-                        &dataset.full_name(),
-                        &["zoned", "canmount", "encryption"],
-                    )
-                    .map_err(|err| Error::GetZfsValue {
-                        zone: zone.zone_name(),
-                        source: err,
-                    })?;
-
-                let check_property = |name, actual, expected| {
-                    if actual != expected {
-                        return Err(Error::DatasetNotReady {
-                            zone: zone.zone_name(),
-                            dataset: dataset.full_name(),
-                            prop_name: String::from(name),
-                            prop_value: actual,
-                            prop_value_expected: String::from(expected),
-                        });
-                    }
-                    return Ok(());
-                };
-                check_property("zoned", zoned, "on")?;
-                check_property("canmount", canmount, "on")?;
-                if dataset.dataset().dataset_should_be_encrypted() {
-                    check_property("encryption", encryption, "aes-256-gcm")?;
-                }
-
-                // If the zone happens to already manage a dataset, then
-                // we co-locate the zone dataset on the same zpool.
-                //
-                // This slightly reduces the underlying fault domain for the
-                // service.
-                let data_pool = dataset.pool();
-                if !all_u2_pools.contains(&data_pool) {
-                    warn!(
+            // We should not be ignoring these zones. This is a short-term
+            // workaround for cases where physical disks have been removed that
+            // would otherwise be blocking bringup of a sled.
+            let root = match self
+                .validate_storage_and_pick_mountpoint(&zone, &all_u2_pools)
+                .await
+            {
+                Ok(root) => root,
+                Err(err) => {
+                    error!(
                         log,
-                        "zone dataset requested on a zpool which doesn't exist";
-                        "zone" => &name,
-                        "zpool" => %data_pool
+                        "Failed to validate storage. Choosing to ignore zone.";
+                        "err" => ?err,
+                        "zone" => zone.zone_name(),
                     );
-                    return Err(Error::MissingDevice {
-                        device: format!("zpool: {data_pool}"),
-                    });
+                    continue;
                 }
-                data_pool.dataset_mountpoint(ZONE_DATASET)
-            } else {
-                // If the zone it not coupled to other datsets, we pick one
-                // arbitrarily.
-                let mut rng = rand::thread_rng();
-                all_u2_pools
-                    .choose(&mut rng)
-                    .map(|pool| pool.dataset_mountpoint(ZONE_DATASET))
-                    .ok_or_else(|| Error::U2NotFound)?
-                    .clone()
             };
 
             new_zones.push(OmicronZoneConfigLocal { zone: zone.clone(), root });
         }
 
+        // Concurrently install and boot all zones
         self.initialize_omicron_zones_locked(existing_zones, &new_zones)
             .await?;
 
+        // Collect the list of all running zones, which contains...
+        //
+        // ... new zones
+        let mut zones = new_zones;
         if let Some(old_config) = old_config {
             for old_zone in &old_config.zones {
+                // ... and old ones that we still requested
                 if requested_zones_set.contains(&old_zone.zone) {
-                    new_zones.push(old_zone.clone());
+                    zones.push(old_zone.clone());
                 }
             }
         }
@@ -3066,8 +3018,133 @@ impl ServiceManager {
             ledger_generation: old_config
                 .map(|c| c.ledger_generation)
                 .unwrap_or_else(Generation::new),
-            zones: new_zones,
+            zones,
         })
+    }
+
+    // For a zone in our "existing_zones" set, finds the corresponding
+    // zone with the same name as the input argument "zone".
+    //
+    // - If it exists and is running, return ValidZoneState::Running
+    // - Otherwise, try to ensure it is stopped, and return
+    // ValidZoneState::Stopped.
+    async fn ensure_running_or_stopped(
+        &self,
+        existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
+        zone: &OmicronZoneConfig,
+    ) -> Result<ValidZoneState, Error> {
+        // Check if we think the zone should already be running
+        let name = zone.zone_name();
+        if existing_zones.contains_key(&name) {
+            // Make sure the zone actually exists in the right state too
+            match Zones::find(&name).await {
+                Ok(Some(zone)) if zone.state() == zone::State::Running => {
+                    info!(self.inner.log, "skipping running zone"; "zone" => &name);
+                    return Ok(ValidZoneState::Running);
+                }
+                Ok(Some(zone)) => {
+                    // Mismatch between SA's view and reality, let's try to
+                    // clean up any remanants and try initialize it again
+                    warn!(
+                        self.inner.log,
+                        "expected to find existing zone in running state";
+                        "zone" => &name,
+                        "state" => ?zone.state(),
+                    );
+                    if let Err(e) =
+                        existing_zones.remove(&name).unwrap().stop().await
+                    {
+                        error!(
+                            self.inner.log,
+                            "Failed to remove zone";
+                            "zone" => &name,
+                            "error" => %e,
+                        );
+                        return Err(Error::ZoneRemoval(e));
+                    }
+                    return Ok(ValidZoneState::Stopped);
+                }
+                Ok(None) => return Ok(ValidZoneState::Stopped),
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Ok(ValidZoneState::Stopped)
+    }
+
+    // Returns a zone filesystem mountpoint, after ensuring that U.2 storage
+    // is valid.
+    async fn validate_storage_and_pick_mountpoint(
+        &self,
+        zone: &OmicronZoneConfig,
+        all_u2_pools: &Vec<ZpoolName>,
+    ) -> Result<Utf8PathBuf, Error> {
+        let name = zone.zone_name();
+
+        // For each new zone request, we pick a U.2 to store the zone
+        // filesystem. Note: This isn't known to Nexus right now, so it's a
+        // local-to-sled decision.
+        //
+        // Currently, the zone filesystem should be destroyed between
+        // reboots, so it's fine to make this decision locally.
+        let root = if let Some(dataset) = zone.dataset_name() {
+            // Check that the dataset is actually ready to be used.
+            let [zoned, canmount, encryption] =
+                illumos_utils::zfs::Zfs::get_values(
+                    &dataset.full_name(),
+                    &["zoned", "canmount", "encryption"],
+                )
+                .map_err(|err| Error::GetZfsValue {
+                    zone: zone.zone_name(),
+                    source: err,
+                })?;
+
+            let check_property = |name, actual, expected| {
+                if actual != expected {
+                    return Err(Error::DatasetNotReady {
+                        zone: zone.zone_name(),
+                        dataset: dataset.full_name(),
+                        prop_name: String::from(name),
+                        prop_value: actual,
+                        prop_value_expected: String::from(expected),
+                    });
+                }
+                return Ok(());
+            };
+            check_property("zoned", zoned, "on")?;
+            check_property("canmount", canmount, "on")?;
+            if dataset.dataset().dataset_should_be_encrypted() {
+                check_property("encryption", encryption, "aes-256-gcm")?;
+            }
+
+            // If the zone happens to already manage a dataset, then
+            // we co-locate the zone dataset on the same zpool.
+            //
+            // This slightly reduces the underlying fault domain for the
+            // service.
+            let data_pool = dataset.pool();
+            if !all_u2_pools.contains(&data_pool) {
+                warn!(
+                    self.inner.log,
+                    "zone dataset requested on a zpool which doesn't exist";
+                    "zone" => &name,
+                    "zpool" => %data_pool
+                );
+                return Err(Error::MissingDevice {
+                    device: format!("zpool: {data_pool}"),
+                });
+            }
+            data_pool.dataset_mountpoint(ZONE_DATASET)
+        } else {
+            // If the zone it not coupled to other datsets, we pick one
+            // arbitrarily.
+            let mut rng = rand::thread_rng();
+            all_u2_pools
+                .choose(&mut rng)
+                .map(|pool| pool.dataset_mountpoint(ZONE_DATASET))
+                .ok_or_else(|| Error::U2NotFound)?
+                .clone()
+        };
+        Ok(root)
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
