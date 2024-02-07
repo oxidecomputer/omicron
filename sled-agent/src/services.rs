@@ -2815,7 +2815,7 @@ impl ServiceManager {
     /// boot.
     pub async fn ensure_all_omicron_zones_persistent(
         &self,
-        request: OmicronZonesConfig,
+        mut request: OmicronZonesConfig,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -2854,11 +2854,26 @@ impl ServiceManager {
 
         // If the generation is the same as what we're running, but the contents
         // aren't, that's a problem, too.
-        if ledger_zone_config.omicron_generation == request.generation
-            && ledger_zone_config.clone().to_omicron_zones_config().zones
-                != request.zones
-        {
-            return Err(Error::RequestedConfigConflicts(request.generation));
+        if ledger_zone_config.omicron_generation == request.generation {
+            // Nexus should send us consistent zone orderings; however, we may
+            // reorder the zone list inside `ensure_all_omicron_zones`. To avoid
+            // equality checks failing only because the two lists are ordered
+            // differently, sort them both here before comparing.
+            let mut ledger_zones =
+                ledger_zone_config.clone().to_omicron_zones_config().zones;
+
+            // We sort by ID because we assume no two zones have the same ID. If
+            // that assumption is wrong, we may return an error here where the
+            // conflict is soley the list orders, but in such a case that's the
+            // least of our problems.
+            ledger_zones.sort_by_key(|z| z.id);
+            request.zones.sort_by_key(|z| z.id);
+
+            if ledger_zones != request.zones {
+                return Err(Error::RequestedConfigConflicts(
+                    request.generation,
+                ));
+            }
         }
 
         let omicron_generation = request.generation;

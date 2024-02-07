@@ -1240,7 +1240,7 @@
         "type": "object",
         "properties": {
           "sled_id": {
-            "$ref": "#/components/schemas/Baseboard"
+            "$ref": "#/components/schemas/BaseboardId"
           },
           "start_request": {
             "$ref": "#/components/schemas/StartSledAgentRequest"
@@ -1317,6 +1317,24 @@
               "type"
             ]
           }
+        ]
+      },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem This type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
         ]
       },
       "BgpConfig": {
