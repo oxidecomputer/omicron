@@ -297,6 +297,11 @@ impl From<Error> for omicron_common::api::external::Error {
             Error::ZoneEnsure { errors } => {
                 // As a special case, if any zones failed to timesync,
                 // prioritize that error.
+                //
+                // This conversion to a 503 error was requested in
+                // https://github.com/oxidecomputer/omicron/issues/4776 ,
+                // and we preserve that behavior here, even though we may
+                // launch many zones at the same time.
                 if let Some(err) = errors.iter().find_map(|(_, err)| {
                     if matches!(err, Error::TimeNotSynchronized) {
                         Some(err)
@@ -592,9 +597,17 @@ enum SledLocalZone {
     },
 }
 
+// The return type for `start_omicron_zones`.
+//
+// When multiple zones are started concurrently, some can fail while others
+// succeed. This structure allows the function to return this nuanced
+// information.
 #[must_use]
-struct EnsureZonesResult {
+struct StartZonesResult {
+    // The set of zones which have successfully started.
     zones: Vec<OmicronZone>,
+
+    // The set of (zone name, error) of zones that failed to start.
     errors: Vec<(String, Error)>,
 }
 
@@ -2672,8 +2685,21 @@ impl ServiceManager {
         Ok(running_zone)
     }
 
-    // Ensures that a single Omicron zone is running
-    async fn ensure_omicron_zone(
+    // Ensures that a single Omicron zone is running.
+    //
+    // This method is NOT idempotent.
+    //
+    // - If the zone already exists, in any form, it is fully removed
+    // before being initialized. This is primarily intended to remove "partially
+    // stopped/started" zones with detritus from interfering with a new zone
+    // being launched.
+    // - If zones need time to be synchronized before they are initialized
+    // (e.g., this is a hard requirement for CockroachDb) they can check the
+    // `time_is_synchronized` argument.
+    // - `all_u2_pools` provides a snapshot into durable storage on this sled,
+    // which gives the storage manager an opportunity to validate the zone's
+    // storage configuration against the reality of the current sled.
+    async fn start_omicron_zone(
         &self,
         zone: &OmicronZoneConfig,
         time_is_synchronized: bool,
@@ -2712,16 +2738,18 @@ impl ServiceManager {
 
     // Concurrently attempts to start all zones identified by requests.
     //
-    // NOTE: if we try to start ANY zones concurrently, the result is contained
-    // in the EnsureZonesResult value. This will contain the set of zones which
+    // This method is NOT idempotent.
+    //
+    // If we try to start ANY zones concurrently, the result is contained
+    // in the `StartZonesResult` value. This will contain the set of zones which
     // were initialized successfully, as well as the set of zones which failed
     // to start.
-    async fn concurrently_ensure_omicron_zones(
+    async fn start_omicron_zones(
         &self,
         requests: impl Iterator<Item = &OmicronZoneConfig> + Clone,
         time_is_synchronized: bool,
         all_u2_pools: &Vec<ZpoolName>,
-    ) -> Result<EnsureZonesResult, Error> {
+    ) -> Result<StartZonesResult, Error> {
         if let Some(name) =
             requests.clone().map(|zone| zone.zone_name()).duplicates().next()
         {
@@ -2732,7 +2760,7 @@ impl ServiceManager {
         }
 
         let futures = requests.clone().map(|zone| async move {
-            self.ensure_omicron_zone(&zone, time_is_synchronized, all_u2_pools)
+            self.start_omicron_zone(&zone, time_is_synchronized, all_u2_pools)
                 .await
                 .map_err(|err| (zone.zone_name().to_string(), err))
         });
@@ -2753,7 +2781,7 @@ impl ServiceManager {
                 }
             }
         }
-        Ok(EnsureZonesResult { zones, errors })
+        Ok(StartZonesResult { zones, errors })
     }
 
     /// Create a zone bundle for the provided zone.
@@ -2899,8 +2927,19 @@ impl ServiceManager {
 
     // Ensures that only the following Omicron zones are running.
     //
-    // Does not record any information such that these services are
-    // re-instantiated on boot.
+    // This method strives to be idempotent.
+    //
+    // - Starting and stopping zones is not an atomic operation - it's possible
+    // that we cannot start a zone after a previous one has been successfully
+    // created (or destroyed) intentionally. As a result, even in error cases,
+    // it's possible that the set of `existing_zones` changes. However, this set
+    // will only change in the direction of `new_request`: zones will only be
+    // removed if they ARE NOT part of `new_request`, and zones will only be
+    // added if they ARE part of `new_request`.
+    // - Zones are not updated in-place: two zone configurations that differ
+    // in any way are treated as entirely distinct.
+    // - This method does not record any information such that these services
+    // are re-instantiated on boot.
     async fn ensure_all_omicron_zones(
         &self,
         // The MutexGuard here attempts to ensure that the caller has the right
@@ -2927,7 +2966,7 @@ impl ServiceManager {
             self.zone_bundle_and_try_remove(existing_zones, &zone).await;
         }
 
-        // Create zones that should be running
+        // Collect information that's necessary to start new zones
         let storage = self.inner.storage.get_latest_resources().await;
         let all_u2_pools = storage.all_u2_zpools();
         let time_is_synchronized =
@@ -2939,8 +2978,8 @@ impl ServiceManager {
             };
 
         // Concurrently boot all new zones
-        let EnsureZonesResult { zones, errors } = self
-            .concurrently_ensure_omicron_zones(
+        let StartZonesResult { zones, errors } = self
+            .start_omicron_zones(
                 zones_to_be_added,
                 time_is_synchronized,
                 &all_u2_pools,
