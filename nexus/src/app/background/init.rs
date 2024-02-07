@@ -470,23 +470,77 @@ pub mod test {
             SocketAddr::V4(_) => panic!("expected v6 address"),
             SocketAddr::V6(a) => a,
         };
-        nexus
-            .upsert_service(
-                &opctx,
-                Uuid::new_v4(),
-                cptestctx.sled_agent.sled_agent.id,
-                Some(Uuid::new_v4()),
-                new_dns_addr,
-                ServiceKind::InternalDns.into(),
-            )
-            .await
-            .unwrap();
+        // let new_config = {
+        //     use dns_service_client::types::{DnsConfigParams, DnsRecord, Srv};
+        //     let mut zones = (&config).zones.clone();
+        //     let mut records = &mut zones[0].records;
+        //     // NOTE(eliza): I didn't make up a UUID for this because I didn't
+        //     // really think it was important to do that, but we'll find out if
+        //     // i'm wrong about this...
+        //     let target =
+        //         "my-great-dns-server.host.control-plane.oxide.internal";
+        //     records
+        //         .get_mut("_nameservice._tcp")
+        //         .expect("a SRV record for _nameservice._tcp must exist")
+        //         .push(DnsRecord::Srv(Srv {
+        //             prio: 0,
+        //             weight: 0,
+        //             port: new_dns_addr.port(),
+        //             target: target.to_string(),
+        //         }));
+        //     records.insert(
+        //         target.to_string(),
+        //         vec![DnsRecord::Aaaa(new_dns_addr.ip().clone())],
+        //     );
+        //     DnsConfigParams {
+        //         generation: 2,
+        //         zones,
+        //         time_created: chrono::Utc::now(),
+        //     }
+        // };
+        // dns_config_client
+        //     .dns_config_put()
+        //     .await
+        //     .expect("failed to get initial DNS server config");
+        let target =
+            "my-great-dns-server.host.control-plane.oxide.internal".to_string();
+        write_dns_generation(
+            datastore,
+            internal_dns_zone_id,
+            2,
+            vec![
+                (
+                    "_nameservice.tcp".to_string(),
+                    vec![nexus_params::DnsRecord::Srv(nexus_params::Srv {
+                        prio: 0,
+                        weight: 0,
+                        port: new_dns_addr.port(),
+                        target: target.clone(),
+                    })],
+                ),
+                (
+                    target,
+                    vec![nexus_params::DnsRecord::Aaaa(
+                        new_dns_addr.ip().clone(),
+                    )],
+                ),
+            ],
+        )
+        .await;
+        info!(&cptestctx.logctx.log, "updated new dns records");
+        wait_propagate_dns(
+            &cptestctx.logctx.log,
+            "initial",
+            initial_dns_dropshot_server.local_addr(),
+            2,
+        )
+        .await;
 
         wait_propagate_dns(
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            1,
+            2,
         )
         .await;
 
@@ -525,15 +579,16 @@ pub mod test {
         generation: u64,
     ) {
         println!(
-            "waiting for propagation of generation {} to {} DNS server ({})",
-            generation, label, addr
+            "waiting for propagation of generation {generation} to {label} \
+            DNS server ({addr})",
         );
 
         let client = dns_service_client::Client::new(
             &format!("http://{}", addr),
             log.clone(),
         );
-        poll::wait_for_condition(
+        let poll_max = Duration::from_secs(30);
+        let result = poll::wait_for_condition(
             || async {
                 match client.dns_config_get().await {
                     Err(error) => {
@@ -551,21 +606,41 @@ pub mod test {
                 }
             },
             &Duration::from_millis(50),
-            &Duration::from_secs(30),
+            &poll_max,
         )
-        .await
-        .expect("DNS config not propagated in expected time");
+        .await;
+        if let Err(err) = result {
+            panic!(
+                "DNS generation {generation} not propagated to \
+                {label} DNS server {addr} within {poll_max:?}: {err}"
+            );
+        }
     }
 
-    pub(crate) async fn write_test_dns_generation(
+    pub(crate) async fn write_dns_generation(
         datastore: &DataStore,
         internal_dns_zone_id: Uuid,
+        version: u32,
+        records: impl IntoIterator<Item = (String, Vec<nexus_params::DnsRecord>)>
+            + Send
+            + Sync,
     ) {
-        {
-            let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let _: Result<(), _> = datastore
-                .transaction_retry_wrapper("write_test_dns_generation")
-                .transaction(&conn, |conn| async move {
+        use nexus_db_queries::db::model::DnsName;
+
+        let version = Generation(version.try_into().unwrap());
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let names = records
+            .into_iter()
+            .map(|(name, records)| {
+                DnsName::new(internal_dns_zone_id, name, version, None, records)
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let _: Result<(), _> = datastore
+            .transaction_retry_wrapper("write_test_dns_generation")
+            .transaction(&conn, move |conn| {
+                let names = names.clone();
+                async move {
                     {
                         use nexus_db_queries::db::model::DnsVersion;
                         use nexus_db_queries::db::schema::dns_version::dsl;
@@ -573,7 +648,7 @@ pub mod test {
                         diesel::insert_into(dsl::dns_version)
                             .values(DnsVersion {
                                 dns_group: DnsGroup::Internal,
-                                version: Generation(2u32.try_into().unwrap()),
+                                version,
                                 time_created: chrono::Utc::now(),
                                 creator: String::from("test suite"),
                                 comment: String::from("test suite"),
@@ -584,31 +659,35 @@ pub mod test {
                     }
 
                     {
-                        use nexus_db_queries::db::model::DnsName;
                         use nexus_db_queries::db::schema::dns_name::dsl;
 
                         diesel::insert_into(dsl::dns_name)
-                            .values(
-                                DnsName::new(
-                                    internal_dns_zone_id,
-                                    String::from("we-got-beets"),
-                                    Generation(2u32.try_into().unwrap()),
-                                    None,
-                                    vec![nexus_params::DnsRecord::Aaaa(
-                                        "fe80::3".parse().unwrap(),
-                                    )],
-                                )
-                                .unwrap(),
-                            )
+                            .values(names)
                             .execute_async(&conn)
                             .await
                             .unwrap();
                     }
 
                     Ok(())
-                })
-                .await;
-        }
+                }
+            })
+            .await;
+    }
+
+    pub(crate) async fn write_test_dns_generation(
+        datastore: &DataStore,
+        internal_dns_zone_id: Uuid,
+    ) {
+        write_dns_generation(
+            datastore,
+            internal_dns_zone_id,
+            2,
+            std::iter::once((
+                "we-got-beets".to_string(),
+                vec![nexus_params::DnsRecord::Aaaa("fe80::3".parse().unwrap())],
+            )),
+        )
+        .await;
     }
 
     pub(crate) async fn read_internal_dns_zone_id(
