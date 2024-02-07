@@ -418,7 +418,7 @@ only_for_targets.image = "standard"
 # 1. Build the zone image manually
 # 2. Copy the output zone image from crucible/out to omicron/out
 # 3. Use source.type = "manual" instead of "prebuilt"
-source.type = "prebuilt"
+source.type = "manual"
 source.repo = "crucible"
 source.commit = "2d4bc11232d53f177c286383926fa5f8c1b2a938"
 # The SHA256 digest is automatically posted to:
@@ -430,7 +430,7 @@ output.intermediate_only = true
 [package.crucible-pantry]
 service_name = "crucible_pantry"
 only_for_targets.image = "standard"
-source.type = "prebuilt"
+source.type = "manual"
 source.repo = "crucible"
 source.commit = "2d4bc11232d53f177c286383926fa5f8c1b2a938"
 # The SHA256 digest is automatically posted to:
