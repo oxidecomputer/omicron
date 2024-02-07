@@ -396,6 +396,10 @@
             DDM_OPENAPI_PATH = ddmOpenAPI;
             DPD_OPENAPI_PATH = dendriteOpenAPI;
 
+            # Needed by rustfmt-wrapper, see:
+            # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
+            RUSTFMT = "${rustToolchain}/bin/rustfmt";
+
             shellHook = ''
               rm out/mgd
               rm out/dendrite-stub
@@ -411,10 +415,6 @@
               ln -s ${clickhouse.out}/etc/config.xml out/clickhouse
               ln -s ${cockroachdb.out}/bin out/cockroachdb/bin
             '';
-
-            # Needed by rustfmt-wrapper, see:
-            # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
-            RUSTFMT = "${rustToolchain} /bin/rustfmt";
           };
     };
 }
