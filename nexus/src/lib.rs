@@ -288,13 +288,15 @@ impl nexus_test_interface::NexusServer for Server {
                             vec!["qsfp0".parse().unwrap()],
                         )]),
                     ),
-                    rack_network_config: Some(RackNetworkConfig {
-                        rack_subnet: "fd00:1122:3344:01::/56".parse().unwrap(),
+                    rack_network_config: RackNetworkConfig {
+                        rack_subnet: "fd00:1122:3344:0100::/56"
+                            .parse()
+                            .unwrap(),
                         infra_ip_first: Ipv4Addr::UNSPECIFIED,
                         infra_ip_last: Ipv4Addr::UNSPECIFIED,
                         ports: Vec::new(),
                         bgp: Vec::new(),
-                    }),
+                    },
                 },
             )
             .await

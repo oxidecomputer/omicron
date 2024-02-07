@@ -5618,7 +5618,6 @@
             }
           },
           "rack_network_config": {
-            "nullable": true,
             "description": "Initial rack network configuration",
             "allOf": [
               {
@@ -5649,6 +5648,7 @@
           "external_port_count",
           "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
+          "rack_network_config",
           "recovery_silo",
           "services"
         ]
