@@ -411,6 +411,11 @@
             # Needed by rustfmt-wrapper, see:
             # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
             RUSTFMT = "${rustToolchain}/bin/rustfmt";
+
+            # Necessary to make the build work for Rain, specifically. For some
+            # reason, pkg-config doesn't do the right thing on Rain's computer.
+            # I don't know why this is.
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
           };
     };
 }
