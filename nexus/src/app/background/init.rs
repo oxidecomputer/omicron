@@ -330,7 +330,7 @@ fn init_dns(
     let task_servers = driver.register(
         task_name_servers.clone(),
         format!(
-            "watches list of {} DNS servers stored in CockroachDB",
+            "watches list of {} DNS servers stored in internal DNS",
             dns_group,
         ),
         config.period_secs_servers,
@@ -431,7 +431,7 @@ pub mod test {
             read_internal_dns_zone_id(&opctx, datastore).await;
 
         // Now spin up another DNS server, add it to the list of servers, and
-        // make sure that DNS gets propagated to it.  Note that we shouldn't
+        // make sure that DNS gets propagated to it. Note that we shouldn't
         // have to explicitly activate the background task because inserting a
         // new service ought to do that for us.
         let log = &cptestctx.logctx.log;
