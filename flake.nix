@@ -76,6 +76,7 @@
       mgVersion = openAPIVersion
         ./tools/maghemite_mg_openapi_version;
 
+
       dendriteOpenAPI = downloadOpenAPI
         {
           repo = "dendrite";
@@ -97,16 +98,17 @@
           version = mgVersion;
         };
 
-      findSha = with pkgs.lib; shas: (name:
-        let
-          upperName = strings.toUpper name;
-          prefix = "${upperName}=\"";
-        in
-        trivial.pipe shas [
-          (lists.findFirst (strings.hasPrefix prefix) "")
-          (strings.removePrefix prefix)
-          (strings.removeSuffix "\"")
-        ]);
+      findSha = with pkgs.lib;
+        shas: (name:
+          let
+            upperName = strings.toUpper name;
+            prefix = "${upperName}=\"";
+          in
+          trivial.pipe shas [
+            (lists.findFirst (strings.hasPrefix prefix) "")
+            (strings.removePrefix prefix)
+            (strings.removeSuffix "\"")
+          ]);
 
       dendrite-stub = with pkgs.lib;
         let
@@ -235,18 +237,25 @@
               '';
           };
 
+      # reads the version for Clickhouse or Cockroachdb from the
+      # `tools/clickhouse_version` and `tools/cockroachdb_version` files.
+      readVersionFile = with pkgs.lib; file: trivial.pipe ./tools/${file} [
+        (builtins.readFile)
+        (strings.removeSuffix "\n")
+        (strings.removePrefix "v")
+        (debug.traceValFn (v: "${file}: ${v}"))
+      ];
+
       clickhouse = with pkgs;
         let
-          # TODO(eliza): it would be nice if this lived in a file that was also used
-          # by `tools/ci_download_clickhouse`, so these could be kept consistent...
-          version = "22.8.9.24";
-          # also, N.B. that unlike maghemite and dendrite, the Clickhouse hashes
+          name = "clickhouse";
+          version = readVersionFile "${name}_version";
+          # N.B. that unlike maghemite and dendrite, the Clickhouse hashes
           # in `tools/clickhouse_checksums` are MD5 rather than SHA256, so we
           # can't give Nix those hashes and must instead determine it ourselves.
           # this means that we will have to update this SHA if the clickhouse
           # version changes.
           sha256 = "1lgxwh67apgl386ilpg0iy5xkyz12q4lgnz08zswjbxv88ra0qxj";
-          name = "clickhouse";
           src = builtins.fetchurl
             {
               inherit sha256;
@@ -276,23 +285,18 @@
 
       cockroachdb = with pkgs;
         let
+          name = "cockroachdb";
           binName = "cockroach";
-          version = with pkgs.lib; trivial.pipe
-            ./tools/cockroachdb_version
-            [
-              (builtins.readFile)
-              (strings.removeSuffix "\n")
-            ];
+          version = readVersionFile "${name}_version";
           src = builtins.fetchurl
             {
-              url = "https://binaries.cockroachdb.com/${binName}-${version}.linux-amd64.tgz";
+              url = "https://binaries.cockroachdb.com/${binName}-v${version}.linux-amd64.tgz";
               sha256 = "1aglbwh27275bicyvij11s3as4zypqwc26p9gyh5zr3y1s123hr4";
             };
         in
         stdenv.mkDerivation
           {
-            name = "cockroachdb";
-            inherit src version;
+            inherit name src version;
             nativeBuildInputs = [
               # patch the binary to use the right dynamic library paths.
               autoPatchelfHook
@@ -321,10 +325,10 @@
             {
               PATH = "${pkg.out}";
             } ''
-            actualVersion=$(${pkg.out}/bin/${cmd})
-            if [ "$actualVersion" != "${pkg.version}" ]; then
-              echo "expected ${pkg.name} version \"${pkg.version}\", got \"$actualVersion\""
-              exit 1
+              actualVersion=$(${pkg.out}/bin/${cmd})
+              if [ "$actualVersion" != "${pkg.version}" ]; then
+                echo "expected ${pkg.name} version \"${pkg.version}\", got \"$actualVersion\""
+            exit 1
             fi
 
             # the check derivation must have an output.
@@ -347,7 +351,7 @@
           cockroachdbVersion = mkVersionCheck
             {
               pkg = cockroachdb;
-              cmd = "cockroach version --build-tag";
+              cmd = "cockroach version --build-tag | tr -d 'v'";
             };
 
           mgdCanExec = mkExecCheck {
@@ -410,10 +414,11 @@
 
             # Needed by rustfmt-wrapper, see:
             # https://github.com/oxidecomputer/rustfmt-wrapper/blob/main/src/lib.rs
-            RUSTFMT = "${rustToolchain}/bin/rustfmt";
+            RUSTFMT = "${rustToolchain} /bin/rustfmt";
           };
     };
 }
+
 
 
 
