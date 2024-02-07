@@ -513,7 +513,7 @@ async fn policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View resource utilization of user's current silo
+/// Fetch resource utilization for user's current silo
 #[endpoint {
     method = GET,
     path = "/v1/utilization",
@@ -535,7 +535,7 @@ async fn utilization_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View current utilization of given silo
+/// Fetch current utilization for given silo
 #[endpoint {
     method = GET,
     path = "/v1/system/utilization/silos/{silo}",
@@ -628,7 +628,7 @@ async fn system_quotas_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View resource quotas of given silo
+/// Fetch resource quotas for silo
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/quotas",
@@ -651,7 +651,7 @@ async fn silo_quotas_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update resource quotas of given silo
+/// Update resource quotas for silo
 ///
 /// If a quota value is not specified, it will remain unchanged.
 #[endpoint {
@@ -829,7 +829,7 @@ async fn silo_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch silo's IAM policy
+/// Fetch silo IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/policy",
@@ -851,7 +851,7 @@ async fn silo_policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update silo's IAM policy
+/// Update silo IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/policy",
@@ -881,7 +881,7 @@ async fn silo_policy_update(
 
 // Silo-specific user endpoints
 
-/// List built-in (system) users in a silo
+/// List built-in (system) users in silo
 #[endpoint {
     method = GET,
     path = "/v1/system/users",
@@ -1683,7 +1683,7 @@ type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 
 /// List ranges for IP pool
 ///
-/// List ranges for IP pool. Ranges are ordered by their first address.
+/// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
@@ -1980,7 +1980,9 @@ async fn floating_ip_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Attach floating IP to instance or other resource
+/// Attach floating IP
+///
+/// Attach floating IP to an instance or other resource.
 #[endpoint {
     method = POST,
     path = "/v1/floating-ips/{floating_ip}/attach",
@@ -2014,7 +2016,9 @@ async fn floating_ip_attach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Detach floating IP from instance or other resource
+/// Detach floating IP
+///
+// Detach floating IP from instance or other resource.
 #[endpoint {
     method = POST,
     path = "/v1/floating-ips/{floating_ip}/detach",
@@ -2598,7 +2602,7 @@ async fn instance_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch instance's serial console
+/// Fetch instance serial console
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/serial-console",
@@ -2629,7 +2633,7 @@ async fn instance_serial_console(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stream instance's serial console
+/// Stream instance serial console
 #[channel {
     protocol = WEBSOCKETS,
     path = "/v1/instances/{instance}/serial-console/stream",
@@ -2681,9 +2685,10 @@ async fn instance_serial_console_stream(
     }
 }
 
-/// List SSH public keys added to instance via cloud-init during instance creation
+/// List SSH public keys for instance
 ///
-/// Note that this list is a snapshot in time and will not reflect updates made after
+/// List SSH public keys injected via cloud-init during instance creation. Note
+/// that this list is a snapshot in time and will not reflect updates made after
 /// the instance is created.
 #[endpoint {
     method = GET,
@@ -2725,7 +2730,7 @@ async fn instance_ssh_public_key_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List instance's disks
+/// List disks for instance
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/disks",
@@ -5054,7 +5059,7 @@ async fn rack_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List uninitialized sleds in a given rack
+/// List uninitialized sleds
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds-uninitialized",
@@ -5160,7 +5165,7 @@ async fn sled_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set sled's provision state
+/// Set sled provision state
 #[endpoint {
     method = PUT,
     path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
@@ -5482,7 +5487,7 @@ async fn silo_metric(
 
 // Updates
 
-/// Upload a TUF repository
+/// Upload TUF repository
 #[endpoint {
     method = PUT,
     path = "/v1/system/update/repository",
@@ -5507,7 +5512,9 @@ async fn system_update_put_repository(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get description of repository by system version.
+/// Fetch TUF repository description
+///
+/// Fetch description of TUF repository by system version.
 #[endpoint {
     method = GET,
     path = "/v1/system/update/repository/{system_version}",
@@ -5768,7 +5775,7 @@ async fn role_view(
 
 // Current user
 
-/// Fetch user associated with current session
+/// Fetch user for current session
 #[endpoint {
    method = GET,
    path = "/v1/me",
@@ -5791,7 +5798,7 @@ pub(crate) async fn current_user_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the silo groups the current user belongs to
+/// Fetch current user's groups
 #[endpoint {
     method = GET,
     path = "/v1/me/groups",
@@ -5865,7 +5872,7 @@ async fn current_user_ssh_key_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an SSH public key
+/// Create SSH public key
 ///
 /// Create an SSH public key for the currently authenticated user.
 #[endpoint {
@@ -5927,7 +5934,7 @@ async fn current_user_ssh_key_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an SSH public key
+/// Delete SSH public key
 ///
 /// Delete an SSH public key associated with the currently authenticated user.
 #[endpoint {
