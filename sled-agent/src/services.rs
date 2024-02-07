@@ -346,27 +346,6 @@ fn display_zone_init_errors(errors: &[(String, Box<Error>)]) -> String {
     output
 }
 
-// Does this zone require time synchronization before it is initialized?"
-//
-// This function is somewhat conservative - the set of services
-// that can be launched before timesync has completed is intentionally kept
-// small, since it would be easy to add a service that expects time to be
-// reasonably synchronized.
-fn zone_requires_timesync(zone_type: &OmicronZoneType) -> bool {
-    match zone_type {
-        // These zones can be initialized and started before time has been
-        // synchronized. For the NTP zones, this should be self-evident --
-        // we need the NTP zone to actually perform time synchronization!
-        //
-        // The DNS zone is a bit of an exception here, since the NTP zone
-        // itself may rely on DNS lookups as a dependency.
-        OmicronZoneType::BoundaryNtp { .. }
-        | OmicronZoneType::InternalNtp { .. }
-        | OmicronZoneType::InternalDns { .. } => false,
-        _ => true,
-    }
-}
-
 /// Configuration parameters which modify the [`ServiceManager`]'s behavior.
 pub struct Config {
     /// Identifies the sled being configured
@@ -605,7 +584,7 @@ enum SledLocalZone {
 #[must_use]
 struct StartZonesResult {
     // The set of zones which have successfully started.
-    zones: Vec<OmicronZone>,
+    new_zones: Vec<OmicronZone>,
 
     // The set of (zone name, error) of zones that failed to start.
     errors: Vec<(String, Error)>,
@@ -2712,7 +2691,7 @@ impl ServiceManager {
         self.ensure_removed(&zone).await?;
 
         // If this zone requires timesync and we aren't ready, fail it early.
-        if zone_requires_timesync(&zone.zone_type) && !time_is_synchronized {
+        if zone.zone_type.requires_timesync() && !time_is_synchronized {
             return Err(Error::TimeNotSynchronized);
         }
 
@@ -2759,7 +2738,7 @@ impl ServiceManager {
             });
         }
 
-        let futures = requests.clone().map(|zone| async move {
+        let futures = requests.map(|zone| async move {
             self.start_omicron_zone(&zone, time_is_synchronized, all_u2_pools)
                 .await
                 .map_err(|err| (zone.zone_name().to_string(), err))
@@ -2767,13 +2746,13 @@ impl ServiceManager {
 
         let results = futures::future::join_all(futures).await;
 
-        let mut zones = Vec::new();
+        let mut new_zones = Vec::new();
         let mut errors = Vec::new();
         for result in results {
             match result {
                 Ok(zone) => {
                     info!(self.inner.log, "Zone started"; "zone" => zone.name());
-                    zones.push(zone);
+                    new_zones.push(zone);
                 }
                 Err((name, error)) => {
                     warn!(self.inner.log, "Zone failed to start"; "zone" => &name);
@@ -2781,7 +2760,7 @@ impl ServiceManager {
                 }
             }
         }
-        Ok(StartZonesResult { zones, errors })
+        Ok(StartZonesResult { new_zones, errors })
     }
 
     /// Create a zone bundle for the provided zone.
@@ -2978,7 +2957,7 @@ impl ServiceManager {
             };
 
         // Concurrently boot all new zones
-        let StartZonesResult { zones, errors } = self
+        let StartZonesResult { new_zones, errors } = self
             .start_omicron_zones(
                 zones_to_be_added,
                 time_is_synchronized,
@@ -2988,7 +2967,7 @@ impl ServiceManager {
 
         // Add the new zones to our tracked zone set
         existing_zones.extend(
-            zones.into_iter().map(|zone| (zone.name().to_string(), zone)),
+            new_zones.into_iter().map(|zone| (zone.name().to_string(), zone)),
         );
 
         // If any zones failed to start, exit with an error
@@ -3008,30 +2987,34 @@ impl ServiceManager {
     ) {
         let log = &self.inner.log;
         let expected_zone_name = zone.zone_name();
-        if let Some(mut zone) = existing_zones.remove(&expected_zone_name) {
-            debug!(
+        let Some(mut zone) = existing_zones.remove(&expected_zone_name) else {
+            warn!(
                 log,
-                "removing an existing zone";
+                "Expected to remove zone, but could not find it";
                 "zone_name" => &expected_zone_name,
             );
-            if let Err(e) = self
-                .inner
-                .zone_bundler
-                .create(&zone.runtime, ZoneBundleCause::UnexpectedZone)
-                .await
-            {
-                error!(
-                    log,
-                    "Failed to take bundle of unexpected zone";
-                    "zone_name" => &expected_zone_name,
-                    "reason" => ?e,
-                );
-            }
-            if let Err(e) = zone.runtime.stop().await {
-                error!(log, "Failed to stop zone {}: {e}", zone.name());
-            }
-        } else {
-            warn!(log, "Expected to remove zone, but could not find it");
+            return;
+        };
+        debug!(
+            log,
+            "removing an existing zone";
+            "zone_name" => &expected_zone_name,
+        );
+        if let Err(e) = self
+            .inner
+            .zone_bundler
+            .create(&zone.runtime, ZoneBundleCause::UnexpectedZone)
+            .await
+        {
+            error!(
+                log,
+                "Failed to take bundle of unexpected zone";
+                "zone_name" => &expected_zone_name,
+                "reason" => ?e,
+            );
+        }
+        if let Err(e) = zone.runtime.stop().await {
+            error!(log, "Failed to stop zone {}: {e}", zone.name());
         }
     }
 
