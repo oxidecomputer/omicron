@@ -37,7 +37,7 @@ jobs:
       if: ${{ startsWith(matrix.os, 'macos') }}
       run: |
         curl -fLOsS --retry 5 https://raw.githubusercontent.com/Homebrew/homebrew-core/081149b0d2720c2759b6ac8253e33b27f6d6c1cd/Formula/lib/libxmlsec1.rb
-        brew install ./libxmlsec1.rb
+        HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1 brew install ./libxmlsec1.rb
         brew pin libxmlsec1
         rm -f libxmlsec1.rb
     - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
