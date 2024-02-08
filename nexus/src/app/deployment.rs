@@ -8,7 +8,6 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
-use nexus_deployment::default_service_count;
 use nexus_deployment::planner::Planner;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -21,6 +20,7 @@ use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -223,7 +223,7 @@ impl super::Nexus {
             policy: Policy {
                 sleds,
                 service_ip_pool_ranges,
-                target_nexus_zone_count: default_service_count::NEXUS,
+                target_nexus_zone_count: NEXUS_REDUNDANCY,
             },
             inventory,
         })

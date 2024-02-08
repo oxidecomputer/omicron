@@ -12,12 +12,11 @@ use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns::config::{Host, ZoneVariant};
 use internal_dns::ServiceName;
-use nexus_deployment::default_service_count;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY,
-    MGD_PORT, MGS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES,
-    SLED_PREFIX,
+    MGD_PORT, MGS_PORT, NEXUS_REDUNDANCY, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -456,7 +455,7 @@ impl Plan {
         }
 
         // Provision Nexus zones, continuing to stripe across sleds.
-        for _ in 0..default_service_count::NEXUS {
+        for _ in 0..NEXUS_REDUNDANCY {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;

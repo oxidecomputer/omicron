@@ -44,7 +44,6 @@ libc.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
 nexus-client.workspace = true
-nexus-deployment.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
 oximeter.workspace = true
