@@ -4,8 +4,11 @@
 
 //! Interface for making API requests to a Sled Agent
 
+use anyhow::Context;
 use async_trait::async_trait;
 use std::convert::TryFrom;
+use std::net::IpAddr;
+use std::net::SocketAddr;
 use uuid::Uuid;
 
 progenitor::generate_api!(
@@ -84,6 +87,74 @@ impl types::OmicronZoneType {
             | types::OmicronZoneType::InternalDns { .. }
             | types::OmicronZoneType::Nexus { .. }
             | types::OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
+    /// Identifies whether this is a Nexus zone
+    pub fn is_nexus(&self) -> bool {
+        match self {
+            types::OmicronZoneType::Nexus { .. } => true,
+
+            types::OmicronZoneType::BoundaryNtp { .. }
+            | types::OmicronZoneType::InternalNtp { .. }
+            | types::OmicronZoneType::Clickhouse { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CockroachDb { .. }
+            | types::OmicronZoneType::Crucible { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::ExternalDns { .. }
+            | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
+    /// This zone's external IP
+    pub fn external_ip(&self) -> anyhow::Result<Option<IpAddr>> {
+        match self {
+            types::OmicronZoneType::Nexus { external_ip, .. } => {
+                Ok(Some(*external_ip))
+            }
+
+            types::OmicronZoneType::ExternalDns { dns_address, .. } => {
+                let dns_address =
+                    dns_address.parse::<SocketAddr>().with_context(|| {
+                        format!(
+                            "failed to parse ExternalDns address {dns_address}"
+                        )
+                    })?;
+                Ok(Some(dns_address.ip()))
+            }
+
+            types::OmicronZoneType::BoundaryNtp { snat_cfg, .. } => {
+                Ok(Some(snat_cfg.ip))
+            }
+
+            types::OmicronZoneType::InternalNtp { .. }
+            | types::OmicronZoneType::Clickhouse { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CockroachDb { .. }
+            | types::OmicronZoneType::Crucible { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Oximeter { .. } => Ok(None),
+        }
+    }
+
+    /// The service vNIC providing external connectivity to this zone
+    pub fn service_vnic(&self) -> Option<&types::NetworkInterface> {
+        match self {
+            types::OmicronZoneType::Nexus { nic, .. }
+            | types::OmicronZoneType::ExternalDns { nic, .. }
+            | types::OmicronZoneType::BoundaryNtp { nic, .. } => Some(nic),
+
+            types::OmicronZoneType::InternalNtp { .. }
+            | types::OmicronZoneType::Clickhouse { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CockroachDb { .. }
+            | types::OmicronZoneType::Crucible { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Oximeter { .. } => None,
         }
     }
 }
@@ -351,7 +422,6 @@ impl From<std::net::Ipv6Addr> for types::Ipv6Net {
 
 impl From<std::net::IpAddr> for types::IpNet {
     fn from(s: std::net::IpAddr) -> Self {
-        use std::net::IpAddr;
         match s {
             IpAddr::V4(v4) => Self::V4(v4.into()),
             IpAddr::V6(v6) => Self::V6(v6.into()),
