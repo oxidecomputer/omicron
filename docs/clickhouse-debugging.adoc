@@ -31,7 +31,7 @@ $ pilot host login <cubby where clickhouse exists>
 $ pfexec zlogin oxz_clickhouse_<UUID>
 ----
 
-. **Identify the IP address of Clickhouse**. This is psosible using `ipadm`:
+. **Identify the IP address of Clickhouse**. This is possible using `ipadm`:
 +
 [source,bash]
 ----
