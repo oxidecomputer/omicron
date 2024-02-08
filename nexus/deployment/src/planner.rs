@@ -98,16 +98,6 @@ impl<'a> Planner<'a> {
                 continue;
             }
 
-            // Before adding any additional services, check whether this sled is
-            // marked as non-provisionable.
-            match sled_info.provision_state {
-                SledProvisionState::Provisionable => (),
-                SledProvisionState::NonProvisionable => {
-                    sleds_ineligible_for_services.insert(*sled_id);
-                    continue;
-                }
-            }
-
             // Now we've established that the current blueprint _says_ there's
             // an NTP zone on this system.  But we must wait for it to actually
             // be there before we can proceed to add anything else.  Otherwise,
@@ -172,6 +162,20 @@ impl<'a> Planner<'a> {
                 continue;
             }
         }
+
+        // We've now placed all the services that should always exist on all
+        // sleds. Before moving on to make decisions about placing services that
+        // are _not_ present on all sleds, check the provision state of all our
+        // sleds so we can avoid any non-provisionable sleds under the
+        // assumption that there is something amiss with them.
+        sleds_ineligible_for_services.extend(
+            self.policy.sleds.iter().filter_map(|(sled_id, sled_info)| {
+                match sled_info.provision_state {
+                    SledProvisionState::Provisionable => None,
+                    SledProvisionState::NonProvisionable => Some(*sled_id),
+                }
+            }),
+        );
 
         self.ensure_correct_number_of_nexus_zones(
             &sleds_ineligible_for_services,
