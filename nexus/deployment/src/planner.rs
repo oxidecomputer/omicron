@@ -223,9 +223,8 @@ impl<'a> Planner<'a> {
             // keys, expecting to stop on the first iteration, with the only
             // exception being when we've removed all the sleds from a bin.
             for (&num_nexus, sleds) in sleds_by_num_nexus.iter_mut() {
-                // TODO choose more smartly than effectively ordering by
-                // sled_id? See
-                // https://github.com/oxidecomputer/omicron/pull/4959#discussion_r1476795735.
+                // `sleds` contains all sleds with the minimum number of Nexus
+                // zones. Pick one arbitrarily but deterministically.
                 let Some(sled_id) = sleds.pop() else {
                     // We already drained this bin; move on.
                     continue;
