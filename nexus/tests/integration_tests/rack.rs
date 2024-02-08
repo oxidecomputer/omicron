@@ -110,7 +110,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
     let sled_uuid = Uuid::new_v4();
     let sa = SledAgentStartupInfo {
-        sa_address: "[fd00:1122:3344:01::1]:8080".parse().unwrap(),
+        sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
         role: SledRole::Gimlet,
         baseboard: Baseboard {
             serial_number: baseboard.serial,

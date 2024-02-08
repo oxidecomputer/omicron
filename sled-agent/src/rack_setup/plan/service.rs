@@ -35,7 +35,7 @@ use sled_agent_client::{
 use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
 use thiserror::Error;
@@ -708,7 +708,7 @@ impl Plan {
         log: &Logger,
         config: &Config,
         storage_manager: &StorageHandle,
-        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
+        sleds: &BTreeMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         // Load the information we need about each Sled to be able to allocate
         // components on it.
@@ -1078,6 +1078,7 @@ mod tests {
     use crate::bootstrap::params::BootstrapAddressDiscovery;
     use crate::bootstrap::params::RecoverySiloConfig;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::RackNetworkConfig;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
@@ -1149,7 +1150,6 @@ mod tests {
             "fd01::103",
         ];
         let config = Config {
-            rack_subnet: Ipv6Addr::LOCALHOST,
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
@@ -1173,7 +1173,13 @@ mod tests {
                 user_name: "recovery".parse().unwrap(),
                 user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
             },
-            rack_network_config: None,
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Addr::LOCALHOST.into(),
+                infra_ip_first: Ipv4Addr::LOCALHOST,
+                infra_ip_last: Ipv4Addr::LOCALHOST,
+                ports: Vec::new(),
+                bgp: Vec::new(),
+            },
         };
 
         let mut svp = ServicePortBuilder::new(&config);
