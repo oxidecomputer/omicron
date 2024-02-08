@@ -52,7 +52,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
-use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use sled_agent_client::types::AddSledRequest;
 use sled_agent_client::types::EarlyNetworkConfigBody;
@@ -871,36 +870,15 @@ impl super::Nexus {
             )
             .await?;
 
-        // Grab the SPs from the last collection
-        let collection =
-            self.db_datastore.inventory_get_latest_collection(opctx).await?;
-
-        // If there isn't a collection, we don't know about the sled
-        let Some(collection) = collection else {
-            return Err(Error::unavail("no inventory data available"));
-        };
-
-        // Find the revision
-        let Some(sp) = collection.sps.get(&baseboard_id) else {
-            return Err(Error::ObjectNotFound {
-                type_name: ResourceType::Sled,
-                lookup_type:
-                    omicron_common::api::external::LookupType::ByCompositeId(
-                        format!("{sled:?}"),
-                    ),
-            });
-        };
-
-        // Convert the baseboard as necessary
-        let baseboard = sled_agent_client::types::Baseboard::Gimlet {
-            identifier: sled.serial.clone(),
-            model: sled.part.clone(),
-            revision: sp.baseboard_revision.into(),
+        // Convert `UninitializedSledId` to the sled-agent type
+        let baseboard_id = sled_agent_client::types::BaseboardId {
+            serial_number: sled.serial.clone(),
+            part_number: sled.part.clone(),
         };
 
         // Make the call to sled-agent
         let req = AddSledRequest {
-            sled_id: baseboard,
+            sled_id: baseboard_id,
             start_request: StartSledAgentRequest {
                 generation: 0,
                 schema_version: 1,

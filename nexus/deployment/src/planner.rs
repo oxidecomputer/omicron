@@ -179,7 +179,7 @@ impl<'a> Planner<'a> {
         let mut sleds_by_num_nexus: BTreeMap<usize, Vec<Uuid>> =
             BTreeMap::new();
         for &sled_id in self.policy.sleds.keys() {
-            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id)?;
+            let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
             num_total_nexus += num_nexus;
 
             // Only bin this sled if we're allowed to use it. If we have a sled
@@ -291,6 +291,7 @@ mod test {
     use super::Planner;
     use crate::blueprint_builder::test::example;
     use crate::blueprint_builder::test::policy_add_sled;
+    use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::BlueprintBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_types::inventory::OmicronZoneType;
@@ -314,6 +315,7 @@ mod test {
             "the_test",
         )
         .expect("failed to create initial blueprint");
+        verify_blueprint(&blueprint1);
 
         // Now run the planner.  It should do nothing because our initial
         // system didn't have any issues that the planner currently knows how to
@@ -334,6 +336,7 @@ mod test {
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
+        verify_blueprint(&blueprint2);
 
         // Now add a new sled.
         let new_sled_id =
@@ -368,6 +371,7 @@ mod test {
         ));
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
+        verify_blueprint(&blueprint3);
 
         // Check that with no change in inventory, the planner makes no changes.
         // It needs to wait for inventory to reflect the new NTP zone before
@@ -387,6 +391,7 @@ mod test {
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
+        verify_blueprint(&blueprint4);
 
         // Now update the inventory to have the requested NTP zone.
         assert!(collection
@@ -439,6 +444,7 @@ mod test {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             };
         }
+        verify_blueprint(&blueprint5);
 
         // Check that there are no more steps.
         let blueprint6 = Planner::new_based_on(
@@ -457,6 +463,7 @@ mod test {
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
+        verify_blueprint(&blueprint6);
 
         logctx.cleanup_successful();
     }
