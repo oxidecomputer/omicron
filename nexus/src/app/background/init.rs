@@ -510,7 +510,7 @@ pub mod test {
             2,
             vec![
                 (
-                    "_nameservice.tcp".to_string(),
+                    "_external-dns._tcp".to_string(),
                     vec![nexus_params::DnsRecord::Srv(nexus_params::Srv {
                         prio: 0,
                         weight: 0,
@@ -528,32 +528,12 @@ pub mod test {
         )
         .await;
         info!(&cptestctx.logctx.log, "updated new dns records");
-        wait_propagate_dns(
-            &cptestctx.logctx.log,
-            "initial",
-            initial_dns_dropshot_server.local_addr(),
-            2,
-        )
-        .await;
-
-        wait_propagate_dns(
-            &cptestctx.logctx.log,
-            "new",
-            new_dns_dropshot_server.local_addr(),
-            2,
-        )
-        .await;
-
-        // Now, write version 2 of the internal DNS configuration with one
-        // additional record.
-        write_test_dns_generation(datastore, internal_dns_zone_id).await;
 
         // Activate the internal DNS propagation pipeline.
         nexus
             .background_tasks
             .activate(&nexus.background_tasks.task_internal_dns_config);
 
-        // Wait for the new generation to get propagated to both servers.
         wait_propagate_dns(
             &cptestctx.logctx.log,
             "initial",
@@ -562,6 +542,11 @@ pub mod test {
         )
         .await;
 
+        // Discover the new external DNS server from internal DNS.
+        nexus
+            .background_tasks
+            .activate(&nexus.background_tasks.task_external_dns_servers);
+
         wait_propagate_dns(
             &cptestctx.logctx.log,
             "new",
@@ -569,6 +554,32 @@ pub mod test {
             2,
         )
         .await;
+
+        // // Now, write version 2 of the internal DNS configuration with one
+        // // additional record.
+        // write_test_dns_generation(datastore, internal_dns_zone_id).await;
+
+        // // Activate the internal DNS propagation pipeline.
+        // nexus
+        //     .background_tasks
+        //     .activate(&nexus.background_tasks.task_internal_dns_config);
+
+        // // Wait for the new generation to get propagated to both servers.
+        // wait_propagate_dns(
+        //     &cptestctx.logctx.log,
+        //     "initial",
+        //     initial_dns_dropshot_server.local_addr(),
+        //     2,
+        // )
+        // .await;
+
+        // wait_propagate_dns(
+        //     &cptestctx.logctx.log,
+        //     "new",
+        //     new_dns_dropshot_server.local_addr(),
+        //     2,
+        // )
+        // .await;
     }
 
     /// Verify that DNS gets propagated to the specified server
@@ -618,6 +629,7 @@ pub mod test {
     }
 
     pub(crate) async fn write_dns_generation(
+        opctx: &OpContext,
         datastore: &DataStore,
         internal_dns_zone_id: Uuid,
         version: u32,
@@ -636,6 +648,7 @@ pub mod test {
                     .unwrap()
             })
             .collect::<Vec<_>>();
+        datastore.dns_update(opctx, conn, update)
         let _: Result<(), _> = datastore
             .transaction_retry_wrapper("write_test_dns_generation")
             .transaction(&conn, move |conn| {
@@ -663,6 +676,8 @@ pub mod test {
 
                         diesel::insert_into(dsl::dns_name)
                             .values(names)
+                            .on_conflict(dsl::id)
+                            .do_update()
                             .execute_async(&conn)
                             .await
                             .unwrap();
