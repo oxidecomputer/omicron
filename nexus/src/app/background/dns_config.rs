@@ -199,7 +199,7 @@ mod test {
         // was sent to the watcher.
         let internal_dns_zone_id =
             read_internal_dns_zone_id(&opctx, &datastore).await;
-        write_test_dns_generation(&datastore, internal_dns_zone_id).await;
+        write_test_dns_generation(&opctx, &datastore).await;
         assert_eq!(watcher.borrow().as_ref().unwrap().generation, 1);
         let value = task.activate(&opctx).await;
         assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);
