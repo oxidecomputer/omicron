@@ -90,6 +90,7 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  rack       Print information about the rack
   disks      Print information about disks
   dns        Print information about internal and external DNS
   inventory  Print information about collected hardware/software inventory
@@ -118,6 +119,7 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  rack       Print information about the rack
   disks      Print information about disks
   dns        Print information about internal and external DNS
   inventory  Print information about collected hardware/software inventory
