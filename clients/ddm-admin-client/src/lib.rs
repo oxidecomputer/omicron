@@ -132,7 +132,6 @@ impl Client {
         interfaces: &'a [BootstrapInterface],
     ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a, DdmError> {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
-        info!(self.log, "Received prefixes from ddmd"; "prefixes" => ?prefixes);
         Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
             prefixes.into_iter().flat_map(|prefix| {
                 let mut segments = prefix.destination.addr.segments();

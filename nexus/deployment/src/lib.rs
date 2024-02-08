@@ -116,6 +116,5 @@
 //! updates, etc.
 
 pub mod blueprint_builder;
-pub mod default_service_count;
 mod ip_allocator;
 pub mod planner;

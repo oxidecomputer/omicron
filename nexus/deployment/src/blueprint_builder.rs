@@ -107,7 +107,7 @@ pub struct BlueprintBuilder<'a> {
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
-    omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+    zones: BlueprintZones<'a>,
     zones_in_service: BTreeSet<Uuid>,
     creator: String,
     comments: Vec<String>,
@@ -286,7 +286,7 @@ impl<'a> BlueprintBuilder<'a> {
             parent_blueprint,
             policy,
             sled_ip_allocators: BTreeMap::new(),
-            omicron_zones: BTreeMap::new(),
+            zones: BlueprintZones::new(parent_blueprint),
             zones_in_service: parent_blueprint.zones_in_service.clone(),
             creator: creator.to_owned(),
             comments: Vec::new(),
@@ -298,41 +298,10 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
-    pub fn build(mut self) -> Blueprint {
+    pub fn build(self) -> Blueprint {
         // Collect the Omicron zones config for each in-service sled.
-        let omicron_zones = self
-            .policy
-            .sleds
-            .keys()
-            .map(|sled_id| {
-                // Start with self.omicron_zones, which contains entries for any
-                // sled whose zones config is changing in this blueprint.
-                let mut zones = self
-                    .omicron_zones
-                    .remove(sled_id)
-                    // If it's not there, use the config from the parent
-                    // blueprint.
-                    .or_else(|| {
-                        self.parent_blueprint
-                            .omicron_zones
-                            .get(sled_id)
-                            .cloned()
-                    })
-                    // If it's not there either, then this must be a new sled
-                    // and we haven't added any zones to it yet.  Use the
-                    // standard initial config.
-                    .unwrap_or_else(|| OmicronZonesConfig {
-                        generation: Generation::new(),
-                        zones: vec![],
-                    });
-
-                // This is not strictly necessary.  But for testing, it's
-                // helpful for things to be in sorted order.
-                zones.zones.sort_by_key(|zone| zone.id);
-
-                (*sled_id, zones)
-            })
-            .collect();
+        let omicron_zones =
+            self.zones.into_omicron_zones(self.policy.sleds.keys().copied());
         Blueprint {
             id: Uuid::new_v4(),
             omicron_zones,
@@ -361,13 +330,9 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<Ensure, Error> {
         // If there's already an NTP zone on this sled, do nothing.
         let has_ntp = self
-            .parent_blueprint
-            .omicron_zones
-            .get(&sled_id)
-            .map(|found_zones| {
-                found_zones.zones.iter().any(|z| z.zone_type.is_ntp())
-            })
-            .unwrap_or(false);
+            .zones
+            .current_sled_zones(sled_id)
+            .any(|z| z.zone_type.is_ntp());
         if has_ntp {
             return Ok(Ensure::NotNeeded);
         }
@@ -425,20 +390,14 @@ impl<'a> BlueprintBuilder<'a> {
         pool_name: ZpoolName,
     ) -> Result<Ensure, Error> {
         // If this sled already has a Crucible zone on this pool, do nothing.
-        let has_crucible_on_this_pool = self
-            .parent_blueprint
-            .omicron_zones
-            .get(&sled_id)
-            .map(|found_zones| {
-                found_zones.zones.iter().any(|z| {
-                    matches!(
-                        &z.zone_type,
-                        OmicronZoneType::Crucible { dataset, .. }
-                        if dataset.pool_name == pool_name
-                    )
-                })
-            })
-            .unwrap_or(false);
+        let has_crucible_on_this_pool =
+            self.zones.current_sled_zones(sled_id).any(|z| {
+                matches!(
+                    &z.zone_type,
+                    OmicronZoneType::Crucible { dataset, .. }
+                    if dataset.pool_name == pool_name
+                )
+            });
         if has_crucible_on_this_pool {
             return Ok(Ensure::NotNeeded);
         }
@@ -473,22 +432,11 @@ impl<'a> BlueprintBuilder<'a> {
     ///
     /// This value may change before a blueprint is actually generated if
     /// further changes are made to the builder.
-    pub fn sled_num_nexus_zones(&self, sled_id: Uuid) -> Result<usize, Error> {
-        // Find the current config for this sled.
-        //
-        // Start with self.omicron_zones, which contains entries for any
-        // sled whose zones config is changing in this blueprint.
-        let Some(sled_config) =
-            self.omicron_zones.get(&sled_id).or_else(|| {
-                // If it's not there, use the config from the parent
-                // blueprint.
-                self.parent_blueprint.omicron_zones.get(&sled_id)
-            })
-        else {
-            return Ok(0);
-        };
-
-        Ok(sled_config.zones.iter().filter(|z| z.zone_type.is_nexus()).count())
+    pub fn sled_num_nexus_zones(&self, sled_id: Uuid) -> usize {
+        self.zones
+            .current_sled_zones(sled_id)
+            .filter(|z| z.zone_type.is_nexus())
+            .count()
     }
 
     pub fn sled_ensure_zone_multiple_nexus(
@@ -496,20 +444,8 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: Uuid,
         desired_zone_count: usize,
     ) -> Result<EnsureMultiple, Error> {
-        // How many Nexus zones are already running on this sled?
-        let nexus_count = self
-            .parent_blueprint
-            .omicron_zones
-            .get(&sled_id)
-            .map(|found_zones| {
-                found_zones
-                    .zones
-                    .iter()
-                    .filter(|z| z.zone_type.is_nexus())
-                    .count()
-            })
-            .unwrap_or(0);
-
+        // How many Nexus zones do we need to add?
+        let nexus_count = self.sled_num_nexus_zones(sled_id);
         let num_nexus_to_add = match desired_zone_count.checked_sub(nexus_count)
         {
             Some(0) => return Ok(EnsureMultiple::NotNeeded),
@@ -627,27 +563,7 @@ impl<'a> BlueprintBuilder<'a> {
             )));
         }
 
-        let sled_zones =
-            self.omicron_zones.entry(sled_id).or_insert_with(|| {
-                if let Some(old_sled_zones) =
-                    self.parent_blueprint.omicron_zones.get(&sled_id)
-                {
-                    OmicronZonesConfig {
-                        generation: old_sled_zones.generation.next(),
-                        zones: old_sled_zones.zones.clone(),
-                    }
-                } else {
-                    // The first generation is reserved to mean the one
-                    // containing no zones.  See
-                    // OMICRON_ZONES_CONFIG_INITIAL_GENERATION.  So we start
-                    // with the next one.
-                    OmicronZonesConfig {
-                        generation: Generation::new().next(),
-                        zones: vec![],
-                    }
-                }
-            });
-
+        let sled_zones = self.zones.change_sled_zones(sled_id);
         sled_zones.zones.push(zone);
         Ok(())
     }
@@ -681,10 +597,8 @@ impl<'a> BlueprintBuilder<'a> {
 
                 // Record each of the sled's zones' underlay addresses as
                 // allocated.
-                if let Some(sled_zones) = self.omicron_zones.get(&sled_id) {
-                    for z in &sled_zones.zones {
-                        allocator.reserve(z.underlay_address);
-                    }
+                for z in self.zones.current_sled_zones(sled_id) {
+                    allocator.reserve(z.underlay_address);
                 }
 
                 allocator
@@ -700,6 +614,104 @@ impl<'a> BlueprintBuilder<'a> {
                 sled_id
             ))
         })
+    }
+}
+
+/// Helper for working with sets of zones on each sled
+///
+/// Tracking the set of zones is slightly non-trivial because we need to bump
+/// the per-sled generation number iff the zones are changed.  So we need to
+/// keep track of whether we've changed the zones relative to the parent
+/// blueprint.  We do this by keeping a copy of any `OmicronZonesConfig` that
+/// we've changed and a _reference_ to the parent blueprint's zones.  This
+/// struct makes it easy for callers iterate over the right set of zones.
+struct BlueprintZones<'a> {
+    changed_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+    parent_zones: &'a BTreeMap<Uuid, OmicronZonesConfig>,
+}
+
+impl<'a> BlueprintZones<'a> {
+    pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintZones {
+        BlueprintZones {
+            changed_zones: BTreeMap::new(),
+            parent_zones: &parent_blueprint.omicron_zones,
+        }
+    }
+
+    /// Returns a mutable reference to a sled's Omicron zones *because* we're
+    /// going to change them.  It's essential that the caller _does_ change them
+    /// because we will have bumped the generation number and we don't want to
+    /// do that if no changes are being made.
+    pub fn change_sled_zones(
+        &mut self,
+        sled_id: Uuid,
+    ) -> &mut OmicronZonesConfig {
+        self.changed_zones.entry(sled_id).or_insert_with(|| {
+            if let Some(old_sled_zones) = self.parent_zones.get(&sled_id) {
+                OmicronZonesConfig {
+                    generation: old_sled_zones.generation.next(),
+                    zones: old_sled_zones.zones.clone(),
+                }
+            } else {
+                // The first generation is reserved to mean the one
+                // containing no zones.  See
+                // OMICRON_ZONES_CONFIG_INITIAL_GENERATION.  So we start
+                // with the next one.
+                OmicronZonesConfig {
+                    generation: Generation::new().next(),
+                    zones: vec![],
+                }
+            }
+        })
+    }
+
+    /// Iterates over the list of Omicron zones currently configured for this
+    /// sled in the blueprint that's being built
+    pub fn current_sled_zones(
+        &self,
+        sled_id: Uuid,
+    ) -> Box<dyn Iterator<Item = &OmicronZoneConfig> + '_> {
+        if let Some(sled_zones) = self
+            .changed_zones
+            .get(&sled_id)
+            .or_else(|| self.parent_zones.get(&sled_id))
+        {
+            Box::new(sled_zones.zones.iter())
+        } else {
+            Box::new(std::iter::empty())
+        }
+    }
+
+    /// Produces an owned map of zones for the requested sleds
+    pub fn into_omicron_zones(
+        mut self,
+        sled_ids: impl Iterator<Item = Uuid>,
+    ) -> BTreeMap<Uuid, OmicronZonesConfig> {
+        sled_ids
+            .map(|sled_id| {
+                // Start with self.changed_zones, which contains entries for any
+                // sled whose zones config is changing in this blueprint.
+                let mut zones = self
+                    .changed_zones
+                    .remove(&sled_id)
+                    // If it's not there, use the config from the parent
+                    // blueprint.
+                    .or_else(|| self.parent_zones.get(&sled_id).cloned())
+                    // If it's not there either, then this must be a new sled
+                    // and we haven't added any zones to it yet.  Use the
+                    // standard initial config.
+                    .unwrap_or_else(|| OmicronZonesConfig {
+                        generation: Generation::new(),
+                        zones: vec![],
+                    });
+
+                // This is not strictly necessary.  But for testing, it's
+                // helpful for things to be in sorted order.
+                zones.zones.sort_by_key(|zone| zone.id);
+
+                (sled_id, zones)
+            })
+            .collect()
     }
 }
 
@@ -782,6 +794,7 @@ pub mod test {
             let zpools = &policy.sleds.get(&sled_id).unwrap().zpools;
             let mut sled_ips =
                 std::iter::successors(Some(sled_ip.saturating_add(1)), |ip| {
+                    println!("sled_ips iterator: currently {ip:?}");
                     Some(ip.saturating_add(1))
                 });
             let zones: Vec<_> = std::iter::once({
@@ -829,8 +842,8 @@ pub mod test {
                     },
                 }
             }))
-            .chain(zpools.iter().enumerate().map(|(i, zpool_name)| {
-                let ip = sled_ip.saturating_add(u128::try_from(i + 2).unwrap());
+            .chain(zpools.iter().map(|zpool_name| {
+                let ip = sled_ips.next().unwrap();
                 OmicronZoneConfig {
                     id: Uuid::new_v4(),
                     underlay_address: ip,
@@ -889,6 +902,25 @@ pub mod test {
         sled_ip
     }
 
+    /// Checks various conditions that should be true for all blueprints
+    pub fn verify_blueprint(blueprint: &Blueprint) {
+        let mut underlay_ips: BTreeMap<Ipv6Addr, &OmicronZoneConfig> =
+            BTreeMap::new();
+        for sled_zones in blueprint.omicron_zones.values() {
+            for zone in &sled_zones.zones {
+                if let Some(previous) =
+                    underlay_ips.insert(zone.underlay_address, zone)
+                {
+                    panic!(
+                        "found duplicate underlay IP {} in zones {} and \
+                        {}\n\nblueprint: {:#?}",
+                        zone.underlay_address, zone.id, previous.id, blueprint
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
@@ -901,6 +933,7 @@ pub mod test {
                 "the_test",
             )
             .expect("failed to create initial blueprint");
+        verify_blueprint(&blueprint_initial);
 
         // Since collections don't include what was in service, we have to
         // provide that ourselves.  For our purposes though we don't care.
@@ -923,6 +956,7 @@ pub mod test {
         )
         .expect("failed to create builder");
         let blueprint = builder.build();
+        verify_blueprint(&blueprint);
         let diff = blueprint_initial.diff(&blueprint);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
@@ -942,6 +976,7 @@ pub mod test {
             "the_test",
         )
         .expect("failed to create initial blueprint");
+        verify_blueprint(&blueprint1);
 
         let mut builder =
             BlueprintBuilder::new_based_on(&blueprint1, &policy, "test_basic")
@@ -960,6 +995,7 @@ pub mod test {
         }
 
         let blueprint2 = builder.build();
+        verify_blueprint(&blueprint2);
         let diff = blueprint1.diff(&blueprint2);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
@@ -984,6 +1020,7 @@ pub mod test {
         }
 
         let blueprint3 = builder.build();
+        verify_blueprint(&blueprint3);
         let diff = blueprint2.diff(&blueprint3);
         println!("expecting new NTP and Crucible zones:\n{}", diff);
 

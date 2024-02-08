@@ -1435,12 +1435,13 @@ impl UpdatePane {
             Constraint::Length(cell_width),
             Constraint::Length(cell_width),
         ];
-        let header_table = Table::new(std::iter::empty(), &width_constraints)
-            .header(
-                Row::new(vec!["COMPONENT", "VERSION", "TARGET", "STATUS"])
-                    .style(header_style),
-            )
-            .block(block.clone().title("OVERVIEW (* = active)"));
+        let header_table =
+            Table::new(std::iter::empty::<Row>(), &width_constraints)
+                .header(
+                    Row::new(vec!["COMPONENT", "VERSION", "TARGET", "STATUS"])
+                        .style(header_style),
+                )
+                .block(block.clone().title("OVERVIEW (* = active)"));
         frame.render_widget(header_table, self.table_headers_rect);
 
         // For the selected item, draw the version table.
