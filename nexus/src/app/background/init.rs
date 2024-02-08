@@ -364,23 +364,17 @@ fn init_dns(
 
 #[cfg(test)]
 pub mod test {
-    use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::HandlerTaskMode;
     use nexus_db_model::DnsGroup;
-    use nexus_db_model::Generation;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
-    use nexus_types::internal_api::params::ServiceKind;
-    use omicron_common::api::external::DataPageParams;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
-    use std::num::NonZeroU32;
     use std::time::Duration;
     use tempfile::TempDir;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -439,10 +433,6 @@ pub mod test {
                 record => panic!("expected a SRV record for _nameservice._tcp, found {record:?}"),
             }
         };
-
-        // We'll need the id of the internal DNS zone.
-        let internal_dns_zone_id =
-            read_internal_dns_zone_id(&opctx, datastore).await;
 
         // Now spin up another DNS server, add it to the list of servers, and
         // make sure that DNS gets propagated to it. Note that we shouldn't
@@ -659,29 +649,5 @@ pub mod test {
             "test suite DNS update".to_string(),
             "test suite".to_string(),
         )
-    }
-
-    pub(crate) async fn read_internal_dns_zone_id(
-        opctx: &OpContext,
-        datastore: &DataStore,
-    ) -> Uuid {
-        let dns_zones = datastore
-            .dns_zones_list(
-                &opctx,
-                DnsGroup::Internal,
-                &DataPageParams {
-                    marker: None,
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: NonZeroU32::new(2).unwrap(),
-                },
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            dns_zones.len(),
-            1,
-            "expected exactly one internal DNS zone"
-        );
-        dns_zones[0].id
     }
 }

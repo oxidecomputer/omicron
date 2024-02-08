@@ -159,7 +159,6 @@ impl BackgroundTask for DnsConfigWatcher {
 mod test {
     use crate::app::background::common::BackgroundTask;
     use crate::app::background::dns_config::DnsConfigWatcher;
-    use crate::app::background::init::test::read_internal_dns_zone_id;
     use crate::app::background::init::test::write_test_dns_generation;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -197,8 +196,6 @@ mod test {
 
         // Now write generation 2, activate again, and verify that the update
         // was sent to the watcher.
-        let internal_dns_zone_id =
-            read_internal_dns_zone_id(&opctx, &datastore).await;
         write_test_dns_generation(&opctx, &datastore).await;
         assert_eq!(watcher.borrow().as_ref().unwrap().generation, 1);
         let value = task.activate(&opctx).await;
