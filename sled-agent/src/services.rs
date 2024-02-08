@@ -368,7 +368,13 @@ const ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 /// wants for all of its zones) with the locally-determined configuration for
 /// these zones.
 #[derive(
-    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub struct OmicronZonesConfigLocal {
     /// generation of the Omicron-provided part of the configuration
@@ -429,7 +435,13 @@ impl OmicronZonesConfigLocal {
 /// wants for this zone) with any locally-determined configuration (like the
 /// path to the root filesystem)
 #[derive(
-    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub struct OmicronZoneConfigLocal {
     pub zone: OmicronZoneConfig,
@@ -2896,6 +2908,12 @@ impl ServiceManager {
             ledger_generation,
             zones,
         };
+
+        // If the contents of the ledger would be identical, we can avoid
+        // performing an update and commit.
+        if *ledger_zone_config == new_config {
+            return Ok(());
+        }
 
         // Update the zones in the ledger and write it back to both M.2s
         *ledger_zone_config = new_config;
