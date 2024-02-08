@@ -614,3 +614,8 @@ branch = "oxide/omicron"
 # to it.
 [patch.crates-io.omicron-workspace-hack]
 path = "workspace-hack"
+
+# Pulls in https://github.com/njaremko/samael/pull/41
+[patch.crates-io.samael]
+git = "https://github.com/oxidecomputer/samael"
+branch = "oxide/omicron"
