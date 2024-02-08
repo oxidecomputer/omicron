@@ -14,6 +14,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -143,17 +144,17 @@ impl super::Nexus {
             .await
     }
 
-    /// Returns the old state.
-    pub(crate) async fn sled_set_provision_state(
+    /// Returns the old provision policy.
+    pub(crate) async fn sled_set_provision_policy(
         &self,
         opctx: &OpContext,
         sled_lookup: &lookup::Sled<'_>,
-        state: db::model::SledProvisionState,
-    ) -> Result<db::model::SledProvisionState, Error> {
+        new_policy: SledProvisionPolicy,
+    ) -> Result<SledProvisionPolicy, Error> {
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
-            .sled_set_provision_state(opctx, &authz_sled, state)
+            .sled_set_provision_policy(opctx, &authz_sled, new_policy)
             .await
     }
 

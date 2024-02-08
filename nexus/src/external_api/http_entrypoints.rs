@@ -5169,29 +5169,25 @@ async fn sled_view(
 async fn sled_set_provision_state(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SledPath>,
-    new_provision_state: TypedBody<params::SledProvisionStateParams>,
-) -> Result<HttpResponseOk<params::SledProvisionStateResponse>, HttpError> {
+    new_provision_state: TypedBody<params::SledProvisionPolicyParams>,
+) -> Result<HttpResponseOk<params::SledProvisionPolicyResponse>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
 
         let path = path_params.into_inner();
-        let provision_state = new_provision_state.into_inner().state;
+        let new_state = new_provision_state.into_inner().state;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        // Convert the external `SledProvisionState` into our internal data model.
-        let new_state = db::model::SledProvisionState::from(provision_state);
 
         let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
 
         let old_state = nexus
-            .sled_set_provision_state(&opctx, &sled_lookup, new_state)
+            .sled_set_provision_policy(&opctx, &sled_lookup, new_state)
             .await?;
 
-        let response = params::SledProvisionStateResponse {
-            old_state: old_state.into(),
-            new_state: new_state.into(),
-        };
+        let response =
+            params::SledProvisionPolicyResponse { old_state, new_state };
 
         Ok(HttpResponseOk(response))
     };

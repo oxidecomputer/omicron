@@ -48,10 +48,10 @@ pub static HARDWARE_SLED_URL: Lazy<String> =
 pub static HARDWARE_SLED_PROVISION_STATE_URL: Lazy<String> = Lazy::new(|| {
     format!("/v1/system/hardware/sleds/{}/provision-state", SLED_AGENT_UUID)
 });
-pub static DEMO_SLED_PROVISION_STATE: Lazy<params::SledProvisionStateParams> =
+pub static DEMO_SLED_PROVISION_STATE: Lazy<params::SledProvisionPolicyParams> =
     Lazy::new(|| {
-        params::SledProvisionStateParams {
-            state: nexus_types::external_api::views::SledProvisionState::NonProvisionable,
+        params::SledProvisionPolicyParams {
+            state: nexus_types::external_api::views::SledProvisionPolicy::NonProvisionable,
         }
     });
 

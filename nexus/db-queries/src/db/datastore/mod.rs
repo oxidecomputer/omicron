@@ -401,8 +401,8 @@ mod test {
     use crate::db::model::{
         BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
         PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
-        ServiceKind, SiloUser, SledBaseboard, SledProvisionState,
-        SledSystemHardware, SledUpdate, SshKey, VpcSubnet, Zpool,
+        ServiceKind, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
+        SshKey, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use chrono::{Duration, Utc};
@@ -411,6 +411,7 @@ mod test {
     use nexus_db_model::IpAttachState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
+    use nexus_types::external_api::views::SledProvisionPolicy;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::{
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
@@ -652,10 +653,10 @@ mod test {
             .unwrap();
         println!("sled: {:?}", sled);
         let old_state = datastore
-            .sled_set_provision_state(
+            .sled_set_provision_policy(
                 &opctx,
                 &authz_sled,
-                SledProvisionState::NonProvisionable,
+                SledProvisionPolicy::NonProvisionable,
             )
             .await
             .unwrap_or_else(|error| {
@@ -665,7 +666,7 @@ mod test {
             });
         // The old state should always be provisionable since that's where we
         // start.
-        assert_eq!(old_state, SledProvisionState::Provisionable);
+        assert_eq!(old_state, SledProvisionPolicy::Provisionable);
     }
 
     fn test_zpool_size() -> ByteCount {

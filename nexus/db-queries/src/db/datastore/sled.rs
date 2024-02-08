@@ -10,8 +10,10 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::model::to_db_sled_policy;
 use crate::db::model::Sled;
 use crate::db::model::SledResource;
+use crate::db::model::SledState;
 use crate::db::model::SledUpdate;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
@@ -19,6 +21,8 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -168,10 +172,11 @@ impl DataStore {
                                     .and(sled_has_space_in_reservoir),
                             )
                             .filter(sled_dsl::time_deleted.is_null())
-                            // Filter out sleds that are not provisionable.
-                            .filter(sled_dsl::provision_state.eq(
-                                db::model::SledProvisionState::Provisionable,
+                            // Ensure that the sled is in-service and active.
+                            .filter(sled_dsl::sled_policy.eq(
+                                to_db_sled_policy(SledPolicy::provisionable()),
                             ))
+                            .filter(sled_dsl::sled_state.eq(SledState::Active))
                             .select(sled_dsl::id)
                             .into_boxed();
 
@@ -243,26 +248,37 @@ impl DataStore {
         Ok(())
     }
 
-    /// Sets the provision state for this sled.
+    /// Sets the provision policy for this sled.
     ///
-    /// Returns the previous state.
-    pub async fn sled_set_provision_state(
+    /// Errors if the sled is not in service.
+    ///
+    /// Returns the previous policy.
+    pub async fn sled_set_provision_policy(
         &self,
         opctx: &OpContext,
         authz_sled: &authz::Sled,
-        state: db::model::SledProvisionState,
-    ) -> Result<db::model::SledProvisionState, external::Error> {
+        policy: SledProvisionPolicy,
+    ) -> Result<SledProvisionPolicy, external::Error> {
         use db::schema::sled::dsl;
 
         opctx.authorize(authz::Action::Modify, authz_sled).await?;
+
+        let new_policy = SledPolicy::InService { provision_policy: policy };
+        // The sled policy can only be changed if the current policy is one of
+        // the `in_service` ones. There are only two in_service policies
+        // possible at the moment.
+        let valid_old_policy =
+            SledPolicy::InService { provision_policy: policy.invert() };
 
         let sled_id = authz_sled.id();
         let query = diesel::update(dsl::sled)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(sled_id))
-            .filter(dsl::provision_state.ne(state))
+            .filter(dsl::sled_policy.eq(to_db_sled_policy(valid_old_policy)))
+            // Ensure that the sled is active.
+            .filter(dsl::sled_state.eq(SledState::Active))
             .set((
-                dsl::provision_state.eq(state),
+                dsl::sled_policy.eq(to_db_sled_policy(new_policy)),
                 dsl::time_modified.eq(Utc::now()),
             ))
             .check_if_exists::<Sled>(sled_id);
@@ -271,7 +287,178 @@ impl DataStore {
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(result.found.provision_state())
+        // There are three possibilities here:
+        // 1. The sled policy was the same as the valid old one, and was
+        //    updated.
+        // 2. The sled policy was the same as the updated one. The policy was
+        //    not updated, but this is fine because this method is idempotent.
+        // 3. The sled policy was something else. In that case, we should
+        //    return an error.
+        match result.found.policy() {
+            SledPolicy::InService { provision_policy } => Ok(provision_policy),
+            other @ SledPolicy::Expunged => {
+                Err(external::Error::conflict(format!(
+                    "the sled is {other}, and its \
+                     provision state cannot be changed"
+                )))
+            }
+        }
+    }
+
+    /// Marks a sled as expunged, as directed by the operator.
+    ///
+    /// This is an irreversible process! It should only be called after
+    /// sufficient warning to the operator.
+    ///
+    /// This is idempotent, and it returns the old policy of the sled.
+    ///
+    /// XXX: This, or the code that's calling it, needs to kick off the
+    /// blueprint planner.
+    pub async fn sled_set_policy_to_expunged(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+    ) -> Result<SledPolicy, external::Error> {
+        use db::schema::sled::dsl;
+
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+
+        let new_policy = SledPolicy::Expunged;
+        // The valid policies to transition from are the two in-service ones.
+        let valid_old_policies = [
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+        ]
+        .into_iter()
+        .map(to_db_sled_policy);
+
+        let sled_id = authz_sled.id();
+        let query = diesel::update(dsl::sled)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(sled_id))
+            .filter(dsl::sled_policy.eq_any(valid_old_policies))
+            // Ensure that the sled is active.
+            .filter(dsl::sled_state.eq(SledState::Active))
+            .set((
+                dsl::sled_policy.eq(to_db_sled_policy(new_policy)),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .check_if_exists::<Sled>(sled_id);
+
+        let result = query
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // There are two possibilities here:
+        // 1. The sled policy was one of the valid old ones (in-service), and
+        //    was updated.
+        // 2. The sled policy was already expunged. The policy was not updated,
+        //    but this is fine because this method is idempotent.
+        //
+        // In the future, when we add graceful sled removal, we'll need to
+        // ensure that graceful removal <-> expunged transitions are
+        // disallowed.
+        Ok(result.found.policy())
+    }
+
+    /// Marks the state of the sled as decommissioned, as believed by Nexus.
+    ///
+    /// This is an irreversible process! It should only be called after all
+    /// resources previously on the sled have been migrated over.
+    ///
+    /// This is idempotent, and it returns the old state of the sled.
+    ///
+    /// # Errors
+    ///
+    /// This method returns an error if the sled policy is not a state that is
+    /// valid to decommission from (i.e. if, for the current sled policy,
+    /// [`SledPolicy::is_decommissionable`] returns `false`).
+    pub async fn sled_set_state_to_decommissioned(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+    ) -> Result<SledState, external::Error> {
+        self.sled_set_state_to_decommissioned_inner(opctx, authz_sled, true)
+            .await
+    }
+
+    async fn sled_set_state_to_decommissioned_inner(
+        &self,
+        opctx: &OpContext,
+        authz_sled: &authz::Sled,
+        // check_decommissionable = false means illegal state transitions are
+        // possible -- this must only be called from test-only code.
+        check_decommissionable: bool,
+    ) -> Result<SledState, external::Error> {
+        use db::schema::sled::dsl;
+
+        #[cfg(not(test))]
+        {
+            if !check_decommissionable {
+                panic!("check_decommissionable = false is only allowed in test code")
+            }
+        }
+
+        opctx.authorize(authz::Action::Modify, authz_sled).await?;
+
+        let new_state = SledState::Decommissioned;
+        let sled_id = authz_sled.id();
+        let query = diesel::update(dsl::sled)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(sled_id))
+            .filter(dsl::sled_state.eq(SledState::Active));
+
+        let query = if check_decommissionable {
+            query
+                .filter(
+                    dsl::sled_policy.eq_any(
+                        SledPolicy::all_decommissionable()
+                            .into_iter()
+                            .map(|p| to_db_sled_policy(*p)),
+                    ),
+                )
+                .into_boxed()
+        } else {
+            query.into_boxed()
+        };
+
+        let query = query
+            .set((
+                dsl::sled_state.eq(new_state),
+                dsl::time_modified.eq(Utc::now()),
+            ))
+            .check_if_exists::<Sled>(sled_id);
+
+        let result = query
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // There are three possibilities here:
+        // 1. The sled state was active, and was updated.
+        // 2. The sled state was already decommissioned. The state was not
+        //    updated, but this is fine because this method is idempotent.
+        // 3. The sled policy was not expunged. If so, return an error.
+        match result.found.policy() {
+            SledPolicy::Expunged => Ok(result.found.state()),
+            other @ SledPolicy::InService { .. } => {
+                if check_decommissionable {
+                    Err(external::Error::conflict(format!(
+                        "the sled is {other}, and its state cannot be \
+                         decommissioned"
+                    )))
+                } else {
+                    // This is test-only code, so don't check if it is
+                    // in-service.
+                    Ok(result.found.state())
+                }
+            }
+        }
     }
 }
 
@@ -359,29 +546,61 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let sled_update = test_new_sled_update();
+        // Define some sleds that resources cannot be provisioned on.
         let non_provisionable_sled =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        set_provision_policy(
+            &opctx,
+            &datastore,
+            non_provisionable_sled.id(),
+            SledProvisionPolicy::NonProvisionable,
+            Ok(SledProvisionPolicy::Provisionable),
+        )
+        .await;
 
-        let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
-            .sled_id(non_provisionable_sled.id())
-            .fetch_for(authz::Action::Modify)
-            .await
-            .unwrap();
+        let expunged_sled =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        set_policy_to_expunged(
+            &opctx,
+            &datastore,
+            expunged_sled.id(),
+            Ok(SledPolicy::provisionable()),
+        )
+        .await;
 
-        let old_state = datastore
-            .sled_set_provision_state(
-                &opctx,
-                &authz_sled,
-                db::model::SledProvisionState::NonProvisionable,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            old_state,
-            db::model::SledProvisionState::Provisionable,
-            "a newly created sled starts as provisionable"
-        );
+        let decommissioned_sled =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        // Legally, we must set the policy to expunged before setting the state
+        // to decommissioned.
+        set_policy_to_expunged(
+            &opctx,
+            &datastore,
+            decommissioned_sled.id(),
+            Ok(SledPolicy::provisionable()),
+        )
+        .await;
+        set_state_to_decommissioned(
+            &opctx,
+            &datastore,
+            decommissioned_sled.id(),
+            true,
+            Ok(SledState::Active),
+        )
+        .await;
+
+        // This is _not_ a legal state, BUT we test it out to ensure that if
+        // the system somehow enters this state anyway, we don't try and
+        // provision resources on it.
+        let illegal_decommissioned_sled =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        set_state_to_decommissioned(
+            &opctx,
+            &datastore,
+            illegal_decommissioned_sled.id(),
+            false,
+            Ok(SledState::Active),
+        )
+        .await;
 
         // This should be an error since there are no provisionable sleds.
         let resources = db::model::Resources::new(
@@ -456,6 +675,107 @@ mod test {
         )
     }
 
+    async fn set_provision_policy(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        sled_id: Uuid,
+        new_policy: SledProvisionPolicy,
+        expected_old_policy: Result<SledProvisionPolicy, SetStateError>,
+    ) {
+        let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        let res = datastore
+            .sled_set_provision_policy(&opctx, &authz_sled, new_policy)
+            .await;
+        match expected_old_policy {
+            Ok(expected_old_policy) => {
+                assert_eq!(
+                    res,
+                    Ok(expected_old_policy),
+                    "actual old policy is not the same as expected"
+                );
+            }
+            Err(SetStateError::InvalidTransition) => {
+                let error = res
+                    .expect_err("expected an invalid state transition error");
+                // Invalid transitions are represented as conflicts.
+                assert!(matches!(error, external::Error::Conflict { .. }), "");
+            }
+        }
+    }
+
+    async fn set_policy_to_expunged(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        sled_id: Uuid,
+        expected_old_policy: Result<SledPolicy, SetStateError>,
+    ) {
+        let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        let res =
+            datastore.sled_set_policy_to_expunged(&opctx, &authz_sled).await;
+        match expected_old_policy {
+            Ok(expected_old_policy) => {
+                assert_eq!(
+                    res,
+                    Ok(expected_old_policy),
+                    "actual old policy is not the same as expected"
+                );
+            }
+            Err(SetStateError::InvalidTransition) => {
+                let error = res
+                    .expect_err("expected an invalid state transition error");
+                // Invalid transitions are represented as conflicts.
+                assert!(matches!(error, external::Error::Conflict { .. }), "");
+            }
+        }
+    }
+
+    async fn set_state_to_decommissioned(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        sled_id: Uuid,
+        check_decommissionable: bool,
+        expected_old_state: Result<SledState, SetStateError>,
+    ) {
+        let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
+            .sled_id(sled_id)
+            .fetch_for(authz::Action::Modify)
+            .await
+            .unwrap();
+
+        let res = datastore
+            .sled_set_state_to_decommissioned_inner(
+                &opctx,
+                &authz_sled,
+                check_decommissionable,
+            )
+            .await;
+        match expected_old_state {
+            Ok(expected_old_state) => {
+                assert_eq!(
+                    res,
+                    Ok(expected_old_state),
+                    "actual old policy is not the same as expected"
+                );
+            }
+            Err(SetStateError::InvalidTransition) => {
+                let error = res
+                    .expect_err("expected an invalid state transition error");
+                // Invalid transitions are represented as conflicts.
+                assert!(matches!(error, external::Error::Conflict { .. }), "");
+            }
+        }
+    }
+
     /// Returns pagination parameters to fetch the first page of results for a
     /// paginated endpoint
     fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
@@ -464,5 +784,10 @@ mod test {
             direction: dropshot::PaginationOrder::Ascending,
             limit,
         }
+    }
+
+    #[derive(Copy, Clone, Debug)]
+    enum SetStateError {
+        InvalidTransition,
     }
 }

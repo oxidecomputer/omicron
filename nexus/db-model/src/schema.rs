@@ -810,7 +810,8 @@ table! {
         ip -> Inet,
         port -> Int4,
         last_used_address -> Inet,
-        provision_state -> crate::SledProvisionStateEnum,
+        sled_policy -> crate::sled_policy::SledPolicyEnum,
+        sled_state -> crate::SledStateEnum,
     }
 }
 

@@ -4243,7 +4243,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SledProvisionStateParams"
+                "$ref": "#/components/schemas/SledProvisionPolicyParams"
               }
             }
           },
@@ -4255,7 +4255,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledProvisionStateResponse"
+                  "$ref": "#/components/schemas/SledProvisionPolicyResponse"
                 }
               }
             }
@@ -14842,7 +14842,7 @@
             "description": "The provision state of the sled.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledProvisionState"
+                "$ref": "#/components/schemas/SledProvisionPolicy"
               }
             ]
           },
@@ -14970,7 +14970,7 @@
           "items"
         ]
       },
-      "SledProvisionState": {
+      "SledProvisionPolicy": {
         "description": "The provision state of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
         "oneOf": [
           {
@@ -14989,7 +14989,7 @@
           }
         ]
       },
-      "SledProvisionStateParams": {
+      "SledProvisionPolicyParams": {
         "description": "Parameters for `sled_set_provision_state`.",
         "type": "object",
         "properties": {
@@ -14997,7 +14997,7 @@
             "description": "The provision state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledProvisionState"
+                "$ref": "#/components/schemas/SledProvisionPolicy"
               }
             ]
           }
@@ -15006,7 +15006,7 @@
           "state"
         ]
       },
-      "SledProvisionStateResponse": {
+      "SledProvisionPolicyResponse": {
         "description": "Response to `sled_set_provision_state`.",
         "type": "object",
         "properties": {
@@ -15014,7 +15014,7 @@
             "description": "The new provision state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledProvisionState"
+                "$ref": "#/components/schemas/SledProvisionPolicy"
               }
             ]
           },
@@ -15022,7 +15022,7 @@
             "description": "The old provision state.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledProvisionState"
+                "$ref": "#/components/schemas/SledProvisionPolicy"
               }
             ]
           }

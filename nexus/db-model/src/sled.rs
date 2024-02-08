@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, Generation, SqlU16, SqlU32};
+use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
+use crate::ipv6;
 use crate::schema::{physical_disk, service, sled, zpool};
-use crate::{ipv6, SledProvisionState};
+use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
 use nexus_types::{external_api::shared, external_api::views, identity::Asset};
@@ -60,7 +61,11 @@ pub struct Sled {
     /// The last IP address provided to a propolis instance on this sled
     pub last_used_address: ipv6::Ipv6Addr,
 
-    provision_state: SledProvisionState,
+    #[diesel(column_name = sled_policy)]
+    policy: DbSledPolicy,
+
+    #[diesel(column_name = sled_state)]
+    state: SledState,
 }
 
 impl Sled {
@@ -84,8 +89,15 @@ impl Sled {
         &self.serial_number
     }
 
-    pub fn provision_state(&self) -> SledProvisionState {
-        self.provision_state
+    /// The policy here is the `views::SledPolicy` because we expect external
+    /// users to always use that.
+    pub fn policy(&self) -> views::SledPolicy {
+        self.policy.into()
+    }
+
+    /// Returns the sled's state.
+    pub fn state(&self) -> SledState {
+        self.state
     }
 }
 
@@ -99,7 +111,9 @@ impl From<Sled> for views::Sled {
                 part: sled.part_number,
                 revision: sled.revision,
             },
-            provision_state: sled.provision_state.into(),
+            policy: sled.policy.into(),
+            provision_policy: sled.policy.to_provision_policy(),
+            state: sled.state.into(),
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
         }
@@ -197,8 +211,13 @@ impl SledUpdate {
             serial_number: self.serial_number,
             part_number: self.part_number,
             revision: self.revision,
-            // By default, sleds start as provisionable.
-            provision_state: SledProvisionState::Provisionable,
+            // By default, sleds start in-service.
+            policy: DbSledPolicy::InService,
+            // By default, sleds start in the "active" state.
+            //
+            // XXX In the future there probably needs to be an "uninitialized"
+            // state here.
+            state: SledState::Active,
             usable_hardware_threads: self.usable_hardware_threads,
             usable_physical_ram: self.usable_physical_ram,
             reservoir_size: self.reservoir_size,
