@@ -478,6 +478,10 @@ async fn spa_undo_ensure_switch_port_bootstore_network_settings(
     Ok(())
 }
 
+/// Update SMF properties in switch zones
+/// These SMF properties track which interfaces are uplinks. Networking
+/// services need this information to properly enable external communication
+/// during rack startup
 async fn spa_ensure_switch_port_uplink(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {

@@ -90,6 +90,9 @@ pub(crate) fn api_to_dpd_port_settings(
     Ok(dpd_port_settings)
 }
 
+/// This function updates the bootstore with the information required to provide external
+/// connectivity to the rack during cold boot. This should be called whenever changes
+/// to uplink configurations / external routing are made
 pub(crate) fn apply_bootstore_update(
     config: &mut EarlyNetworkConfig,
     update: &EarlyNetworkPortUpdate,
@@ -248,6 +251,10 @@ pub(crate) async fn bootstore_update(
     Ok(update)
 }
 
+/// Updates SMF properties in switch zone on scrimlets
+/// These SMF properties are used to notify rack networking services which
+/// ports are being used as uplinks, as they required additional configuration
+/// for external connectivity
 pub(crate) async fn ensure_switch_port_uplink(
     sagactx: NexusActionContext,
     opctx: &OpContext,
