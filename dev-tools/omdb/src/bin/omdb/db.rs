@@ -413,7 +413,7 @@ impl DbArgs {
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
         let datastore = Arc::new(
-            DataStore::new_unchecked(pool)
+            DataStore::new_unchecked(log.clone(), pool)
                 .map_err(|e| anyhow!(e).context("creating datastore"))?,
         );
         check_schema_version(&datastore).await;
