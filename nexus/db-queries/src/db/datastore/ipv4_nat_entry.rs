@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::sql_types::BigInt;
 use nexus_db_model::ExternalIp;
+use nexus_db_model::Ipv4NatChange;
 use nexus_db_model::Ipv4NatEntryView;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -317,10 +318,19 @@ impl DataStore {
         version: i64,
         limit: u32,
     ) -> ListResultVec<Ipv4NatEntryView> {
-        let nat_entries =
-            self.ipv4_nat_list_since_version(opctx, version, limit).await?;
+        use db::schema::ipv4_nat_changes::dsl;
+
+        let nat_changes = dsl::ipv4_nat_changes
+            .filter(dsl::version.gt(version))
+            .limit(limit as i64)
+            .order_by(dsl::version)
+            .select(Ipv4NatChange::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         let nat_entries: Vec<Ipv4NatEntryView> =
-            nat_entries.iter().map(|e| e.clone().into()).collect();
+            nat_changes.iter().map(|e| e.clone().into()).collect();
         Ok(nat_entries)
     }
 
@@ -367,7 +377,7 @@ fn ipv4_nat_next_version() -> diesel::expression::SqlLiteral<BigInt> {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use std::{net::Ipv4Addr, str::FromStr};
 
     use crate::db::datastore::datastore_test;
     use chrono::Utc;
@@ -375,6 +385,7 @@ mod test {
     use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
+    use rand::seq::IteratorRandom;
 
     // Test our ability to track additions and deletions since a given version number
     #[tokio::test]
@@ -798,6 +809,86 @@ mod test {
                 && entry.time_deleted.is_none()
                 && entry.version_removed.is_none()
         }));
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Test our ability to return a strict order of changes
+    #[tokio::test]
+    async fn ipv4_nat_changeset() {
+        let logctx = dev::test_setup_log("test_nat_version_tracking");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // We should not have any NAT entries at this moment
+        let initial_state =
+            datastore.ipv4_nat_list_since_version(&opctx, 0, 10).await.unwrap();
+
+        assert!(initial_state.is_empty());
+        assert_eq!(
+            datastore.ipv4_nat_current_version(&opctx).await.unwrap(),
+            0
+        );
+
+        let addresses = (0..=255).map(|i| {
+            let addr = Ipv4Addr::new(10, 0, 0, i);
+            let net = ipnetwork::Ipv4Network::new(addr, 32).unwrap();
+            external::Ipv4Net(net)
+        });
+
+        let sled_address = external::Ipv6Net(
+            ipnetwork::Ipv6Network::try_from("fd00:1122:3344:104::1").unwrap(),
+        );
+
+        let nat_entries = addresses.map(|external_address| {
+            // build a bunch of nat entries
+            Ipv4NatValues {
+                external_address: external_address.into(),
+                first_port: u16::MIN.into(),
+                last_port: u16::MAX.into(),
+                sled_address: sled_address.into(),
+                vni: Vni(external::Vni::random()),
+                mac: MacAddr(external::MacAddr::random_guest()),
+            }
+        });
+
+        let mut db_records = vec![];
+
+        // create the nat entries
+        for entry in nat_entries {
+            let result = datastore
+                .ensure_ipv4_nat_entry(&opctx, entry.clone())
+                .await
+                .unwrap();
+
+            db_records.push(result);
+        }
+
+        // delete a subset of the entries
+        for entry in
+            db_records.iter().choose_multiple(&mut rand::thread_rng(), 50)
+        {
+            datastore.ipv4_nat_delete(&opctx, entry).await.unwrap();
+        }
+
+        // ensure that the changeset is ordered
+        let mut version = 0;
+        let limit = 100;
+        let mut changes =
+            datastore.ipv4_nat_changeset(&opctx, version, limit).await.unwrap();
+
+        while !changes.is_empty() {
+            assert!(changes
+                .windows(2)
+                .all(|entries| entries[0].gen < entries[1].gen));
+
+            version = changes.last().unwrap().gen;
+            changes = datastore
+                .ipv4_nat_changeset(&opctx, version, limit)
+                .await
+                .unwrap();
+        }
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
