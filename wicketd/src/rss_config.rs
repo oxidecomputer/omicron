@@ -26,7 +26,6 @@ use gateway_client::types::SpType;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::Ipv4Range;
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use sled_hardware::Baseboard;
 use slog::warn;
 use std::collections::BTreeSet;
@@ -34,6 +33,7 @@ use std::mem;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
 // TODO-correctness For now, we always use the same rack subnet when running
 // RSS. When we get to multirack, this will be wrong, but there are many other
@@ -64,7 +64,7 @@ pub(crate) struct CurrentRssConfig {
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
     recovery_silo_password_hash: Option<omicron_passwords::NewPasswordHash>,
-    rack_network_config: Option<RackNetworkConfig>,
+    rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
 
     // External certificates are uploaded in two separate actions (cert then
     // key, or vice versa). Here we store a partial certificate; once we have
@@ -82,7 +82,9 @@ impl CurrentRssConfig {
         &self.ntp_servers
     }
 
-    pub(crate) fn rack_network_config(&self) -> Option<&RackNetworkConfig> {
+    pub(crate) fn user_specified_rack_network_config(
+        &self,
+    ) -> Option<&UserSpecifiedRackNetworkConfig> {
         self.rack_network_config.as_ref()
     }
 
@@ -252,7 +254,6 @@ impl CurrentRssConfig {
             .collect();
 
         let request = RackInitializeRequest {
-            rack_subnet: RACK_SUBNET,
             trust_quorum_peers,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyThese(
                 bootstrap_ips,
@@ -268,7 +269,7 @@ impl CurrentRssConfig {
                 user_name: UserId(RECOVERY_SILO_USERNAME.into()),
                 user_password_hash,
             },
-            rack_network_config: Some(rack_network_config),
+            rack_network_config,
         };
 
         Ok(request)
@@ -452,7 +453,7 @@ impl From<&'_ CurrentRssConfig> for CurrentRssUserConfig {
 }
 
 fn validate_rack_network_config(
-    config: &RackNetworkConfig,
+    config: &UserSpecifiedRackNetworkConfig,
 ) -> Result<bootstrap_agent_client::types::RackNetworkConfigV1> {
     use bootstrap_agent_client::types::BgpConfig as BaBgpConfig;
     use bootstrap_agent_client::types::BgpPeerConfig as BaBgpPeerConfig;
@@ -497,7 +498,7 @@ fn validate_rack_network_config(
     // TODO Add more client side checks on `rack_network_config` contents?
 
     Ok(bootstrap_agent_client::types::RackNetworkConfigV1 {
-        rack_subnet: config.rack_subnet,
+        rack_subnet: RACK_SUBNET.into(),
         infra_ip_first: config.infra_ip_first,
         infra_ip_last: config.infra_ip_last,
         ports: config

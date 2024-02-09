@@ -17,12 +17,16 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
+use nexus_types::inventory::Collection;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
@@ -37,18 +41,11 @@ use uuid::Uuid;
 // unsafe: `new_unchecked` is only unsound if the argument is 0.
 const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 
-/// "limit" used in SQL queries that fetch inventory data.  Unlike the batch
-/// size above, this is a limit on the *total* number of records returned.  If
-/// it's too small, the whole operation will fail.  See
-/// oxidecomputer/omicron#4629.
-// unsafe: `new_unchecked` is only unsound if the argument is 0.
-const SQL_LIMIT_INVENTORY: NonZeroU32 =
-    unsafe { NonZeroU32::new_unchecked(1000) };
-
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
     policy: Policy,
     creator: String,
+    inventory: Option<Collection>,
 }
 
 impl super::Nexus {
@@ -174,12 +171,66 @@ impl super::Nexus {
                 let zpools = zpools_by_sled_id
                     .remove(&sled_id)
                     .unwrap_or_else(BTreeSet::new);
-                let sled_info = SledResources { subnet, zpools };
+                let sled_info = SledResources {
+                    provision_state: sled_row.provision_state().into(),
+                    subnet,
+                    zpools,
+                };
                 (sled_id, sled_info)
             })
             .collect();
 
-        Ok(PlanningContext { creator, policy: Policy { sleds } })
+        let service_ip_pool_ranges = {
+            let (authz_service_ip_pool, _) =
+                datastore.ip_pools_service_lookup(opctx).await?;
+
+            let mut ip_ranges = Vec::new();
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = datastore
+                    .ip_pool_list_ranges(
+                        opctx,
+                        &authz_service_ip_pool,
+                        &p.current_pagparams(),
+                    )
+                    .await?;
+                // The use of `last_address` here assumes `paginator` is sorting
+                // in Ascending order (which it does - see the implementation of
+                // `current_pagparams()`).
+                paginator = p.found_batch(&batch, &|r| r.last_address);
+                ip_ranges.extend(batch.iter().map(IpRange::from));
+            }
+
+            ip_ranges
+        };
+
+        // The choice of which inventory collection to use here is not
+        // necessarily trivial.  Inventory collections may be incomplete due to
+        // transient (or even persistent) errors.  It's not yet clear what
+        // general criteria we'll want to use in picking a collection here.  But
+        // as of this writing, this is only used for one specific case, which is
+        // to implement a gate that prevents the planner from provisioning
+        // non-NTP zones on a sled unless we know there's an NTP zone already on
+        // that sled.  For that purpose, it's okay if this collection is
+        // incomplete due to a transient error -- that would just prevent
+        // forward progress in the planner until the next time we try this.
+        // (Critically, it won't cause the planner to do anything wrong.)
+        let inventory = datastore
+            .inventory_get_latest_collection(opctx)
+            .await
+            .internal_context(
+                "fetching latest inventory collection for blueprint planner",
+            )?;
+
+        Ok(PlanningContext {
+            creator,
+            policy: Policy {
+                sleds,
+                service_ip_pool_ranges,
+                target_nexus_zone_count: NEXUS_REDUNDANCY,
+            },
+            inventory,
+        })
     }
 
     async fn blueprint_add(
@@ -197,11 +248,7 @@ impl super::Nexus {
     ) -> CreateResult<Blueprint> {
         let collection = self
             .datastore()
-            .inventory_collection_read_all_or_nothing(
-                opctx,
-                collection_id,
-                SQL_LIMIT_INVENTORY,
-            )
+            .inventory_collection_read(opctx, collection_id)
             .await?;
         let planning_context = self.blueprint_planning_context(opctx).await?;
         let blueprint = BlueprintBuilder::build_initial_from_collection(
@@ -234,12 +281,21 @@ impl super::Nexus {
         };
 
         let planning_context = self.blueprint_planning_context(opctx).await?;
+        let inventory = planning_context.inventory.ok_or_else(|| {
+            Error::internal_error("no recent inventory collection found")
+        })?;
         let planner = Planner::new_based_on(
             opctx.log.clone(),
             &parent_blueprint,
             &planning_context.policy,
             &planning_context.creator,
-        );
+            &inventory,
+        )
+        .map_err(|error| {
+            Error::internal_error(&format!(
+                "error creating blueprint planner: {error:#}",
+            ))
+        })?;
         let blueprint = planner.plan().map_err(|error| {
             Error::internal_error(&format!(
                 "error generating blueprint: {}",

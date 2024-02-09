@@ -6,8 +6,8 @@
 
 use omicron_package::{parse, BuildCommand, DeployCommand};
 
+use camino::{Utf8Path, Utf8PathBuf};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result};
@@ -20,7 +20,7 @@ use thiserror::Error;
 #[derive(Deserialize, Debug)]
 struct Builder {
     server: String,
-    omicron_path: PathBuf,
+    omicron_path: Utf8PathBuf,
 }
 
 // A server on which an omicron package is deployed.
@@ -33,19 +33,19 @@ struct Server {
 #[derive(Deserialize, Debug)]
 struct Deployment {
     rss_server: String,
-    staging_dir: PathBuf,
+    staging_dir: Utf8PathBuf,
     servers: BTreeSet<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    omicron_path: PathBuf,
+    omicron_path: Utf8PathBuf,
     builder: Builder,
     servers: BTreeMap<String, Server>,
     deployment: Deployment,
 
     #[serde(default)]
-    rss_config_path: Option<PathBuf>,
+    rss_config_path: Option<Utf8PathBuf>,
 
     #[serde(default)]
     debug: bool,
@@ -129,7 +129,7 @@ struct Args {
         help = "Path to deployment manifest toml file",
         action
     )]
-    config: PathBuf,
+    config: Utf8PathBuf,
 
     #[clap(
         short,
@@ -140,7 +140,7 @@ struct Args {
 
     /// The output directory, where artifacts should be built and staged
     #[clap(long = "artifacts", default_value = "out/")]
-    artifact_dir: PathBuf,
+    artifact_dir: Utf8PathBuf,
 
     #[clap(subcommand)]
     subcommand: SubCommand,
@@ -151,11 +151,6 @@ struct Args {
 enum FlingError {
     #[error("Servers not listed in configuration: {0:?}")]
     InvalidServers(Vec<String>),
-
-    /// The parameter should be the name of the argument that could not be
-    /// properly converted to a string.
-    #[error("{0} is not valid UTF-8")]
-    BadString(String),
 
     /// Failed to rsync omicron to build host
     #[error("Failed to sync {src} with {dst}")]
@@ -238,20 +233,14 @@ fn do_sync(config: &Config) -> Result<()> {
     // trailing slash.
     let src = format!(
         "{}/",
-        config
-            .omicron_path
-            .canonicalize()
-            .with_context(|| format!(
-                "could not canonicalize {}",
-                config.omicron_path.display()
-            ))?
-            .to_string_lossy()
+        config.omicron_path.canonicalize_utf8().with_context(|| format!(
+            "could not canonicalize {}",
+            config.omicron_path
+        ))?
     );
     let dst = format!(
         "{}@{}:{}",
-        builder.username,
-        builder.addr,
-        config.builder.omicron_path.to_str().unwrap()
+        builder.username, builder.addr, config.builder.omicron_path
     );
 
     println!("Synchronizing source files to: {}", dst);
@@ -301,9 +290,7 @@ fn copy_to_deployment_staging_dir(
         || {
             let dst = format!(
                 "{}@{}:{}",
-                server.username,
-                server.addr,
-                config.deployment.staging_dir.to_str().unwrap()
+                server.username, server.addr, config.deployment.staging_dir
             );
             let mut cmd = partial_cmd();
             cmd.arg(&dst);
@@ -330,14 +317,10 @@ fn rsync_config_needed_for_tools(config: &Config) -> Result<()> {
         // the `./` here is load-bearing; it interacts with `--relative` to tell
         // rsync to create `smf/sled-agent` but none of its parents
         "{}/./smf/sled-agent/",
-        config
-            .omicron_path
-            .canonicalize()
-            .with_context(|| format!(
-                "could not canonicalize {}",
-                config.omicron_path.display()
-            ))?
-            .to_string_lossy()
+        config.omicron_path.canonicalize_utf8().with_context(|| format!(
+            "could not canonicalize {}",
+            config.omicron_path
+        ))?
     );
 
     copy_to_deployment_staging_dir(config, src, "Copy smf/sled-agent dir")
@@ -351,14 +334,10 @@ fn rsync_tools_dir_to_deployment_servers(config: &Config) -> Result<()> {
         // the `./` here is load-bearing; it interacts with `--relative` to tell
         // rsync to create `tools` but none of its parents
         "{}/./tools/",
-        config
-            .omicron_path
-            .canonicalize()
-            .with_context(|| format!(
-                "could not canonicalize {}",
-                config.omicron_path.display()
-            ))?
-            .to_string_lossy()
+        config.omicron_path.canonicalize_utf8().with_context(|| format!(
+            "could not canonicalize {}",
+            config.omicron_path
+        ))?
     );
     copy_to_deployment_staging_dir(config, src, "Copy tools dir")
 }
@@ -405,7 +384,7 @@ fn do_install_prereqs(config: &Config) -> Result<()> {
 
             let cmd = format!(
                 "cd {} && mkdir -p out && pfexec ./tools/{}",
-                root_path.display(),
+                root_path.clone(),
                 script
             );
             println!(
@@ -426,7 +405,7 @@ fn create_external_tls_cert_on_builder(config: &Config) -> Result<()> {
     let builder = &config.servers[&config.builder.server];
     let cmd = format!(
         "cd {} && ./tools/create_self_signed_cert.sh",
-        config.builder.omicron_path.to_string_lossy()
+        config.builder.omicron_path,
     );
     ssh_exec(&builder, &cmd, SshStrategy::NoForward)
 }
@@ -434,7 +413,7 @@ fn create_external_tls_cert_on_builder(config: &Config) -> Result<()> {
 fn create_virtual_hardware_on_deployment_servers(config: &Config) {
     let cmd = format!(
         "cd {} && pfexec ./tools/create_virtual_hardware.sh",
-        config.deployment.staging_dir.display()
+        config.deployment.staging_dir
     );
     let fns = config.deployment_servers().map(|server| {
         || {
@@ -464,7 +443,7 @@ fn do_build_minimal(config: &Config) -> Result<()> {
     let server = &config.servers[&config.builder.server];
     let cmd = format!(
         "cd {} && cargo build {} -p {} -p {}",
-        config.builder.omicron_path.to_string_lossy(),
+        config.builder.omicron_path,
         config.release_arg(),
         "omicron-package",
         "omicron-deploy"
@@ -472,11 +451,8 @@ fn do_build_minimal(config: &Config) -> Result<()> {
     ssh_exec(&server, &cmd, SshStrategy::NoForward)
 }
 
-fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
+fn do_package(config: &Config, artifact_dir: Utf8PathBuf) -> Result<()> {
     let builder = &config.servers[&config.builder.server];
-    let artifact_dir = artifact_dir
-        .to_str()
-        .ok_or_else(|| FlingError::BadString("artifact_dir".to_string()))?;
 
     // We use a bash login shell to get a proper environment, so we have a path to
     // postgres, and $DEP_PQ_LIBDIRS is filled in. This is required for building
@@ -487,9 +463,9 @@ fn do_package(config: &Config, artifact_dir: PathBuf) -> Result<()> {
         "bash -lc \
             'cd {} && \
              cargo run {} --bin omicron-package -- package --out {}'",
-        config.builder.omicron_path.to_string_lossy(),
+        config.builder.omicron_path,
         config.release_arg(),
-        &artifact_dir,
+        artifact_dir,
     );
 
     ssh_exec(&builder, &cmd, SshStrategy::NoForward)
@@ -506,7 +482,7 @@ fn do_check(config: &Config) -> Result<()> {
         "bash -lc \
             'cd {} && \
              cargo run {} --bin omicron-package -- check'",
-        config.builder.omicron_path.to_string_lossy(),
+        config.builder.omicron_path,
         config.release_arg(),
     );
 
@@ -521,7 +497,7 @@ fn do_uninstall(config: &Config) -> Result<()> {
         // Run `omicron-package uninstall` on the deployment server
         let cmd = format!(
             "cd {} && pfexec ./omicron-package uninstall",
-            config.deployment.staging_dir.to_string_lossy(),
+            config.deployment.staging_dir,
         );
         println!("$ {}", cmd);
         ssh_exec(&server, &cmd, SshStrategy::Forward)?;
@@ -531,10 +507,10 @@ fn do_uninstall(config: &Config) -> Result<()> {
 
 fn do_clean(
     config: &Config,
-    artifact_dir: PathBuf,
-    install_dir: PathBuf,
+    artifact_dir: Utf8PathBuf,
+    install_dir: Utf8PathBuf,
 ) -> Result<()> {
-    let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
+    let mut deployment_src = Utf8PathBuf::from(&config.deployment.staging_dir);
     deployment_src.push(&artifact_dir);
     let builder = &config.servers[&config.builder.server];
     for server in config.deployment_servers() {
@@ -543,9 +519,7 @@ fn do_clean(
         // Run `omicron-package uninstall` on the deployment server
         let cmd = format!(
             "cd {} && pfexec ./omicron-package clean --in {} --out {}",
-            config.deployment.staging_dir.to_string_lossy(),
-            deployment_src.to_string_lossy(),
-            install_dir.to_string_lossy()
+            config.deployment.staging_dir, deployment_src, install_dir,
         );
         println!("$ {}", cmd);
         ssh_exec(&server, &cmd, SshStrategy::Forward)?;
@@ -586,12 +560,14 @@ where
     .unwrap();
 }
 
-fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
+fn do_install(
+    config: &Config,
+    artifact_dir: &Utf8Path,
+    install_dir: &Utf8Path,
+) {
     let builder = &config.servers[&config.builder.server];
-    let mut pkg_dir = PathBuf::from(&config.builder.omicron_path);
+    let mut pkg_dir = Utf8PathBuf::from(&config.builder.omicron_path);
     pkg_dir.push(artifact_dir);
-    let pkg_dir = pkg_dir.to_string_lossy();
-    let pkg_dir = &pkg_dir;
 
     let fns = config.deployment.servers.iter().map(|server_name| {
         (server_name, || {
@@ -599,7 +575,7 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
                 config,
                 &artifact_dir,
                 &install_dir,
-                &pkg_dir,
+                pkg_dir.as_str(),
                 builder,
                 server_name,
             )
@@ -611,7 +587,7 @@ fn do_install(config: &Config, artifact_dir: &Path, install_dir: &Path) {
 
 fn do_overlay(config: &Config) -> Result<()> {
     let builder = &config.servers[&config.builder.server];
-    let mut root_path = PathBuf::from(&config.builder.omicron_path);
+    let mut root_path = Utf8PathBuf::from(&config.builder.omicron_path);
     // TODO: This needs to match the artifact_dir in `package`
     root_path.push("out/overlay");
 
@@ -649,7 +625,7 @@ fn do_overlay(config: &Config) -> Result<()> {
 fn overlay_rss_config(
     builder: &Server,
     config: &Config,
-    rss_server_dir: &Path,
+    rss_server_dir: &Utf8Path,
 ) -> Result<()> {
     // Sync `config-rss.toml` to the directory for the RSS server on the
     // builder.
@@ -660,9 +636,7 @@ fn overlay_rss_config(
     };
     let dst = format!(
         "{}@{}:{}/config-rss.toml",
-        builder.username,
-        builder.addr,
-        rss_server_dir.display()
+        builder.username, builder.addr, rss_server_dir
     );
 
     let mut cmd = rsync_common();
@@ -671,11 +645,7 @@ fn overlay_rss_config(
     let status =
         cmd.status().context(format!("Failed to run command: ({:?})", cmd))?;
     if !status.success() {
-        return Err(FlingError::FailedSync {
-            src: src.to_string_lossy().to_string(),
-            dst,
-        }
-        .into());
+        return Err(FlingError::FailedSync { src: src.to_string(), dst }.into());
     }
 
     Ok(())
@@ -683,8 +653,8 @@ fn overlay_rss_config(
 
 fn single_server_install(
     config: &Config,
-    artifact_dir: &Path,
-    install_dir: &Path,
+    artifact_dir: &Utf8Path,
+    install_dir: &Utf8Path,
     pkg_dir: &str,
     builder: &Server,
     server_name: &str,
@@ -757,7 +727,7 @@ fn copy_package_artifacts_to_staging(
         pkg_dir,
         destination.username,
         destination.addr,
-        config.deployment.staging_dir.to_string_lossy()
+        config.deployment.staging_dir
     );
     println!("$ {}", cmd);
     ssh_exec(builder, &cmd, SshStrategy::Forward)
@@ -768,17 +738,17 @@ fn copy_omicron_package_binary_to_staging(
     builder: &Server,
     destination: &Server,
 ) -> Result<()> {
-    let mut bin_path = PathBuf::from(&config.builder.omicron_path);
+    let mut bin_path = Utf8PathBuf::from(&config.builder.omicron_path);
     bin_path.push(format!(
         "target/{}/omicron-package",
         if config.debug { "debug" } else { "release" }
     ));
     let cmd = format!(
         "rsync -avz {} {}@{}:{}",
-        bin_path.to_string_lossy(),
+        bin_path,
         destination.username,
         destination.addr,
-        config.deployment.staging_dir.to_string_lossy()
+        config.deployment.staging_dir
     );
     println!("$ {}", cmd);
     ssh_exec(builder, &cmd, SshStrategy::Forward)
@@ -789,14 +759,14 @@ fn copy_package_manifest_to_staging(
     builder: &Server,
     destination: &Server,
 ) -> Result<()> {
-    let mut path = PathBuf::from(&config.builder.omicron_path);
+    let mut path = Utf8PathBuf::from(&config.builder.omicron_path);
     path.push("package-manifest.toml");
     let cmd = format!(
         "rsync {} {}@{}:{}",
-        path.to_string_lossy(),
+        path,
         destination.username,
         destination.addr,
-        config.deployment.staging_dir.to_string_lossy()
+        config.deployment.staging_dir
     );
     println!("$ {}", cmd);
     ssh_exec(builder, &cmd, SshStrategy::Forward)
@@ -805,13 +775,12 @@ fn copy_package_manifest_to_staging(
 fn run_omicron_package_activate_from_staging(
     config: &Config,
     destination: &Server,
-    install_dir: &Path,
+    install_dir: &Utf8Path,
 ) -> Result<()> {
     // Run `omicron-package activate` on the deployment server
     let cmd = format!(
         "cd {} && pfexec ./omicron-package activate --out {}",
-        config.deployment.staging_dir.to_string_lossy(),
-        install_dir.to_string_lossy(),
+        config.deployment.staging_dir, install_dir,
     );
 
     println!("$ {}", cmd);
@@ -821,18 +790,16 @@ fn run_omicron_package_activate_from_staging(
 fn run_omicron_package_unpack_from_staging(
     config: &Config,
     destination: &Server,
-    artifact_dir: &Path,
-    install_dir: &Path,
+    artifact_dir: &Utf8Path,
+    install_dir: &Utf8Path,
 ) -> Result<()> {
-    let mut deployment_src = PathBuf::from(&config.deployment.staging_dir);
+    let mut deployment_src = Utf8PathBuf::from(&config.deployment.staging_dir);
     deployment_src.push(&artifact_dir);
 
     // Run `omicron-package unpack` on the deployment server
     let cmd = format!(
         "cd {} && pfexec ./omicron-package unpack --in {} --out {}",
-        config.deployment.staging_dir.to_string_lossy(),
-        deployment_src.to_string_lossy(),
-        install_dir.to_string_lossy(),
+        config.deployment.staging_dir, deployment_src, install_dir,
     );
 
     println!("$ {}", cmd);
@@ -852,7 +819,7 @@ fn copy_overlay_files_to_staging(
         destination_name,
         destination.username,
         destination.addr,
-        config.deployment.staging_dir.to_string_lossy()
+        config.deployment.staging_dir
     );
     println!("$ {}", cmd);
     ssh_exec(builder, &cmd, SshStrategy::Forward)
@@ -861,12 +828,11 @@ fn copy_overlay_files_to_staging(
 fn install_overlay_files_from_staging(
     config: &Config,
     destination: &Server,
-    install_dir: &Path,
+    install_dir: &Utf8Path,
 ) -> Result<()> {
     let cmd = format!(
         "pfexec cp -r {}/overlay/* {}",
-        config.deployment.staging_dir.to_string_lossy(),
-        install_dir.to_string_lossy()
+        config.deployment.staging_dir, install_dir
     );
     println!("$ {}", cmd);
     ssh_exec(&destination, &cmd, SshStrategy::NoForward)
@@ -925,7 +891,7 @@ fn validate_servers(
 }
 
 fn validate_absolute_path(
-    path: &Path,
+    path: &Utf8Path,
     field: &'static str,
 ) -> Result<(), FlingError> {
     if path.is_absolute() || path.starts_with("$HOME") {
@@ -970,7 +936,7 @@ fn main() -> Result<()> {
         SubCommand::Builder(BuildCommand::Target { .. }) => {
             todo!("Setting target not supported through thing-flinger")
         }
-        SubCommand::Builder(BuildCommand::Package) => {
+        SubCommand::Builder(BuildCommand::Package { .. }) => {
             do_package(&config, args.artifact_dir)?;
         }
         SubCommand::Builder(BuildCommand::Stamp { .. }) => {

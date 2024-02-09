@@ -17,6 +17,7 @@ use steno::ActionContext;
 use steno::ActionError;
 use steno::SagaType;
 use thiserror::Error;
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub mod disk_create;
@@ -407,4 +408,24 @@ where
         },
     )
     .await
+}
+
+/// Reliable persistent workflows can request that sagas be run as part of their
+/// activation by sending a SagaRequest through a supplied channel to Nexus.
+pub enum SagaRequest {
+    #[cfg(test)]
+    TestOnly,
+}
+
+impl SagaRequest {
+    pub fn channel() -> (mpsc::Sender<SagaRequest>, mpsc::Receiver<SagaRequest>)
+    {
+        // Limit the maximum number of saga requests that background tasks can
+        // queue for Nexus to run.
+        //
+        // Note this value was chosen arbitrarily!
+        const MAX_QUEUED_SAGA_REQUESTS: usize = 128;
+
+        mpsc::channel(MAX_QUEUED_SAGA_REQUESTS)
+    }
 }

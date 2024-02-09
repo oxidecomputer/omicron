@@ -160,6 +160,8 @@ pub struct DbFetchOptions {
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand)]
 enum DbCommands {
+    /// Print information about the rack
+    Rack(RackArgs),
     /// Print information about disks
     Disks(DiskArgs),
     /// Print information about internal and external DNS
@@ -178,6 +180,18 @@ enum DbCommands {
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
     Validate(ValidateArgs),
+}
+
+#[derive(Debug, Args)]
+struct RackArgs {
+    #[command(subcommand)]
+    command: RackCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RackCommands {
+    /// Summarize current racks
+    List,
 }
 
 #[derive(Debug, Args)]
@@ -399,13 +413,16 @@ impl DbArgs {
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
         let datastore = Arc::new(
-            DataStore::new_unchecked(pool)
+            DataStore::new_unchecked(log.clone(), pool)
                 .map_err(|e| anyhow!(e).context("creating datastore"))?,
         );
         check_schema_version(&datastore).await;
 
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         match &self.command {
+            DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
+                cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
+            }
             DbCommands::Disks(DiskArgs {
                 command: DiskCommands::Info(uuid),
             }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
@@ -609,6 +626,50 @@ async fn cmd_db_disk_list(
             None => "-".to_string(),
         },
     });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db rack info`.
+async fn cmd_db_rack_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RackRow {
+        id: String,
+        initialized: bool,
+        tuf_base_url: String,
+        rack_subnet: String,
+    }
+
+    let ctx = || "listing racks".to_string();
+
+    let limit = fetch_opts.fetch_limit;
+    let rack_list = datastore
+        .rack_list(opctx, &first_page(limit))
+        .await
+        .context("listing racks")?;
+    check_limit(&rack_list, limit, ctx);
+
+    let rows = rack_list.into_iter().map(|rack| RackRow {
+        id: rack.id().to_string(),
+        initialized: rack.initialized,
+        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
+        rack_subnet: rack
+            .rack_subnet
+            .map(|subnet| subnet.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+    });
+
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -2291,7 +2352,6 @@ async fn cmd_db_inventory(
                 opctx,
                 datastore,
                 id,
-                limit,
                 long_string_formatter,
             )
             .await
@@ -2496,16 +2556,12 @@ async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
     id: Uuid,
-    limit: NonZeroU32,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
-    let (collection, incomplete) = datastore
-        .inventory_collection_read_best_effort(opctx, id, limit)
+    let collection = datastore
+        .inventory_collection_read(opctx, id)
         .await
         .context("reading collection")?;
-    if incomplete {
-        limit_error(limit, || "loading collection");
-    }
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;

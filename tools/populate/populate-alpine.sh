@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Simple script to install the alpine image included with propolis.
 
 if ! oxide api /v1/images > /dev/null; then

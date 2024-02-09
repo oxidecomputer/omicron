@@ -15,7 +15,7 @@ use crate::trust_quorum::RackSecret;
 use camino::Utf8PathBuf;
 use derive_more::From;
 use sled_hardware::Baseboard;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{error, info, o, warn, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{SocketAddr, SocketAddrV6};
 use std::time::Duration;
@@ -647,7 +647,7 @@ impl Node {
             .iter()
             .filter(|(id, _)| Some(*id) != excluded_peer)
         {
-            debug!(
+            info!(
                 self.log,
                 "Sending network config with generation {} to {id}",
                 network_config.generation
@@ -684,7 +684,7 @@ impl Node {
             if let Some(conn_handle) =
                 self.established_connections.get(&envelope.to)
             {
-                debug!(
+                info!(
                     self.log,
                     "Sending {:?} to {}", envelope.msg, envelope.to
                 );
@@ -924,6 +924,7 @@ impl Node {
                 self.fsm.on_disconnected(&peer_id);
             }
             ConnToMainMsgInner::Received { from, msg } => {
+                info!(self.log, "Received {msg:?} from {from}");
                 match self.fsm.handle_msg(Instant::now().into(), from, msg) {
                     Ok(None) => (),
                     Ok(Some(api_output)) => {

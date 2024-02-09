@@ -1940,10 +1940,11 @@ mod test {
                 },
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(1),
-                hostname: String::from("base_instance"),
+                hostname: "base-instance".parse().unwrap(),
                 user_data:
                     b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                         .to_vec(),
+                ssh_public_keys:  Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 disks: disks_to_attach,

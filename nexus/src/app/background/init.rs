@@ -4,6 +4,9 @@
 
 //! Background task initialization
 
+use super::bfd;
+use super::blueprint_execution;
+use super::blueprint_load;
 use super::common;
 use super::dns_config;
 use super::dns_propagation;
@@ -12,7 +15,9 @@ use super::external_endpoints;
 use super::inventory_collection;
 use super::nat_cleanup;
 use super::phantom_disks;
+use super::region_replacement;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
+use crate::app::sagas::SagaRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -22,6 +27,7 @@ use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
 
 /// Describes ongoing background tasks and provides interfaces for working with
@@ -52,25 +58,41 @@ pub struct BackgroundTasks {
     /// task handle for the ipv4 nat entry garbage collector
     pub nat_cleanup: common::TaskHandle,
 
+    /// task handle for the switch bfd manager
+    pub bfd_manager: common::TaskHandle,
+
     /// task handle for the task that collects inventory
     pub task_inventory_collection: common::TaskHandle,
 
     /// task handle for the task that detects phantom disks
     pub task_phantom_disks: common::TaskHandle,
 
+    /// task handle for blueprint target loader
+    pub task_blueprint_loader: common::TaskHandle,
+
+    /// task handle for blueprint execution background task
+    pub task_blueprint_executor: common::TaskHandle,
+
     /// task handle for the service zone nat tracker
     pub task_service_zone_nat_tracker: common::TaskHandle,
+
+    /// task handle for the task that detects if regions need replacement and
+    /// begins the process
+    pub task_region_replacement: common::TaskHandle,
 }
 
 impl BackgroundTasks {
     /// Kick off all background tasks
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
         dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
+        mgd_clients: &HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
+        saga_request: Sender<SagaRequest>,
     ) -> BackgroundTasks {
         let mut driver = common::Driver::new();
 
@@ -110,8 +132,7 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
-        let dpd_clients: Vec<_> =
-            dpd_clients.values().map(|client| client.clone()).collect();
+        let dpd_clients: Vec<_> = dpd_clients.values().cloned().collect();
 
         let nat_cleanup = {
             driver.register(
@@ -124,6 +145,23 @@ impl BackgroundTasks {
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
                     datastore.clone(),
                     dpd_clients.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
+        let bfd_manager = {
+            driver.register(
+                "bfd_manager".to_string(),
+                String::from(
+                    "Manages bidirectional fowarding detection (BFD) \
+                    configuration on rack switches",
+                ),
+                config.bfd_manager.period_secs,
+                Box::new(bfd::BfdManager::new(
+                    datastore.clone(),
+                    mgd_clients.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -171,6 +209,33 @@ impl BackgroundTasks {
             task
         };
 
+        // Background task: blueprint loader
+        let blueprint_loader =
+            blueprint_load::TargetBlueprintLoader::new(datastore.clone());
+        let rx_blueprint = blueprint_loader.watcher();
+        let task_blueprint_loader = driver.register(
+            String::from("blueprint_loader"),
+            String::from("Loads the current target blueprint from the DB"),
+            config.blueprints.period_secs_load,
+            Box::new(blueprint_loader),
+            opctx.child(BTreeMap::new()),
+            vec![],
+        );
+
+        // Background task: blueprint executor
+        let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
+            datastore.clone(),
+            rx_blueprint.clone(),
+        );
+        let task_blueprint_executor = driver.register(
+            String::from("blueprint_executor"),
+            String::from("Executes the target blueprint"),
+            config.blueprints.period_secs_execute,
+            Box::new(blueprint_executor),
+            opctx.child(BTreeMap::new()),
+            vec![Box::new(rx_blueprint)],
+        );
+
         let task_service_zone_nat_tracker = {
             driver.register(
                 "service_zone_nat_tracker".to_string(),
@@ -187,6 +252,26 @@ impl BackgroundTasks {
             )
         };
 
+        // Background task: detect if a region needs replacement and begin the
+        // process
+        let task_region_replacement = {
+            let detector = region_replacement::RegionReplacementDetector::new(
+                datastore,
+                saga_request.clone(),
+            );
+
+            let task = driver.register(
+                String::from("region_replacement"),
+                String::from("detects if a region requires replacing and begins the process"),
+                config.region_replacement.period_secs,
+                Box::new(detector),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            );
+
+            task
+        };
+
         BackgroundTasks {
             driver,
             task_internal_dns_config,
@@ -196,9 +281,13 @@ impl BackgroundTasks {
             task_external_endpoints,
             external_endpoints,
             nat_cleanup,
+            bfd_manager,
             task_inventory_collection,
             task_phantom_disks,
+            task_blueprint_loader,
+            task_blueprint_executor,
             task_service_zone_nat_tracker,
+            task_region_replacement,
         }
     }
 

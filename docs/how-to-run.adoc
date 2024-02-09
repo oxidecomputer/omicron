@@ -277,7 +277,7 @@ The below example demonstrates a single static gateway route; in-depth explanati
 [rack_network_config]
 # An internal-only IPv6 address block which contains AZ-wide services.
 # This does not need to be changed.
-rack_subnet = "fd00:1122:3344:01::/56"
+rack_subnet = "fd00:1122:3344:0100::/56"
 # A range of IP addresses used by Boundary Services on the network.  In a real
 # system, these would be addresses of the uplink ports on the Sidecar.  With
 # softnpu, only one address is used.
@@ -298,7 +298,7 @@ routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
 # Addresses associated with this port.
 # For softnpu, an address within the "infra" block above that will be used for
 # the softnpu uplink port.  You can just pick the first address in that pool.
-addresses = ["192.168.1.30/32"]
+addresses = ["192.168.1.30/24"]
 # Name of the uplink port.  This should always be "qsfp0" when using softnpu.
 port = "qsfp0"
 # The speed of this port.

@@ -334,8 +334,14 @@ pub struct BackgroundTaskConfig {
     pub inventory: InventoryConfig,
     /// configuration for phantom disks task
     pub phantom_disks: PhantomDiskConfig,
+    /// configuration for blueprint related tasks
+    pub blueprints: BlueprintTasksConfig,
     /// configuration for service zone nat sync task
     pub sync_service_zone_nat: SyncServiceZoneNatConfig,
+    /// configuration for the bfd manager task
+    pub bfd_manager: BfdManagerConfig,
+    /// configuration for region replacement task
+    pub region_replacement: RegionReplacementConfig,
 }
 
 #[serde_as]
@@ -380,6 +386,14 @@ pub struct NatCleanupConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BfdManagerConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SyncServiceZoneNatConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
@@ -413,6 +427,28 @@ pub struct InventoryConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct PhantomDiskConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BlueprintTasksConfig {
+    /// period (in seconds) for periodic activations of the background task that
+    /// reads the latest target blueprint from the database
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_load: Duration,
+
+    /// period (in seconds) for periodic activations of the background task that
+    /// executes the latest target blueprint
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs_execute: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionReplacementConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -518,16 +554,16 @@ impl std::fmt::Display for SchemeName {
 mod test {
     use super::{
         default_techport_external_server_port, AuthnConfig,
-        BackgroundTaskConfig, Config, ConfigDropshotWithTls, ConsoleConfig,
-        Database, DeploymentConfig, DnsTasksConfig, DpdConfig,
-        ExternalEndpointsConfig, InternalDns, InventoryConfig, LoadError,
-        LoadErrorKind, MgdConfig, NatCleanupConfig, PackageConfig,
-        PhantomDiskConfig, SchemeName, TimeseriesDbConfig, Tunables,
-        UpdatesConfig,
+        BackgroundTaskConfig, BlueprintTasksConfig, Config,
+        ConfigDropshotWithTls, ConsoleConfig, Database, DeploymentConfig,
+        DnsTasksConfig, DpdConfig, ExternalEndpointsConfig, InternalDns,
+        InventoryConfig, LoadError, LoadErrorKind, MgdConfig, NatCleanupConfig,
+        PackageConfig, PhantomDiskConfig, RegionReplacementConfig, SchemeName,
+        TimeseriesDbConfig, Tunables, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
-    use crate::nexus_config::SyncServiceZoneNatConfig;
+    use crate::nexus_config::{BfdManagerConfig, SyncServiceZoneNatConfig};
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
@@ -672,11 +708,15 @@ mod test {
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
+            bfd_manager.period_secs = 30
             inventory.period_secs = 10
             inventory.nkeep = 11
             inventory.disable = false
             phantom_disks.period_secs = 30
+            blueprints.period_secs_load = 10
+            blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
+            region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -773,6 +813,9 @@ mod test {
                         nat_cleanup: NatCleanupConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        bfd_manager: BfdManagerConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                         inventory: InventoryConfig {
                             period_secs: Duration::from_secs(10),
                             nkeep: 11,
@@ -781,9 +824,16 @@ mod test {
                         phantom_disks: PhantomDiskConfig {
                             period_secs: Duration::from_secs(30),
                         },
+                        blueprints: BlueprintTasksConfig {
+                            period_secs_load: Duration::from_secs(10),
+                            period_secs_execute: Duration::from_secs(60)
+                        },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
-                        }
+                        },
+                        region_replacement: RegionReplacementConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -838,11 +888,15 @@ mod test {
             dns_external.max_concurrent_server_updates = 8
             external_endpoints.period_secs = 9
             nat_cleanup.period_secs = 30
+            bfd_manager.period_secs = 30
             inventory.period_secs = 10
             inventory.nkeep = 3
             inventory.disable = false
             phantom_disks.period_secs = 30
+            blueprints.period_secs_load = 10
+            blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
+            region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

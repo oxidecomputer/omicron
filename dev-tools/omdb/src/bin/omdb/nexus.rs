@@ -256,6 +256,8 @@ async fn cmd_nexus_background_tasks_show(
         "dns_servers_external",
         "dns_propagation_external",
         "nat_v4_garbage_collector",
+        "blueprint_loader",
+        "blueprint_executor",
     ] {
         if let Some(bgtask) = tasks.remove(name) {
             print_task(&bgtask);
@@ -634,6 +636,32 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 println!(
                     "    number of phantom disk delete errors: {}",
                     success.phantom_disk_deleted_err
+                );
+            }
+        };
+    } else if name == "region_replacement" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// how many region replacements were started ok
+            region_replacement_started_ok: usize,
+
+            /// how many region replacements could not be started
+            region_replacement_started_err: usize,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(success) => {
+                println!(
+                    "    number of region replacements started ok: {}",
+                    success.region_replacement_started_ok
+                );
+                println!(
+                    "    number of region replacement start errors: {}",
+                    success.region_replacement_started_err
                 );
             }
         };
