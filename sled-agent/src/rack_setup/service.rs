@@ -601,58 +601,55 @@ impl ServiceInner {
             .map(Into::into)
             .collect();
 
-        let rack_network_config = match &config.rack_network_config {
-            Some(config) => {
-                let value = NexusTypes::RackNetworkConfigV1 {
-                    rack_subnet: config.rack_subnet,
-                    infra_ip_first: config.infra_ip_first,
-                    infra_ip_last: config.infra_ip_last,
-                    ports: config
-                        .ports
-                        .iter()
-                        .map(|config| NexusTypes::PortConfigV1 {
-                            port: config.port.clone(),
-                            routes: config
-                                .routes
-                                .iter()
-                                .map(|r| NexusTypes::RouteConfig {
-                                    destination: r.destination,
-                                    nexthop: r.nexthop,
-                                })
-                                .collect(),
-                            addresses: config.addresses.clone(),
-                            switch: config.switch.into(),
-                            uplink_port_speed: config.uplink_port_speed.into(),
-                            uplink_port_fec: config.uplink_port_fec.into(),
-                            autoneg: config.autoneg,
-                            bgp_peers: config
-                                .bgp_peers
-                                .iter()
-                                .map(|b| NexusTypes::BgpPeerConfig {
-                                    addr: b.addr,
-                                    asn: b.asn,
-                                    port: b.port.clone(),
-                                    hold_time: b.hold_time,
-                                    connect_retry: b.connect_retry,
-                                    delay_open: b.delay_open,
-                                    idle_hold_time: b.idle_hold_time,
-                                    keepalive: b.keepalive,
-                                })
-                                .collect(),
-                        })
-                        .collect(),
-                    bgp: config
-                        .bgp
-                        .iter()
-                        .map(|config| NexusTypes::BgpConfig {
-                            asn: config.asn,
-                            originate: config.originate.clone(),
-                        })
-                        .collect(),
-                };
-                Some(value)
+        let rack_network_config = {
+            let config = &config.rack_network_config;
+            NexusTypes::RackNetworkConfigV1 {
+                rack_subnet: config.rack_subnet,
+                infra_ip_first: config.infra_ip_first,
+                infra_ip_last: config.infra_ip_last,
+                ports: config
+                    .ports
+                    .iter()
+                    .map(|config| NexusTypes::PortConfigV1 {
+                        port: config.port.clone(),
+                        routes: config
+                            .routes
+                            .iter()
+                            .map(|r| NexusTypes::RouteConfig {
+                                destination: r.destination,
+                                nexthop: r.nexthop,
+                            })
+                            .collect(),
+                        addresses: config.addresses.clone(),
+                        switch: config.switch.into(),
+                        uplink_port_speed: config.uplink_port_speed.into(),
+                        uplink_port_fec: config.uplink_port_fec.into(),
+                        autoneg: config.autoneg,
+                        bgp_peers: config
+                            .bgp_peers
+                            .iter()
+                            .map(|b| NexusTypes::BgpPeerConfig {
+                                addr: b.addr,
+                                asn: b.asn,
+                                port: b.port.clone(),
+                                hold_time: b.hold_time,
+                                connect_retry: b.connect_retry,
+                                delay_open: b.delay_open,
+                                idle_hold_time: b.idle_hold_time,
+                                keepalive: b.keepalive,
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                bgp: config
+                    .bgp
+                    .iter()
+                    .map(|config| NexusTypes::BgpConfig {
+                        asn: config.asn,
+                        originate: config.originate.clone(),
+                    })
+                    .collect(),
             }
-            None => None,
         };
 
         info!(self.log, "rack_network_config: {:#?}", rack_network_config);
@@ -868,14 +865,14 @@ impl ServiceInner {
         // - Enough peers to create a new plan (if one does not exist)
         let bootstrap_addrs = match &config.bootstrap_discovery {
             BootstrapAddressDiscovery::OnlyOurs => {
-                HashSet::from([local_bootstrap_agent.our_address()])
+                BTreeSet::from([local_bootstrap_agent.our_address()])
             }
             BootstrapAddressDiscovery::OnlyThese { addrs } => addrs.clone(),
         };
         let maybe_sled_plan =
             SledPlan::load(&self.log, storage_manager).await?;
         if let Some(plan) = &maybe_sled_plan {
-            let stored_peers: HashSet<Ipv6Addr> =
+            let stored_peers: BTreeSet<Ipv6Addr> =
                 plan.sleds.keys().map(|a| *a.ip()).collect();
             if stored_peers != bootstrap_addrs {
                 let e = concat!(
@@ -931,7 +928,7 @@ impl ServiceInner {
             schema_version: 1,
             body: EarlyNetworkConfigBody {
                 ntp_servers: config.ntp_servers.clone(),
-                rack_network_config: config.rack_network_config.clone(),
+                rack_network_config: Some(config.rack_network_config.clone()),
             },
         };
         info!(self.log, "Writing Rack Network Configuration to bootstore");

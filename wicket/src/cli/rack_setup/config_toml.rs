@@ -19,7 +19,7 @@ use wicket_common::rack_update::SpType;
 use wicketd_client::types::BootstrapSledDescription;
 use wicketd_client::types::CurrentRssUserConfigInsensitive;
 use wicketd_client::types::IpRange;
-use wicketd_client::types::RackNetworkConfigV1;
+use wicketd_client::types::UserSpecifiedRackNetworkConfig;
 
 static TEMPLATE: &str = include_str!("config_template.toml");
 
@@ -176,7 +176,7 @@ fn build_sleds_array(sleds: &[BootstrapSledDescription]) -> Array {
 
 fn populate_network_table(
     table: &mut Table,
-    config: Option<&RackNetworkConfigV1>,
+    config: Option<&UserSpecifiedRackNetworkConfig>,
 ) {
     // Helper function to serialize enums into their appropriate string
     // representations.
@@ -195,7 +195,6 @@ fn populate_network_table(
     };
 
     for (property, value) in [
-        ("rack_subnet", config.rack_subnet.to_string()),
         ("infra_ip_first", config.infra_ip_first.to_string()),
         ("infra_ip_last", config.infra_ip_last.to_string()),
     ] {
@@ -350,7 +349,6 @@ fn populate_network_table(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use omicron_common::api::internal::shared::RackNetworkConfigV1 as InternalRackNetworkConfig;
     use std::net::Ipv6Addr;
     use wicket_common::rack_setup::PutRssUserConfigInsensitive;
     use wicket_common::rack_update::SpIdentifier;
@@ -373,6 +371,7 @@ mod tests {
         use omicron_common::api::internal::shared::PortSpeed as InternalPortSpeed;
         use omicron_common::api::internal::shared::RouteConfig as InternalRouteConfig;
         use omicron_common::api::internal::shared::SwitchLocation as InternalSwitchLocation;
+        use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig as InternalUserSpecifiedRackNetworkConfig;
 
         let rnc = value.rack_network_config.unwrap();
 
@@ -401,8 +400,7 @@ mod tests {
                 .collect(),
             external_dns_ips: value.external_dns_ips,
             ntp_servers: value.ntp_servers,
-            rack_network_config: InternalRackNetworkConfig {
-                rack_subnet: rnc.rack_subnet,
+            rack_network_config: InternalUserSpecifiedRackNetworkConfig {
                 infra_ip_first: rnc.infra_ip_first,
                 infra_ip_last: rnc.infra_ip_last,
                 ports: rnc
@@ -514,8 +512,7 @@ mod tests {
             )],
             external_dns_ips: vec!["10.0.0.1".parse().unwrap()],
             ntp_servers: vec!["ntp1.com".into(), "ntp2.com".into()],
-            rack_network_config: Some(RackNetworkConfigV1 {
-                rack_subnet: "fd00:1122:3344:01::/56".parse().unwrap(),
+            rack_network_config: Some(UserSpecifiedRackNetworkConfig {
                 infra_ip_first: "172.30.0.1".parse().unwrap(),
                 infra_ip_last: "172.30.0.10".parse().unwrap(),
                 ports: vec![PortConfigV1 {
