@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(33, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(33, 0, 1);
 
 table! {
     disk (id) {
@@ -546,7 +546,7 @@ table! {
     }
 }
 
-// View used for summarzing changes to ipv4_nat_entry
+// View used for summarizing changes to ipv4_nat_entry
 table! {
     ipv4_nat_changes (version) {
         external_address -> Inet,

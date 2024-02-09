@@ -872,16 +872,74 @@ mod test {
             datastore.ipv4_nat_delete(&opctx, entry).await.unwrap();
         }
 
-        // ensure that the changeset is ordered
+        // get the new state of all nat entries
+        // note that this is not the method under test
+        let db_records = datastore
+            .ipv4_nat_list_since_version(&opctx, 0, 300)
+            .await
+            .unwrap();
+
+        // ensure that the changeset is ordered, displaying the correct
+        // version numbers, and displaying the correct `deleted` status
         let mut version = 0;
         let limit = 100;
         let mut changes =
             datastore.ipv4_nat_changeset(&opctx, version, limit).await.unwrap();
 
         while !changes.is_empty() {
+            // check ordering
             assert!(changes
                 .windows(2)
                 .all(|entries| entries[0].gen < entries[1].gen));
+
+            // check deleted status and version numbers
+            changes.iter().for_each(|change| match change.deleted {
+                true => {
+                    // version should match a deleted entry
+                    let deleted_nat = db_records
+                        .iter()
+                        .find(|entry| entry.version_removed == Some(change.gen))
+                        .expect("did not find a deleted nat entry with a matching version number");
+
+                    assert_eq!(
+                        deleted_nat.external_address.ip(),
+                        change.external_address
+                    );
+                    assert_eq!(
+                        deleted_nat.first_port,
+                        change.first_port.into()
+                    );
+                    assert_eq!(deleted_nat.last_port, change.last_port.into());
+                    assert_eq!(
+                        deleted_nat.sled_address.ip(),
+                        change.sled_address
+                    );
+                    assert_eq!(*deleted_nat.mac, change.mac);
+                    assert_eq!(deleted_nat.vni.0, change.vni);
+                }
+                false => {
+                    // version should match an active nat entry
+                    let added_nat = db_records
+                        .iter()
+                        .find(|entry| entry.version_added == change.gen)
+                        .expect("did not find an active nat entry with a matching version number");
+
+                    assert!(added_nat.version_removed.is_none());
+
+                    assert_eq!(
+                        added_nat.external_address.ip(),
+                        change.external_address
+                    );
+                    assert_eq!(added_nat.first_port, change.first_port.into());
+                    assert_eq!(added_nat.last_port, change.last_port.into());
+                    assert_eq!(
+                        added_nat.sled_address.ip(),
+                        change.sled_address
+                    );
+                    assert_eq!(*added_nat.mac, change.mac);
+                    assert_eq!(added_nat.vni.0, change.vni);
+                }
+            });
 
             version = changes.last().unwrap().gen;
             changes = datastore
