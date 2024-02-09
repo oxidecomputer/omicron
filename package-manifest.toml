@@ -418,24 +418,24 @@ only_for_targets.image = "standard"
 # 1. Build the zone image manually
 # 2. Copy the output zone image from crucible/out to omicron/out
 # 3. Use source.type = "manual" instead of "prebuilt"
-source.type = "manual"
+source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "2d4bc11232d53f177c286383926fa5f8c1b2a938"
+source.commit = "3e2bd7c5f79b59c66d848a6c19042394c28616ff"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "88ec93657a644e8f10a32d1d22cc027db901aea81027f49ce7bee58fc4a35755"
+source.sha256 = "172c3ad4cbb836d6ef9af8d50a52eb6bc5fe7dad589b880c71a93bf9867a6188"
 output.type = "zone"
 output.intermediate_only = true
 
 [package.crucible-pantry]
 service_name = "crucible_pantry"
 only_for_targets.image = "standard"
-source.type = "manual"
+source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "2d4bc11232d53f177c286383926fa5f8c1b2a938"
+source.commit = "3e2bd7c5f79b59c66d848a6c19042394c28616ff"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "e2c3ed2d4cd6b5da3d38dd52df6d4a259280be7d45c30a363e9c71b174ecc6f8"
+source.sha256 = "6a90cb0e3198cc2578aa2f4aa75016fed8f25511ccd0965f1bf7e8872c156616"
 output.type = "zone"
 output.intermediate_only = true
 
