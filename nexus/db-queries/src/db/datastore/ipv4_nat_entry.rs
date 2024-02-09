@@ -814,7 +814,7 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    // Test our ability to return a strict order of changes
+    // Test our ability to return all changes interleaved in the correct order
     #[tokio::test]
     async fn ipv4_nat_changeset() {
         let logctx = dev::test_setup_log("test_nat_version_tracking");
@@ -879,6 +879,12 @@ mod test {
             .await
             .unwrap();
 
+        // Count the actual number of changes seen.
+        // This check is required because we _were_ getting changes in ascending order,
+        // but some entries were being skipped. We want to ensure we are getting
+        // *all* of the changes in ascending order.
+        let mut total_changes = 0;
+
         // ensure that the changeset is ordered, displaying the correct
         // version numbers, and displaying the correct `deleted` status
         let mut version = 0;
@@ -941,12 +947,18 @@ mod test {
                 }
             });
 
+            // bump the count of changes seen
+            total_changes += changes.len();
+
             version = changes.last().unwrap().gen;
             changes = datastore
                 .ipv4_nat_changeset(&opctx, version, limit)
                 .await
                 .unwrap();
         }
+
+        // did we see everything?
+        assert_eq!(total_changes, db_records.len());
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
