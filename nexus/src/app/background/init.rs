@@ -389,7 +389,6 @@ pub mod test {
     //     the new DNS configuration
     #[nexus_test(server = crate::Server)]
     async fn test_dns_propagation_basic(cptestctx: &ControlPlaneTestContext) {
-        const INTERNAL_DNS_SRV_NAME: &'static str = "_nameservice._tcp";
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
@@ -421,16 +420,19 @@ pub mod test {
             .await
             .expect("failed to get initial DNS server config");
         assert_eq!(config.generation, 1);
+
+        let internal_dns_srv_name =
+            internal_dns::ServiceName::InternalDns.dns_name();
+
         let initial_srv_record = {
             let zone =
                 config.zones.get(0).expect("DNS config must have a zone");
-            let record = zone
-                .records
-                .get(INTERNAL_DNS_SRV_NAME)
-                .expect("zone must have a record for _nameservice._tcp");
+            let Some(record) = zone.records.get(&internal_dns_srv_name) else {
+                panic!("zone must have a record for {internal_dns_srv_name}")
+            };
             match record.get(0) {
                 Some(dns_service_client::types::DnsRecord::Srv(srv)) => srv,
-                record => panic!("expected a SRV record for _nameservice._tcp, found {record:?}"),
+                record => panic!("expected a SRV record for {internal_dns_srv_name}, found {record:?}"),
             }
         };
 
@@ -481,10 +483,10 @@ pub mod test {
             let target = "my-great-dns-server.host";
 
             let mut update = test_dns_update_builder();
-            update.remove_name(INTERNAL_DNS_SRV_NAME.to_string()).unwrap();
+            update.remove_name(internal_dns_srv_name.clone()).unwrap();
             update
                 .add_name(
-                    INTERNAL_DNS_SRV_NAME.to_string(),
+                    internal_dns_srv_name,
                     vec![
                         DnsRecord::Srv(Srv {
                             prio: 0,
