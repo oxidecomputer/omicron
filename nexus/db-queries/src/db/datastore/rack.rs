@@ -442,6 +442,20 @@ impl DataStore {
     ) -> Result<(), RackInitError> {
         use internal_params::ServiceKind;
 
+        let service_db = db::model::Service::new(
+            service.service_id,
+            service.sled_id,
+            service.zone_id,
+            service.address,
+            service.kind.clone().into(),
+        );
+        self.service_upsert_conn(conn, service_db).await.map_err(
+            |e| match e.retryable() {
+                Retryable(e) => RackInitError::Retryable(e),
+                NotRetryable(e) => RackInitError::ServiceInsert(e.into()),
+            },
+        )?;
+
         // For services with external connectivity, we record their
         // explicit IP allocation and create a service NIC as well.
         let service_ip_nic = match service.kind {
