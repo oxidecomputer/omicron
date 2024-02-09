@@ -17,7 +17,7 @@ WITH interleaved_versions AS (
   FROM ipv4_nat_entry
   WHERE version_removed IS NULL
 
-  UNION ALL
+  UNION
 
   SELECT
     external_address,
