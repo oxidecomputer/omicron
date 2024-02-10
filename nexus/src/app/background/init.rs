@@ -524,10 +524,6 @@ pub mod test {
         )
         .await;
 
-        let config = dns_config_client
-            .dns_config_get()
-            .await
-
         // Discover the new internal DNS server from internal DNS.
         nexus
             .background_tasks
