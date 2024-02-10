@@ -31,6 +31,10 @@ enum SledAgentCommands {
     /// print information about zpools
     #[clap(subcommand)]
     Zpools(ZpoolCommands),
+
+    /// print information about the local bootstore node
+    #[clap(subcommand)]
+    Bootstore(BootstoreCommands),
 }
 
 #[derive(Debug, Subcommand)]
@@ -43,6 +47,12 @@ enum ZoneCommands {
 enum ZpoolCommands {
     /// Print list of all zpools managed by the sled agent
     List,
+}
+
+#[derive(Debug, Subcommand)]
+enum BootstoreCommands {
+    /// Show the internal state of the local bootstore node
+    Status,
 }
 
 impl SledAgentArgs {
@@ -69,6 +79,9 @@ impl SledAgentArgs {
             }
             SledAgentCommands::Zpools(ZpoolCommands::List) => {
                 cmd_zpools_list(&client).await
+            }
+            SledAgentCommands::Bootstore(BootstoreCommands::Status) => {
+                cmd_bootstore_status(&client).await
             }
         }
     }
@@ -108,5 +121,14 @@ async fn cmd_zpools_list(
         println!("    {:?}", zpool);
     }
 
+    Ok(())
+}
+
+/// Runs `omdb sled-agent bootstore status`
+async fn cmd_bootstore_status(
+    client: &sled_agent_client::Client,
+) -> Result<(), anyhow::Error> {
+    let status = client.bootstore_status().await.context("bootstore status")?;
+    println!("{status}");
     Ok(())
 }

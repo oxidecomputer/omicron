@@ -136,6 +136,31 @@
         }
       }
     },
+    "/bootstore/status": {
+      "get": {
+        "summary": "Get the internal state of the local bootstore node",
+        "operationId": "bootstore_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "String",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/cockroachdb": {
       "post": {
         "summary": "Initializes a CockroachDB cluster",
