@@ -527,8 +527,6 @@ pub mod test {
         let config = dns_config_client
             .dns_config_get()
             .await
-            .expect("failed to get initial DNS server config");
-        println!("config: {config:#?}");
 
         // Discover the new internal DNS server from internal DNS.
         nexus
