@@ -64,7 +64,7 @@ async fn instance_launch() -> Result<()> {
         .body(InstanceCreate {
             name: generate_name("instance")?,
             description: String::new(),
-            hostname: "localshark".into(), // 🦈
+            hostname: "localshark".parse().unwrap(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
             disks: vec![InstanceDiskAttachment::Attach {

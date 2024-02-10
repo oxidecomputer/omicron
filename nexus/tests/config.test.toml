@@ -100,7 +100,10 @@ inventory.nkeep = 3
 # Disable inventory collection altogether (for emergencies)
 inventory.disable = false
 phantom_disks.period_secs = 30
+blueprints.period_secs_load = 100
+blueprints.period_secs_execute = 600
 sync_service_zone_nat.period_secs = 30
+region_replacement.period_secs = 30
 
 [default_region_allocation_strategy]
 # we only have one sled in the test environment, so we need to use the

@@ -664,6 +664,27 @@ impl OmicronZoneType {
             *address,
         ))
     }
+
+    /// Does this zone require time synchronization before it is initialized?"
+    ///
+    /// This function is somewhat conservative - the set of services
+    /// that can be launched before timesync has completed is intentionally kept
+    /// small, since it would be easy to add a service that expects time to be
+    /// reasonably synchronized.
+    pub fn requires_timesync(&self) -> bool {
+        match self {
+            // These zones can be initialized and started before time has been
+            // synchronized. For the NTP zones, this should be self-evident --
+            // we need the NTP zone to actually perform time synchronization!
+            //
+            // The DNS zone is a bit of an exception here, since the NTP zone
+            // itself may rely on DNS lookups as a dependency.
+            OmicronZoneType::BoundaryNtp { .. }
+            | OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::InternalDns { .. } => false,
+            _ => true,
+        }
+    }
 }
 
 impl crate::smf_helper::Service for OmicronZoneType {

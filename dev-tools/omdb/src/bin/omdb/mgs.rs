@@ -22,6 +22,12 @@ use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use tabled::Tabled;
 
+mod dashboard;
+mod sensors;
+
+use dashboard::DashboardArgs;
+use sensors::SensorsArgs;
+
 /// Arguments to the "omdb mgs" subcommand
 #[derive(Debug, Args)]
 pub struct MgsArgs {
@@ -35,19 +41,25 @@ pub struct MgsArgs {
 
 #[derive(Debug, Subcommand)]
 enum MgsCommands {
+    /// Dashboard of SPs
+    Dashboard(DashboardArgs),
+
     /// Show information about devices and components visible to MGS
     Inventory(InventoryArgs),
+
+    /// Show information about sensors, as gleaned by MGS
+    Sensors(SensorsArgs),
 }
 
 #[derive(Debug, Args)]
 struct InventoryArgs {}
 
 impl MgsArgs {
-    pub(crate) async fn run_cmd(
+    async fn mgs_client(
         &self,
         omdb: &Omdb,
         log: &slog::Logger,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<gateway_client::Client, anyhow::Error> {
         let mgs_url = match &self.mgs_url {
             Some(cli_or_env_url) => cli_or_env_url.clone(),
             None => {
@@ -68,11 +80,24 @@ impl MgsArgs {
             }
         };
         eprintln!("note: using MGS URL {}", &mgs_url);
-        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
+        Ok(gateway_client::Client::new(&mgs_url, log.clone()))
+    }
 
+    pub(crate) async fn run_cmd(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> Result<(), anyhow::Error> {
         match &self.command {
-            MgsCommands::Inventory(inventory_args) => {
-                cmd_mgs_inventory(&mgs_client, inventory_args).await
+            MgsCommands::Dashboard(args) => {
+                dashboard::cmd_mgs_dashboard(omdb, log, self, args).await
+            }
+            MgsCommands::Inventory(args) => {
+                let mgs_client = self.mgs_client(omdb, log).await?;
+                cmd_mgs_inventory(&mgs_client, args).await
+            }
+            MgsCommands::Sensors(args) => {
+                sensors::cmd_mgs_sensors(omdb, log, self, args).await
             }
         }
     }
@@ -154,6 +179,10 @@ fn sp_type_to_str(s: &SpType) -> &'static str {
         SpType::Power => "Power",
         SpType::Switch => "Switch",
     }
+}
+
+fn sp_to_string(s: &SpIdentifier) -> String {
+    format!("{} {}", sp_type_to_str(&s.type_), s.slot)
 }
 
 fn show_sp_ids(sp_ids: &[SpIdentifier]) -> Result<(), anyhow::Error> {

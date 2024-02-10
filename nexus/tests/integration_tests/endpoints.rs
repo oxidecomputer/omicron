@@ -421,7 +421,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from_gibibytes_u32(16),
-        hostname: String::from("demo-instance"),
+        hostname: "demo-instance".parse().unwrap(),
         user_data: vec![],
         ssh_public_keys: Some(Vec::new()),
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,

@@ -1010,6 +1010,23 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
+        // Check that the hostname is valid.
+        //
+        // TODO-cleanup: This can be removed when we are confident that no
+        // instances exist prior to the addition of strict hostname validation
+        // in the API.
+        let Ok(hostname) = db_instance.hostname.parse() else {
+            let msg = format!(
+                "The instance hostname '{}' is no longer valid. \
+                To access the data on its disks, this instance \
+                must be deleted, and a new one created with the \
+                relevant disks. The new hostname will be validated \
+                at that time.",
+                db_instance.hostname,
+            );
+            return Err(Error::invalid_request(&msg));
+        };
+
         // Gather disk information and turn that into DiskRequests
         let disks = self
             .db_datastore
@@ -1175,7 +1192,7 @@ impl super::Nexus {
             properties: InstanceProperties {
                 ncpus: db_instance.ncpus.into(),
                 memory: db_instance.memory.into(),
-                hostname: db_instance.hostname.clone(),
+                hostname,
             },
             nics,
             source_nat,

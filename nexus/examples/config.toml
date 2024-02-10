@@ -106,7 +106,10 @@ inventory.nkeep = 5
 # Disable inventory collection altogether (for emergencies)
 inventory.disable = false
 phantom_disks.period_secs = 30
+blueprints.period_secs_load = 10
+blueprints.period_secs_execute = 60
 sync_service_zone_nat.period_secs = 30
+region_replacement.period_secs = 30
 
 [default_region_allocation_strategy]
 # allocate region on 3 random distinct zpools, on 3 random distinct sleds.

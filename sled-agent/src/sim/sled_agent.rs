@@ -287,7 +287,7 @@ impl SledAgent {
             if !self.instances.contains_key(&instance_id).await {
                 let properties = propolis_client::types::InstanceProperties {
                     id: propolis_id,
-                    name: hardware.properties.hostname.clone(),
+                    name: hardware.properties.hostname.to_string(),
                     description: "sled-agent-sim created instance".to_string(),
                     image_id: Uuid::default(),
                     bootrom_id: Uuid::default(),
