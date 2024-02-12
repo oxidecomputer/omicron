@@ -113,8 +113,8 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
         sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
         role: SledRole::Gimlet,
         baseboard: Baseboard {
-            serial_number: baseboard.serial,
-            part_number: baseboard.part,
+            serial: baseboard.serial,
+            part: baseboard.part,
             revision: baseboard.revision,
         },
         usable_hardware_threads: 32,

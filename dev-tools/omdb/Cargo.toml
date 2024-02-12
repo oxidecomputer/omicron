@@ -10,12 +10,14 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
+async-trait.workspace = true
 chrono.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 crucible-agent-client.workspace = true
 csv.workspace = true
 diesel.workspace = true
+dns-service-client.workspace = true
 dropshot.workspace = true
 dyn-clone.workspace = true
 futures.workspace = true

@@ -41,6 +41,7 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 
 mod db;
+mod dns;
 mod mgs;
 mod nexus;
 mod oximeter;
@@ -58,6 +59,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     match &args.command {
         OmdbCommands::Db(db) => db.run_cmd(&args, &log).await,
+        OmdbCommands::Dns(dns) => dns.run_cmd(&args, &log).await,
         OmdbCommands::Mgs(mgs) => mgs.run_cmd(&args, &log).await,
         OmdbCommands::Nexus(nexus) => nexus.run_cmd(&args, &log).await,
         OmdbCommands::Oximeter(oximeter) => oximeter.run_cmd(&log).await,
@@ -150,6 +152,35 @@ impl Omdb {
             }
         }
     }
+
+    // Create a Nexus client via an explicit URL, or look one up via DNS.
+    async fn get_nexus_client(
+        &self,
+        nexus_internal_url: &Option<String>,
+        log: &slog::Logger,
+    ) -> Result<nexus_client::Client, anyhow::Error> {
+        let nexus_url = match &nexus_internal_url {
+            Some(cli_or_env_url) => cli_or_env_url.clone(),
+            None => {
+                eprintln!(
+                    "note: Nexus URL not specified.  Will pick one from DNS."
+                );
+                let addrs = self
+                    .dns_lookup_all(
+                        log.clone(),
+                        internal_dns::ServiceName::Nexus,
+                    )
+                    .await?;
+                let addr = addrs.into_iter().next().expect(
+                    "expected at least one Nexus address from \
+                    successful DNS lookup",
+                );
+                format!("http://{}", addr)
+            }
+        };
+        eprintln!("note: using Nexus URL {}", &nexus_url);
+        Ok(nexus_client::Client::new(&nexus_url, log.clone()))
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -157,6 +188,8 @@ impl Omdb {
 enum OmdbCommands {
     /// Query the control plane database (CockroachDB)
     Db(db::DbArgs),
+    /// Query for internal DNS information
+    Dns(dns::DnsArgs),
     /// Debug a specific Management Gateway Service instance
     Mgs(mgs::MgsArgs),
     /// Debug a specific Nexus instance

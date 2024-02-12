@@ -2,12 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::identity::AssetIdentityMetadata;
+use crate::internal_api::params::{Baseboard, SledProvisionState};
 use chrono::DateTime;
 use chrono::Utc;
 use futures::future::ready;
 use futures::stream::StreamExt;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::ObjectStream;
 use schemars::JsonSchema;
+use serde::Deserialize;
 use serde::Serialize;
 use std::time::Duration;
 use std::time::Instant;
@@ -24,6 +28,25 @@ where
         .map(|maybe_object| maybe_object.unwrap().into())
         .collect::<Vec<U>>()
         .await
+}
+
+/// A view of the Sled which is exposed through the internal API for debugging
+/// purposes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct Sled {
+    #[serde(flatten)]
+    pub identity: AssetIdentityMetadata,
+    pub baseboard: Baseboard,
+    /// The rack to which this Sled is currently attached
+    pub rack_id: Uuid,
+    /// The provision state of the sled.
+    pub provision_state: SledProvisionState,
+    /// The number of hardware threads which can execute on this sled
+    pub usable_hardware_threads: u32,
+    /// Amount of RAM which may be used by the Sled's OS
+    pub usable_physical_ram: ByteCount,
+    /// Address to use when contacting this sled on the underlay.
+    pub address: std::net::SocketAddrV6,
 }
 
 /// Sagas
@@ -145,6 +168,19 @@ impl From<steno::SagaStateView> for SagaState {
                 error_info: SagaErrorInfo::from(error_source),
             },
         }
+    }
+}
+
+/// Provides a view of inventory through the internal API.
+///
+/// This is primarily exposed as a utility to omdb.
+pub mod inventory {
+    use super::*;
+
+    /// Omicron Zones
+    #[derive(Clone, Debug, Serialize, JsonSchema)]
+    pub struct OmicronZone {
+        pub id: Uuid,
     }
 }
 

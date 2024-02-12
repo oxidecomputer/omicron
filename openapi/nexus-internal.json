@@ -426,6 +426,63 @@
         }
       }
     },
+    "/hardware/sleds": {
+      "get": {
+        "summary": "List sleds known to nexus.",
+        "description": "Exposed to provide omdb additional context about sleds known to Nexus.",
+        "operationId": "sled_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/instances/{instance_id}": {
       "put": {
         "summary": "Report updated state for an instance.",
@@ -1020,24 +1077,24 @@
         ]
       },
       "Baseboard": {
-        "description": "Describes properties that should uniquely identify Oxide manufactured hardware",
+        "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
         "properties": {
-          "part_number": {
+          "part": {
             "type": "string"
           },
           "revision": {
             "type": "integer",
             "format": "int64"
           },
-          "serial_number": {
+          "serial": {
             "type": "string"
           }
         },
         "required": [
-          "part_number",
+          "part",
           "revision",
-          "serial_number"
+          "serial"
         ]
       },
       "BgpConfig": {
@@ -6290,6 +6347,72 @@
           "sled_id"
         ]
       },
+      "Sled": {
+        "description": "A view of the Sled which is exposed through the internal API for debugging purposes.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "Address to use when contacting this sled on the underlay.",
+            "type": "string"
+          },
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "provision_state": {
+            "description": "The provision state of the sled.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledProvisionState"
+              }
+            ]
+          },
+          "rack_id": {
+            "description": "The rack to which this Sled is currently attached",
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "usable_hardware_threads": {
+            "description": "The number of hardware threads which can execute on this sled",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "usable_physical_ram": {
+            "description": "Amount of RAM which may be used by the Sled's OS",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "address",
+          "baseboard",
+          "id",
+          "provision_state",
+          "rack_id",
+          "time_created",
+          "time_modified",
+          "usable_hardware_threads",
+          "usable_physical_ram"
+        ]
+      },
       "SledAgentStartupInfo": {
         "description": "Sent by a sled agent on startup to Nexus to request further instruction",
         "type": "object",
@@ -6376,6 +6499,46 @@
           "instance_state",
           "propolis_id",
           "vmm_state"
+        ]
+      },
+      "SledProvisionState": {
+        "description": "The provision state of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
+        "oneOf": [
+          {
+            "description": "New resources will be provisioned on this sled.",
+            "type": "string",
+            "enum": [
+              "provisionable"
+            ]
+          },
+          {
+            "description": "New resources will not be provisioned on this sled. However, existing resources will continue to be on this sled unless manually migrated off.",
+            "type": "string",
+            "enum": [
+              "non_provisionable"
+            ]
+          }
+        ]
+      },
+      "SledResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sled"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "SledRole": {

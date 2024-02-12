@@ -34,6 +34,7 @@ use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
 use nexus_types::internal_api::views::BackgroundTask;
 use nexus_types::internal_api::views::Saga;
+use nexus_types::internal_api::views::Sled;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
@@ -73,6 +74,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(saga_list)?;
         api.register(saga_view)?;
+
+        api.register(sled_list)?;
 
         api.register(ipv4_nat_changeset)?;
 
@@ -503,6 +506,37 @@ async fn saga_view(
         let path = path_params.into_inner();
         let saga = nexus.saga_get(&opctx, path.saga_id).await?;
         Ok(HttpResponseOk(saga))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List sleds known to nexus.
+///
+/// Exposed to provide omdb additional context about sleds known to Nexus.
+#[endpoint {
+    method = GET,
+    path = "/hardware/sleds",
+}]
+async fn sled_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<Sled>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let sleds = nexus
+            .sled_list(&opctx, &data_page_params_for(&rqctx, &query)?)
+            .await?
+            .into_iter()
+            .map(|s| s.into())
+            .collect();
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            sleds,
+            &|_, sled: &Sled| sled.identity.id,
+        )?))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

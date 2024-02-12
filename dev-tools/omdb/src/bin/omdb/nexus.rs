@@ -123,27 +123,8 @@ impl NexusArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let nexus_url = match &self.nexus_internal_url {
-            Some(cli_or_env_url) => cli_or_env_url.clone(),
-            None => {
-                eprintln!(
-                    "note: Nexus URL not specified.  Will pick one from DNS."
-                );
-                let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Nexus,
-                    )
-                    .await?;
-                let addr = addrs.into_iter().next().expect(
-                    "expected at least one Nexus address from \
-                    successful DNS lookup",
-                );
-                format!("http://{}", addr)
-            }
-        };
-        eprintln!("note: using Nexus URL {}", &nexus_url);
-        let client = nexus_client::Client::new(&nexus_url, log.clone());
+        let client =
+            omdb.get_nexus_client(&self.nexus_internal_url, log).await?;
 
         match &self.command {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {

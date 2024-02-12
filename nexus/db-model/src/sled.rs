@@ -106,6 +106,24 @@ impl From<Sled> for views::Sled {
     }
 }
 
+impl From<Sled> for nexus_types::internal_api::views::Sled {
+    fn from(sled: Sled) -> Self {
+        Self {
+            identity: sled.identity(),
+            rack_id: sled.rack_id,
+            baseboard: shared::Baseboard {
+                serial: sled.serial_number,
+                part: sled.part_number,
+                revision: sled.revision,
+            },
+            provision_state: sled.provision_state.into(),
+            usable_hardware_threads: sled.usable_hardware_threads.0,
+            usable_physical_ram: *sled.usable_physical_ram,
+            address: std::net::SocketAddrV6::new(*sled.ip, *sled.port, 0, 0),
+        }
+    }
+}
+
 impl DatastoreCollectionConfig<super::PhysicalDisk> for Sled {
     type CollectionId = Uuid;
     type GenerationNumberColumn = sled::dsl::rcgen;
