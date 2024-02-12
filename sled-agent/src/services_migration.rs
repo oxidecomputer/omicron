@@ -403,7 +403,14 @@ impl TryFrom<ServiceZoneRequest> for OmicronZoneConfig {
                 .with_context(error_context);
         }
 
-        Ok(OmicronZoneConfig { id, underlay_address, zone_type })
+        // TODO:
+        //
+        // Handle this case? Right now, the filesystem_pool is not known from
+        // ServiceZoneRequest alone.
+        let _ = id;
+        let _ = underlay_address;
+        todo!();
+        //        Ok(OmicronZoneConfig { id, underlay_address, filesystem_pool: None, zone_type })
     }
 }
 

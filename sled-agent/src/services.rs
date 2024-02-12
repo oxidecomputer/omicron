@@ -3854,6 +3854,11 @@ mod test {
     const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_ntp";
     const EXPECTED_PORT: u16 = 12223;
 
+    const EXPECTED_ZPOOL_UUID: Uuid =
+        Uuid::from_u128(0x9cb4cf49_5c3d_4647_83b0_8f3515da7be1);
+    const EXPECTED_ZONE_FILESYSTEM_ZPOOL: ZpoolName =
+        ZpoolName::new_internal(EXPECTED_ZPOOL_UUID);
+
     fn make_bootstrap_networking_config() -> BootstrapNetworking {
         BootstrapNetworking {
             bootstrap_etherstub: Etherstub(
@@ -4068,6 +4073,7 @@ mod test {
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
+                filesystem_pool: EXPECTED_ZONE_FILESYSTEM_ZPOOL,
                 zone_type,
             }],
         })
@@ -4088,6 +4094,7 @@ mod test {
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
+                filesystem_pool: EXPECTED_ZONE_FILESYSTEM_ZPOOL,
                 zone_type: OmicronZoneType::InternalNtp {
                     address,
                     ntp_servers: vec![],
@@ -4099,7 +4106,6 @@ mod test {
         .await
         .unwrap();
     }
-
     // Prepare to drop the service manager.
     //
     // This will shut down all allocated zones, and delete their
@@ -4477,6 +4483,7 @@ mod test {
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
             underlay_address: Ipv6Addr::LOCALHOST,
+            filesystem_pool: EXPECTED_ZONE_FILESYSTEM_ZPOOL,
             zone_type: OmicronZoneType::InternalNtp {
                 address,
                 ntp_servers: vec![],
@@ -4503,6 +4510,7 @@ mod test {
         zones.push(OmicronZoneConfig {
             id: id2,
             underlay_address: Ipv6Addr::LOCALHOST,
+            filesystem_pool: EXPECTED_ZONE_FILESYSTEM_ZPOOL,
             zone_type: OmicronZoneType::InternalNtp {
                 address,
                 ntp_servers: vec![],

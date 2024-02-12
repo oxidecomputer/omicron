@@ -355,11 +355,11 @@ impl JsonSchema for ZpoolName {
 }
 
 impl ZpoolName {
-    pub fn new_internal(id: Uuid) -> Self {
+    pub const fn new_internal(id: Uuid) -> Self {
         Self { id, kind: ZpoolKind::Internal }
     }
 
-    pub fn new_external(id: Uuid) -> Self {
+    pub const fn new_external(id: Uuid) -> Self {
         Self { id, kind: ZpoolKind::External }
     }
 

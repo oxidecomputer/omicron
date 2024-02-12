@@ -50,6 +50,16 @@ impl Eq for types::OmicronZoneConfig {}
 impl Eq for types::OmicronZoneType {}
 impl Eq for types::OmicronZoneDataset {}
 
+impl types::ZpoolName {
+    pub fn external(&self) -> bool {
+        self.as_str().starts_with("oxp_")
+    }
+
+    pub fn internal(&self) -> bool {
+        self.as_str().starts_with("oxi_")
+    }
+}
+
 impl types::OmicronZoneType {
     /// Human-readable label describing what kind of zone this is
     ///
@@ -105,6 +115,29 @@ impl types::OmicronZoneType {
             | types::OmicronZoneType::ExternalDns { .. }
             | types::OmicronZoneType::InternalDns { .. }
             | types::OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
+    /// Returns the durable dataset associated with the zone, if any
+    pub fn durable_dataset(&self) -> Option<&crate::types::OmicronZoneDataset> {
+        match self {
+            types::OmicronZoneType::Nexus { .. }
+            | types::OmicronZoneType::BoundaryNtp { .. }
+            | types::OmicronZoneType::InternalNtp { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::Oximeter { .. } => None,
+            types::OmicronZoneType::Clickhouse { dataset, .. } => Some(dataset),
+            types::OmicronZoneType::Crucible { dataset, .. } => Some(dataset),
+            types::OmicronZoneType::CockroachDb { dataset, .. } => {
+                Some(dataset)
+            }
+            types::OmicronZoneType::ExternalDns { dataset, .. } => {
+                Some(dataset)
+            }
+            types::OmicronZoneType::InternalDns { dataset, .. } => {
+                Some(dataset)
+            }
         }
     }
 

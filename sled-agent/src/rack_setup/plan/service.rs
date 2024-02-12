@@ -27,6 +27,7 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use rand::prelude::SliceRandom;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
@@ -363,15 +364,15 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_from_u2_zpool(DatasetKind::InternalDns)?;
+                sled.dataset_alloc_from_u2s(DatasetKind::InternalDns)?;
+            let pool = dataset_name.pool();
 
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: ip,
+                filesystem_pool: pool.clone(),
                 zone_type: OmicronZoneType::InternalDns {
-                    dataset: OmicronZoneDataset {
-                        pool_name: dataset_name.pool().clone(),
-                    },
+                    dataset: OmicronZoneDataset { pool_name: pool.clone() },
                     http_address,
                     dns_address,
                     gz_address: dns_subnet.gz_address().ip(),
@@ -396,14 +397,14 @@ impl Plan {
                 .service_backend_zone(ServiceName::Cockroach, &zone, port)
                 .unwrap();
             let dataset_name =
-                sled.alloc_from_u2_zpool(DatasetKind::CockroachDb)?;
+                sled.dataset_alloc_from_u2s(DatasetKind::CockroachDb)?;
+            let pool = dataset_name.pool();
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: ip,
+                filesystem_pool: pool.clone(),
                 zone_type: OmicronZoneType::CockroachDb {
-                    dataset: OmicronZoneDataset {
-                        pool_name: dataset_name.pool().clone(),
-                    },
+                    dataset: OmicronZoneDataset { pool_name: pool.clone() },
                     address,
                 },
             });
@@ -438,15 +439,15 @@ impl Plan {
             let dns_port = omicron_common::address::DNS_PORT;
             let dns_address = SocketAddr::new(external_ip, dns_port);
             let dataset_kind = DatasetKind::ExternalDns;
-            let dataset_name = sled.alloc_from_u2_zpool(dataset_kind)?;
+            let dataset_name = sled.dataset_alloc_from_u2s(dataset_kind)?;
+            let pool = dataset_name.pool();
 
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: *http_address.ip(),
+                filesystem_pool: pool.clone(),
                 zone_type: OmicronZoneType::ExternalDns {
-                    dataset: OmicronZoneDataset {
-                        pool_name: dataset_name.pool().clone(),
-                    },
+                    dataset: OmicronZoneDataset { pool_name: pool.clone() },
                     http_address,
                     dns_address,
                     nic,
@@ -472,9 +473,11 @@ impl Plan {
                 )
                 .unwrap();
             let (nic, external_ip) = svc_port_builder.next_nexus(id)?;
+            let filesystem_pool = sled.zpool_alloc_from_u2s()?;
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: address,
+                filesystem_pool,
                 zone_type: OmicronZoneType::Nexus {
                     internal_address: SocketAddrV6::new(
                         address,
@@ -514,9 +517,11 @@ impl Plan {
                     omicron_common::address::OXIMETER_PORT,
                 )
                 .unwrap();
+            let filesystem_pool = sled.zpool_alloc_from_u2s()?;
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: address,
+                filesystem_pool,
                 zone_type: OmicronZoneType::Oximeter {
                     address: SocketAddrV6::new(
                         address,
@@ -545,10 +550,12 @@ impl Plan {
                 .service_backend_zone(ServiceName::Clickhouse, &zone, port)
                 .unwrap();
             let dataset_name =
-                sled.alloc_from_u2_zpool(DatasetKind::Clickhouse)?;
+                sled.dataset_alloc_from_u2s(DatasetKind::Clickhouse)?;
+            let filesystem_pool = sled.zpool_alloc_from_u2s()?;
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: ip,
+                filesystem_pool,
                 zone_type: OmicronZoneType::Clickhouse {
                     address,
                     dataset: OmicronZoneDataset {
@@ -581,15 +588,15 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_from_u2_zpool(DatasetKind::ClickhouseKeeper)?;
+                sled.dataset_alloc_from_u2s(DatasetKind::ClickhouseKeeper)?;
+            let pool = dataset_name.pool();
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: ip,
+                filesystem_pool: pool.clone(),
                 zone_type: OmicronZoneType::ClickhouseKeeper {
                     address,
-                    dataset: OmicronZoneDataset {
-                        pool_name: dataset_name.pool().clone(),
-                    },
+                    dataset: OmicronZoneDataset { pool_name: pool.clone() },
                 },
             });
         }
@@ -609,9 +616,11 @@ impl Plan {
             dns_builder
                 .service_backend_zone(ServiceName::CruciblePantry, &zone, port)
                 .unwrap();
+            let filesystem_pool = sled.zpool_alloc_from_u2s()?;
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: address,
+                filesystem_pool,
                 zone_type: OmicronZoneType::CruciblePantry {
                     address: SocketAddrV6::new(address, port, 0, 0),
                 },
@@ -638,6 +647,7 @@ impl Plan {
                 sled.request.zones.push(OmicronZoneConfig {
                     id,
                     underlay_address: ip,
+                    filesystem_pool: pool.clone(),
                     zone_type: OmicronZoneType::Crucible {
                         address,
                         dataset: OmicronZoneDataset { pool_name: pool.clone() },
@@ -685,9 +695,11 @@ impl Plan {
 
             dns_builder.service_backend_zone(svcname, &zone, NTP_PORT).unwrap();
 
+            let filesystem_pool = sled.zpool_alloc_from_u2s()?;
             sled.request.zones.push(OmicronZoneConfig {
                 id,
                 underlay_address: address,
+                filesystem_pool,
                 zone_type,
             });
         }
@@ -811,9 +823,17 @@ impl SledInfo {
         }
     }
 
+    /// Allocates a zpool from one of the U.2 pools on this sled
+    fn zpool_alloc_from_u2s(&self) -> Result<ZpoolName, PlanError> {
+        self.u2_zpools
+            .choose(&mut rand::thread_rng())
+            .map(|z| z.clone())
+            .ok_or_else(|| PlanError::NotEnoughSleds)
+    }
+
     /// Allocates a dataset of the specified type from one of the U.2 pools on
     /// this Sled
-    fn alloc_from_u2_zpool(
+    fn dataset_alloc_from_u2s(
         &mut self,
         kind: DatasetKind,
     ) -> Result<DatasetName, PlanError> {

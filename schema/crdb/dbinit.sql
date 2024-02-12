@@ -2983,6 +2983,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
         CHECK (second_service_port IS NULL
         OR second_service_port BETWEEN 0 AND 65535),
 
+    -- Zones always have a zpool backing their filesystem. They're currently always
+    -- on a U.2.
+    --
+    -- This considered "non-durable" data, compared with the "dataset_zpool_name",
+    -- but it prevents zone filesystems from consuming arbitrary system RAM.
+    filesystem_zpool_name TEXT,
+
     -- Zones may have an associated dataset.  They're currently always on a U.2.
     -- The only thing we need to identify it here is the name of the zpool that
     -- it's on.
