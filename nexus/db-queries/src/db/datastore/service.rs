@@ -5,7 +5,6 @@
 //! [`DataStore`] methods on [`Service`]s.
 
 use super::DataStore;
-use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -17,20 +16,14 @@ use crate::db::error::TransactionError;
 use crate::db::identity::Asset;
 use crate::db::model::Service;
 use crate::db::model::Sled;
-use crate::db::pagination::paginated;
 use crate::db::pool::DbConnection;
-use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
-use nexus_db_model::ServiceKind;
 use omicron_common::api::external::CreateResult;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
-use uuid::Uuid;
 
 impl DataStore {
     /// Stores a new service in the database.
@@ -94,22 +87,5 @@ impl DataStore {
                 ))
             }
         })
-    }
-
-    /// List services of a given kind
-    pub async fn services_list_kind(
-        &self,
-        opctx: &OpContext,
-        kind: ServiceKind,
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> ListResultVec<Service> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        use db::schema::service::dsl;
-        paginated(dsl::service, dsl::id, pagparams)
-            .filter(dsl::kind.eq(kind))
-            .select(Service::as_select())
-            .load_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 }

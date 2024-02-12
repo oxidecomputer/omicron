@@ -64,7 +64,6 @@ use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
 use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_types::identity::Resource;
@@ -168,8 +167,6 @@ enum DbCommands {
     Dns(DnsArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
-    /// Print information about control plane services
-    Services(ServicesArgs),
     /// Print information about sleds
     Sleds,
     /// Print information about customer instances
@@ -301,20 +298,6 @@ struct CollectionsShowArgs {
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
-}
-
-#[derive(Debug, Args)]
-struct ServicesArgs {
-    #[command(subcommand)]
-    command: ServicesCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum ServicesCommands {
-    /// List service instances
-    ListInstances,
-    /// List service instances, grouped by sled
-    ListBySled,
 }
 
 #[derive(Debug, Args)]
@@ -452,26 +435,6 @@ impl DbArgs {
                     &datastore,
                     &self.fetch_opts,
                     inventory_args,
-                )
-                .await
-            }
-            DbCommands::Services(ServicesArgs {
-                command: ServicesCommands::ListInstances,
-            }) => {
-                cmd_db_services_list_instances(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                )
-                .await
-            }
-            DbCommands::Services(ServicesArgs {
-                command: ServicesCommands::ListBySled,
-            }) => {
-                cmd_db_services_list_by_sled(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
                 )
                 .await
             }
@@ -1083,18 +1046,6 @@ async fn cmd_db_disk_physical(
     Ok(())
 }
 
-// SERVICES
-
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct ServiceInstanceRow {
-    #[tabled(rename = "SERVICE")]
-    kind: String,
-    instance_id: Uuid,
-    addr: String,
-    sled_serial: String,
-}
-
 // Snapshots
 fn format_snapshot(state: &SnapshotState) -> impl Display {
     match state {
@@ -1248,128 +1199,7 @@ async fn cmd_db_snapshot_info(
     Ok(())
 }
 
-/// Run `omdb db services list-instances`.
-async fn cmd_db_services_list_instances(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
-) -> Result<(), anyhow::Error> {
-    let limit = fetch_opts.fetch_limit;
-    let sled_list = datastore
-        .sled_list(&opctx, &first_page(limit))
-        .await
-        .context("listing sleds")?;
-    check_limit(&sled_list, limit, || String::from("listing sleds"));
-
-    let sleds: BTreeMap<Uuid, Sled> =
-        sled_list.into_iter().map(|s| (s.id(), s)).collect();
-
-    let mut rows = vec![];
-
-    for service_kind in ServiceKind::iter() {
-        let context =
-            || format!("listing instances of kind {:?}", service_kind);
-        let instances = datastore
-            .services_list_kind(&opctx, service_kind, &first_page(limit))
-            .await
-            .with_context(&context)?;
-        check_limit(&instances, limit, &context);
-
-        rows.extend(instances.into_iter().map(|instance| {
-            let addr =
-                std::net::SocketAddrV6::new(*instance.ip, *instance.port, 0, 0)
-                    .to_string();
-
-            ServiceInstanceRow {
-                kind: format!("{:?}", service_kind),
-                instance_id: instance.id(),
-                addr,
-                sled_serial: sleds
-                    .get(&instance.sled_id)
-                    .map(|s| s.serial_number())
-                    .unwrap_or("unknown")
-                    .to_string(),
-            }
-        }));
-    }
-
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
-
-    println!("{}", table);
-
-    Ok(())
-}
-
 // SLEDS
-
-#[derive(Tabled)]
-#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-struct ServiceInstanceSledRow {
-    #[tabled(rename = "SERVICE")]
-    kind: String,
-    instance_id: Uuid,
-    addr: String,
-}
-
-/// Run `omdb db services list-by-sled`.
-async fn cmd_db_services_list_by_sled(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
-) -> Result<(), anyhow::Error> {
-    let limit = fetch_opts.fetch_limit;
-    let sled_list = datastore
-        .sled_list(&opctx, &first_page(limit))
-        .await
-        .context("listing sleds")?;
-    check_limit(&sled_list, limit, || String::from("listing sleds"));
-
-    let sleds: BTreeMap<Uuid, Sled> =
-        sled_list.into_iter().map(|s| (s.id(), s)).collect();
-    let mut services_by_sled: BTreeMap<Uuid, Vec<ServiceInstanceSledRow>> =
-        BTreeMap::new();
-
-    for service_kind in ServiceKind::iter() {
-        let context =
-            || format!("listing instances of kind {:?}", service_kind);
-        let instances = datastore
-            .services_list_kind(&opctx, service_kind, &first_page(limit))
-            .await
-            .with_context(&context)?;
-        check_limit(&instances, limit, &context);
-
-        for i in instances {
-            let addr =
-                std::net::SocketAddrV6::new(*i.ip, *i.port, 0, 0).to_string();
-            let sled_instances =
-                services_by_sled.entry(i.sled_id).or_insert_with(Vec::new);
-            sled_instances.push(ServiceInstanceSledRow {
-                kind: format!("{:?}", service_kind),
-                instance_id: i.id(),
-                addr,
-            })
-        }
-    }
-
-    for (sled_id, instances) in services_by_sled {
-        println!(
-            "sled: {} (id {})\n",
-            sleds.get(&sled_id).map(|s| s.serial_number()).unwrap_or("unknown"),
-            sled_id,
-        );
-        let table = tabled::Table::new(instances)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string();
-        println!("{}", textwrap::indent(&table.to_string(), "  "));
-        println!("");
-    }
-
-    Ok(())
-}
 
 #[derive(Tabled)]
 #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
