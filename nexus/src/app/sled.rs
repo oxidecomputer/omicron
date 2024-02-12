@@ -23,9 +23,6 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[cfg(test)]
-use nexus_db_queries::db::model::ServiceKind;
-
 impl super::Nexus {
     // Sleds
     pub fn sled_lookup<'a>(
@@ -273,41 +270,6 @@ impl super::Nexus {
         info!(self.log, "upserting dataset"; "zpool_id" => zpool_id.to_string(), "dataset_id" => id.to_string(), "address" => address.to_string());
         let dataset = db::model::Dataset::new(id, zpool_id, address, kind);
         self.db_datastore.dataset_upsert(dataset).await?;
-        Ok(())
-    }
-
-    // Services
-
-    /// Upserts a Service into the database, updating it if it already exists.
-    #[cfg(test)]
-    pub(crate) async fn upsert_service(
-        &self,
-        opctx: &OpContext,
-        id: Uuid,
-        sled_id: Uuid,
-        zone_id: Option<Uuid>,
-        address: SocketAddrV6,
-        kind: ServiceKind,
-    ) -> Result<(), Error> {
-        info!(
-            self.log,
-            "upserting service";
-            "sled_id" => sled_id.to_string(),
-            "service_id" => id.to_string(),
-            "address" => address.to_string(),
-        );
-        let service =
-            db::model::Service::new(id, sled_id, zone_id, address, kind);
-        self.db_datastore.service_upsert(opctx, service).await?;
-
-        if kind == ServiceKind::ExternalDns {
-            self.background_tasks
-                .activate(&self.background_tasks.task_external_dns_servers);
-        } else if kind == ServiceKind::InternalDns {
-            self.background_tasks
-                .activate(&self.background_tasks.task_internal_dns_servers);
-        }
-
         Ok(())
     }
 
