@@ -1708,10 +1708,14 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CRUCIBLE_PORT.to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
 
                 let dataset_name = DatasetName::new(
                     dataset.pool_name.clone(),
@@ -1720,8 +1724,6 @@ impl ServiceManager {
                 .full_name();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("dataset", "astring", &dataset_name)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
@@ -1729,6 +1731,7 @@ impl ServiceManager {
                     .add_property("store", "astring", "/data");
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(
                         ServiceBuilder::new("oxide/crucible/agent")
@@ -1759,18 +1762,21 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port);
 
                 let profile = ProfileBuilder::new("omicron")
+                .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(
                         ServiceBuilder::new("oxide/crucible/pantry")
