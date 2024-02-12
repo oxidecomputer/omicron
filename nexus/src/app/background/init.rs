@@ -477,6 +477,12 @@ pub mod test {
             SocketAddr::V6(a) => a,
         };
 
+        // In order to test that DNS gets propagated to a newly-added server, we
+        // first need to update the source of truth about DNS (the database).
+        // Then we need to wait for that to get propagated (by this same
+        // mechanism) to the existing DNS servers.  Only then would we expect
+        // the mechanism to see the new DNS server and then propagate
+        // configuration to it.
         let update = {
             use nexus_params::{DnsRecord, Srv};
 
