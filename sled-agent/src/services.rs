@@ -1776,7 +1776,7 @@ impl ServiceManager {
                     .add_property("listen_port", "astring", listen_port);
 
                 let profile = ProfileBuilder::new("omicron")
-                .add_service(nw_setup_service)
+                    .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(
                         ServiceBuilder::new("oxide/crucible/pantry")
