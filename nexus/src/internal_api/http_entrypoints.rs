@@ -57,6 +57,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 pub(crate) fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
         api.register(sled_agent_put)?;
+        api.register(sled_firewall_rules_request)?;
         api.register(switch_put)?;
         api.register(rack_initialization_complete)?;
         api.register(physical_disk_put)?;
@@ -121,6 +122,31 @@ async fn sled_agent_put(
     let sled_id = &path.sled_id;
     let handler = async {
         nexus.upsert_sled(&opctx, *sled_id, info).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Request a new set of firewall rules for a sled.
+///
+/// This causes Nexus to read the latest set of rules for the sled,
+/// and call a Sled endpoint which applies the rules to all OPTE ports
+/// that happen to exist.
+#[endpoint {
+     method = POST,
+     path = "/sled-agents/{sled_id}/firewall-rules-update",
+ }]
+async fn sled_firewall_rules_request(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledAgentPathParam>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+    let path = path_params.into_inner();
+    let sled_id = &path.sled_id;
+    let handler = async {
+        nexus.sled_request_firewall_rules(&opctx, *sled_id).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
