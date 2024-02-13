@@ -835,6 +835,34 @@
         }
       }
     },
+    "/sled-agents/{sled_id}/firewall-rules-update": {
+      "post": {
+        "summary": "Request a new set of firewall rules for a sled.",
+        "operationId": "sled_firewall_rules_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sled-agents/{sled_id}/zpools/{zpool_id}": {
       "put": {
         "summary": "Report that a pool for a specified sled has come online.",

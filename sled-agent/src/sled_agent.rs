@@ -105,6 +105,9 @@ pub enum Error {
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
 
+    #[error("Failed to request firewall rules")]
+    FirewallRequest(#[source] nexus_client::Error<nexus_client::types::Error>),
+
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
@@ -602,11 +605,24 @@ impl SledAgent {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                self.inner
-                    .services
-                    .load_services()
+                // Load as many services as we can, and don't exit immediately
+                // upon failure...
+                let load_services_result =
+                    self.inner.services.load_services().await.map_err(|err| {
+                        BackoffError::transient(Error::from(err))
+                    });
+
+                // ... and request firewall rule updates for as many services as
+                // we can. Note that we still make this request even if we only
+                // partially load some services.
+                let firewall_result = self
+                    .request_firewall_update()
                     .await
-                    .map_err(|err| BackoffError::transient(err))
+                    .map_err(|err| BackoffError::transient(err));
+
+                // Only complete if we have loaded all services and firewall
+                // rules successfully.
+                load_services_result.and(firewall_result)
             },
             |err, delay| {
                 warn!(
@@ -618,10 +634,6 @@ impl SledAgent {
         )
         .await
         .unwrap(); // we retry forever, so this can't fail
-
-        // Now that we've initialized the sled services, notify nexus again
-        // at which point it'll plumb any necessary firewall rules back to us.
-        self.notify_nexus_about_self(&self.log);
     }
 
     pub(crate) fn switch_zone_underlay_info(
@@ -642,7 +654,24 @@ impl SledAgent {
         &self.inner.start_request
     }
 
-    // Sends a request to Nexus informing it that the current sled exists.
+    /// Requests firewall rules from Nexus.
+    ///
+    /// Does not retry upon failure.
+    async fn request_firewall_update(&self) -> Result<(), Error> {
+        let sled_id = self.inner.id;
+
+        self.inner
+            .nexus_client
+            .client()
+            .sled_firewall_rules_request(&sled_id)
+            .await
+            .map_err(|err| Error::FirewallRequest(err))?;
+        Ok(())
+    }
+
+    /// Sends a request to Nexus informing it that the current sled exists.
+    ///
+    /// Does not block for neux being available.
     pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let nexus_client = self.inner.nexus_client.clone();
@@ -658,7 +687,7 @@ impl SledAgent {
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with an randomized, capped
+            // until it succeeds. We retry with a randomized, capped
             // exponential backoff.
             //
             // TODO-robustness if this returns a 400 error, we probably want to
