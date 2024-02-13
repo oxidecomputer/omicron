@@ -669,9 +669,11 @@ impl SledAgent {
         Ok(())
     }
 
-    /// Sends a request to Nexus informing it that the current sled exists.
+    /// Sends a request to Nexus informing it that the current sled exists,
+    /// with information abou the existing set of hardware.
     ///
-    /// Does not block for neux being available.
+    /// Does not block until Nexus is available -- the future created by this
+    /// function is retried in a queue that is polled in the background.
     pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let nexus_client = self.inner.nexus_client.clone();
