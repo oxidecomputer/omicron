@@ -19,6 +19,7 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     NetworkInterface, SourceNatConfig,
 };
+use omicron_common::ledger::Ledgerable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_hardware::Baseboard;
@@ -295,6 +296,20 @@ pub struct OmicronZonesConfig {
     pub zones: Vec<OmicronZoneConfig>,
 }
 
+impl OmicronZonesConfig {
+    pub fn initial() -> Self {
+        Self { generation: Generation::new(), zones: vec![] }
+    }
+}
+
+impl Ledgerable for OmicronZonesConfig {
+    fn is_newer_than(&self, other: &OmicronZonesConfig) -> bool {
+        self.generation > other.generation
+    }
+
+    fn generation_bump(&mut self) {}
+}
+
 impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
     fn from(local: OmicronZonesConfig) -> Self {
         Self {
@@ -317,8 +332,6 @@ pub struct OmicronZoneConfig {
     /// Note that this is transient -- the sled agent is permitted to
     /// destroy the zone's dataset on this pool each time the zone is
     /// initialized.
-    // TODO: Should this be optional? This would only be necessary if we
-    // had a problem reading old formats...
     pub filesystem_pool: ZpoolName,
     pub zone_type: OmicronZoneType,
 }

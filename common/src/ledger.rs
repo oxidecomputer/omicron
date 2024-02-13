@@ -168,6 +168,10 @@ pub trait Ledgerable: DeserializeOwned + Serialize + Send + Sync {
     fn is_newer_than(&self, other: &Self) -> bool;
 
     /// Increments the gneration number.
+    ///
+    /// Automatically bumped during "commit".
+    /// If the Ledgerable object already contains a generation
+    /// number, this may be implemented as a no-op.
     fn generation_bump(&mut self);
 
     /// Reads from `path` as a json-serialized version of `Self`.

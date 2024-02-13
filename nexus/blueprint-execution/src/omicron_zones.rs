@@ -113,7 +113,7 @@ mod test {
     use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::deployment::{Blueprint, BlueprintTarget};
     use nexus_types::inventory::{
-        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
+        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, ZpoolName,
     };
     use omicron_common::api::external::Generation;
     use std::collections::BTreeMap;
@@ -201,9 +201,9 @@ mod test {
 
         // The particular dataset doesn't matter for this test.
         // We re-use the same one to not obfuscate things
-        let dataset = OmicronZoneDataset {
-            pool_name: format!("oxp_{}", Uuid::new_v4()).parse().unwrap(),
-        };
+        let pool_name: ZpoolName =
+            format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
+        let dataset = OmicronZoneDataset { pool_name: pool_name.clone() };
 
         let generation = Generation::new();
 
@@ -215,6 +215,7 @@ mod test {
             zones: vec![OmicronZoneConfig {
                 id: Uuid::new_v4(),
                 underlay_address: "::1".parse().unwrap(),
+                filesystem_pool: pool_name,
                 zone_type: OmicronZoneType::InternalDns {
                     dataset,
                     dns_address: "oh-hello-internal-dns".into(),
@@ -304,10 +305,12 @@ mod test {
         s2.verify_and_clear();
 
         // Add an `InternalNtp` zone for our next update
+        let pool_name = format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
         zones.generation = generation.next();
         zones.zones.push(OmicronZoneConfig {
             id: Uuid::new_v4(),
             underlay_address: "::1".parse().unwrap(),
+            filesystem_pool: pool_name,
             zone_type: OmicronZoneType::InternalNtp {
                 address: "::1".into(),
                 dns_servers: vec!["::1".parse().unwrap()],

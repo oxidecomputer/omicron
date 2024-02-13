@@ -550,6 +550,12 @@ mod test {
                 zones: vec![sled_agent_client::types::OmicronZoneConfig {
                     id: zone_id,
                     underlay_address: *zone_address.ip(),
+                    filesystem_pool:
+                        sled_agent_client::types::ZpoolName::try_from(format!(
+                            "oxp_{}",
+                            Uuid::new_v4()
+                        ))
+                        .expect("Failed to create fake zpool name"),
                     zone_type:
                         sled_agent_client::types::OmicronZoneType::Oximeter {
                             address: zone_address.to_string(),

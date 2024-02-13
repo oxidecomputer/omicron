@@ -3170,6 +3170,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
         CHECK (second_service_port IS NULL
         OR second_service_port BETWEEN 0 AND 65535),
 
+    -- Zones always have an associated transient filesystem. They're currently always
+    -- on a U.2. Unlike the "dataset_zpool_name", these datasets may be destroyed
+    -- by the Sled Agent between zone reboots.
+    filesystem_zpool_name TEXT,
+
     -- Zones may have an associated dataset.  They're currently always on a U.2.
     -- The only thing we need to identify it here is the name of the zpool that
     -- it's on.

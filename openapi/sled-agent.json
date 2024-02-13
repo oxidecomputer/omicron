@@ -5558,7 +5558,7 @@
         "type": "object",
         "properties": {
           "filesystem_pool": {
-            "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.\n\nTODO: Should this be optional?",
+            "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ZpoolName"

@@ -848,6 +848,10 @@ pub mod test {
                 OmicronZoneConfig {
                     id: Uuid::new_v4(),
                     underlay_address: ip,
+                    filesystem_pool: zpools
+                        .first()
+                        .cloned()
+                        .expect("No zpools"),
                     zone_type: OmicronZoneType::InternalNtp {
                         address: SocketAddrV6::new(ip, 12345, 0, 0).to_string(),
                         dns_servers: vec![],
@@ -866,6 +870,10 @@ pub mod test {
                 OmicronZoneConfig {
                     id,
                     underlay_address: ip,
+                    filesystem_pool: zpools
+                        .first()
+                        .cloned()
+                        .expect("No zpools"),
                     zone_type: OmicronZoneType::Nexus {
                         internal_address: SocketAddrV6::new(ip, 12346, 0, 0)
                             .to_string(),
@@ -893,6 +901,7 @@ pub mod test {
                 OmicronZoneConfig {
                     id: Uuid::new_v4(),
                     underlay_address: ip,
+                    filesystem_pool: zpool_name.clone(),
                     zone_type: OmicronZoneType::Crucible {
                         address: String::from("[::1]:12345"),
                         dataset: OmicronZoneDataset {
