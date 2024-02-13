@@ -4599,6 +4599,14 @@
         "description": "The body of a request to ensure that a instance and VMM are known to a sled agent.",
         "type": "object",
         "properties": {
+          "filesystem_pool": {
+            "description": "The zpool which will hold thie propolis zone's filesystem.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
+              }
+            ]
+          },
           "hardware": {
             "description": "A description of the instance's virtual hardware and the initial runtime state this sled agent should store for this incarnation of the instance.",
             "allOf": [
@@ -4634,6 +4642,7 @@
           }
         },
         "required": [
+          "filesystem_pool",
           "hardware",
           "instance_runtime",
           "propolis_addr",

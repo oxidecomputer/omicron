@@ -30,6 +30,7 @@ use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
+use illumos_utils::zpool::ZpoolName;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
@@ -39,8 +40,6 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::backoff;
 use propolis_client::Client as PropolisClient;
-use rand::prelude::SliceRandom;
-use rand::SeedableRng;
 use sled_storage::dataset::ZONE_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -103,8 +102,8 @@ pub enum Error {
     #[error("Instance already registered with Propolis ID {0}")]
     InstanceAlreadyRegistered(Uuid),
 
-    #[error("No U.2 devices found")]
-    U2NotFound,
+    #[error("Filesystem pool for instance does not exist {0}")]
+    FilesystemPoolNotFound(ZpoolName),
 
     #[error("I/O error")]
     Io(#[from] std::io::Error),
@@ -197,6 +196,9 @@ struct InstanceInner {
 
     // The socket address of the Propolis server running this instance
     propolis_addr: SocketAddr,
+
+    // The filesytem pool we've been instructed to use
+    filesystem_pool: ZpoolName,
 
     // NIC-related properties
     vnic_allocator: VnicAllocator<Etherstub>,
@@ -681,6 +683,7 @@ pub(crate) struct InstanceInitialState {
     pub instance_runtime: InstanceRuntimeState,
     pub vmm_runtime: VmmRuntimeState,
     pub propolis_addr: SocketAddr,
+    pub filesystem_pool: ZpoolName,
 }
 
 impl Instance {
@@ -713,6 +716,7 @@ impl Instance {
             instance_runtime,
             vmm_runtime,
             propolis_addr,
+            filesystem_pool,
         } = state;
 
         let InstanceManagerServices {
@@ -773,6 +777,7 @@ impl Instance {
             },
             propolis_id,
             propolis_addr,
+            filesystem_pool,
             vnic_allocator,
             port_manager,
             requested_nics: hardware.nics,
@@ -1012,15 +1017,13 @@ impl Instance {
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
         let zname = propolis_zone_name(inner.propolis_id());
-        let mut rng = rand::rngs::StdRng::from_entropy();
-        let root = inner
-            .storage
-            .get_latest_resources()
-            .await
-            .all_u2_mountpoints(ZONE_DATASET)
-            .choose(&mut rng)
-            .ok_or_else(|| Error::U2NotFound)?
-            .clone();
+
+        // Ensure the filesystem pool exists at the time of instance creation.
+        if !inner.storage.get_latest_resources().await.all_u2_zpools().contains(&inner.filesystem_pool) {
+            return Err(Error::FilesystemPoolNotFound(inner.filesystem_pool.clone()));
+        }
+        let root = inner.filesystem_pool.dataset_mountpoint(ZONE_DATASET);
+
         let installed_zone = inner
             .zone_builder_factory
             .builder()

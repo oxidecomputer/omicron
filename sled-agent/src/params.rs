@@ -103,6 +103,9 @@ pub struct InstanceEnsureBody {
 
     /// The address at which this VMM should serve a Propolis server API.
     pub propolis_addr: SocketAddr,
+
+    /// The zpool which will hold thie propolis zone's filesystem.
+    pub filesystem_pool: ZpoolName,
 }
 
 /// The body of a request to move a previously-ensured instance into a specific

@@ -40,6 +40,7 @@ use illumos_utils::opte::params::{
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
+use illumos_utils::zpool::ZpoolName;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
@@ -918,6 +919,7 @@ impl SledAgent {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        filesystem_pool: ZpoolName,
     ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
@@ -928,6 +930,7 @@ impl SledAgent {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                filesystem_pool,
             )
             .await
             .map_err(|e| Error::Instance(e))

@@ -1226,6 +1226,7 @@ impl super::Nexus {
                         PROPOLIS_PORT,
                     )
                     .to_string(),
+                    filesystem_pool,
                 },
             )
             .await

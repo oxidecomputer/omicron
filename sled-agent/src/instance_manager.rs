@@ -20,6 +20,7 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use illumos_utils::vmm_reservoir;
+use illumos_utils::zpool::ZpoolName;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
@@ -224,6 +225,7 @@ impl InstanceManager {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        filesystem_pool: ZpoolName,
     ) -> Result<SledInstanceState, Error> {
         info!(
             &self.inner.log,
@@ -234,6 +236,7 @@ impl InstanceManager {
             "instance_runtime" => ?instance_runtime,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
+            "filesystem_pool" => ?filesystem_pool,
         );
 
         let instance = {
@@ -283,6 +286,7 @@ impl InstanceManager {
                     instance_runtime,
                     vmm_runtime,
                     propolis_addr,
+                    filesystem_pool,
                 };
 
                 let instance = Instance::new(
