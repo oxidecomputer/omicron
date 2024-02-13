@@ -45,6 +45,7 @@ use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
 use nexus_db_model::IpAttachState;
+use nexus_db_model::IpKind;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
@@ -1743,32 +1744,54 @@ async fn cmd_db_eips(
         }
     }
 
-    #[derive(Tabled)]
     enum Owner {
-        Instance { project: String, name: String },
-        Service { kind: String },
+        Instance { id: Uuid, project: String, name: String },
+        Service { id: Uuid, kind: String },
+        Project { id: Uuid, name: String },
         None,
     }
 
-    impl Display for Owner {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    impl Owner {
+        fn kind(&self) -> &'static str {
             match self {
-                Self::Instance { project, name } => {
-                    write!(f, "Instance {project}/{name}")
+                Owner::Instance { .. } => "instance",
+                Owner::Service { .. } => "service",
+                Owner::Project { .. } => "project",
+                Owner::None => "none",
+            }
+        }
+
+        fn id(&self) -> String {
+            match self {
+                Owner::Instance { id, .. }
+                | Owner::Service { id, .. }
+                | Owner::Project { id, .. } => id.to_string(),
+                Owner::None => "none".to_string(),
+            }
+        }
+
+        fn description(&self) -> String {
+            match self {
+                Self::Instance { project, name, .. } => {
+                    format!("{project}/{name}")
                 }
-                Self::Service { kind } => write!(f, "Service {kind}"),
-                Self::None => write!(f, "None"),
+                Self::Service { kind, .. } => kind.to_string(),
+                Self::Project { name, .. } => name.to_string(),
+                Self::None => "none".to_string(),
             }
         }
     }
 
     #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct IpRow {
         ip: ipnetwork::IpNetwork,
         ports: PortRange,
-        kind: String,
+        kind: IpKind,
         state: IpAttachState,
-        owner: Owner,
+        owner_kind: &'static str,
+        owner_id: String,
+        owner_description: String,
     }
 
     if verbose {
@@ -1798,7 +1821,10 @@ async fn cmd_db_eips(
                         continue;
                     }
                 };
-                Owner::Service { kind: format!("{:?}", service.1.kind) }
+                Owner::Service {
+                    id: owner_id,
+                    kind: format!("{:?}", service.1.kind),
+                }
             } else {
                 use db::schema::instance::dsl as instance_dsl;
                 let instance = match instance_dsl::instance
@@ -1827,7 +1853,7 @@ async fn cmd_db_eips(
                     .context("loading requested project")?
                     .pop()
                 {
-                    Some(instance) => instance,
+                    Some(project) => project,
                     None => {
                         eprintln!(
                             "project with id {} not found",
@@ -1838,10 +1864,30 @@ async fn cmd_db_eips(
                 };
 
                 Owner::Instance {
+                    id: owner_id,
                     project: project.name().to_string(),
                     name: instance.name().to_string(),
                 }
             }
+        } else if let Some(project_id) = ip.project_id {
+            use db::schema::project::dsl as project_dsl;
+            let project = match project_dsl::project
+                .filter(project_dsl::id.eq(project_id))
+                .limit(1)
+                .select(Project::as_select())
+                .load_async(&*datastore.pool_connection_for_tests().await?)
+                .await
+                .context("loading requested project")?
+                .pop()
+            {
+                Some(project) => project,
+                None => {
+                    eprintln!("project with id {} not found", project_id);
+                    continue;
+                }
+            };
+
+            Owner::Project { id: project_id, name: project.name().to_string() }
         } else {
             Owner::None
         };
@@ -1853,8 +1899,10 @@ async fn cmd_db_eips(
                 last: ip.last_port.into(),
             },
             state: ip.state,
-            kind: format!("{:?}", ip.kind),
-            owner,
+            kind: ip.kind,
+            owner_kind: owner.kind(),
+            owner_id: owner.id(),
+            owner_description: owner.description(),
         };
         rows.push(row);
     }
