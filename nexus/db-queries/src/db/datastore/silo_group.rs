@@ -41,7 +41,12 @@ impl DataStore {
         Ok(diesel::insert_into(dsl::silo_group)
             .values(silo_group)
             .on_conflict((dsl::silo_id, dsl::external_id))
-            .filter_target(dsl::time_deleted.is_null())
+            // This used to have a `filter_target` condition on
+            // `dsl::time_deleted.is_null()`, but that's been removed since
+            // filter_target doesn't work with CockroachDB:
+            // https://github.com/oxidecomputer/omicron/issues/5047.
+            //
+            // XXX: is this correct?
             .do_nothing()
             .returning(SiloGroup::as_returning()))
     }

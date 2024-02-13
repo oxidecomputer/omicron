@@ -1,0 +1,9 @@
+disallowed-methods = [
+    # `ON CONFLICT ... WHERE ... DO UPDATE` does not work with CockroachDB --
+    # see https://github.com/oxidecomputer/omicron/issues/5047.
+    #
+    # Instead, import diesel::query_dsl::methods::FilterDsl, then use
+    # `do_update().set(...).filter(...)`. (This is not part of the
+    # documentation as of Diesel 2.1.4, but it works.)
+    "diesel::upsert::DecoratableTarget::filter_target",
+]
