@@ -838,6 +838,7 @@
     "/sled-agents/{sled_id}/firewall-rules-update": {
       "post": {
         "summary": "Request a new set of firewall rules for a sled.",
+        "description": "This causes Nexus to read the latest set of rules for the sled, and call a Sled endpoint which applies the rules to all OPTE ports that happen to exist.",
         "operationId": "sled_firewall_rules_request",
         "parameters": [
           {
