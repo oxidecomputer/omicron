@@ -65,8 +65,7 @@ pub enum NodeRequestError {
 impl From<NodeRequestError> for omicron_common::api::external::Error {
     fn from(error: NodeRequestError) -> Self {
         omicron_common::api::external::Error::internal_error(&format!(
-            "{:#}",
-            error
+            "{error}"
         ))
     }
 }
