@@ -129,6 +129,40 @@ async fn cmd_bootstore_status(
     client: &sled_agent_client::Client,
 ) -> Result<(), anyhow::Error> {
     let status = client.bootstore_status().await.context("bootstore status")?;
-    println!("{status}");
+    println!("fsm ledger generation: {}", status.fsm_ledger_generation);
+    println!(
+        "network config ledger generation: {:?}",
+        status.network_config_ledger_generation
+    );
+    println!("fsm state: {}", status.fsm_state);
+    println!("peers (found by ddmd):");
+    if status.peers.is_empty() {
+        println!("    <none>");
+    }
+    for peer in status.peers.iter() {
+        println!("    {peer}");
+    }
+    println!("established connections:");
+    if status.established_connections.is_empty() {
+        println!("    <none>");
+    }
+    for c in status.established_connections.iter() {
+        println!("     {:?} : {}", c.baseboard, c.addr);
+    }
+    println!("accepted connections:");
+    if status.accepted_connections.is_empty() {
+        println!("    <none>");
+    }
+    for addr in status.accepted_connections.iter() {
+        println!("    {addr}");
+    }
+    println!("negotiating connections:");
+    if status.negotiating_connections.is_empty() {
+        println!("    <none>");
+    }
+    for addr in status.negotiating_connections.iter() {
+        println!("    {addr}");
+    }
+
     Ok(())
 }

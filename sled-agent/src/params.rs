@@ -25,6 +25,7 @@ use sled_hardware::Baseboard;
 pub use sled_hardware::DendriteAsic;
 use sled_storage::dataset::DatasetKind;
 use sled_storage::dataset::DatasetName;
+use std::collections::BTreeSet;
 use std::fmt::{Debug, Display, Formatter, Result as FormatResult};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::str::FromStr;
@@ -864,4 +865,46 @@ pub struct Inventory {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct EstablishedConnection {
+    baseboard: Baseboard,
+    addr: SocketAddrV6,
+}
+
+impl From<(Baseboard, SocketAddrV6)> for EstablishedConnection {
+    fn from(value: (Baseboard, SocketAddrV6)) -> Self {
+        EstablishedConnection { baseboard: value.0, addr: value.1 }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct BootstoreStatus {
+    pub fsm_ledger_generation: u64,
+    pub network_config_ledger_generation: Option<u64>,
+    pub fsm_state: String,
+    pub peers: BTreeSet<SocketAddrV6>,
+    pub established_connections: Vec<EstablishedConnection>,
+    pub accepted_connections: BTreeSet<SocketAddrV6>,
+    pub negotiating_connections: BTreeSet<SocketAddrV6>,
+}
+
+impl From<bootstore::schemes::v0::Status> for BootstoreStatus {
+    fn from(value: bootstore::schemes::v0::Status) -> Self {
+        BootstoreStatus {
+            fsm_ledger_generation: value.fsm_ledger_generation,
+            network_config_ledger_generation: value
+                .network_config_ledger_generation,
+            fsm_state: value.fsm_state.to_string(),
+            peers: value.peers,
+            established_connections: value
+                .connections
+                .into_iter()
+                .map(EstablishedConnection::from)
+                .collect(),
+            accepted_connections: value.accepted_connections,
+            negotiating_connections: value.negotiating_connections,
+        }
+    }
 }

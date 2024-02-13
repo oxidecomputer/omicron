@@ -8,7 +8,7 @@ use super::sled_agent::SledAgent;
 use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
-    CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
+    BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
     InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
     OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
@@ -981,15 +981,15 @@ async fn inventory(
 }]
 async fn bootstore_status(
     request_context: RequestContext<SledAgent>,
-) -> Result<HttpResponseOk<String>, HttpError> {
+) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
     let sa = request_context.context();
     let bootstore = sa.bootstore();
-    let status = bootstore.get_status().await.map_err(|e| {
-        HttpError::from(omicron_common::api::external::Error::from(e))
-    })?;
-    // Status is full of maps with non-string keys, and using `serde_as`
-    // doesn't work with JSON. Since this is just used for omdb right now,
-    // return a string.
-    let status_str = format!("{status:#?}");
-    Ok(HttpResponseOk(status_str))
+    let status = bootstore
+        .get_status()
+        .await
+        .map_err(|e| {
+            HttpError::from(omicron_common::api::external::Error::from(e))
+        })?
+        .into();
+    Ok(HttpResponseOk(status))
 }
