@@ -4,6 +4,7 @@
     {
       "id": "b2629475-65b2-4e8a-9e70-d4e8c034d8ad",
       "underlay_address": "fd00:1122:3344:102::e",
+      "filesystem_pool": "oxp_1cd1c449-b5e1-4e8b-bb2f-2e2bd5a8f301",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::e]:32345",
@@ -15,6 +16,7 @@
     {
       "id": "1aa5fd71-d766-4f20-b3c7-9cf4fe9e4f2e",
       "underlay_address": "fd00:1122:3344:102::9",
+      "filesystem_pool": "oxp_6d799846-deac-4809-93bd-5dad30127938",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::9]:32345",
@@ -26,6 +28,7 @@
     {
       "id": "271ee61b-9e97-4e45-a407-0083f8bf15a7",
       "underlay_address": "fd00:1122:3344:102::7",
+      "filesystem_pool": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::7]:32345",
@@ -37,6 +40,7 @@
     {
       "id": "750b40ef-8e83-4c7a-be96-33964b2244f3",
       "underlay_address": "fd00:1122:3344:102::a",
+      "filesystem_pool": "oxp_901a85dd-8214-407a-a358-ef4aebfa810d",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::a]:32345",
@@ -48,6 +52,7 @@
     {
       "id": "0322760d-a1e2-4911-8745-569f6bad8251",
       "underlay_address": "fd00:1122:3344:102::4",
+      "filesystem_pool": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a",
       "zone_type": {
         "type": "external_dns",
         "dataset": {
@@ -74,6 +79,7 @@
     {
       "id": "f350b534-e9bb-4e47-a2ae-4029efe48e1a",
       "underlay_address": "fd00:1122:3344:102::6",
+      "filesystem_pool": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a",
       "zone_type": {
         "type": "crucible_pantry",
         "address": "[fd00:1122:3344:102::6]:17000"
@@ -82,6 +88,7 @@
     {
       "id": "e9d7d6ba-59e3-44ff-9081-f43e61c9968a",
       "underlay_address": "fd00:1122:3344:102::d",
+      "filesystem_pool": "oxp_51abdeb3-6673-4af3-aa91-7e8748e4dda2",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::d]:32345",
@@ -93,6 +100,7 @@
     {
       "id": "d02206f1-7567-4753-9221-6b2b70407925",
       "underlay_address": "fd00:1122:3344:102::b",
+      "filesystem_pool": "oxp_0fa59017-d1e7-47c1-9ed6-b66851e544ee",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::b]:32345",
@@ -104,6 +112,7 @@
     {
       "id": "c489b9a3-33e5-487c-8a60-77853584dca1",
       "underlay_address": "fd00:1122:3344:102::f",
+      "filesystem_pool": "oxp_17d7dbce-b430-4c71-a27e-a5e66d175347",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::f]:32345",
@@ -115,6 +124,7 @@
     {
       "id": "996f3011-5aaa-4732-a47d-e6514b1131d8",
       "underlay_address": "fd00:1122:3344:102::c",
+      "filesystem_pool": "oxp_87714aed-4573-438c-8c9d-3ed64688bdc4",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::c]:32345",
@@ -126,6 +136,7 @@
     {
       "id": "cef138ff-87a4-4509-ba30-2395e01ac5f7",
       "underlay_address": "fd00:1122:3344:102::5",
+      "filesystem_pool": "oxp_87714aed-4573-438c-8c9d-3ed64688bdc4",
       "zone_type": {
         "type": "oximeter",
         "address": "[fd00:1122:3344:102::5]:12223"
@@ -134,6 +145,7 @@
     {
       "id": "263584b3-2f53-4f87-a9c0-60a4c78af6c4",
       "underlay_address": "fd00:1122:3344:102::8",
+      "filesystem_pool": "oxp_2acbc210-8b83-490a-b7a7-e458d742c269",
       "zone_type": {
         "type": "crucible",
         "address": "[fd00:1122:3344:102::8]:32345",
@@ -145,6 +157,7 @@
     {
       "id": "2f336547-e4b0-422c-af54-deae20b4580c",
       "underlay_address": "fd00:1122:3344:102::3",
+      "filesystem_pool": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a",
       "zone_type": {
         "type": "cockroach_db",
         "address": "[fd00:1122:3344:102::3]:32221",
@@ -156,6 +169,7 @@
     {
       "id": "412bfd7b-4bf8-471d-ae4d-90bf0bdd05ff",
       "underlay_address": "fd00:1122:3344:102::10",
+      "filesystem_pool": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a",
       "zone_type": {
         "type": "boundary_ntp",
         "address": "[fd00:1122:3344:102::10]:123",
@@ -191,6 +205,7 @@
     {
       "id": "7de28140-8cdc-4478-9204-63763ecc10ff",
       "underlay_address": "fd00:1122:3344:1::1",
+      "filesystem_pool": "oxp_65de425b-1487-4d46-85b5-f5fa7c9e776a",
       "zone_type": {
         "type": "internal_dns",
         "dataset": {
