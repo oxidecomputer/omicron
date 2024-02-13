@@ -79,7 +79,6 @@ impl DataStore {
                     // >>):
                     //
                     //    .on_conflict((dsl::project_id, dsl::name))
-                    //    .filter_target(dsl::time_deleted.is_null())
                     //    .do_update()
                     //    .set(dsl::time_modified.eq(dsl::time_modified))
                     //    .filter(dsl::time_deleted.is_null())
