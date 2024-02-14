@@ -48,7 +48,7 @@ use uuid::Uuid;
 /// database.
 ///
 /// See the documentation in the database schema for more background.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub struct Collection {
     /// unique identifier for this collection
     pub id: Uuid,

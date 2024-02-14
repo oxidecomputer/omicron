@@ -639,6 +639,32 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
             }
         };
+    } else if name == "region_replacement" {
+        #[derive(Deserialize)]
+        struct TaskSuccess {
+            /// how many region replacements were started ok
+            region_replacement_started_ok: usize,
+
+            /// how many region replacements could not be started
+            region_replacement_started_err: usize,
+        }
+
+        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(success) => {
+                println!(
+                    "    number of region replacements started ok: {}",
+                    success.region_replacement_started_ok
+                );
+                println!(
+                    "    number of region replacement start errors: {}",
+                    success.region_replacement_started_err
+                );
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

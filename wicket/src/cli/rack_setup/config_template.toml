@@ -40,7 +40,6 @@ bootstrap_sleds = []
 
 # TODO: docs on network config
 [rack_network_config]
-rack_subnet = ""
 infra_ip_first = ""
 infra_ip_last = ""
 

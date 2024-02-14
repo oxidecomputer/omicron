@@ -277,7 +277,7 @@ The below example demonstrates a single static gateway route; in-depth explanati
 [rack_network_config]
 # An internal-only IPv6 address block which contains AZ-wide services.
 # This does not need to be changed.
-rack_subnet = "fd00:1122:3344:01::/56"
+rack_subnet = "fd00:1122:3344:0100::/56"
 # A range of IP addresses used by Boundary Services on the network.  In a real
 # system, these would be addresses of the uplink ports on the Sidecar.  With
 # softnpu, only one address is used.

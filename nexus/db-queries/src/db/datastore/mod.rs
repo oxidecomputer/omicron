@@ -159,6 +159,7 @@ pub type DataStoreConnection<'a> =
     bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
 
 pub struct DataStore {
+    log: Logger,
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
     transaction_retry_producer: crate::transaction_retry::Producer,
@@ -173,8 +174,9 @@ impl DataStore {
     /// Ignores the underlying DB version. Should be used with caution, as usage
     /// of this method can construct a Datastore which does not understand
     /// the underlying CockroachDB schema. Data corruption could result.
-    pub fn new_unchecked(pool: Arc<Pool>) -> Result<Self, String> {
+    pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Result<Self, String> {
         let datastore = DataStore {
+            log,
             pool,
             virtual_provisioning_collection_producer:
                 crate::provisioning::Producer::new(),
@@ -193,7 +195,8 @@ impl DataStore {
         pool: Arc<Pool>,
         config: Option<&SchemaConfig>,
     ) -> Result<Self, String> {
-        let datastore = Self::new_unchecked(pool)?;
+        let datastore =
+            Self::new_unchecked(log.new(o!("component" => "datastore")), pool)?;
 
         // Keep looping until we find that the schema matches our expectation.
         const EXPECTED_VERSION: SemverVersion =
@@ -239,6 +242,7 @@ impl DataStore {
         name: &'static str,
     ) -> crate::transaction_retry::RetryHelper {
         crate::transaction_retry::RetryHelper::new(
+            &self.log,
             &self.transaction_retry_producer,
             name,
         )

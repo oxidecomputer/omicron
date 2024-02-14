@@ -11,13 +11,17 @@
 //! nexus/deployment does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::views::SledProvisionState;
 use crate::inventory::Collection;
+pub use crate::inventory::NetworkInterface;
+pub use crate::inventory::NetworkInterfaceKind;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;
 pub use crate::inventory::OmicronZonesConfig;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
@@ -43,14 +47,26 @@ use uuid::Uuid;
 ///
 /// The current policy is pretty limited.  It's aimed primarily at supporting
 /// the add/remove sled use case.
+#[derive(Debug, Clone)]
 pub struct Policy {
     /// set of sleds that are supposed to be part of the control plane, along
     /// with information about resources available to the planner
     pub sleds: BTreeMap<Uuid, SledResources>,
+
+    /// ranges specified by the IP pool for externally-visible control plane
+    /// services (e.g., external DNS, Nexus, boundary NTP)
+    pub service_ip_pool_ranges: Vec<IpRange>,
+
+    /// desired total number of deployed Nexus zones
+    pub target_nexus_zone_count: usize,
 }
 
 /// Describes the resources available on each sled for the planner
+#[derive(Debug, Clone)]
 pub struct SledResources {
+    /// provision state of this sled
+    pub provision_state: SledProvisionState,
+
     /// zpools on this sled
     ///
     /// (used to allocate storage for control plane zones with persistent
@@ -476,10 +492,11 @@ impl<'a> OmicronZonesDiff<'a> {
         for z in &bbsledzones.zones {
             writeln!(
                 f,
-                "{}         zone {} type {} ({})",
+                "{}         zone {} type {} underlay IP {} ({})",
                 prefix,
                 z.id,
                 z.zone_type.label(),
+                z.underlay_address,
                 label
             )?;
         }
@@ -539,44 +556,65 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                     DiffZoneChangedHow::DetailsChanged => {
                         writeln!(
                             f,
-                            "-         zone {} type {} (changed)",
-                            zone_id, zone_type,
+                            "-         zone {} type {} underlay IP {} \
+                                (changed)",
+                            zone_id,
+                            zone_type,
+                            zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
                             f,
-                            "+         zone {} type {} (changed)",
-                            zone_id, zone2_type,
+                            "+         zone {} type {} underlay IP {} \
+                                (changed)",
+                            zone_id,
+                            zone2_type,
+                            zone_changes.zone_after.underlay_address,
                         )?;
                     }
                     DiffZoneChangedHow::RemovedFromService => {
                         writeln!(
                             f,
-                            "-         zone {} type {} (in service)",
-                            zone_id, zone_type,
+                            "-         zone {} type {} underlay IP {} \
+                                (in service)",
+                            zone_id,
+                            zone_type,
+                            zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
                             f,
-                            "+         zone {} type {} (removed from service)",
-                            zone_id, zone2_type,
+                            "+         zone {} type {} underlay IP {} \
+                                (removed from service)",
+                            zone_id,
+                            zone2_type,
+                            zone_changes.zone_after.underlay_address,
                         )?;
                     }
                     DiffZoneChangedHow::AddedToService => {
                         writeln!(
                             f,
-                            "-         zone {} type {} (not in service)",
-                            zone_id, zone_type,
+                            "-         zone {} type {} underlay IP {} \
+                                (not in service)",
+                            zone_id,
+                            zone_type,
+                            zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
                             f,
-                            "+         zone {} type {} (added to service)",
-                            zone_id, zone2_type,
+                            "+         zone {} type {} underlay IP {} \
+                                (added to service)",
+                            zone_id,
+                            zone2_type,
+                            zone_changes.zone_after.underlay_address,
                         )?;
                     }
                     DiffZoneChangedHow::NoChanges => {
                         writeln!(
                             f,
-                            "         zone {} type {} (unchanged)",
-                            zone_id, zone_type,
+                            "         zone {} type {} underlay IP {} \
+                                (unchanged)",
+                            zone_id,
+                            zone_type,
+                            zone_changes.zone_before.underlay_address,
                         )?;
                     }
                 }
@@ -585,8 +623,9 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
             for zone in sled_changes.zones_added() {
                 writeln!(
                     f,
-                    "+        zone {} type {} (added)",
+                    "+        zone {} type {} underlay IP {} (added)",
                     zone.id,
+                    zone.underlay_address,
                     zone.zone_type.label(),
                 )?;
             }

@@ -15,8 +15,8 @@ use internal_dns::ServiceName;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY,
-    MGD_PORT, MGS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES,
-    SLED_PREFIX,
+    MGD_PORT, MGS_PORT, NEXUS_REDUNDANCY, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -34,7 +34,7 @@ use sled_agent_client::{
 use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
 use thiserror::Error;
@@ -42,9 +42,6 @@ use uuid::Uuid;
 
 // The number of boundary NTP servers to create from RSS.
 const BOUNDARY_NTP_COUNT: usize = 2;
-
-// The number of Nexus instances to create from RSS.
-const NEXUS_COUNT: usize = 3;
 
 // The number of CRDB instances to create from RSS.
 const CRDB_COUNT: usize = 5;
@@ -442,7 +439,7 @@ impl Plan {
         }
 
         // Provision Nexus zones, continuing to stripe across sleds.
-        for _ in 0..NEXUS_COUNT {
+        for _ in 0..NEXUS_REDUNDANCY {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
@@ -701,7 +698,7 @@ impl Plan {
         log: &Logger,
         config: &Config,
         storage_manager: &StorageHandle,
-        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
+        sleds: &BTreeMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         // Load the information we need about each Sled to be able to allocate
         // components on it.
@@ -1071,6 +1068,7 @@ mod tests {
     use crate::bootstrap::params::BootstrapAddressDiscovery;
     use crate::bootstrap::params::RecoverySiloConfig;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::RackNetworkConfig;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
@@ -1142,7 +1140,6 @@ mod tests {
             "fd01::103",
         ];
         let config = Config {
-            rack_subnet: Ipv6Addr::LOCALHOST,
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
@@ -1166,7 +1163,13 @@ mod tests {
                 user_name: "recovery".parse().unwrap(),
                 user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
             },
-            rack_network_config: None,
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Addr::LOCALHOST.into(),
+                infra_ip_first: Ipv4Addr::LOCALHOST,
+                infra_ip_last: Ipv4Addr::LOCALHOST,
+                ports: Vec::new(),
+                bgp: Vec::new(),
+            },
         };
 
         let mut svp = ServicePortBuilder::new(&config);
