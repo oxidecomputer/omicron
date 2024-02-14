@@ -34,6 +34,7 @@ use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::TextExpressionMethods;
 use gateway_client::types::SpType;
+use ipnetwork::IpNetwork;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -46,6 +47,8 @@ use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::NetworkInterface;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
@@ -56,6 +59,7 @@ use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
+use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -76,6 +80,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::MacAddr;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
@@ -332,6 +337,8 @@ struct NetworkArgs {
 enum NetworkCommands {
     /// List external IPs
     ListEips,
+    /// List virtual network interfaces
+    ListVnics,
 }
 
 #[derive(Debug, Args)]
@@ -488,6 +495,17 @@ impl DbArgs {
             }) => {
                 cmd_db_eips(&opctx, &datastore, &self.fetch_opts, *verbose)
                     .await
+            }
+            DbCommands::Network(NetworkArgs {
+                command: NetworkCommands::ListVnics,
+                verbose,
+            }) => {
+                cmd_db_network_list_vnics(
+                    &datastore,
+                    &self.fetch_opts,
+                    *verbose,
+                )
+                .await
             }
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::Info(uuid),
@@ -1903,6 +1921,104 @@ async fn cmd_db_eips(
             owner_kind: owner.kind(),
             owner_id: owner.id(),
             owner_description: owner.description(),
+        };
+        rows.push(row);
+    }
+
+    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_network_list_vnics(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    verbose: bool,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct NicRow {
+        ip: IpNetwork,
+        mac: MacAddr,
+        slot: i16,
+        primary: bool,
+        kind: &'static str,
+        subnet: String,
+        parent_id: Uuid,
+        description: String,
+    }
+    use db::schema::network_interface::dsl;
+    let mut query = dsl::network_interface.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let nics: Vec<NetworkInterface> = query
+        .select(NetworkInterface::as_select())
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .get_results_async(&*datastore.pool_connection_for_tests().await?)
+        .await?;
+
+    check_limit(&nics, fetch_opts.fetch_limit, || {
+        String::from("listing network interfaces")
+    });
+
+    if verbose {
+        for nic in &nics {
+            if verbose {
+                println!("{nic:#?}");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut rows = Vec::new();
+
+    for nic in &nics {
+        let kind = match nic.kind {
+            NetworkInterfaceKind::Instance => "instance",
+            NetworkInterfaceKind::Service => "service",
+        };
+
+        let subnet = {
+            use db::schema::vpc_subnet::dsl;
+            let subnet = match dsl::vpc_subnet
+                .filter(dsl::id.eq(nic.subnet_id))
+                .limit(1)
+                .select(VpcSubnet::as_select())
+                .load_async(&*datastore.pool_connection_for_tests().await?)
+                .await
+                .context("loading requested subnet")?
+                .pop()
+            {
+                Some(subnet) => subnet,
+                None => {
+                    eprintln!("subnet with id {} not found", nic.subnet_id);
+                    continue;
+                }
+            };
+
+            if nic.ip.is_ipv4() {
+                subnet.ipv4_block.to_string()
+            } else {
+                subnet.ipv6_block.to_string()
+            }
+        };
+
+        let row = NicRow {
+            ip: nic.ip,
+            mac: *nic.mac,
+            slot: nic.slot,
+            primary: nic.primary,
+            kind,
+            subnet,
+            parent_id: nic.parent_id,
+            description: nic.description().to_string(),
         };
         rows.push(row);
     }
