@@ -1132,7 +1132,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
               }
             ]
           }
@@ -2172,7 +2172,7 @@
             }
           },
           "rack_network_config": {
-            "$ref": "#/components/schemas/RackNetworkConfigV1"
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
           }
         },
         "required": [
@@ -2189,46 +2189,6 @@
         "description": "RackInitId\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"format\": \"uuid\" } ``` </details>",
         "type": "string",
         "format": "uuid"
-      },
-      "RackNetworkConfigV1": {
-        "description": "Initial network configuration",
-        "type": "object",
-        "properties": {
-          "bgp": {
-            "description": "BGP configurations for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BgpConfig"
-            }
-          },
-          "infra_ip_first": {
-            "description": "First ip address to be used for configuring network infrastructure",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "infra_ip_last": {
-            "description": "Last ip address to be used for configuring network infrastructure",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "ports": {
-            "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
-            }
-          },
-          "rack_subnet": {
-            "$ref": "#/components/schemas/Ipv6Network"
-          }
-        },
-        "required": [
-          "bgp",
-          "infra_ip_first",
-          "infra_ip_last",
-          "ports",
-          "rack_subnet"
-        ]
       },
       "RackOperationStatus": {
         "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackInitId\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackResetId\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
@@ -4696,6 +4656,38 @@
               "kind"
             ]
           }
+        ]
+      },
+      "UserSpecifiedRackNetworkConfig": {
+        "description": "User-specified parts of [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).",
+        "type": "object",
+        "properties": {
+          "bgp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "infra_ip_last": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortConfigV1"
+            }
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "ports"
         ]
       },
       "IgnitionCommand": {

@@ -26,10 +26,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-22.04, macos-12 ]
+        os: [ ubuntu-22.04, macos-14 ]
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
+      if: ${{ startsWith(matrix.os, 'ubuntu') }}
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
     - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
       with:

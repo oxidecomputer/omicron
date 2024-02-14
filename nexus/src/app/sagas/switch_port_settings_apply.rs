@@ -56,13 +56,13 @@ declare_saga_actions! {
         + spa_ensure_switch_port_settings
         - spa_undo_ensure_switch_port_settings
     }
-    ENSURE_SWITCH_ROUTES -> "ensure_switch_routes" {
-        + spa_ensure_switch_routes
-        - spa_undo_ensure_switch_routes
-    }
     ENSURE_SWITCH_PORT_UPLINK -> "ensure_switch_port_uplink" {
         + spa_ensure_switch_port_uplink
         - spa_undo_ensure_switch_port_uplink
+    }
+    ENSURE_SWITCH_ROUTES -> "ensure_switch_routes" {
+        + spa_ensure_switch_routes
+        - spa_undo_ensure_switch_routes
     }
     ENSURE_SWITCH_PORT_BGP_SETTINGS -> "ensure_switch_port_bgp_settings" {
         + spa_ensure_switch_port_bgp_settings
@@ -95,6 +95,7 @@ impl NexusSaga for SagaSwitchPortSettingsApply {
         builder.append(get_switch_port_settings_action());
         builder.append(ensure_switch_port_settings_action());
         builder.append(ensure_switch_port_uplink_action());
+        builder.append(ensure_switch_routes_action());
         builder.append(ensure_switch_port_bgp_settings_action());
         builder.append(ensure_switch_port_bootstore_network_settings_action());
         Ok(builder.build()?)
@@ -238,8 +239,8 @@ async fn spa_ensure_switch_routes(
             IpAddr::V4(v4) => v4,
             IpAddr::V6(_) => continue,
         };
-        let prefix = match r.gw.ip() {
-            IpAddr::V4(v4) => Prefix4 { value: v4, length: r.gw.prefix() },
+        let prefix = match r.dst.ip() {
+            IpAddr::V4(v4) => Prefix4 { value: v4, length: r.dst.prefix() },
             IpAddr::V6(_) => continue,
         };
         let sr = StaticRoute4 { nexthop, prefix };
