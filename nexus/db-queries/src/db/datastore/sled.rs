@@ -491,4 +491,54 @@ mod test {
             limit,
         }
     }
+
+    /// Tests listing large numbers of sleds via the batched interface
+    #[tokio::test]
+    async fn sled_list_batch() {
+        let logctx =
+            dev::test_setup_log("sled_reservation_create_non_provisionable");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let size = usize::try_from(2 * SQL_BATCH_SIZE.get()).unwrap();
+        let mut new_sleds = Vec::with_capacity(size);
+        new_sleds.resize_with(size, test_new_sled_update);
+        let mut expected_ids: Vec<_> =
+            new_sleds.iter().map(|s| s.id()).collect();
+        expected_ids.sort();
+
+        // This is essentially the same as `sled_upsert()`.  But since we know
+        // none of these exist already, we can just insert them.  And that means
+        // we can do them all in one SQL statement.  This is considerably
+        // faster.
+        let values_to_insert: Vec<_> =
+            new_sleds.into_iter().map(|s| s.into_insertable()).collect();
+        let ninserted = {
+            use db::schema::sled::dsl;
+            diesel::insert_into(dsl::sled)
+                .values(values_to_insert)
+                .execute_async(
+                    &*datastore
+                        .pool_connection_for_tests()
+                        .await
+                        .expect("failed to get connection"),
+                )
+                .await
+                .expect("failed to insert sled")
+        };
+        assert_eq!(ninserted, size);
+
+        let sleds = datastore
+            .sled_list_all_batched(&opctx)
+            .await
+            .expect("failed to list all sleds");
+        // We don't need to sort these ids because the sleds are enumerated in
+        // id order.
+        let found_ids: Vec<_> = sleds.into_iter().map(|s| s.id()).collect();
+        assert_eq!(expected_ids, found_ids);
+        assert_eq!(found_ids.len(), size);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
 }
