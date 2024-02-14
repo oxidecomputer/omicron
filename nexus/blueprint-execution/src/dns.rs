@@ -5,7 +5,7 @@
 //! Propagates internal DNS changes in a given blueprint
 
 use crate::Sled;
-use anyhow::ensure;
+use dns_service_client::DnsDiff;
 use internal_dns::DnsConfigBuilder;
 use internal_dns::ServiceName;
 use nexus_db_model::DnsGroup;
@@ -15,7 +15,6 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::internal_api::params::DnsConfigParams;
-use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
@@ -34,7 +33,6 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use slog::{debug, info};
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use uuid::Uuid;
 
 pub async fn deploy_dns<S>(
@@ -223,78 +221,4 @@ pub fn blueprint_dns_config(
 
     dns_builder.generation(blueprint.internal_dns_version.next());
     dns_builder.build()
-}
-
-type DnsRecords = HashMap<String, Vec<DnsRecord>>;
-pub struct DnsDiff<'a> {
-    left: &'a DnsRecords,
-    right: &'a DnsRecords,
-}
-
-impl<'a> DnsDiff<'a> {
-    pub fn new(
-        left: &'a DnsConfigParams,
-        right: &'a DnsConfigParams,
-    ) -> Result<DnsDiff<'a>, anyhow::Error> {
-        let left_zone = {
-            ensure!(
-                left.zones.len() == 1,
-                "left side of diff: expected exactly one \
-                DNS zone, but found {}",
-                left.zones.len(),
-            );
-
-            &left.zones[0]
-        };
-
-        let right_zone = {
-            ensure!(
-                right.zones.len() == 1,
-                "right side of diff: expected exactly one \
-                DNS zone, but found {}",
-                right.zones.len(),
-            );
-
-            &right.zones[0]
-        };
-
-        ensure!(
-            left_zone.zone_name == right_zone.zone_name,
-            "cannot compare DNS configuration from zones with different names: \
-            {:?} vs. {:?}", left_zone.zone_name, right_zone.zone_name,
-        );
-
-        Ok(DnsDiff { left: &left_zone.records, right: &right_zone.records })
-    }
-
-    pub fn names_added(&self) -> impl Iterator<Item = (&str, &[DnsRecord])> {
-        self.right
-            .iter()
-            .filter(|(k, _)| !self.left.contains_key(*k))
-            .map(|(k, v)| (k.as_ref(), v.as_ref()))
-    }
-
-    pub fn names_removed(&self) -> impl Iterator<Item = (&str, &[DnsRecord])> {
-        self.left
-            .iter()
-            .filter(|(k, _)| !self.right.contains_key(*k))
-            .map(|(k, v)| (k.as_ref(), v.as_ref()))
-    }
-
-    pub fn names_changed(
-        &self,
-    ) -> impl Iterator<Item = (&str, &[DnsRecord], &[DnsRecord])> {
-        self.left.iter().filter_map(|(k, v1)| match self.right.get(k) {
-            Some(v2) if v1 != v2 => {
-                Some((k.as_ref(), v1.as_ref(), v2.as_ref()))
-            }
-            _ => None,
-        })
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.names_added().next().is_none()
-            && self.names_removed().next().is_none()
-            && self.names_changed().next().is_none()
-    }
 }

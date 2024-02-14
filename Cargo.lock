@@ -1885,6 +1885,7 @@ dependencies = [
 name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "http 0.2.11",
  "omicron-workspace-hack",
@@ -4271,6 +4272,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "dns-service-client",
  "futures",
  "httptest",
  "internal-dns",

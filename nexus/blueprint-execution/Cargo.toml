@@ -8,6 +8,7 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+dns-service-client.workspace = true
 futures.workspace = true
 internal-dns.workspace = true
 nexus-db-model.workspace = true
