@@ -377,6 +377,7 @@ impl OmicronZoneConfig {
                         name: nic.name.clone(),
                         ip: nic.ip,
                         mac: nic.mac,
+                        slot: nic.slot,
                     },
                 },
             },
@@ -397,6 +398,7 @@ impl OmicronZoneConfig {
                         name: nic.name.clone(),
                         ip: nic.ip,
                         mac: nic.mac,
+                        slot: nic.slot,
                     },
                 },
             },
@@ -440,6 +442,7 @@ impl OmicronZoneConfig {
                             name: nic.name.clone(),
                             ip: nic.ip,
                             mac: nic.mac,
+                            slot: nic.slot,
                         },
                     },
                 }
