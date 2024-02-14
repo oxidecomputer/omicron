@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
 use sled_hardware::Baseboard;
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
 use uuid::Uuid;
 
@@ -24,14 +24,13 @@ pub enum BootstrapAddressDiscovery {
     /// Ignore all bootstrap addresses except our own.
     OnlyOurs,
     /// Ignore all bootstrap addresses except the following.
-    OnlyThese { addrs: HashSet<Ipv6Addr> },
+    OnlyThese { addrs: BTreeSet<Ipv6Addr> },
 }
 
 // "Shadow" copy of `RackInitializeRequest` that does no validation on its
 // fields.
 #[derive(Clone, Deserialize)]
 struct UnvalidatedRackInitializeRequest {
-    rack_subnet: Ipv6Addr,
     trust_quorum_peers: Option<Vec<Baseboard>>,
     bootstrap_discovery: BootstrapAddressDiscovery,
     ntp_servers: Vec<String>,
@@ -41,7 +40,7 @@ struct UnvalidatedRackInitializeRequest {
     external_dns_zone_name: String,
     external_certificates: Vec<Certificate>,
     recovery_silo: RecoverySiloConfig,
-    rack_network_config: Option<RackNetworkConfig>,
+    rack_network_config: RackNetworkConfig,
 }
 
 /// Configuration for the "rack setup service".
@@ -53,8 +52,6 @@ struct UnvalidatedRackInitializeRequest {
 #[derive(Clone, Deserialize, Serialize, PartialEq, JsonSchema)]
 #[serde(try_from = "UnvalidatedRackInitializeRequest")]
 pub struct RackInitializeRequest {
-    pub rack_subnet: Ipv6Addr,
-
     /// The set of peer_ids required to initialize trust quorum
     ///
     /// The value is `None` if we are not using trust quorum
@@ -89,7 +86,7 @@ pub struct RackInitializeRequest {
     pub recovery_silo: RecoverySiloConfig,
 
     /// Initial rack network configuration
-    pub rack_network_config: Option<RackNetworkConfig>,
+    pub rack_network_config: RackNetworkConfig,
 }
 
 // This custom debug implementation hides the private keys.
@@ -98,7 +95,6 @@ impl std::fmt::Debug for RackInitializeRequest {
         // If you find a compiler error here, and you just added a field to this
         // struct, be sure to add it to the Debug impl below!
         let RackInitializeRequest {
-            rack_subnet,
             trust_quorum_peers: trust_qurorum_peers,
             bootstrap_discovery,
             ntp_servers,
@@ -112,7 +108,6 @@ impl std::fmt::Debug for RackInitializeRequest {
         } = &self;
 
         f.debug_struct("RackInitializeRequest")
-            .field("rack_subnet", rack_subnet)
             .field("trust_quorum_peers", trust_qurorum_peers)
             .field("bootstrap_discovery", bootstrap_discovery)
             .field("ntp_servers", ntp_servers)
@@ -155,7 +150,6 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
         }
 
         Ok(RackInitializeRequest {
-            rack_subnet: value.rack_subnet,
             trust_quorum_peers: value.trust_quorum_peers,
             bootstrap_discovery: value.bootstrap_discovery,
             ntp_servers: value.ntp_servers,
@@ -174,10 +168,21 @@ impl TryFrom<UnvalidatedRackInitializeRequest> for RackInitializeRequest {
 pub type Certificate = nexus_client::types::Certificate;
 pub type RecoverySiloConfig = nexus_client::types::RecoverySiloConfig;
 
+/// A representation of a Baseboard ID as used in the inventory subsystem
+/// This type is essentially the same as a `Baseboard` except it doesn't have a
+/// revision or HW type (Gimlet, PC, Unknown).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
+pub struct BaseboardId {
+    /// Oxide Part Number
+    pub part_number: String,
+    /// Serial number (unique for a given part number)
+    pub serial_number: String,
+}
+
 /// A request to Add a given sled after rack initialization has occurred
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct AddSledRequest {
-    pub sled_id: Baseboard,
+    pub sled_id: BaseboardId,
     pub start_request: StartSledAgentRequest,
 }
 
@@ -255,9 +260,6 @@ pub struct StartSledAgentRequestBody {
     /// true.
     pub is_lrtq_learner: bool,
 
-    // Note: The order of these fields is load bearing, because we serialize
-    // `SledAgentRequest`s as toml. `subnet` serializes as a TOML table, so it
-    // must come after non-table fields.
     /// Portion of the IP space to be managed by the Sled Agent.
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
@@ -360,6 +362,7 @@ pub fn test_config() -> RackInitializeRequest {
 
 #[cfg(test)]
 mod tests {
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
 
     use super::*;
@@ -387,7 +390,6 @@ mod tests {
     #[test]
     fn parse_rack_initialization_weak_hash() {
         let config = r#"
-            rack_subnet = "fd00:1122:3344:0100::"
             bootstrap_discovery.type = "only_ours"
             ntp_servers = [ "ntp.eng.oxide.computer" ]
             dns_servers = [ "1.1.1.1", "9.9.9.9" ]
@@ -472,7 +474,6 @@ mod tests {
         // Conjure up a config; we'll tweak the internal services pools and
         // external DNS IPs, but no other fields matter.
         let mut config = UnvalidatedRackInitializeRequest {
-            rack_subnet: Ipv6Addr::LOCALHOST,
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
@@ -486,7 +487,13 @@ mod tests {
                 user_name: "recovery".parse().unwrap(),
                 user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
             },
-            rack_network_config: None,
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Addr::LOCALHOST.into(),
+                infra_ip_first: Ipv4Addr::LOCALHOST,
+                infra_ip_last: Ipv4Addr::LOCALHOST,
+                ports: Vec::new(),
+                bgp: Vec::new(),
+            },
         };
 
         // Valid configs: all external DNS IPs are contained in the IP pool

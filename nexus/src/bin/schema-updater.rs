@@ -76,7 +76,8 @@ async fn main() -> anyhow::Result<()> {
 
     // We use the unchecked constructor of the datastore because we
     // don't want to block on someone else applying an upgrade.
-    let datastore = DataStore::new_unchecked(pool).map_err(|e| anyhow!(e))?;
+    let datastore =
+        DataStore::new_unchecked(log.clone(), pool).map_err(|e| anyhow!(e))?;
 
     match args.cmd {
         Cmd::List => {

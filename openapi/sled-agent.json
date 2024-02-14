@@ -136,6 +136,30 @@
         }
       }
     },
+    "/bootstore/status": {
+      "get": {
+        "summary": "Get the internal state of the local bootstore node",
+        "operationId": "bootstore_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstoreStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/cockroachdb": {
       "post": {
         "summary": "Initializes a CockroachDB cluster",
@@ -1240,7 +1264,7 @@
         "type": "object",
         "properties": {
           "sled_id": {
-            "$ref": "#/components/schemas/Baseboard"
+            "$ref": "#/components/schemas/BaseboardId"
           },
           "start_request": {
             "$ref": "#/components/schemas/StartSledAgentRequest"
@@ -1317,6 +1341,24 @@
               "type"
             ]
           }
+        ]
+      },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem This type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
         ]
       },
       "BgpConfig": {
@@ -2511,6 +2553,60 @@
               "update_id"
             ]
           }
+        ]
+      },
+      "BootstoreStatus": {
+        "type": "object",
+        "properties": {
+          "accepted_connections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "established_connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EstablishedConnection"
+            }
+          },
+          "fsm_ledger_generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "fsm_state": {
+            "type": "string"
+          },
+          "negotiating_connections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "network_config_ledger_generation": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "peers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "accepted_connections",
+          "established_connections",
+          "fsm_ledger_generation",
+          "fsm_state",
+          "negotiating_connections",
+          "peers"
         ]
       },
       "BundleUtilization": {
@@ -3827,6 +3923,21 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "EstablishedConnection": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          }
+        },
+        "required": [
+          "addr",
+          "baseboard"
         ]
       },
       "Field": {
