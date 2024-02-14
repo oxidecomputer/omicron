@@ -5,7 +5,6 @@
 //! Facilities for working with the Omicron database
 
 pub(crate) mod alias;
-pub(crate) mod cast_uuid_as_bytea;
 // This is not intended to be public, but this is necessary to use it from
 // doctests
 pub mod collection_attach;
