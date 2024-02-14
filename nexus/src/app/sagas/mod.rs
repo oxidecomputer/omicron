@@ -358,8 +358,8 @@ where
                     Err(progenitor_client::Error::CommunicationError(e)) => {
                         warn!(
                             log,
-                            "saw transient communication error {}, retrying...",
-                            e,
+                            "saw transient communication error, retrying...";
+                            "error" => %e,
                         );
 
                         Err(backoff::BackoffError::transient(
@@ -382,16 +382,23 @@ where
                             }
 
                             // Anything else is a permanent error
-                            _ => Err(backoff::BackoffError::Permanent(
-                                progenitor_client::Error::ErrorResponse(
-                                    response_value,
-                                ),
-                            )),
+                            _ => {
+                                warn!(
+                                    log,
+                                    "saw response implying permanent error, aborting";
+                                    "response" => ?response_value
+                                );
+                                Err(backoff::BackoffError::Permanent(
+                                    progenitor_client::Error::ErrorResponse(
+                                        response_value,
+                                    ),
+                                ))
+                            },
                         }
                     }
 
                     Err(e) => {
-                        warn!(log, "saw permanent error {}, aborting", e,);
+                        warn!(log, "saw permanent error, aborting"; "error" => %e);
 
                         Err(backoff::BackoffError::Permanent(e))
                     }

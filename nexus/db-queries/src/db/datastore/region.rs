@@ -153,6 +153,12 @@ impl DataStore {
             .map(|DatasetAndRegion { dataset, region }| (dataset, region))
             .collect::<Vec<_>>();
 
+        info!(
+            self.log,
+            "Allocated regions for volume";
+            "volume_id" => %volume_id,
+            "datasets_and_regions" => ?dataset_and_regions,
+        );
         Ok(dataset_and_regions)
     }
 
