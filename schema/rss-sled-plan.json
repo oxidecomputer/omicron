@@ -466,7 +466,7 @@
         "external_dns_zone_name",
         "internal_services_ip_pool_ranges",
         "ntp_servers",
-        "rack_subnet",
+        "rack_network_config",
         "recovery_silo"
       ],
       "properties": {
@@ -521,18 +521,11 @@
         },
         "rack_network_config": {
           "description": "Initial rack network configuration",
-          "anyOf": [
+          "allOf": [
             {
               "$ref": "#/definitions/RackNetworkConfigV1"
-            },
-            {
-              "type": "null"
             }
           ]
-        },
-        "rack_subnet": {
-          "type": "string",
-          "format": "ipv6"
         },
         "recovery_silo": {
           "description": "Configuration of the Recovery Silo (the initial Silo)",

@@ -65,7 +65,7 @@ impl ServiceName {
 
     /// Returns the DNS name for this service, ignoring the zone part of the DNS
     /// name
-    pub(crate) fn dns_name(&self) -> String {
+    pub fn dns_name(&self) -> String {
         match self {
             ServiceName::Clickhouse
             | ServiceName::ClickhouseKeeper
