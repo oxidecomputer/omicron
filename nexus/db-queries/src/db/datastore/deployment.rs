@@ -1343,10 +1343,12 @@ mod tests {
         policy.sleds.insert(new_sled_id, fake_sled_resources(None));
         let new_sled_zpools = &policy.sleds.get(&new_sled_id).unwrap().zpools;
 
-        // Create a builder for a child blueprint.
+        // Create a builder for a child blueprint.  While we're at it, use a
+        // different DNS version to test that that works.
+        let new_dns_version = blueprint1.internal_dns_version.next();
         let mut builder = BlueprintBuilder::new_based_on(
             &blueprint1,
-            Generation::new(),
+            new_dns_version,
             &policy,
             "test",
         )
@@ -1398,6 +1400,7 @@ mod tests {
             .expect("failed to read collection back");
         println!("diff: {}", blueprint2.diff_sleds(&blueprint_read));
         assert_eq!(blueprint2, blueprint_read);
+        assert_eq!(blueprint2.internal_dns_version, new_dns_version);
         {
             let mut expected_ids = [blueprint1.id, blueprint2.id];
             expected_ids.sort();
