@@ -104,6 +104,8 @@ pub enum InsertError {
     IpAddressNotAvailable(std::net::IpAddr),
     /// An explicity-requested MAC address is already in use
     MacAddressNotAvailable(MacAddr),
+    /// An explicity-requested interface slot is already in use
+    SlotNotAvailable(u8),
     /// There are no slots available for a new interface
     NoSlotsAvailable,
     /// There are no MAC addresses available
@@ -169,19 +171,24 @@ impl InsertError {
                 ))
             }
             InsertError::IpAddressNotAvailable(ip) => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "The IP address '{}' is not available",
                     ip
                 ))
             }
             InsertError::MacAddressNotAvailable(mac) => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "The MAC address '{}' is not available",
                     mac
                 ))
             }
+            InsertError::SlotNotAvailable(slot) => {
+                external::Error::invalid_request(format!(
+                    "The interface slot '{slot}' is not available",
+                ))
+            }
             InsertError::NoSlotsAvailable => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "May not attach more than {} network interfaces",
                     MAX_NICS
                 ))
@@ -252,6 +259,12 @@ fn decode_database_error(
     // MAC that is already allocated to another interface in the same VPC.
     const MAC_NOT_AVAILABLE_CONSTRAINT: &str =
         "network_interface_vpc_id_mac_key";
+
+    // The name of the index whose uniqueness is violated if we try to assign a
+    // slot to an interface that is already allocated to another interface in
+    // the same instance or service.
+    const SLOT_NOT_AVAILABLE_CONSTRAINT: &str =
+        "network_interface_parent_id_slot_key";
 
     // The name of the index whose uniqueness is violated if we try to assign a
     // name to an interface that is already used for another interface on the
@@ -378,6 +391,12 @@ fn decode_database_error(
             Some(constraint) if constraint == MAC_NOT_AVAILABLE_CONSTRAINT => {
                 let mac = interface.mac.unwrap_or_else(|| MacAddr::from_i64(0));
                 InsertError::MacAddressNotAvailable(mac)
+            }
+            // Constraint violated if a user-requested slot has
+            // already been assigned within the same instance or service.
+            Some(constraint) if constraint == SLOT_NOT_AVAILABLE_CONSTRAINT => {
+                let slot = interface.slot.unwrap_or(0);
+                InsertError::SlotNotAvailable(slot)
             }
             // Constraint violated if the user-requested name is already
             // assigned to an interface on this resource
@@ -977,6 +996,7 @@ pub struct InsertQuery {
     parent_id_str: String,
     ip_sql: Option<IpNetwork>,
     mac_sql: Option<db::model::MacAddr>,
+    slot_sql: Option<i16>,
     next_mac_subquery: NextMacAddress,
     next_ipv4_address_subquery: NextIpv4Address,
     next_slot_subquery: NextNicSlot,
@@ -991,6 +1011,7 @@ impl InsertQuery {
         let parent_id_str = interface.parent_id.to_string();
         let ip_sql = interface.ip.map(|ip| ip.into());
         let mac_sql = interface.mac.map(|mac| mac.into());
+        let slot_sql = interface.slot.map(|slot| slot.into());
         let next_mac_subquery =
             NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
@@ -1008,6 +1029,7 @@ impl InsertQuery {
             parent_id_str,
             ip_sql,
             mac_sql,
+            slot_sql,
             next_mac_subquery,
             next_ipv4_address_subquery,
             next_slot_subquery,
@@ -1162,7 +1184,11 @@ impl QueryFragment<Pg> for InsertQuery {
         out.push_identifier(dsl::ip::NAME)?;
         out.push_sql(", ");
 
-        select_from_cte(out.reborrow(), dsl::slot::NAME)?;
+        if let Some(slot) = &self.slot_sql {
+            out.push_bind_param::<sql_types::SmallInt, i16>(slot)?;
+        } else {
+            select_from_cte(out.reborrow(), dsl::slot::NAME)?;
+        }
         out.push_sql(", ");
         select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
 
@@ -2195,7 +2221,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_request_slot() {
-        let context = TestContext::new("test_insert_request_mac", 1).await;
+        let context = TestContext::new("test_insert_request_slot", 1).await;
 
         // Ensure service NICs are recorded with the explicit requested slot
         let mut used_macs = HashSet::new();
@@ -2290,6 +2316,80 @@ mod tests {
         assert!(
             matches!(result, Err(InsertError::MacAddressNotAvailable(_))),
             "Requesting an interface with an existing MAC should fail"
+        );
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_request_same_slot_fails() {
+        let context =
+            TestContext::new("test_insert_request_same_slot_fails", 2).await;
+
+        let ip0 = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+        let ip1 = context.net1.subnets[1]
+            .ipv4_block
+            .iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+
+        let mut next_mac = {
+            let mut used_macs = HashSet::new();
+            move || {
+                let mut mac = MacAddr::random_system();
+                while !used_macs.insert(mac) {
+                    mac = MacAddr::random_system();
+                }
+                mac
+            }
+        };
+
+        // Insert a service NIC
+        let service_id = Uuid::new_v4();
+        let interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "service-nic".parse().unwrap(),
+                description: String::from("service nic"),
+            },
+            ip0.into(),
+            next_mac(),
+            0,
+        )
+        .unwrap();
+        let inserted_interface = context
+            .db_datastore
+            .service_create_network_interface_raw(&context.opctx, interface)
+            .await
+            .expect("Failed to insert interface");
+        assert_eq!(inserted_interface.slot, 0);
+
+        // Inserting an interface with the same slot on the same service should
+        let new_interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[1].clone(),
+            IdentityMetadataCreateParams {
+                name: "new-service-nic".parse().unwrap(),
+                description: String::from("new-service nic"),
+            },
+            ip1.into(),
+            next_mac(),
+            0,
+        )
+        .unwrap();
+        let result = context
+            .db_datastore
+            .service_create_network_interface_raw(&context.opctx, new_interface)
+            .await;
+        assert!(
+            matches!(result, Err(InsertError::SlotNotAvailable(0))),
+            "Requesting an interface with an existing slot should fail"
         );
         context.success().await;
     }
