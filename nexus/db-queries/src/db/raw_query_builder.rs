@@ -30,10 +30,7 @@ impl BindParamCounter {
 ///
 /// This is basically a workaround for cases where we haven't yet been
 /// able to construct a query at compile-time.
-pub enum TrustedStr {
-    Static(&'static str),
-    ValidatedExplicitly(String),
-}
+pub struct TrustedStr(TrustedStrVariants);
 
 impl TrustedStr {
     /// Explicitly constructs a string, with a name that hopefully
@@ -42,23 +39,30 @@ impl TrustedStr {
     /// If arbitrary user input is provided here, this string COULD
     /// cause SQL injection attacks, so each call-site should have a
     /// justification for "why it's safe".
-    pub fn this_string_wont_cause_sql_injections(s: String) -> Self {
-        Self::ValidatedExplicitly(s)
+    pub fn i_take_responsibility_for_validating_this_string(s: String) -> Self {
+        Self(TrustedStrVariants::ValidatedExplicitly(s))
     }
 
     #[cfg(test)]
     pub fn as_str(&self) -> &str {
-        match self {
-            Self::Static(s) => s,
-            Self::ValidatedExplicitly(s) => s.as_str(),
+        match &self.0 {
+            TrustedStrVariants::Static(s) => s,
+            TrustedStrVariants::ValidatedExplicitly(s) => s.as_str(),
         }
     }
 }
 
 impl From<&'static str> for TrustedStr {
     fn from(s: &'static str) -> Self {
-        Self::Static(s)
+        Self(TrustedStrVariants::Static(s))
     }
+}
+
+// This enum should be kept non-pub to make it harder to accidentally
+// construct a "ValidatedExplicitly" variant.
+enum TrustedStrVariants {
+    Static(&'static str),
+    ValidatedExplicitly(String),
 }
 
 trait SqlQueryBinds {
@@ -127,9 +131,9 @@ impl QueryBuilder {
     ///
     /// See the documentation of [TrustedStr] for more details.
     pub fn sql<S: Into<TrustedStr>>(self, s: S) -> Self {
-        let query = match s.into() {
-            TrustedStr::Static(s) => self.query.sql(s),
-            TrustedStr::ValidatedExplicitly(s) => self.query.sql(s),
+        let query = match s.into().0 {
+            TrustedStrVariants::Static(s) => self.query.sql(s),
+            TrustedStrVariants::ValidatedExplicitly(s) => self.query.sql(s),
         };
         Self { query, bind_counter: self.bind_counter }
     }

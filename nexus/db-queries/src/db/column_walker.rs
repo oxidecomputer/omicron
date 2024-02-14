@@ -36,7 +36,7 @@ macro_rules! impl_column_walker {
                 // are not controlled by an arbitrary user, and
                 // - The "prefix" type, which is a "&'static str" (AKA,
                 // hopefully known at compile-time, and not leaked).
-                TrustedStr::this_string_wont_cause_sql_injections(
+                TrustedStr::i_take_responsibility_for_validating_this_string(
                     [$([prefix, $column::NAME].join("."),)+].join(", ")
                 )
             }
