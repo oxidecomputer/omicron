@@ -25,21 +25,14 @@ use diesel::QueryResult;
 use diesel::RunQueryDsl;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
-use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::NetworkInterfaceKindEnum;
+use nexus_db_model::{NetworkInterfaceKind, MAX_NICS};
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use once_cell::sync::Lazy;
 use std::net::IpAddr;
 use uuid::Uuid;
-
-/// The max number of interfaces that may be associated with a resource,
-/// e.g., instance or service.
-///
-/// RFD 135 caps instances at 8 interfaces and we use the same limit for
-/// all types of interfaces for simplicity.
-pub(crate) const MAX_NICS: usize = 8;
 
 // These are sentinel values and other constants used to verify the state of the
 // system when operating on network interfaces
@@ -1713,6 +1706,7 @@ mod tests {
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use std::collections::HashSet;
     use std::convert::TryInto;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -2167,8 +2161,14 @@ mod tests {
     async fn test_insert_request_mac() {
         let context = TestContext::new("test_insert_request_mac", 1).await;
 
-        // Insert a service NIC with an explicit MAC address
+        // Ensure service NICs are recorded with the explicit requested MAC
+        // address
         let service_id = Uuid::new_v4();
+        let ip = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
         let mac = MacAddr::random_system();
         let interface = IncompleteNetworkInterface::new_service(
             Uuid::new_v4(),
@@ -2178,8 +2178,9 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            None,
-            Some(mac),
+            ip.into(),
+            mac,
+            0,
         )
         .unwrap();
         let inserted_interface = context
@@ -2193,12 +2194,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_insert_request_slot() {
+        let context = TestContext::new("test_insert_request_mac", 1).await;
+
+        // Ensure service NICs are recorded with the explicit requested slot
+        let mut used_macs = HashSet::new();
+        let mut ips = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
+        for slot in 0..u8::try_from(MAX_NICS).unwrap() {
+            let service_id = Uuid::new_v4();
+            let ip = ips.next().expect("exhausted test subnet");
+            let mut mac = MacAddr::random_system();
+            while !used_macs.insert(mac) {
+                mac = MacAddr::random_system();
+            }
+            let interface = IncompleteNetworkInterface::new_service(
+                Uuid::new_v4(),
+                service_id,
+                context.net1.subnets[0].clone(),
+                IdentityMetadataCreateParams {
+                    name: "service-nic".parse().unwrap(),
+                    description: String::from("service nic"),
+                },
+                ip.into(),
+                mac,
+                slot,
+            )
+            .unwrap();
+            let inserted_interface = context
+                .db_datastore
+                .service_create_network_interface_raw(&context.opctx, interface)
+                .await
+                .expect("Failed to insert interface");
+            assert_eq!(inserted_interface.slot, i16::from(slot));
+        }
+
+        context.success().await;
+    }
+
+    #[tokio::test]
     async fn test_insert_request_same_mac_fails() {
         let context =
             TestContext::new("test_insert_request_same_mac_fails", 2).await;
 
+        let mut ips = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
+
         // Insert a service NIC
         let service_id = Uuid::new_v4();
+        let mac = MacAddr::random_system();
         let interface = IncompleteNetworkInterface::new_service(
             Uuid::new_v4(),
             service_id,
@@ -2207,8 +2255,9 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            None,
-            None,
+            ips.next().expect("exhausted test subnet").into(),
+            mac,
+            0,
         )
         .unwrap();
         let inserted_interface = context
@@ -2216,6 +2265,7 @@ mod tests {
             .service_create_network_interface_raw(&context.opctx, interface)
             .await
             .expect("Failed to insert interface");
+        assert_eq!(inserted_interface.mac.0, mac);
 
         // Inserting an interface with the same MAC should fail, even if all
         // other parameters are valid.
@@ -2228,8 +2278,9 @@ mod tests {
                 name: "new-service-nic".parse().unwrap(),
                 description: String::from("new-service nic"),
             },
-            None,
-            Some(inserted_interface.mac.0),
+            ips.next().expect("exhausted test subnet").into(),
+            mac,
+            0,
         )
         .unwrap();
         let result = context
