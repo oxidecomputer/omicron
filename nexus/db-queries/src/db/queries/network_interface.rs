@@ -25,8 +25,8 @@ use diesel::QueryResult;
 use diesel::RunQueryDsl;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
-use nexus_db_model::NetworkInterfaceKindEnum;
-use nexus_db_model::{NetworkInterfaceKind, MAX_NICS};
+use nexus_db_model::{NetworkInterfaceKind, MAX_NICS_PER_INSTANCE};
+use nexus_db_model::{NetworkInterfaceKindEnum, SqlU8};
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -190,7 +190,7 @@ impl InsertError {
             InsertError::NoSlotsAvailable => {
                 external::Error::invalid_request(format!(
                     "May not attach more than {} network interfaces",
-                    MAX_NICS
+                    MAX_NICS_PER_INSTANCE
                 ))
             }
             InsertError::NoMacAddrressesAvailable => {
@@ -577,7 +577,7 @@ impl NextNicSlot {
     pub fn new(parent_id: Uuid) -> Self {
         let generator = DefaultShiftGenerator {
             base: 0,
-            max_shift: i64::try_from(MAX_NICS)
+            max_shift: i64::try_from(MAX_NICS_PER_INSTANCE)
                 .expect("Too many network interfaces"),
             min_shift: 0,
         };
@@ -996,7 +996,7 @@ pub struct InsertQuery {
     parent_id_str: String,
     ip_sql: Option<IpNetwork>,
     mac_sql: Option<db::model::MacAddr>,
-    slot_sql: Option<i16>,
+    slot_sql: Option<SqlU8>,
     next_mac_subquery: NextMacAddress,
     next_ipv4_address_subquery: NextIpv4Address,
     next_slot_subquery: NextNicSlot,
@@ -1185,7 +1185,7 @@ impl QueryFragment<Pg> for InsertQuery {
         out.push_sql(", ");
 
         if let Some(slot) = &self.slot_sql {
-            out.push_bind_param::<sql_types::SmallInt, i16>(slot)?;
+            out.push_bind_param::<sql_types::Int2, SqlU8>(slot)?;
         } else {
             select_from_cte(out.reborrow(), dsl::slot::NAME)?;
         }
@@ -1700,7 +1700,7 @@ mod tests {
     use super::first_available_address;
     use super::last_address_offset;
     use super::InsertError;
-    use super::MAX_NICS;
+    use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use crate::authz;
     use crate::context::OpContext;
@@ -2229,7 +2229,7 @@ mod tests {
             .ipv4_block
             .iter()
             .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
-        for slot in 0..u8::try_from(MAX_NICS).unwrap() {
+        for slot in 0..u8::try_from(MAX_NICS_PER_INSTANCE).unwrap() {
             let service_id = Uuid::new_v4();
             let ip = ips.next().expect("exhausted test subnet");
             let mut mac = MacAddr::random_system();
@@ -2704,11 +2704,11 @@ mod tests {
     async fn test_limit_number_of_interfaces_per_instance_query() {
         let context = TestContext::new(
             "test_limit_number_of_interfaces_per_instance_query",
-            MAX_NICS as u8 + 1,
+            MAX_NICS_PER_INSTANCE as u8 + 1,
         )
         .await;
         let instance = context.create_stopped_instance().await;
-        for slot in 0..MAX_NICS {
+        for slot in 0..MAX_NICS_PER_INSTANCE {
             let subnet = &context.net1.subnets[slot];
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),

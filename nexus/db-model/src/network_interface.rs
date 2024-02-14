@@ -22,7 +22,7 @@ use uuid::Uuid;
 ///
 /// RFD 135 caps instances at 8 interfaces and we use the same limit for
 /// all types of interfaces for simplicity.
-pub const MAX_NICS: usize = 8;
+pub const MAX_NICS_PER_INSTANCE: usize = 8;
 
 impl_enum_type! {
     #[derive(SqlType, QueryId, Debug, Clone, Copy)]
@@ -254,9 +254,10 @@ impl IncompleteNetworkInterface {
             }
         }
         if let Some(slot) = slot {
-            if usize::from(slot) >= MAX_NICS {
+            if usize::from(slot) >= MAX_NICS_PER_INSTANCE {
                 return Err(external::Error::invalid_request(format!(
-                    "invalid slot {slot} for NIC",
+                    "invalid slot {slot} for NIC (max slot = {})",
+                    MAX_NICS_PER_INSTANCE - 1,
                 )));
             }
         }
