@@ -69,6 +69,8 @@ use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::DNS_HTTP_PORT;
+use omicron_common::address::DNS_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -1888,21 +1890,24 @@ impl ServiceManager {
                 let opte_interface = port.vnic_name();
                 let opte_gateway = &port.gateway().ip().to_string();
 
-                let listen_addr = underlay_address.to_string();
+                let static_addr = underlay_address.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     info,
                     &installed_zone,
-                    &listen_addr.clone(),
+                    &static_addr.clone(),
                 )?;
+
+                let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
+                let dns_addr = format!("{}:{}", opte_gateway, DNS_PORT);
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     // TODO: Removeme and move to new opte interface service
                     .add_property("opte_gateway", "astring", opte_gateway)
                     .add_property("opte_interface", "astring", opte_interface)
                     // TODO: Keep these two
-                    .add_property("http_address", "astring", opte_gateway)
-                    .add_property("dns_address", "astring", &listen_addr);
+                    .add_property("http_address", "astring", &http_addr)
+                    .add_property("dns_address", "astring", &dns_addr);
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")

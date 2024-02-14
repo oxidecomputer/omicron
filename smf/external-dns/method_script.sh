@@ -34,4 +34,4 @@ args=(
   "--dns-address" "$DNS_ADDR"
 )
 
-ctrun -l child -o noorphan,regent /opt/oxide/dns-server/bin/dns-server "${args[@]}" &
+exec /opt/oxide/dns-server/bin/dns-server "${args[@]}" &
