@@ -335,8 +335,65 @@ pub fn allocation_query(
       region.extent_count
     ),
   updated_datasets AS
-    (UPDATE dataset SET size_used = (dataset.size_used + (SELECT proposed_dataset_changes.size_used_delta FROM proposed_dataset_changes WHERE (proposed_dataset_changes.id = dataset.id) LIMIT 1)) WHERE ((dataset.id = ANY(SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)) AND (SELECT do_insert.insert FROM do_insert LIMIT 1)) RETURNING dataset.id, dataset.time_created, dataset.time_modified, dataset.time_deleted, dataset.rcgen, dataset.pool_id, dataset.ip, dataset.port, dataset.kind, dataset.size_used)
-(SELECT dataset.id, dataset.time_created, dataset.time_modified, dataset.time_deleted, dataset.rcgen, dataset.pool_id, dataset.ip, dataset.port, dataset.kind, dataset.size_used, old_regions.id, old_regions.time_created, old_regions.time_modified, old_regions.dataset_id, old_regions.volume_id, old_regions.block_size, old_regions.blocks_per_extent, old_regions.extent_count FROM (old_regions INNER JOIN dataset ON (old_regions.dataset_id = dataset.id))) UNION (SELECT updated_datasets.id, updated_datasets.time_created, updated_datasets.time_modified, updated_datasets.time_deleted, updated_datasets.rcgen, updated_datasets.pool_id, updated_datasets.ip, updated_datasets.port, updated_datasets.kind, updated_datasets.size_used, inserted_regions.id, inserted_regions.time_created, inserted_regions.time_modified, inserted_regions.dataset_id, inserted_regions.volume_id, inserted_regions.block_size, inserted_regions.blocks_per_extent, inserted_regions.extent_count FROM (inserted_regions INNER JOIN updated_datasets ON (inserted_regions.dataset_id = updated_datasets.id)))"
+    (UPDATE dataset SET
+      size_used = (dataset.size_used + (SELECT proposed_dataset_changes.size_used_delta FROM proposed_dataset_changes WHERE (proposed_dataset_changes.id = dataset.id) LIMIT 1))
+    WHERE (
+      (dataset.id = ANY(SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)) AND
+      (SELECT do_insert.insert FROM do_insert LIMIT 1))
+    RETURNING
+      dataset.id,
+      dataset.time_created,
+      dataset.time_modified,
+      dataset.time_deleted,
+      dataset.rcgen,
+      dataset.pool_id,
+      dataset.ip,
+      dataset.port,
+      dataset.kind,
+      dataset.size_used
+    )
+(SELECT
+  dataset.id,
+  dataset.time_created,
+  dataset.time_modified,
+  dataset.time_deleted,
+  dataset.rcgen,
+  dataset.pool_id,
+  dataset.ip,
+  dataset.port,
+  dataset.kind,
+  dataset.size_used,
+  old_regions.id,
+  old_regions.time_created,
+  old_regions.time_modified,
+  old_regions.dataset_id,
+  old_regions.volume_id,
+  old_regions.block_size,
+  old_regions.blocks_per_extent,
+  old_regions.extent_count
+FROM
+  (old_regions INNER JOIN dataset ON (old_regions.dataset_id = dataset.id))
+) UNION
+(SELECT
+  updated_datasets.id,
+  updated_datasets.time_created,
+  updated_datasets.time_modified,
+  updated_datasets.time_deleted,
+  updated_datasets.rcgen,
+  updated_datasets.pool_id,
+  updated_datasets.ip,
+  updated_datasets.port,
+  updated_datasets.kind,
+  updated_datasets.size_used,
+  inserted_regions.id,
+  inserted_regions.time_created,
+  inserted_regions.time_modified,
+  inserted_regions.dataset_id,
+  inserted_regions.volume_id,
+  inserted_regions.block_size,
+  inserted_regions.blocks_per_extent,
+  inserted_regions.extent_count
+FROM (inserted_regions INNER JOIN updated_datasets ON (inserted_regions.dataset_id = updated_datasets.id)))"
     ).query
 }
 
