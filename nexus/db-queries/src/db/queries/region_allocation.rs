@@ -676,3 +676,197 @@ impl Query for RegionAllocate {
 }
 
 impl RunQueryDsl<DbConnection> for RegionAllocate {}
+
+struct BindParamCounter(i32);
+impl BindParamCounter {
+    fn new() -> Self {
+        Self(0)
+    }
+    fn next(&mut self) -> i32 {
+        self.0 += 1;
+        self.0
+    }
+}
+
+trait SqlQueryBinds {
+    fn add_bind(self, bind_counter: &mut BindParamCounter) -> Self;
+}
+
+impl<'a, Query> SqlQueryBinds
+    for diesel::query_builder::BoxedSqlQuery<'a, Pg, Query>
+{
+    fn add_bind(self, bind_counter: &mut BindParamCounter) -> Self {
+        self.sql("$").sql(bind_counter.next().to_string())
+    }
+}
+
+pub fn allocation_query(
+    volume_id: uuid::Uuid,
+    block_size: u64,
+    blocks_per_extent: u64,
+    extent_count: u64,
+    allocation_strategy: &RegionAllocationStrategy,
+) -> diesel::query_builder::BoxedSqlQuery<
+    'static,
+    Pg,
+    diesel::query_builder::SqlQuery,
+> {
+    let (seed, distinct_sleds) = {
+        let (input_seed, distinct_sleds) = match allocation_strategy {
+            RegionAllocationStrategy::Random { seed } => (seed, false),
+            RegionAllocationStrategy::RandomWithDistinctSleds { seed } => {
+                (seed, true)
+            }
+        };
+        (
+            input_seed.map_or_else(
+                || {
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                },
+                |seed| seed as u128,
+            ),
+            distinct_sleds,
+        )
+    };
+
+    let seed = seed.to_le_bytes().to_vec();
+
+    let size_delta = block_size * blocks_per_extent * extent_count;
+    let redunancy: i64 = i64::try_from(REGION_REDUNDANCY_THRESHOLD).unwrap();
+
+    let mut binds = BindParamCounter::new();
+    let query = diesel::sql_query(
+"WITH
+  old_regions AS
+    (SELECT region.id, region.time_created, region.time_modified, region.dataset_id, region.volume_id, region.block_size, region.blocks_per_extent, region.extent_count FROM region WHERE (region.volume_id = ").into_boxed().add_bind(&mut binds).sql(")),")
+    .bind::<sql_types::Uuid, _>(volume_id)
+    .sql(
+"
+  old_zpool_usage AS
+    (SELECT dataset.pool_id, sum(dataset.size_used) AS size_used FROM dataset WHERE ((dataset.size_used IS NOT NULL) AND (dataset.time_deleted IS NULL)) GROUP BY dataset.pool_id),
+");
+
+    // We pick one of these branches, depending on whether or not the sleds
+    // should be distinct.
+    if distinct_sleds {
+        query.sql("
+  candidate_zpools AS
+    (SELECT old_zpool_usage.pool_id FROM (old_zpool_usage INNER JOIN (zpool INNER JOIN sled ON (zpool.sled_id = sled.id)) ON (zpool.id = old_zpool_usage.pool_id)) WHERE (((old_zpool_usage.size_used + ").add_bind(&mut binds).sql(" ) <= total_size) AND (sled.provision_state = 'provisionable'))),
+")
+        .bind::<sql_types::BigInt, _>(size_delta as i64)
+    } else {
+        query.sql("
+  candidate_zpools AS
+    (SELECT DISTINCT ON (zpool.sled_id) old_zpool_usage.pool_id FROM (old_zpool_usage INNER JOIN (zpool INNER JOIN sled ON (zpool.sled_id = sled.id)) ON (zpool.id = old_zpool_usage.pool_id)) WHERE (((old_zpool_usage.size_used + ").add_bind(&mut binds).sql(" ) <= total_size) AND (sled.provision_state = 'provisionable')) ORDER BY zpool.sled_id, md5((CAST(zpool.id as BYTEA) || ").add_bind(&mut binds).sql("))),
+")
+        .bind::<sql_types::BigInt, _>(size_delta as i64)
+        .bind::<sql_types::Bytea, _>(seed.clone())
+    }
+    .sql(
+"
+  candidate_datasets AS
+    (SELECT DISTINCT ON (dataset.pool_id) dataset.id, dataset.pool_id FROM (dataset INNER JOIN candidate_zpools ON (dataset.pool_id = candidate_zpools.pool_id)) WHERE (((dataset.time_deleted IS NULL) AND (dataset.size_used IS NOT NULL)) AND (dataset.kind = 'crucible')) ORDER BY dataset.pool_id, md5((CAST(dataset.id as BYTEA) || ").add_bind(&mut binds).sql("))),
+"
+    ).bind::<sql_types::Bytea, _>(seed.clone())
+    .sql(
+"
+  shuffled_candidate_datasets AS
+    (SELECT candidate_datasets.id, candidate_datasets.pool_id FROM candidate_datasets ORDER BY md5((CAST(candidate_datasets.id as BYTEA) || ").add_bind(&mut binds).sql(")) LIMIT ").add_bind(&mut binds).sql("),
+"
+    ).bind::<sql_types::Bytea, _>(seed)
+    .bind::<sql_types::BigInt, _>(redunancy)
+    .sql(
+"
+  candidate_regions AS
+    (SELECT gen_random_uuid() AS id, now() AS time_created, now() AS time_modified, shuffled_candidate_datasets.id AS dataset_id, ").add_bind(&mut binds).sql(" AS volume_id, ").add_bind(&mut binds).sql(" AS block_size, ").add_bind(&mut binds).sql(" AS blocks_per_extent, ").add_bind(&mut binds).sql(" AS extent_count FROM shuffled_candidate_datasets),
+"
+    ).bind::<sql_types::Uuid, _>(volume_id)
+    .bind::<sql_types::BigInt, _>(block_size as i64)
+    .bind::<sql_types::BigInt, _>(blocks_per_extent as i64)
+    .bind::<sql_types::BigInt, _>(extent_count as i64)
+    .sql(
+"
+  proposed_dataset_changes AS
+    (SELECT candidate_regions.dataset_id AS id, dataset.pool_id AS pool_id, ((candidate_regions.block_size * candidate_regions.blocks_per_extent) * candidate_regions.extent_count) AS size_used_delta FROM (candidate_regions INNER JOIN dataset ON (dataset.id = candidate_regions.dataset_id))),
+  do_insert AS
+    (SELECT (((((SELECT COUNT(*) FROM old_regions LIMIT 1) < ").add_bind(&mut binds).sql(") AND CAST(IF(((SELECT COUNT(*) FROM candidate_zpools LIMIT 1) >= ").add_bind(&mut binds).sql("), 'TRUE', 'Not enough space') AS BOOL)) AND CAST(IF(((SELECT COUNT(*) FROM candidate_regions LIMIT 1) >= ").add_bind(&mut binds).sql("), 'TRUE', 'Not enough datasets') AS BOOL)) AND CAST(IF(((SELECT COUNT(DISTINCT dataset.pool_id) FROM (candidate_regions INNER JOIN dataset ON (candidate_regions.dataset_id = dataset.id)) LIMIT 1) >= ").add_bind(&mut binds).sql("), 'TRUE', 'Not enough unique zpools selected') AS BOOL)) AS insert),
+"
+    ).bind::<sql_types::BigInt, _>(redunancy)
+    .bind::<sql_types::BigInt, _>(redunancy)
+    .bind::<sql_types::BigInt, _>(redunancy)
+    .bind::<sql_types::BigInt, _>(redunancy)
+    .sql(
+"
+  inserted_regions AS
+    (INSERT INTO region (id, time_created, time_modified, dataset_id, volume_id, block_size, blocks_per_extent, extent_count) SELECT candidate_regions.id, candidate_regions.time_created, candidate_regions.time_modified, candidate_regions.dataset_id, candidate_regions.volume_id, candidate_regions.block_size, candidate_regions.blocks_per_extent, candidate_regions.extent_count FROM candidate_regions WHERE (SELECT do_insert.insert FROM do_insert LIMIT 1) RETURNING region.id, region.time_created, region.time_modified, region.dataset_id, region.volume_id, region.block_size, region.blocks_per_extent, region.extent_count),
+  updated_datasets AS
+    (UPDATE dataset SET size_used = (dataset.size_used + (SELECT proposed_dataset_changes.size_used_delta FROM proposed_dataset_changes WHERE (proposed_dataset_changes.id = dataset.id) LIMIT 1)) WHERE ((dataset.id = ANY(SELECT proposed_dataset_changes.id FROM proposed_dataset_changes)) AND (SELECT do_insert.insert FROM do_insert LIMIT 1)) RETURNING dataset.id, dataset.time_created, dataset.time_modified, dataset.time_deleted, dataset.rcgen, dataset.pool_id, dataset.ip, dataset.port, dataset.kind, dataset.size_used)
+(SELECT dataset.id, dataset.time_created, dataset.time_modified, dataset.time_deleted, dataset.rcgen, dataset.pool_id, dataset.ip, dataset.port, dataset.kind, dataset.size_used, old_regions.id, old_regions.time_created, old_regions.time_modified, old_regions.dataset_id, old_regions.volume_id, old_regions.block_size, old_regions.blocks_per_extent, old_regions.extent_count FROM (old_regions INNER JOIN dataset ON (old_regions.dataset_id = dataset.id))) UNION (SELECT updated_datasets.id, updated_datasets.time_created, updated_datasets.time_modified, updated_datasets.time_deleted, updated_datasets.rcgen, updated_datasets.pool_id, updated_datasets.ip, updated_datasets.port, updated_datasets.kind, updated_datasets.size_used, inserted_regions.id, inserted_regions.time_created, inserted_regions.time_modified, inserted_regions.dataset_id, inserted_regions.volume_id, inserted_regions.block_size, inserted_regions.blocks_per_extent, inserted_regions.extent_count FROM (inserted_regions INNER JOIN updated_datasets ON (inserted_regions.dataset_id = updated_datasets.id)))"
+    )
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::explain::ExplainableAsync;
+    use omicron_test_utils::dev;
+    use nexus_test_utils::db::test_setup_database;
+    use uuid::Uuid;
+
+    #[test]
+    fn raw_sql() {
+        let volume_id = Uuid::new_v4();
+        let block_size = 0;
+        let blocks_per_extent = 1;
+        let extent_count = 2;
+        let allocation_strategy =
+            RegionAllocationStrategy::RandomWithDistinctSleds { seed: None };
+
+        let region_allocate = RegionAllocate::new(
+            volume_id,
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            &allocation_strategy,
+        );
+
+        let query = diesel::debug_query::<Pg, _>(&region_allocate);
+
+        assert_eq!(query.to_string(), "foobar");
+    }
+
+    #[tokio::test]
+    async fn explainable() {
+        let logctx = dev::test_setup_log("explainable");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = crate::db::Pool::new(&logctx.log, &cfg);
+        let conn = pool.pool().get().await.unwrap();
+
+        let volume_id = Uuid::new_v4();
+        let block_size = 0;
+        let blocks_per_extent = 1;
+        let extent_count = 2;
+        let allocation_strategy =
+            RegionAllocationStrategy::RandomWithDistinctSleds { seed: None };
+        let region_allocate = allocation_query(
+            volume_id,
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            &allocation_strategy,
+        );
+
+        let _ = region_allocate
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+}

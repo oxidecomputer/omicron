@@ -18,6 +18,7 @@ use uuid::Uuid;
 /// available to a service on the Sled.
 #[derive(
     Queryable,
+    QueryableByName,
     Insertable,
     Debug,
     Clone,
