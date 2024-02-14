@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task for managing switch port settings
+//! Background task for propagating switch port settings to downstream switch
+//! management daemons (dendrite)
 
 use crate::app::sagas::switch_port_settings_common::api_to_dpd_port_settings;
 

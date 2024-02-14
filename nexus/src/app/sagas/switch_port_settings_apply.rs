@@ -52,10 +52,6 @@ declare_saga_actions! {
     GET_SWITCH_PORT_SETTINGS -> "switch_port_settings" {
         + spa_get_switch_port_settings
     }
-    ENSURE_SWITCH_PORT_SETTINGS -> "ensure_switch_port_settings" {
-        + spa_ensure_switch_port_settings
-        - spa_undo_ensure_switch_port_settings
-    }
     ENSURE_SWITCH_PORT_UPLINK -> "ensure_switch_port_uplink" {
         + spa_ensure_switch_port_uplink
         - spa_undo_ensure_switch_port_uplink
@@ -93,7 +89,6 @@ impl NexusSaga for SagaSwitchPortSettingsApply {
     ) -> Result<steno::Dag, SagaInitError> {
         builder.append(associate_switch_port_action());
         builder.append(get_switch_port_settings_action());
-        builder.append(ensure_switch_port_settings_action());
         builder.append(ensure_switch_port_uplink_action());
         builder.append(ensure_switch_routes_action());
         builder.append(ensure_switch_port_bgp_settings_action());
@@ -160,63 +155,6 @@ async fn spa_get_switch_port_settings(
         })?;
 
     Ok(port_settings)
-}
-
-async fn spa_ensure_switch_port_settings(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
-    let log = sagactx.user_data().log();
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let settings = sagactx
-        .lookup::<SwitchPortSettingsCombinedResult>("switch_port_settings")?;
-
-    let port_id: PortId =
-        PortId::from_str(&params.switch_port_name).map_err(|e| {
-            ActionError::action_failed(format!("parse port id: {e}"))
-        })?;
-
-    let dpd_client: Arc<dpd_client::Client> =
-        select_dendrite_client(&sagactx, &opctx, params.switch_port_id).await?;
-
-    let dpd_port_settings =
-        api_to_dpd_port_settings(&settings).map_err(|e| {
-            ActionError::action_failed(format!(
-                "translate api port settings to dpd port settings: {e}",
-            ))
-        })?;
-
-    retry_until_known_result(log, || async {
-        dpd_client
-            .port_settings_apply(
-                &port_id,
-                Some(NEXUS_DPD_TAG),
-                &dpd_port_settings,
-            )
-            .await
-    })
-    .await
-    .map_err(|e| match e {
-        progenitor_client::Error::ErrorResponse(ref er) => {
-            if er.status().is_client_error() {
-                ActionError::action_failed(format!(
-                    "bad request: dpd port settings apply {}",
-                    er.message,
-                ))
-            } else {
-                ActionError::action_failed(format!(
-                    "dpd port settings apply {e}"
-                ))
-            }
-        }
-        _ => ActionError::action_failed(format!("dpd port settings apply {e}")),
-    })?;
-
-    Ok(())
 }
 
 async fn spa_ensure_switch_routes(
@@ -291,72 +229,6 @@ async fn spa_undo_ensure_switch_routes(
     mg_client.inner.static_remove_v4_route(&rq).await.map_err(|e| {
         ActionError::action_failed(format!("mgd static route remove {e}"))
     })?;
-
-    Ok(())
-}
-
-async fn spa_undo_ensure_switch_port_settings(
-    sagactx: NexusActionContext,
-) -> Result<(), Error> {
-    let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let nexus = osagactx.nexus();
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    let log = sagactx.user_data().log();
-
-    let port_id: PortId = PortId::from_str(&params.switch_port_name)
-        .map_err(|e| external::Error::internal_error(e.to_string().as_str()))?;
-
-    let orig_port_settings_id = sagactx
-        .lookup::<Option<Uuid>>("original_switch_port_settings_id")
-        .map_err(|e| external::Error::internal_error(&e.to_string()))?;
-
-    let dpd_client =
-        select_dendrite_client(&sagactx, &opctx, params.switch_port_id).await?;
-
-    let id = match orig_port_settings_id {
-        Some(id) => id,
-        None => {
-            retry_until_known_result(log, || async {
-                dpd_client
-                    .port_settings_clear(&port_id, Some(NEXUS_DPD_TAG))
-                    .await
-            })
-            .await
-            .map_err(|e| external::Error::internal_error(&e.to_string()))?;
-
-            return Ok(());
-        }
-    };
-
-    let settings = nexus
-        .switch_port_settings_get(&opctx, &NameOrId::Id(id))
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!("switch port settings get: {e}"))
-        })?;
-
-    let dpd_port_settings =
-        api_to_dpd_port_settings(&settings).map_err(|e| {
-            ActionError::action_failed(format!(
-                "translate api to dpd port settings {e}"
-            ))
-        })?;
-
-    retry_until_known_result(log, || async {
-        dpd_client
-            .port_settings_apply(
-                &port_id,
-                Some(NEXUS_DPD_TAG),
-                &dpd_port_settings,
-            )
-            .await
-    })
-    .await
-    .map_err(|e| external::Error::internal_error(&e.to_string()))?;
 
     Ok(())
 }
