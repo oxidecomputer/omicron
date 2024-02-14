@@ -27,6 +27,7 @@ mod pool_connection;
 // This is marked public because the error types are used elsewhere, e.g., in
 // sagas.
 pub mod queries;
+mod raw_query_builder;
 mod saga_recovery;
 mod sec_store;
 pub mod subquery;
