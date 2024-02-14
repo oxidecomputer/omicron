@@ -20,6 +20,7 @@ use crate::db::model::SnapshotState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
+use crate::db::IncompleteOnConflictExt;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -69,19 +70,19 @@ impl DataStore {
                     // As written below,
                     //
                     //    .on_conflict((dsl::project_id, dsl::name))
+                    //    .as_partial_index()
                     //    .do_update()
                     //    .set(dsl::time_modified.eq(dsl::time_modified))
-                    //    .filter(dsl::time_deleted.is_null())
                     //
                     // will set any existing record's `time_modified` if the
                     // project id and name match, even if the snapshot ID does
-                    // not match. We could add another filter with (marked as
-                    // >>):
+                    // not match. diesel supports adding a filter below like so
+                    // (marked with >>):
                     //
                     //    .on_conflict((dsl::project_id, dsl::name))
+                    //    .as_partial_index()
                     //    .do_update()
                     //    .set(dsl::time_modified.eq(dsl::time_modified))
-                    //    .filter(dsl::time_deleted.is_null())
                     // >> .filter(dsl::id.eq(snapshot.id()))
                     //
                     // which will restrict the `insert_into`'s set so that it
@@ -93,11 +94,6 @@ impl DataStore {
                     // If this function is passed a snapshot with an ID that
                     // does not match, but a project and name that does, return
                     // ObjectAlreadyExists here.
-                    //
-                    // NOTE: an earlier version of this comment suggested using
-                    // filter_target for time_deleted, which does not work with
-                    // CockroachDB:
-                    // https://github.com/oxidecomputer/omicron/issues/5047
 
                     let existing_snapshot_id: Option<Uuid> = dsl::snapshot
                         .filter(dsl::time_deleted.is_null())
@@ -118,29 +114,26 @@ impl DataStore {
                         }
                     }
 
-                    let query = {
-                        use diesel::query_dsl::methods::FilterDsl;
-
+                    Project::insert_resource(
+                        project_id,
                         diesel::insert_into(dsl::snapshot)
                             .values(snapshot)
                             .on_conflict((dsl::project_id, dsl::name))
+                            .as_partial_index()
                             .do_update()
-                            .set(dsl::time_modified.eq(dsl::time_modified))
-                            .filter(dsl::time_deleted.is_null())
-                    };
-
-                    Project::insert_resource(project_id, query)
-                        .insert_and_get_result_async(&conn)
-                        .await
-                        .map_err(|e| match e {
-                            AsyncInsertError::CollectionNotFound => {
-                                err.bail(Error::ObjectNotFound {
-                                    type_name: ResourceType::Project,
-                                    lookup_type: LookupType::ById(project_id),
-                                })
-                            }
-                            AsyncInsertError::DatabaseError(e) => e,
-                        })
+                            .set(dsl::time_modified.eq(dsl::time_modified)),
+                    )
+                    .insert_and_get_result_async(&conn)
+                    .await
+                    .map_err(|e| match e {
+                        AsyncInsertError::CollectionNotFound => {
+                            err.bail(Error::ObjectNotFound {
+                                type_name: ResourceType::Project,
+                                lookup_type: LookupType::ById(project_id),
+                            })
+                        }
+                        AsyncInsertError::DatabaseError(e) => e,
+                    })
                 }
             })
             .await
