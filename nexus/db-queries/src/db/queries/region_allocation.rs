@@ -304,6 +304,41 @@ mod test {
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
+    // This test is a bit of a "change detector", but it's here to help with
+    // debugging too. If you change this query, it can be useful to see exactly
+    // how the output SQL has been altered.
+    #[tokio::test]
+    async fn expectorate_query() {
+        let volume_id = Uuid::new_v4();
+        let block_size = 512;
+        let blocks_per_extent = 4;
+        let extent_count = 8;
+
+        // First structure: "RandomWithDistinctSleds"
+
+        let region_allocate = allocation_query(
+            volume_id,
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            &RegionAllocationStrategy::RandomWithDistinctSleds { seed: Some(1) },
+        );
+        let s = diesel::debug_query::<Pg, _>(&region_allocate).to_string();
+        expectorate::assert_contents("tests/output/region_allocate_distinct_sleds.sql", &s);
+
+        // Second structure: "Random"
+
+        let region_allocate = allocation_query(
+            volume_id,
+            block_size,
+            blocks_per_extent,
+            extent_count,
+            &RegionAllocationStrategy::Random { seed: Some(1) },
+        );
+        let s = diesel::debug_query::<Pg, _>(&region_allocate).to_string();
+        expectorate::assert_contents("tests/output/region_allocate_random_sleds.sql", &s);
+    }
+
     // Explain the possible forms of the SQL query to ensure that it
     // creates a valid SQL string.
     #[tokio::test]
