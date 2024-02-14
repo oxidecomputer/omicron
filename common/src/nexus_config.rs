@@ -847,7 +847,7 @@ mod test {
                         switch_port_settings_manager:
                             SwitchPortSettingsManagerConfig {
                                 period_secs: Duration::from_secs(30),
-                            }
+                            },
                         region_replacement: RegionReplacementConfig {
                             period_secs: Duration::from_secs(30),
                         },
