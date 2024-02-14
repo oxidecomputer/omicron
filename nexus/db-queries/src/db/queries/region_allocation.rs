@@ -98,7 +98,7 @@ pub fn allocation_query(
     let seed = seed.to_le_bytes().to_vec();
 
     let size_delta = block_size * blocks_per_extent * extent_count;
-    let redunancy: i64 = i64::try_from(REGION_REDUNDANCY_THRESHOLD).unwrap();
+    let redundancy: i64 = i64::try_from(REGION_REDUNDANCY_THRESHOLD).unwrap();
 
     let builder = QueryBuilder::new().sql(
     // Find all old regions associated with a particular volume
@@ -191,7 +191,7 @@ pub fn allocation_query(
     ORDER BY md5((CAST(candidate_datasets.id as BYTEA) || ").param().sql(")) LIMIT ").param().sql("
   ),")
     .bind::<sql_types::Bytea, _>(seed)
-    .bind::<sql_types::BigInt, _>(redunancy)
+    .bind::<sql_types::BigInt, _>(redundancy)
     // Create the regions-to-be-inserted for the volume.
     .sql("
   candidate_regions AS (
@@ -255,10 +255,10 @@ pub fn allocation_query(
         CAST(IF(((SELECT COUNT(DISTINCT dataset.pool_id) FROM (candidate_regions INNER JOIN dataset ON (candidate_regions.dataset_id = dataset.id)) LIMIT 1) >= ")).param().sql(concatcp!("), 'TRUE', '", NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL, "') AS BOOL)
     ) AS insert
   ),"))
-    .bind::<sql_types::BigInt, _>(redunancy)
-    .bind::<sql_types::BigInt, _>(redunancy)
-    .bind::<sql_types::BigInt, _>(redunancy)
-    .bind::<sql_types::BigInt, _>(redunancy)
+    .bind::<sql_types::BigInt, _>(redundancy)
+    .bind::<sql_types::BigInt, _>(redundancy)
+    .bind::<sql_types::BigInt, _>(redundancy)
+    .bind::<sql_types::BigInt, _>(redundancy)
     .sql("
   inserted_regions AS (
     INSERT INTO region
@@ -309,7 +309,7 @@ mod test {
     // how the output SQL has been altered.
     #[tokio::test]
     async fn expectorate_query() {
-        let volume_id = Uuid::new_v4();
+        let volume_id = Uuid::nil();
         let block_size = 512;
         let blocks_per_extent = 4;
         let extent_count = 8;

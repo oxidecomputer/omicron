@@ -94,4 +94,4 @@ UNION
 (
   SELECT updated_datasets.id, updated_datasets.time_created, updated_datasets.time_modified, updated_datasets.time_deleted, updated_datasets.rcgen, updated_datasets.pool_id, updated_datasets.ip, updated_datasets.port, updated_datasets.kind, updated_datasets.size_used, inserted_regions.id, inserted_regions.time_created, inserted_regions.time_modified, inserted_regions.dataset_id, inserted_regions.volume_id, inserted_regions.block_size, inserted_regions.blocks_per_extent, inserted_regions.extent_count
   FROM (inserted_regions INNER JOIN updated_datasets ON (inserted_regions.dataset_id = updated_datasets.id))
-) -- binds: [b1aa0a63-9afa-4fc3-b61e-0ebdc7854840, 16384, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 3, b1aa0a63-9afa-4fc3-b61e-0ebdc7854840, 512, 4, 8, 3, 3, 3, 3]
+) -- binds: [00000000-0000-0000-0000-000000000000, 16384, [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 3, 00000000-0000-0000-0000-000000000000, 512, 4, 8, 3, 3, 3, 3]
