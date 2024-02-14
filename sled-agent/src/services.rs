@@ -1899,7 +1899,7 @@ impl ServiceManager {
                 )?;
 
                 let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
-                let dns_addr = format!("{}:{}", opte_gateway, DNS_PORT);
+                let dns_addr = format!("{}", DNS_PORT);
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     // TODO: Removeme and move to new opte interface service

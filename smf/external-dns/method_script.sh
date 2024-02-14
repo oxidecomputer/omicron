@@ -11,6 +11,7 @@ OPTE_INTERFACE="$(svcprop -c -p config/opte_interface "${SMF_FMRI}")"
 OPTE_GATEWAY="$(svcprop -c -p config/opte_gateway "${SMF_FMRI}")"
 
 HTTP_ADDR="$(svcprop -c -p config/http_address "${SMF_FMRI}")"
+# TODO: Rename DNS_ADDR to DNS_PORT if I don't find a way to retrieve OPTE_IP from the installed zone somehow
 DNS_ADDR="$(svcprop -c -p config/dns_address "${SMF_FMRI}")"
 
 # TODO: This should be its own service
@@ -31,7 +32,7 @@ fi
 args=(
   "--config-file" "/var/svc/manifest/site/external_dns/config.toml"
   "--http-address" "$HTTP_ADDR"
-  "--dns-address" "$DNS_ADDR"
+  "--dns-address" "$OPTE_IP:$DNS_ADDR"
 )
 
 exec /opt/oxide/dns-server/bin/dns-server "${args[@]}" &
