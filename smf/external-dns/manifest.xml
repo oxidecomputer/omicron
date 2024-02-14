@@ -4,21 +4,29 @@
 <service_bundle type='manifest' name='external_dns'>
 
   <service name='oxide/external_dns' type='service' version='1'>
-  <create_default_instance enabled='false' />
+  <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
   <exec_method type='method' name='start'
-      exec='ctrun -l child -o noorphan,regent /opt/oxide/dns-server/bin/dns-server --config-file /var/svc/manifest/site/external_dns/config.toml --http-address %{config/http_address} --dns-address %{config/dns_address} &amp;'
+      exec='/opt/oxide/lib/svc/manifest/external_dns.sh'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
     <propval name='http_address' type='astring' value='unknown' />
     <propval name='dns_address' type='astring' value='unknown' />
+    <!-- TODO: Removeme when new opte interface service exists -->
+    <propval name='opte_interface' type='astring' value='unknown' />
+    <propval name='opte_gateway' type='astring' value='unknown' />
   </property_group>
 
   <property_group name='startd' type='framework'>

@@ -220,7 +220,7 @@ output.type = "zone"
 service_name = "external_dns"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz" ]
+source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz", "zone-network-setup.tar.gz" ]
 output.type = "zone"
 
 [package.dns-server]
@@ -245,7 +245,11 @@ output.type = "zone"
 service_name = "external-dns-customizations"
 only_for_targets.image = "standard"
 source.type = "local"
-source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" } ]
+source.paths = [ 
+  { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" },
+  # TODO: Removeme as we'll have a separate service for setting up OPTE interfaces
+  { from = "smf/external-dns/method_script.sh", to = "/opt/oxide/lib/svc/manifest/external_dns.sh" },
+]
 output.intermediate_only = true
 output.type = "zone"
 
