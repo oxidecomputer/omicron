@@ -22,7 +22,7 @@ where
     Target: DecoratableTarget<SqlLiteral<Bool>>,
 {
     type AsPartialIndexOutput =
-        IncompleteOnConflict<Stmt, DecoratedBool<Target>>;
+        IncompleteOnConflict<Stmt, DecoratedAsPartialIndex<Target>>;
 
     fn as_partial_index(self) -> Self::AsPartialIndexOutput {
         #[allow(clippy::disallowed_methods)]
@@ -32,5 +32,5 @@ where
     }
 }
 
-type DecoratedBool<Target> =
+type DecoratedAsPartialIndex<Target> =
     <Target as DecoratableTarget<SqlLiteral<Bool>>>::FilterOutput;
