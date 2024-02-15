@@ -31,7 +31,7 @@ use omicron_common::address::OXIMETER_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
-use slog::{debug, info};
+use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -60,62 +60,25 @@ where
     // Next, construct the DNS config represented by the blueprint.
     let dns_config_blueprint = blueprint_dns_config(blueprint, sleds_by_id);
 
-    // Diff these configurations and use the result to prepare an update.
+    // Looking at the current contents of DNS, prepare an update that will make
+    // it match what it should be.
+    let log = opctx.log.new(o!("blueprint_execution" => "DNS"));
     let comment = format!("blueprint {} ({})", blueprint.id, blueprint.comment);
-    let mut update = DnsVersionUpdateBuilder::new(
-        DnsGroup::Internal,
+    let maybe_update = dns_compute_update(
+        &log,
         comment,
         String::from(creator),
-    );
-
-    let diff = DnsDiff::new(&dns_config_current, &dns_config_blueprint)
-        .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
-    if !diff.is_empty() {
-        info!(opctx.log, "blueprint execution: DNS: no changes");
+        &dns_config_current,
+        &dns_config_blueprint,
+    )?;
+    let Some(update) = maybe_update else {
+        // Nothing to do.
         return Ok(());
-    }
-
-    for (name, new_records) in diff.names_added() {
-        debug!(
-            opctx.log,
-            "blueprint dns update: adding name";
-            "name" => name,
-            "new_records" => ?new_records,
-        );
-        update.add_name(
-            name.to_string(),
-            new_records.into_iter().cloned().collect(),
-        )?;
-    }
-
-    for (name, old_records) in diff.names_removed() {
-        debug!(
-            opctx.log,
-            "blueprint dns update: removing name";
-            "name" => name,
-            "old_records" => ?old_records,
-        );
-        update.remove_name(name.to_string())?;
-    }
-
-    for (name, old_records, new_records) in diff.names_changed() {
-        debug!(
-            opctx.log,
-            "blueprint dns update: updating name";
-            "name" => name,
-            "old_records" => ?old_records,
-            "new_records" => ?new_records,
-        );
-        update.remove_name(name.to_string())?;
-        update.add_name(
-            name.to_string(),
-            new_records.into_iter().cloned().collect(),
-        )?;
-    }
+    };
 
     info!(
-        opctx.log,
-        "blueprint execution: DNS: attempting to update from generation {}",
+        log,
+        "attempting to update from generation {}",
         dns_config_blueprint.generation,
     );
     let generation_u32 = u32::try_from(dns_config_blueprint.generation)
@@ -221,4 +184,400 @@ pub fn blueprint_dns_config(
 
     dns_builder.generation(blueprint.internal_dns_version.next());
     dns_builder.build()
+}
+
+fn dns_compute_update(
+    log: &slog::Logger,
+    comment: String,
+    creator: String,
+    current_config: &DnsConfigParams,
+    new_config: &DnsConfigParams,
+) -> Result<Option<DnsVersionUpdateBuilder>, Error> {
+    let mut update =
+        DnsVersionUpdateBuilder::new(DnsGroup::Internal, comment, creator);
+
+    let diff = DnsDiff::new(&current_config, &new_config)
+        .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
+    if !diff.is_empty() {
+        info!(log, "no changes");
+        return Ok(None);
+    }
+
+    for (name, new_records) in diff.names_added() {
+        debug!(
+            log,
+            "adding name";
+            "name" => name,
+            "new_records" => ?new_records,
+        );
+        update.add_name(
+            name.to_string(),
+            new_records.into_iter().cloned().collect(),
+        )?;
+    }
+
+    for (name, old_records) in diff.names_removed() {
+        debug!(
+            log,
+            "removing name";
+            "name" => name,
+            "old_records" => ?old_records,
+        );
+        update.remove_name(name.to_string())?;
+    }
+
+    for (name, old_records, new_records) in diff.names_changed() {
+        debug!(
+            log,
+            "updating name";
+            "name" => name,
+            "old_records" => ?old_records,
+            "new_records" => ?new_records,
+        );
+        update.remove_name(name.to_string())?;
+        update.add_name(
+            name.to_string(),
+            new_records.into_iter().cloned().collect(),
+        )?;
+    }
+
+    Ok(Some(update))
+}
+
+#[cfg(test)]
+mod test {
+    use super::blueprint_dns_config;
+    use crate::Sled;
+    use internal_dns::ServiceName;
+    use internal_dns::DNS_ZONE;
+    use nexus_deployment::blueprint_builder::BlueprintBuilder;
+    use nexus_inventory::CollectionBuilder;
+    use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::OmicronZoneConfig;
+    use nexus_types::deployment::OmicronZoneType;
+    use nexus_types::deployment::Policy;
+    use nexus_types::deployment::SledResources;
+    use nexus_types::deployment::ZpoolName;
+    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::internal_api::params::DnsConfigParams;
+    use nexus_types::internal_api::params::DnsConfigZone;
+    use nexus_types::internal_api::params::DnsRecord;
+    use omicron_common::address::get_sled_address;
+    use omicron_common::address::get_switch_zone_address;
+    use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::RACK_PREFIX;
+    use omicron_common::address::SLED_PREFIX;
+    use omicron_common::api::external::Generation;
+    use std::collections::BTreeMap;
+    use std::collections::BTreeSet;
+    use std::collections::HashMap;
+    use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
+    use std::str::FromStr;
+    use uuid::Uuid;
+
+    fn blueprint_empty() -> Blueprint {
+        let builder = CollectionBuilder::new("test-suite");
+        let collection = builder.build();
+        let policy = Policy {
+            sleds: BTreeMap::new(),
+            service_ip_pool_ranges: vec![],
+            target_nexus_zone_count: 3,
+        };
+        BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            Generation::new(),
+            &policy,
+            "test-suite",
+        )
+        .expect("failed to generate empty blueprint")
+    }
+
+    fn dns_config_empty() -> DnsConfigParams {
+        DnsConfigParams {
+            generation: 1,
+            time_created: chrono::Utc::now(),
+            zones: vec![DnsConfigZone {
+                zone_name: String::from("internal"),
+                records: HashMap::new(),
+            }],
+        }
+    }
+
+    /// test blueprint_dns_config(): trivial case of an empty blueprint
+    #[test]
+    fn test_blueprint_dns_empty() {
+        let blueprint = blueprint_empty();
+        let blueprint_dns = blueprint_dns_config(&blueprint, &BTreeMap::new());
+        assert!(blueprint_dns.sole_zone().unwrap().records.is_empty());
+    }
+
+    /// test blueprint_dns_config(): exercise various different conditions
+    /// - one of each type of zone in service
+    /// - some zones not in service
+    #[test]
+    fn test_blueprint_dns_basic() {
+        // We'll use the standard representative inventory collection to build a
+        // blueprint.  The main thing we care about here is that we have at
+        // least one zone of each type.  Later, we'll mark a couple of the sleds
+        // as Scrimlets to exercise that case.
+        let representative = nexus_inventory::examples::representative();
+        let collection = representative.builder.build();
+        let rack_subnet_base: Ipv6Addr =
+            "fd00:1122:3344:0100::".parse().unwrap();
+        let rack_subnet =
+            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
+        let possible_sled_subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+        // Ignore sleds with no associated zones in the inventory.
+        // This is included in the "representative" collection, but it's
+        // not allowed by BlueprintBuilder::build_initial_from_collection().
+        let policy_sleds = collection
+            .omicron_zones
+            .keys()
+            .zip(possible_sled_subnets)
+            .map(|(sled_id, subnet)| {
+                let sled_resources = SledResources {
+                    provision_state: SledProvisionState::Provisionable,
+                    zpools: BTreeSet::from([ZpoolName::from_str(&format!(
+                        "oxp_{}",
+                        Uuid::new_v4()
+                    ))
+                    .unwrap()]),
+                    subnet: Ipv6Subnet::new(subnet.network()),
+                };
+                (*sled_id, sled_resources)
+            })
+            .collect();
+
+        let policy = Policy {
+            sleds: policy_sleds,
+            service_ip_pool_ranges: vec![],
+            target_nexus_zone_count: 3,
+        };
+        let dns_empty = dns_config_empty();
+        let initial_dns_generation =
+            Generation::from(u32::try_from(dns_empty.generation).unwrap());
+        let mut blueprint = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            initial_dns_generation,
+            &policy,
+            "test-suite",
+        )
+        .expect("failed to build initial blueprint");
+
+        // To make things slightly more interesting, let's add a zone that's
+        // not currently in service.
+        let out_of_service_id = Uuid::new_v4();
+        let out_of_service_addr = Ipv6Addr::LOCALHOST;
+        blueprint.omicron_zones.values_mut().next().unwrap().zones.push(
+            OmicronZoneConfig {
+                id: out_of_service_id,
+                underlay_address: out_of_service_addr,
+                zone_type: OmicronZoneType::Oximeter {
+                    address: SocketAddrV6::new(
+                        out_of_service_addr,
+                        12345,
+                        0,
+                        0,
+                    )
+                    .to_string(),
+                },
+            },
+        );
+
+        // To generate the blueprint's DNS config, we need to make up a
+        // different set of information about the sleds in our fake system.
+        let sleds_by_id = policy
+            .sleds
+            .iter()
+            .enumerate()
+            .map(|(i, (sled_id, sled_resources))| {
+                let sled_info = Sled {
+                    id: *sled_id,
+                    sled_agent_address: get_sled_address(sled_resources.subnet),
+                    // The first two of these (arbitrarily) will be marked
+                    // Scrimlets.
+                    is_scrimlet: i < 2,
+                };
+                (*sled_id, sled_info)
+            })
+            .collect();
+
+        let dns_config_blueprint =
+            blueprint_dns_config(&blueprint, &sleds_by_id);
+        assert_eq!(
+            dns_config_blueprint.generation,
+            u64::from(initial_dns_generation.next())
+        );
+        let blueprint_dns_zone = dns_config_blueprint.sole_zone().unwrap();
+        assert_eq!(blueprint_dns_zone.zone_name, DNS_ZONE);
+
+        // Now, verify a few different properties about the generated DNS
+        // configuration:
+        //
+        // 1. Every zone (except for the one that we added not-in-service)
+        //    should have some DNS name with a AAAA record that points at the
+        //    zone's underlay IP.  (i.e., every Omiron zone is _in_ DNS)
+        //
+        // 2. Every SRV record that we find should have a "target" that points
+        //    to another name within the DNS configuration, and that name should
+        //    be one of the ones with a AAAA record pointing to an Omicron zone.
+        //
+        // 3. There is at least one SRV record for each service that we expect
+        //    to appear in the representative system that we're working with.
+        //
+        // 4. Our out-of-service zone does *not* appear in the DNS config,
+        //    neither with an AAAA record nor in an SRV record.
+        //
+        // Together, this tells us that we have SRV records for all services,
+        // that those SRV records all point to at least one of the Omicron zones
+        // for that service, and that we correctly ignored zones that were not
+        // in service.
+
+        // To start, we need a mapping from underlay IP to the corresponding
+        // Omicron zone.
+        let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
+            .all_omicron_zones()
+            .filter(|(_, zone)| zone.id != out_of_service_id)
+            .map(|(_, zone)| (zone.underlay_address, zone.id))
+            .collect();
+        println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
+
+        // We also want a mapping from underlay IP to the corresponding switch
+        // zone.  In this case, the value is the Scrimlet's sled id.
+        let mut switch_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
+            .iter()
+            .filter_map(|(sled_id, sled)| {
+                if sled.is_scrimlet {
+                    let sled_subnet = policy.sleds.get(sled_id).unwrap().subnet;
+                    let switch_zone_ip = get_switch_zone_address(sled_subnet);
+                    Some((switch_zone_ip, *sled_id))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Now go through all the DNS names that have AAAA records and remove
+        // any corresponding Omicron zone.  While doing this, construct a set of
+        // the fully-qualified DNS names (i.e., with the zone name suffix
+        // appended) that had AAAA records.  We'll use this later to make sure
+        // all the SRV records' targets that we find are valid.
+        let mut expected_srv_targets: BTreeSet<_> = BTreeSet::new();
+        for (name, records) in &blueprint_dns_zone.records {
+            let addrs: Vec<_> = records
+                .iter()
+                .filter_map(|dns_record| match dns_record {
+                    DnsRecord::Aaaa(addr) => Some(addr),
+                    _ => None,
+                })
+                .collect();
+            for addr in addrs {
+                if let Some(zone_id) = omicron_zones_by_ip.remove(addr) {
+                    println!(
+                        "IP {} found in DNS corresponds with zone {}",
+                        addr, zone_id
+                    );
+                    expected_srv_targets.insert(format!(
+                        "{}.{}",
+                        name, blueprint_dns_zone.zone_name
+                    ));
+                    continue;
+                }
+
+                if let Some(scrimlet_id) = switch_sleds_by_ip.remove(addr) {
+                    println!(
+                        "IP {} found in DNS corresponds with switch zone \
+                        for Scrimlet {}",
+                        addr, scrimlet_id
+                    );
+                    expected_srv_targets.insert(format!(
+                        "{}.{}",
+                        name, blueprint_dns_zone.zone_name
+                    ));
+                    continue;
+                }
+
+                println!(
+                    "note: found IP ({}) not corresponding to any \
+                    Omicron zone or switch zone (name {:?})",
+                    addr, name
+                );
+            }
+        }
+
+        println!(
+            "Omicron zones whose IPs were not found in DNS: {:?}",
+            omicron_zones_by_ip,
+        );
+        assert!(
+            omicron_zones_by_ip.is_empty(),
+            "some Omicron zones' IPs were not found in DNS"
+        );
+
+        println!(
+            "Scrimlets whose switch zone IPs were not found in DNS: {:?}",
+            switch_sleds_by_ip,
+        );
+        assert!(
+            switch_sleds_by_ip.is_empty(),
+            "some switch zones' IPs were not found in DNS"
+        );
+
+        // Now go through all DNS names that have SRV records.  For each one,
+        //
+        // 1. If its name corresponds to the name of one of the SRV services
+        //    that we expect the system to have, record that fact.  At the end
+        //    we'll verify that we found at least one SRV record for each such
+        //    service.
+        //
+        // 2. Make sure that the SRV record points at a name that we found in
+        //    the previous pass (i.e., that corresponds to an Omicron zone).
+        //
+        // There are some ServiceNames missing here because they are not part of
+        // our representative config (e.g., ClickhouseKeeper) or they don't
+        // currently have DNS record at all (e.g., SledAgent, Maghemite, Mgd,
+        // Tfport).
+        let mut srv_kinds_expected = BTreeSet::from([
+            ServiceName::Clickhouse,
+            ServiceName::Cockroach,
+            ServiceName::InternalDns,
+            ServiceName::ExternalDns,
+            ServiceName::Nexus,
+            ServiceName::Oximeter,
+            ServiceName::Dendrite,
+            ServiceName::CruciblePantry,
+            ServiceName::BoundaryNtp,
+            ServiceName::InternalNtp,
+        ]);
+
+        for (name, records) in &blueprint_dns_zone.records {
+            let srvs: Vec<_> = records
+                .iter()
+                .filter_map(|dns_record| match dns_record {
+                    DnsRecord::Srv(srv) => Some(srv),
+                    _ => None,
+                })
+                .collect();
+            for srv in srvs {
+                assert!(
+                    expected_srv_targets.contains(&srv.target),
+                    "found SRV record with target {:?} that does not \
+                    correspond to a name that points to any Omicron zone",
+                    srv.target
+                );
+            }
+
+            let kinds_left: Vec<_> =
+                srv_kinds_expected.iter().copied().collect();
+            for kind in kinds_left {
+                if kind.dns_name() == *name {
+                    srv_kinds_expected.remove(&kind);
+                }
+            }
+        }
+
+        println!("SRV kinds with no records found: {:?}", srv_kinds_expected);
+        assert!(srv_kinds_expected.is_empty());
+    }
 }

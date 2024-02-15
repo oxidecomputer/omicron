@@ -4,10 +4,9 @@
 
 use crate::types::DnsConfigParams;
 use crate::types::DnsRecord;
+use crate::DnsRecords;
 use anyhow::ensure;
-use std::collections::HashMap;
-
-type DnsRecords = HashMap<String, Vec<DnsRecord>>;
+use anyhow::Context;
 
 /// Compare the DNS records contained in two sets of DNS configuration
 #[derive(Debug)]
@@ -25,27 +24,8 @@ impl<'a> DnsDiff<'a> {
         left: &'a DnsConfigParams,
         right: &'a DnsConfigParams,
     ) -> Result<DnsDiff<'a>, anyhow::Error> {
-        let left_zone = {
-            ensure!(
-                left.zones.len() == 1,
-                "left side of diff: expected exactly one \
-                DNS zone, but found {}",
-                left.zones.len(),
-            );
-
-            &left.zones[0]
-        };
-
-        let right_zone = {
-            ensure!(
-                right.zones.len() == 1,
-                "right side of diff: expected exactly one \
-                DNS zone, but found {}",
-                right.zones.len(),
-            );
-
-            &right.zones[0]
-        };
+        let left_zone = left.sole_zone().context("left side of diff")?;
+        let right_zone = right.sole_zone().context("right side of diff")?;
 
         ensure!(
             left_zone.zone_name == right_zone.zone_name,
@@ -138,12 +118,16 @@ mod test {
         // Configs must have at least one zone.
         let error = DnsDiff::new(&example_empty, &example_empty)
             .expect_err("unexpectedly succeeded comparing two empty configs");
-        assert!(error.to_string().contains("expected exactly one DNS zone"));
+        assert!(
+            format!("{:#}", error).contains("expected exactly one DNS zone")
+        );
 
         let example = example();
         let error = DnsDiff::new(&example_empty, &example)
             .expect_err("unexpectedly succeeded comparing two empty configs");
-        assert!(error.to_string().contains("expected exactly one DNS zone"));
+        assert!(
+            format!("{:#}", error).contains("expected exactly one DNS zone")
+        );
 
         // Configs must not have more than one zone.
         let example_multiple = DnsConfigParams {
@@ -162,7 +146,9 @@ mod test {
         };
         let error = DnsDiff::new(&example_multiple, &example)
             .expect_err("unexpectedly succeeded comparing two empty configs");
-        assert!(error.to_string().contains("expected exactly one DNS zone"));
+        assert!(
+            format!("{:#}", error).contains("expected exactly one DNS zone")
+        );
 
         // Cannot compare different zone names
         let example_different_zone = DnsConfigParams {
@@ -178,7 +164,7 @@ mod test {
             different zone names",
         );
         assert_eq!(
-            error.to_string(),
+            format!("{:#}", error),
             "cannot compare DNS configuration from zones with different \
             names: \"dummy-other\" vs. \"dummy\""
         );

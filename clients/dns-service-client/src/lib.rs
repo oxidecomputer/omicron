@@ -3,7 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 mod diff;
+
+use crate::Error as DnsConfigError;
+use anyhow::ensure;
 pub use diff::DnsDiff;
+use std::collections::HashMap;
 
 progenitor::generate_api!(
     spec = "../../openapi/dns-server.json",
@@ -24,8 +28,6 @@ progenitor::generate_api!(
 pub const ERROR_CODE_UPDATE_IN_PROGRESS: &'static str = "UpdateInProgress";
 pub const ERROR_CODE_BAD_UPDATE_GENERATION: &'static str =
     "BadUpdateGeneration";
-
-use crate::Error as DnsConfigError;
 
 /// Returns whether an error from this client should be retried
 pub fn is_retryable(error: &DnsConfigError<crate::types::Error>) -> bool {
@@ -85,4 +87,24 @@ pub fn is_retryable(error: &DnsConfigError<crate::types::Error>) -> bool {
     }
 
     false
+}
+
+type DnsRecords = HashMap<String, Vec<types::DnsRecord>>;
+
+impl types::DnsConfigParams {
+    /// Given a high-level DNS configuration, return a reference to its sole
+    /// DNS zone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there are 0 or more than one zones in this
+    /// configuration.
+    pub fn sole_zone(&self) -> Result<&types::DnsConfigZone, anyhow::Error> {
+        ensure!(
+            self.zones.len() == 1,
+            "expected exactly one DNS zone, but found {}",
+            self.zones.len()
+        );
+        Ok(&self.zones[0])
+    }
 }
