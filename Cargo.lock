@@ -4287,6 +4287,7 @@ dependencies = [
  "omicron-common",
  "omicron-nexus",
  "omicron-rpaths",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "pq-sys",
  "reqwest",

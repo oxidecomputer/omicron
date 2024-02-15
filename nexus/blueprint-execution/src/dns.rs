@@ -198,7 +198,7 @@ fn dns_compute_update(
 
     let diff = DnsDiff::new(&current_config, &new_config)
         .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
-    if !diff.is_empty() {
+    if diff.is_empty() {
         info!(log, "no changes");
         return Ok(None);
     }
@@ -247,6 +247,7 @@ fn dns_compute_update(
 #[cfg(test)]
 mod test {
     use super::blueprint_dns_config;
+    use super::dns_compute_update;
     use crate::Sled;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
@@ -268,9 +269,11 @@ mod test {
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
+    use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
@@ -579,5 +582,95 @@ mod test {
 
         println!("SRV kinds with no records found: {:?}", srv_kinds_expected);
         assert!(srv_kinds_expected.is_empty());
+    }
+
+    #[test]
+    fn test_dns_compute_update() {
+        let logctx = test_setup_log("dns_compute_update");
+
+        // Start with an empty DNS config.  There's no database update needed
+        // when updating the DNS config to itself.
+        let dns_empty = dns_config_empty();
+        match dns_compute_update(
+            &logctx.log,
+            "test-suite".to_string(),
+            "test-suite".to_string(),
+            &dns_empty,
+            &dns_empty,
+        ) {
+            Ok(None) => (),
+            Err(error) => {
+                panic!("unexpected error generating update: {:?}", error)
+            }
+            Ok(Some(diff)) => panic!("unexpected delta: {:?}", diff),
+        };
+
+        // Now let's do something a little less trivial.  Set up two slightly
+        // different DNS configurations, compute the database update, and make
+        // sure it matches what we expect.
+        let dns_config1 = DnsConfigParams {
+            generation: 4,
+            time_created: chrono::Utc::now(),
+            zones: vec![DnsConfigZone {
+                zone_name: "my-zone".to_string(),
+                records: HashMap::from([
+                    (
+                        "ex1".to_string(),
+                        vec![DnsRecord::A(Ipv4Addr::LOCALHOST)],
+                    ),
+                    (
+                        "ex2".to_string(),
+                        vec![DnsRecord::A("192.168.1.3".parse().unwrap())],
+                    ),
+                ]),
+            }],
+        };
+
+        let dns_config2 = DnsConfigParams {
+            generation: 4,
+            time_created: chrono::Utc::now(),
+            zones: vec![DnsConfigZone {
+                zone_name: "my-zone".to_string(),
+                records: HashMap::from([
+                    (
+                        "ex2".to_string(),
+                        vec![DnsRecord::A("192.168.1.4".parse().unwrap())],
+                    ),
+                    (
+                        "ex3".to_string(),
+                        vec![DnsRecord::A(Ipv4Addr::LOCALHOST)],
+                    ),
+                ]),
+            }],
+        };
+
+        let update = dns_compute_update(
+            &logctx.log,
+            "test-suite".to_string(),
+            "test-suite".to_string(),
+            &dns_config1,
+            &dns_config2,
+        )
+        .expect("failed to compute update")
+        .expect("unexpectedly produced no update");
+
+        let mut removed: Vec<_> = update.names_removed().collect();
+        removed.sort();
+        assert_eq!(removed, vec!["ex1", "ex2"]);
+
+        let mut added: Vec<_> = update.names_added().collect();
+        added.sort_by_key(|n| n.0);
+        assert_eq!(
+            added,
+            vec![
+                (
+                    "ex2",
+                    [DnsRecord::A("192.168.1.4".parse().unwrap())].as_ref()
+                ),
+                ("ex3", [DnsRecord::A(Ipv4Addr::LOCALHOST)].as_ref()),
+            ]
+        );
+
+        logctx.cleanup_successful();
     }
 }

@@ -584,7 +584,7 @@ impl DataStore {
 /// This object changes all of the zones associated with a particular DNS group
 /// because the assumption right now is that they're equivalent.  (In practice,
 /// we should only ever have one zone in each group right now.)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DnsVersionUpdateBuilder {
     dns_group: DnsGroup,
     comment: String,
@@ -673,6 +673,16 @@ impl DnsVersionUpdateBuilder {
             assert!(self.names_removed.insert(name));
             Ok(())
         }
+    }
+
+    pub fn names_removed(&self) -> impl Iterator<Item = &str> {
+        self.names_removed.iter().map(AsRef::as_ref)
+    }
+
+    pub fn names_added(&self) -> impl Iterator<Item = (&str, &[DnsRecord])> {
+        self.names_added
+            .iter()
+            .map(|(name, list)| (name.as_ref(), list.as_ref()))
     }
 }
 
