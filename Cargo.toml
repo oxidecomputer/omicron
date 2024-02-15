@@ -264,7 +264,7 @@ nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
-num-integer = "0.1.45"
+num-integer = "0.1.46"
 num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
