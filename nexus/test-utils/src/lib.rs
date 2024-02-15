@@ -608,6 +608,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .unwrap()
                         .into(),
                     mac,
+                    slot: 0,
                 },
             },
             internal_dns::ServiceName::Nexus,
@@ -812,6 +813,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .unwrap()
                         .into(),
                     mac,
+                    slot: 0,
                 },
             },
             internal_dns::ServiceName::ExternalDns,

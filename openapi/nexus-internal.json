@@ -6291,13 +6291,19 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           }
         },
         "required": [
           "id",
           "ip",
           "mac",
-          "name"
+          "name",
+          "slot"
         ]
       },
       "ServicePutRequest": {

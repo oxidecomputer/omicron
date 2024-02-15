@@ -250,7 +250,7 @@ impl DataStore {
                 .await?;
 
                 if let Some(query) = silo_admin_group_ensure_query {
-                    query.get_result_async(&conn).await?;
+                    query.execute_async(&conn).await?;
                 }
 
                 if let Some(queries) = silo_admin_group_role_assignment_queries

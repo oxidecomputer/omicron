@@ -83,7 +83,7 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
-pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
+pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).

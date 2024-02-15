@@ -655,7 +655,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
@@ -815,7 +815,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "922d6ea3081d68b9e3e09557204bff47f9b5406a4a304dc917e187f8cafd582b"
 dependencies = [
  "serde",
- "toml 0.8.9",
+ "toml 0.8.10",
 ]
 
 [[package]]
@@ -1577,7 +1577,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
 ]
 
 [[package]]
@@ -1873,7 +1873,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
  "trust-dns-client",
  "trust-dns-proto",
  "trust-dns-resolver",
@@ -1947,14 +1947,14 @@ dependencies = [
  "progenitor-client 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "quote",
  "rand 0.8.5",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "rustfmt-wrapper",
  "schemars",
  "serde",
  "serde_json",
  "slog",
- "toml 0.8.9",
+ "toml 0.8.10",
  "uuid",
 ]
 
@@ -1976,7 +1976,7 @@ dependencies = [
  "hostname",
  "http 0.2.11",
  "hyper 0.14.27",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "multer",
  "openapiv3",
  "paste",
@@ -1997,7 +1997,7 @@ dependencies = [
  "slog-term",
  "tokio",
  "tokio-rustls 0.25.0",
- "toml 0.8.9",
+ "toml 0.8.10",
  "usdt 0.3.5",
  "uuid",
  "version_check",
@@ -2169,7 +2169,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
  "trust-dns-resolver",
  "uuid",
 ]
@@ -2779,7 +2779,7 @@ dependencies = [
  "debug-ignore",
  "fixedbitset",
  "guppy-workspace-hack",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "itertools 0.12.1",
  "nested",
  "once_cell",
@@ -2811,7 +2811,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.11",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "slab",
  "tokio",
  "tokio-util",
@@ -2863,9 +2863,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.2"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f93e7192158dbcda357bdec5fb5788eebf8bbac027f3f33e719d29135ae84156"
+checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
  "ahash",
  "allocator-api2",
@@ -3369,7 +3369,7 @@ dependencies = [
  "opte-ioctl",
  "oxide-vpc",
  "oxlog",
- "regress",
+ "regress 0.8.0",
  "schemars",
  "serde",
  "serde_json",
@@ -3377,7 +3377,7 @@ dependencies = [
  "smf",
  "thiserror",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
  "uuid",
  "zone",
 ]
@@ -3406,20 +3406,20 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.2.2"
+version = "2.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "824b2ae422412366ba479e8111fd301f7b5faece8149317bb81925979a53f520"
+checksum = "233cf39063f058ea2caae4091bf4a3ef70a653afbc026f5c4a4135d114e3c177"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.2",
+ "hashbrown 0.14.3",
  "serde",
 ]
 
 [[package]]
 name = "indicatif"
-version = "0.17.7"
+version = "0.17.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb28741c9db9a713d93deb3bb9515c20788cef5815265bee4980e87bde7e0f25"
+checksum = "763a5a8f45087d6bcea4222e7b72c291a054edf80e4ef6efd2a4979878c7bea3"
 dependencies = [
  "console",
  "instant",
@@ -3505,7 +3505,7 @@ dependencies = [
  "installinator-common",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
@@ -3980,7 +3980,7 @@ version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2994eeba8ed550fd9b47a0b38f0242bc3344e496483c6180b69139cc2fa5d1d7"
 dependencies = [
- "hashbrown 0.14.2",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -4109,7 +4109,7 @@ dependencies = [
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
 ]
 
 [[package]]
@@ -4310,7 +4310,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
@@ -4349,7 +4349,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
- "strum 0.25.0",
+ "strum 0.26.1",
  "thiserror",
  "uuid",
 ]
@@ -4421,7 +4421,7 @@ dependencies = [
  "slog",
  "static_assertions",
  "steno",
- "strum 0.25.0",
+ "strum 0.26.1",
  "subprocess",
  "swrite",
  "term",
@@ -4484,7 +4484,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "slog",
- "strum 0.25.0",
+ "strum 0.26.1",
  "thiserror",
  "tokio",
  "uuid",
@@ -4573,7 +4573,7 @@ dependencies = [
  "serde_json",
  "sled-agent-client",
  "steno",
- "strum 0.25.0",
+ "strum 0.26.1",
  "thiserror",
  "uuid",
 ]
@@ -4880,7 +4880,7 @@ dependencies = [
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "proptest",
  "rand 0.8.5",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "semver 1.0.21",
@@ -4890,12 +4890,12 @@ dependencies = [
  "serde_urlencoded",
  "serde_with",
  "slog",
- "strum 0.25.0",
+ "strum 0.26.1",
  "test-strategy",
  "thiserror",
  "tokio",
  "tokio-postgres",
- "toml 0.8.9",
+ "toml 0.8.10",
  "uuid",
 ]
 
@@ -4929,7 +4929,7 @@ dependencies = [
  "subprocess",
  "tokio",
  "tokio-postgres",
- "toml 0.8.9",
+ "toml 0.8.10",
 ]
 
 [[package]]
@@ -4971,7 +4971,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
- "toml 0.8.9",
+ "toml 0.8.10",
  "uuid",
 ]
 
@@ -5078,7 +5078,7 @@ dependencies = [
  "slog-term",
  "sp-sim",
  "steno",
- "strum 0.25.0",
+ "strum 0.26.1",
  "subprocess",
  "tempfile",
  "term",
@@ -5136,7 +5136,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "slog-error-chain",
- "strum 0.25.0",
+ "strum 0.26.1",
  "subprocess",
  "tabled",
  "textwrap 0.16.0",
@@ -5171,12 +5171,12 @@ dependencies = [
  "slog-bunyan",
  "slog-term",
  "smf",
- "strum 0.25.0",
+ "strum 0.26.1",
  "swrite",
  "tar",
  "thiserror",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
  "walkdir",
 ]
 
@@ -5278,6 +5278,7 @@ dependencies = [
  "slog-term",
  "smf",
  "static_assertions",
+ "strum 0.26.1",
  "subprocess",
  "tar",
  "tempfile",
@@ -5286,7 +5287,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.9",
+ "toml 0.8.10",
  "usdt 0.5.0",
  "uuid",
  "zeroize",
@@ -5374,11 +5375,11 @@ dependencies = [
  "getrandom 0.2.10",
  "group",
  "hashbrown 0.13.2",
- "hashbrown 0.14.2",
+ "hashbrown 0.14.3",
  "hex",
  "hmac",
  "hyper 0.14.27",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
@@ -5420,6 +5421,7 @@ dependencies = [
  "socket2 0.5.5",
  "spin 0.9.8",
  "string_cache",
+ "strum 0.25.0",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.48",
@@ -5432,7 +5434,6 @@ dependencies = [
  "toml 0.7.8",
  "toml_datetime",
  "toml_edit 0.19.15",
- "toml_edit 0.21.1",
  "tracing",
  "trust-dns-proto",
  "unicode-bidi",
@@ -5502,7 +5503,7 @@ version = "0.4.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ef442ee4343e97b6d9c217d3e7533962fe7d7236"
 dependencies = [
  "heck 0.4.1",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "lazy_static",
  "openapiv3",
  "regex",
@@ -5514,7 +5515,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc02deea53ffe807708244e5914f6b099ad7015a207ee24317c22112e17d9c5c"
 dependencies = [
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "serde",
  "serde_json",
 ]
@@ -5655,7 +5656,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "rand 0.8.5",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -5695,7 +5696,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "strum 0.25.0",
+ "strum 0.26.1",
  "thiserror",
  "trybuild",
  "uuid",
@@ -5748,11 +5749,11 @@ dependencies = [
  "slog-async",
  "slog-dtrace",
  "slog-term",
- "strum 0.25.0",
+ "strum 0.26.1",
  "subprocess",
  "thiserror",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
  "uuid",
 ]
 
@@ -5771,7 +5772,7 @@ dependencies = [
  "expectorate",
  "futures",
  "highway",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "itertools 0.12.1",
  "omicron-common",
  "omicron-test-utils",
@@ -5790,7 +5791,7 @@ dependencies = [
  "slog-term",
  "sqlformat",
  "sqlparser",
- "strum 0.25.0",
+ "strum 0.26.1",
  "tabled",
  "tempfile",
  "thiserror",
@@ -6146,7 +6147,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "serde",
  "serde_derive",
 ]
@@ -6563,7 +6564,7 @@ dependencies = [
  "getopts",
  "heck 0.4.1",
  "http 0.2.11",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -6585,7 +6586,7 @@ dependencies = [
  "getopts",
  "heck 0.4.1",
  "http 0.2.11",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -7066,6 +7067,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ed9969cad8051328011596bf549629f1b800cf1731e7964b1eef8dfc480d2c2"
 dependencies = [
  "hashbrown 0.13.2",
+ "memchr",
+]
+
+[[package]]
+name = "regress"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f5f39ba4513916c1b2657b72af6ec671f091cd637992f58d0ede5cae4e5dea0"
+dependencies = [
+ "hashbrown 0.14.3",
  "memchr",
 ]
 
@@ -7948,7 +7959,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "serde",
  "serde_json",
  "serde_with_macros",
@@ -7973,7 +7984,7 @@ version = "0.9.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a49e178e4452f45cb61d0cd8cebc1b0fafd3e41929e996cef79aa3aca91f574"
 dependencies = [
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "itoa",
  "ryu",
  "serde",
@@ -8144,7 +8155,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
@@ -8451,7 +8462,7 @@ dependencies = [
  "sprockets-rot",
  "thiserror",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
 ]
 
 [[package]]
@@ -9329,14 +9340,14 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.9"
+version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c6a4b9e8023eb94392d3dca65d717c53abc5dad49c07cb65bb8fcd87115fa325"
+checksum = "9a9aad4a3066010876e8dcf5a8a06e70a558751117a145c6ce2b82c2e2054290"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.21.1",
+ "toml_edit 0.22.4",
 ]
 
 [[package]]
@@ -9354,7 +9365,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9367,7 +9378,18 @@ version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
 dependencies = [
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
+ "toml_datetime",
+ "winnow",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.22.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c9ffdf896f8daaabf9b66ba8e77ea1ed5ed0f72821b398aba62352e95062951"
+dependencies = [
+ "indexmap 2.2.3",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9653,7 +9675,7 @@ dependencies = [
  "slog",
  "tar",
  "tokio",
- "toml 0.8.9",
+ "toml 0.8.10",
  "tough",
  "url",
  "zip",
@@ -9718,7 +9740,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress",
+ "regress 0.7.1",
  "schemars",
  "serde_json",
  "syn 2.0.48",
@@ -9886,7 +9908,7 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "indicatif",
  "libsw",
  "linear-map",
@@ -10299,7 +10321,7 @@ dependencies = [
  "crossterm",
  "futures",
  "humantime",
- "indexmap 2.2.2",
+ "indexmap 2.2.3",
  "indicatif",
  "itertools 0.12.1",
  "omicron-common",
@@ -10323,7 +10345,7 @@ dependencies = [
  "textwrap 0.16.0",
  "tokio",
  "tokio-util",
- "toml 0.8.9",
+ "toml 0.8.10",
  "toml_edit 0.21.1",
  "tui-tree-widget",
  "unicode-width",
@@ -10431,7 +10453,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
- "toml 0.8.9",
+ "toml 0.8.10",
  "tough",
  "trust-dns-resolver",
  "tufaceous",
@@ -10453,7 +10475,7 @@ dependencies = [
  "ipnetwork",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
