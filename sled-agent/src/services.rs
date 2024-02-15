@@ -2166,46 +2166,6 @@ impl ServiceManager {
                             .await
                             .map_err(|err| Error::io_path(&config_path, err))?;
                     }
-
-                    //                    OmicronZoneType::ExternalDns {
-                    //                        http_address,
-                    //                        dns_address,
-                    //                        ..
-                    //                    } => {
-                    //                        info!(
-                    //                            self.inner.log,
-                    //                            "Setting up external-dns service"
-                    //                        );
-                    //
-                    //                        // Like Nexus, we need to be reachable externally via
-                    //                        // `dns_address` but we don't listen on that address
-                    //                        // directly but instead on a VPC private IP. OPTE will
-                    //                        // en/decapsulate as appropriate.
-                    //                        let port_ip = running_zone
-                    //                            .ensure_address_for_port("public", 0)
-                    //                            .await?
-                    //                            .ip();
-                    //                        let dns_address =
-                    //                            SocketAddr::new(port_ip, dns_address.port());
-                    //
-                    //                        smfh.setprop(
-                    //                            "config/http_address",
-                    //                            format!(
-                    //                                "[{}]:{}",
-                    //                                http_address.ip(),
-                    //                                http_address.port(),
-                    //                            ),
-                    //                        )?;
-                    //                        smfh.setprop(
-                    //                            "config/dns_address",
-                    //                            dns_address.to_string(),
-                    //                        )?;
-                    //
-                    //                        // Refresh the manifest with the new properties we set,
-                    //                        // so they become "effective" properties when the
-                    //                        // service is enabled.
-                    //                        smfh.refresh()?;
-                    //                    }
                     OmicronZoneType::InternalDns {
                         http_address,
                         dns_address,
