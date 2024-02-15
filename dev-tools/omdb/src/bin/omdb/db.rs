@@ -1788,7 +1788,7 @@ async fn cmd_db_eips(
             }
         }
 
-        fn description(&self) -> String {
+        fn name(&self) -> String {
             match self {
                 Self::Instance { project, name, .. } => {
                     format!("{project}/{name}")
@@ -1809,7 +1809,7 @@ async fn cmd_db_eips(
         state: IpAttachState,
         owner_kind: &'static str,
         owner_id: String,
-        owner_description: String,
+        owner_name: String,
     }
 
     if verbose {
@@ -1920,7 +1920,7 @@ async fn cmd_db_eips(
             kind: ip.kind,
             owner_kind: owner.kind(),
             owner_id: owner.id(),
-            owner_description: owner.description(),
+            owner_name: owner.name(),
         };
         rows.push(row);
     }
