@@ -228,7 +228,7 @@ hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
 indexmap = "2.2.2"
-indicatif = { version = "0.17.7", features = ["rayon"] }
+indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "clients/installinator-artifact-client" }
