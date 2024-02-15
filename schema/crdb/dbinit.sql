@@ -1462,6 +1462,17 @@ STORING (vpc_id, subnet_id, is_primary)
 WHERE
     time_deleted IS NULL;
 
+/*
+ * Index used to verify that all interfaces for a resource (e.g. Instance,
+ * Service) have unique slots.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_slot_key ON omicron.public.network_interface (
+    parent_id,
+    slot
+)
+WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE IF NOT EXISTS omicron.public.vpc_firewall_rule_status AS ENUM (
     'disabled',
     'enabled'
@@ -3504,7 +3515,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '33.0.1', NULL)
+    ( TRUE, NOW(), NOW(), '34.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
