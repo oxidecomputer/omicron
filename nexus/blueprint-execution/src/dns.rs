@@ -76,6 +76,73 @@ where
         return Ok(());
     };
 
+    // Our goal here is to update the DNS configuration stored in the database
+    // to match the blueprint.  But it's always possible that we're executing a
+    // blueprint that's no longer the current target.  In that case, we want to
+    // fail without making any changes.  We definitely don't want to
+    // accidentally clobber changes that have been made by another instance
+    // executing a newer target blueprint.
+    //
+    // To avoid this problem, before generating a blueprint, Nexus fetches the
+    // current internal DNS generation and stores that into the blueprint
+    // itself.  Here, when we execute the blueprint, we make our database update
+    // conditional on that still being the current internal DNS generation.
+    // If some other instance has already come along and updated the database,
+    // whether for this same blueprint or a newer one, our attempt to update the
+    // database will fail.
+    //
+    // Let's look at a tricky example.  Suppose:
+    //
+    // 1. The system starts with some initial blueprint B1 with DNS version 3.
+    //    The blueprint has been fully executed and all is well.
+    //
+    // 2. Blueprint B2 gets generated.  It stores DNS version 3.  It's made the
+    //    current target.  Execution has not started yet.
+    //
+    // 3. Blueprint B3 gets generated.  It also stores DNS version 3 because
+    //    that's still the current version in DNS.  B3 is made the current
+    //    target.
+    //
+    //    Assume B2 and B3 specify different internal DNS contents (e.g., have a
+    //    different set of Omicron zones in them).
+    //
+    // 4. Nexus instance N1 finds B2 to be the current target and starts
+    //    executing it.  (Assume it found this between 2 and 3 above.)
+    //
+    // 5. Nexus instance N2 finds B3 to be the current target and starts
+    //    executing it.
+    //
+    // During execution:
+    //
+    // * N1 will assemble a new version of DNS called version 4, generate a diff
+    //   between version 3 (which is fixed) and version 4, and attempt to apply
+    //   this to the database conditional on the current version being version
+    //   3.
+    //
+    // * N2 will do the same, but its version 4 will look different.
+    //
+    // Now, one of two things could happen:
+    //
+    // 1. N1 wins.  Its database update applies successfully.  In the database,
+    //    the internal DNS version becomes version 4.  In this case, N2 loses.
+    //    Its database operation fails altogether.  At this point, any
+    //    subsequent attempt to execute blueprint B3 will fail because any DNS
+    //    update will be conditional on the database having version 3.  The only
+    //    way out of this is for the planner to generate a new blueprint B4
+    //    that's exactly equivalent to B3 except that the stored internal DNS
+    //    version is 4.  Then we'll be able to execute that.
+    //
+    // 2. N2 wins.  Its database update applies successfully.  In the database,
+    //    the internal DNS version becomes version 4.  In this case, N1 loses.
+    //    Its database operation fails altogether.  At this point, any
+    //    subsequent attempt to execute blueprint B3 will fail because any DNS
+    //    update will be conditional on the databae having version 3.  No
+    //    further action is needed, though, because we've successfully executed
+    //    the latest target blueprint.
+    //
+    // In both cases, the system will (1) converge to having successfully
+    // executed the target blueprint, and (2) never have rolled any changes back
+    // -- DNS only ever moves forward, closer to the latest desired state.
     info!(
         log,
         "attempting to update from generation {}",
