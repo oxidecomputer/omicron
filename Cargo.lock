@@ -5270,6 +5270,7 @@ dependencies = [
  "slog-term",
  "smf",
  "static_assertions",
+ "strum 0.26.1",
  "subprocess",
  "tar",
  "tempfile",
