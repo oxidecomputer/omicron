@@ -122,6 +122,7 @@ mod test {
 
     fn create_blueprint(
         omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+        internal_dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -135,7 +136,7 @@ mod test {
                 omicron_zones,
                 zones_in_service: BTreeSet::new(),
                 parent_blueprint_id: None,
-                internal_dns_version: Generation::new(),
+                internal_dns_version,
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -204,7 +205,8 @@ mod test {
 
         // With a target blueprint having no zones, the task should trivially
         // complete and report a successful (empty) summary.
-        let blueprint = Arc::new(create_blueprint(BTreeMap::new()));
+        let generation = Generation::new();
+        let blueprint = Arc::new(create_blueprint(BTreeMap::new(), generation));
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
@@ -233,10 +235,14 @@ mod test {
                 }],
             }
         }
-        let mut blueprint = create_blueprint(BTreeMap::from([
-            (sled_id1, make_zones()),
-            (sled_id2, make_zones()),
-        ]));
+        let generation = generation.next();
+        let mut blueprint = create_blueprint(
+            BTreeMap::from([
+                (sled_id1, make_zones()),
+                (sled_id2, make_zones()),
+            ]),
+            generation,
+        );
 
         blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
 
@@ -262,6 +268,8 @@ mod test {
 
         // Now, disable the target and make sure that we _don't_ invoke the sled
         // agent.  It's enough to just not set expectations.
+        blueprint.1.internal_dns_version =
+            blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
         blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
         let value = task.activate(&opctx).await;

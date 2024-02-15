@@ -145,11 +145,12 @@ where
     // -- DNS only ever moves forward, closer to the latest desired state.
     info!(
         log,
-        "attempting to update from generation {}",
+        "attempting to update from generation {} to generation {}",
+        dns_config_current.generation,
         dns_config_blueprint.generation,
     );
-    let generation_u32 = u32::try_from(dns_config_blueprint.generation)
-        .map_err(|e| {
+    let generation_u32 =
+        u32::try_from(dns_config_current.generation).map_err(|e| {
             Error::internal_error(&format!(
                 "internal DNS generation got too large: {}",
                 e,
