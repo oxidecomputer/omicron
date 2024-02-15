@@ -7,7 +7,7 @@
 use anyhow::anyhow;
 use clap::{arg, command};
 use illumos_utils::ipadm::Ipadm;
-use illumos_utils::route::Route;
+use illumos_utils::route::{Gateway, Route};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::info;
@@ -74,7 +74,7 @@ async fn do_run() -> Result<(), CmdError> {
         zone::current().await.expect("Could not determine local zone name");
     let datalink: &String = matches.get_one("datalink").unwrap();
     let static_addr: &Ipv6Addr = matches.get_one("static_addr").unwrap();
-    let gateway: &Ipv6Addr = matches.get_one("gateway").unwrap();
+    let gateway: Ipv6Addr = *matches.get_one("gateway").unwrap();
 
     // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is
     // addressed
@@ -91,7 +91,7 @@ async fn do_run() -> Result<(), CmdError> {
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
-    Route::ensure_default_route_with_gateway(gateway)
+    Route::ensure_default_route_with_gateway(Gateway::Ipv6(gateway))
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Populating hosts file for zone"; "zonename" => ?zonename);
