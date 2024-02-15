@@ -22,6 +22,7 @@ use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::OptionalExtension;
@@ -299,6 +300,75 @@ impl DataStore {
                             "snapshot exists but cannot be deleted",
                         ))
                     }
+                }
+            }
+        }
+    }
+
+    /// Set a snapshot to faulted and un-delete it
+    ///
+    /// If the snapshot delete saga unwinds, then the snapshot should _not_ remain
+    /// deleted: snapshot delete saga should be triggered again in order to fully
+    /// complete, and the only way to do that is to un-delete the snapshot. Set it
+    /// to faulted to ensure that it won't be used.
+    ///
+    /// This function is essentially a duplicate of
+    /// `project_undelete_disk_set_faulted_no_auth`, so see the docstring of
+    /// that method for more info.
+    pub async fn project_undelete_snapshot_set_faulted_no_auth(
+        &self,
+        snapshot_id: &Uuid, // XXX newtype uuid?
+    ) -> Result<(), Error> {
+        use db::schema::snapshot::dsl;
+        let conn = self.pool_connection_unauthorized().await?;
+
+        // If only the UUID is used, you will hit "name cannot be a UUID to
+        // avoid ambiguity with IDs". Add a small prefix to avoid this, and use
+        // "deleted" to be unambigious to the user about what they should do
+        // with this disk.
+        let new_name = format!("deleted-{snapshot_id}");
+
+        let result = diesel::update(dsl::snapshot)
+            .filter(dsl::time_deleted.is_not_null())
+            .filter(dsl::id.eq(*snapshot_id))
+            .set((
+                dsl::time_deleted.eq(None::<DateTime<Utc>>),
+                dsl::state.eq(SnapshotState::Faulted),
+                dsl::name.eq(new_name),
+            ))
+            .check_if_exists::<Snapshot>(*snapshot_id)
+            .execute_and_check(&conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Snapshot,
+                        LookupType::ById(*snapshot_id),
+                    ),
+                )
+            })?;
+
+        match result.status {
+            UpdateStatus::Updated => Ok(()),
+            UpdateStatus::NotUpdatedButExists => {
+                let snapshot = result.found;
+                let snapshot_state = &snapshot.state;
+
+                if snapshot.time_deleted().is_none()
+                    && snapshot_state == &SnapshotState::Faulted
+                {
+                    // To maintain idempotency, if the snapshot has already been
+                    // faulted, don't throw an error.
+                    return Ok(());
+                } else {
+                    // NOTE: This is a "catch-all" error case, more specific
+                    // errors should be preferred as they're more actionable.
+                    return Err(Error::InternalError {
+                        internal_message: String::from(
+                            "snapshot exists, but cannot be faulted",
+                        ),
+                    });
                 }
             }
         }
