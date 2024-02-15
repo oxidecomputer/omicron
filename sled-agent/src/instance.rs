@@ -504,7 +504,8 @@ impl InstanceRunner {
                             | nexus_client::Error::InvalidResponsePayload(..)
                             | nexus_client::Error::UnexpectedResponse(_)
                             | nexus_client::Error::InvalidUpgrade(_)
-                            | nexus_client::Error::ResponseBodyError(_) => {
+                            | nexus_client::Error::ResponseBodyError(_)
+                            | nexus_client::Error::PreHookError(_) => {
                                 BackoffError::permanent(Error::Notification(
                                     err,
                                 ))
