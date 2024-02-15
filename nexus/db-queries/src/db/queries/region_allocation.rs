@@ -326,7 +326,11 @@ mod test {
                 seed: Some(1),
             },
         );
-        let s = diesel::debug_query::<Pg, _>(&region_allocate).to_string();
+        let s = dev::db::format_sql(
+            &diesel::debug_query::<Pg, _>(&region_allocate).to_string(),
+        )
+        .await
+        .unwrap();
         expectorate::assert_contents(
             "tests/output/region_allocate_distinct_sleds.sql",
             &s,
@@ -341,7 +345,11 @@ mod test {
             extent_count,
             &RegionAllocationStrategy::Random { seed: Some(1) },
         );
-        let s = diesel::debug_query::<Pg, _>(&region_allocate).to_string();
+        let s = dev::db::format_sql(
+            &diesel::debug_query::<Pg, _>(&region_allocate).to_string(),
+        )
+        .await
+        .unwrap();
         expectorate::assert_contents(
             "tests/output/region_allocate_random_sleds.sql",
             &s,
