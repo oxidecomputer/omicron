@@ -1448,8 +1448,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_dns_update() {
-        let logctx = dev::test_setup_log("test_dns_update");
+    async fn test_dns_update_incremental() {
+        let logctx = dev::test_setup_log("test_dns_update_incremental");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let now = Utc::now();
@@ -1820,6 +1820,119 @@ mod test {
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
         assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_dns_update_from_version() {
+        let logctx = dev::test_setup_log("test_dns_update_from_version");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // The guts of `dns_update_from_version()` are shared with
+        // `dns_update_incremental()`.  The main cases worth testing here are
+        // (1) quick check that the happy path works, plus (2) make sure it
+        // fails when the precondition fails (current version doesn't match
+        // what's expected).
+        //
+        // Start by loading some initial data.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let initial_data = InitialDnsGroup::new(
+            DnsGroup::Internal,
+            "my-zone",
+            "test-suite",
+            "test-suite",
+            HashMap::from([
+                (
+                    "wendell".to_string(),
+                    vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
+                ),
+                (
+                    "krabappel".to_string(),
+                    vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
+                ),
+            ]),
+        );
+        DataStore::load_dns_data(&conn, initial_data)
+            .await
+            .expect("failed to insert initial data");
+
+        // Construct an update and apply it conditional on the current
+        // generation matching the initial one.  This should succeed.
+        let mut update1 = DnsVersionUpdateBuilder::new(
+            DnsGroup::Internal,
+            String::from("test-suite-1"),
+            String::from("test-suite-1"),
+        );
+        update1.remove_name(String::from("wendell")).unwrap();
+        update1
+            .add_name(
+                String::from("nelson"),
+                vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
+            )
+            .unwrap();
+        let gen1 = Generation::new();
+        datastore
+            .dns_update_from_version(&opctx, update1, gen1)
+            .await
+            .expect("failed to update from first generation");
+
+        // Now construct another update based on the _first_ version and try to
+        // apply that.  It should not work because the version has changed from
+        // under us.
+        let mut update2 = DnsVersionUpdateBuilder::new(
+            DnsGroup::Internal,
+            String::from("test-suite-2"),
+            String::from("test-suite-2"),
+        );
+        update2.remove_name(String::from("krabappel")).unwrap();
+        update2
+            .add_name(
+                String::from("hoover"),
+                vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
+            )
+            .unwrap();
+        let error = datastore
+            .dns_update_from_version(&opctx, update2.clone(), gen1)
+            .await
+            .expect_err("update unexpectedly succeeded");
+        assert!(error
+            .to_string()
+            .contains("expected current DNS version to be 1, found 2"));
+
+        // At this point, the database state should reflect the first update but
+        // not the second.
+        let config = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("failed to read config");
+        let gen2 = nexus_db_model::Generation(gen1.next());
+        assert_eq!(u64::from(*gen2), config.generation);
+        assert_eq!(1, config.zones.len());
+        let records = &config.zones[0].records;
+        assert!(records.contains_key("nelson"));
+        assert!(!records.contains_key("wendell"));
+        assert!(records.contains_key("krabappel"));
+
+        // We can apply the second update, as long as we say it's conditional on
+        // the current generation.
+        datastore
+            .dns_update_from_version(&opctx, update2, gen2)
+            .await
+            .expect("failed to update from first generation");
+        let config = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("failed to read config");
+        assert_eq!(u64::from(gen2.next()), config.generation);
+        assert_eq!(1, config.zones.len());
+        let records = &config.zones[0].records;
+        assert!(records.contains_key("nelson"));
+        assert!(!records.contains_key("wendell"));
+        assert!(!records.contains_key("krabappel"));
+        assert!(records.contains_key("hoover"));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
