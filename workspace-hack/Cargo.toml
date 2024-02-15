@@ -59,7 +59,7 @@ hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13.2" }
 hex = { version = "0.4.3", features = ["serde"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "0.14.27", features = ["full"] }
-indexmap = { version = "2.2.2", features = ["serde"] }
+indexmap = { version = "2.2.3", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
@@ -166,7 +166,7 @@ hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13.2" }
 hex = { version = "0.4.3", features = ["serde"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
 hyper = { version = "0.14.27", features = ["full"] }
-indexmap = { version = "2.2.2", features = ["serde"] }
+indexmap = { version = "2.2.3", features = ["serde"] }
 inout = { version = "0.1.3", default-features = false, features = ["std"] }
 ipnetwork = { version = "0.20.0", features = ["schemars"] }
 itertools = { version = "0.10.5" }
