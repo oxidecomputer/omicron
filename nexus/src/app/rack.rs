@@ -891,6 +891,11 @@ impl super::Nexus {
             ),
         })?;
 
+        // Trigger an inventory collection so that the newly added sled is known
+        // about.
+        self.background_tasks
+            .activate(&self.background_tasks.task_inventory_collection);
+
         Ok(())
     }
 

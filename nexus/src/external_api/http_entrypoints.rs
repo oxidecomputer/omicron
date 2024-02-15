@@ -332,6 +332,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
+        api.register(console_api::console_lookup)?;
         api.register(console_api::console_projects)?;
         api.register(console_api::console_projects_new)?;
         api.register(console_api::console_silo_images)?;

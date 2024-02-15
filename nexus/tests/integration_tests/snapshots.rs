@@ -904,13 +904,13 @@ async fn test_create_snapshot_record_idempotent(
 
     let project_id = create_project_and_pool(&client).await;
     let disk_id = Uuid::new_v4();
+    let snapshot_name =
+        external::Name::try_from("snapshot".to_string()).unwrap();
 
     let snapshot = db::model::Snapshot {
         identity: db::model::SnapshotIdentity {
             id: Uuid::new_v4(),
-            name: external::Name::try_from("snapshot".to_string())
-                .unwrap()
-                .into(),
+            name: snapshot_name.clone().into(),
             description: "snapshot".into(),
 
             time_created: Utc::now(),
@@ -961,9 +961,7 @@ async fn test_create_snapshot_record_idempotent(
     let dupe_snapshot = db::model::Snapshot {
         identity: db::model::SnapshotIdentity {
             id: Uuid::new_v4(),
-            name: external::Name::try_from("snapshot".to_string())
-                .unwrap()
-                .into(),
+            name: snapshot_name.clone().into(),
             description: "snapshot".into(),
 
             time_created: Utc::now(),
@@ -1055,6 +1053,36 @@ async fn test_create_snapshot_record_idempotent(
                 db::model::SnapshotState::Destroyed,
             ],
         )
+        .await
+        .unwrap();
+
+    // Test that a new snapshot can be added with the same name as a deleted
+    // one.
+
+    let new_snapshot = db::model::Snapshot {
+        identity: db::model::SnapshotIdentity {
+            id: Uuid::new_v4(),
+            name: snapshot_name.into(),
+            description: "snapshot".into(),
+
+            time_created: Utc::now(),
+            time_modified: Utc::now(),
+            time_deleted: None,
+        },
+
+        project_id,
+        disk_id,
+        volume_id: Uuid::new_v4(),
+        destination_volume_id: Uuid::new_v4(),
+
+        gen: db::model::Generation::new(),
+        state: db::model::SnapshotState::Creating,
+        block_size: db::model::BlockSize::Traditional,
+        size: external::ByteCount::try_from(1024u32).unwrap().into(),
+    };
+
+    let _ = datastore
+        .project_ensure_snapshot(&opctx, &authz_project, new_snapshot)
         .await
         .unwrap();
 }
