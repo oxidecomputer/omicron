@@ -71,7 +71,7 @@ managed = { version = "0.8.0", default-features = false, features = ["alloc", "m
 memchr = { version = "2.6.3" }
 nom = { version = "7.1.3" }
 num-bigint = { version = "0.4.4", features = ["rand"] }
-num-integer = { version = "0.1.45", features = ["i128"] }
+num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.43", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.16", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
@@ -178,7 +178,7 @@ managed = { version = "0.8.0", default-features = false, features = ["alloc", "m
 memchr = { version = "2.6.3" }
 nom = { version = "7.1.3" }
 num-bigint = { version = "0.4.4", features = ["rand"] }
-num-integer = { version = "0.1.45", features = ["i128"] }
+num-integer = { version = "0.1.46", features = ["i128"] }
 num-iter = { version = "0.1.43", default-features = false, features = ["i128"] }
 num-traits = { version = "0.2.16", features = ["i128", "libm"] }
 openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_serializing_defaults"] }
