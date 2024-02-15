@@ -367,8 +367,9 @@ impl<'a> ResourceAllocator<'a> {
                 name: nic.name.clone(),
                 description: format!("{zone_type} service vNIC"),
             },
-            Some(nic.ip),
-            Some(nic.mac),
+            nic.ip,
+            nic.mac,
+            nic.slot,
         )
         .with_context(|| {
             format!(
