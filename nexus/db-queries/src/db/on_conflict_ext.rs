@@ -33,11 +33,10 @@ pub trait IncompleteOnConflictExt {
     /// that uniquely identifies a row in a given table. For example, the
     /// primary key of a table is always a unique index.
     ///
-    /// Databases like CockroachDB also support [*partial
-    /// indexes*](https://www.cockroachlabs.com/docs/stable/partial-indexes): a
-    /// unique index formed only on the set of columns that meet a given
-    /// condition. In Omicron, we have several partial indexes of the form (as
-    /// described in `dbinit.sql`):
+    /// Databases like CockroachDB also support *[partial indexes]*: a unique
+    /// index formed only on the set of columns that meet a given condition. In
+    /// Omicron, we have several partial indexes of the form (as described in
+    /// `dbinit.sql`):
     ///
     /// ```sql
     /// CREATE UNIQUE INDEX IF NOT EXISTS lookup_silo_group_by_silo ON omicron.public.silo_group (
@@ -63,8 +62,7 @@ pub trait IncompleteOnConflictExt {
     ///
     /// By default, if you try to insert a row that would violate a unique
     /// constraint, the database will raise an error. However, you can
-    /// customize this behavior with [the `ON CONFLICT`
-    /// clause](https://www.cockroachlabs.com/docs/stable/insert#on-conflict-clause).
+    /// customize this behavior with [the `ON CONFLICT` clause].
     ///
     /// For example, for a table with five columns `pkey` (primary key),
     /// `external_id` (a UUID), `data`, `time_created`, and `time_deleted`, you
@@ -130,7 +128,7 @@ pub trait IncompleteOnConflictExt {
     /// like `time_deleted IS NULL` the value of that is not exactly clear, but
     /// you can imagine a partial index on something like `col >= 10`, and
     /// write `ON CONFLICT (...) WHERE col >= 20`. This is allowed because `col
-    /// >= 20` implies `col >= 10`. (But `col >= 5` is not allowed.)
+    /// >= 20` implies `col >= 10`. (But `WHERE col >= 5` is not allowed.)
     ///
     /// ## 4. A similar syntax with a different meaning
     ///
@@ -150,8 +148,8 @@ pub trait IncompleteOnConflictExt {
     ///    clauses.
     /// 2. `data IS NULL` is irrelevant to `pkey`.
     ///
-    /// But in reality, this query is not only accepted -- the `WHERE` clause
-    /// is **completely, silently ignored**. `data` will be set to `'foo'` no
+    /// But in reality, this query is not only accepted---the `WHERE` clause is
+    /// **completely, silently ignored**. `data` will be set to `'foo'` no
     /// matter if it is `NULL` or not. (This is true as of both CockroachDB
     /// 23.2.0 and PostgreSQL 16.2).
     ///
@@ -165,9 +163,7 @@ pub trait IncompleteOnConflictExt {
     ///
     /// Let's take a step back and think about what logical implication (often
     /// represented by `->`) means. In classical logic, `p -> q` is interpreted
-    /// as [material
-    /// implication](https://en.wikipedia.org/wiki/Material_conditional), and
-    /// is logically equivalent to `!p || q`.
+    /// as *[material implication]*, and is logically equivalent to `!p || q`.
     ///
     /// Consider what happens if `q` is a _tautology_, i.e. it is always true.
     /// In that case, no matter what `p` is, `p -> q` is always true.
@@ -177,7 +173,7 @@ pub trait IncompleteOnConflictExt {
     /// always true. This means that `p` (the `WHERE` clause) can be anything.
     /// As a result, Cockroach completely ignores the `WHERE` clause.
     ///
-    /// **This seems really bad!** Our intuitive understanding of `p implies q`
+    /// **This seems really bad!** Our intuitive understanding of "p implies q"
     /// typically has some kind of notion of _relevance_ attached to it: we
     /// expect that `p` being true has to have some bearing on q. But material
     /// implication does not capture this idea at all. (Put a pin in this,
@@ -191,24 +187,20 @@ pub trait IncompleteOnConflictExt {
     ///   CONFLICT ... DO UPDATE ... WHERE`.
     /// * `ON CONFLICT ... WHERE ... DO UPDATE` on a full index silently
     ///   accepts _anything_ in the `WHERE` clause.
-    /// * `ON CONFLICT ... WHERE ... DO UPDATE` is required for a partial
+    /// * `ON CONFLICT ... WHERE ... DO UPDATE` is *required* for a partial
     ///   index.
     ///
     /// How can we prevent misuse while still supporting legitimate uses?
     ///
     /// One option is to look at [Diesel](https://diesel.rs/), our Rust ORM and
     /// query builder. In Diesel, the usual way to add a `WHERE` clause is via
-    /// [the `filter`
-    /// method](https://docs.rs/diesel/2.1.4/diesel/query_dsl/methods/trait.FilterDsl.html#tymethod.filter).
-    /// But the special case of `ON CONFLICT ... WHERE` is expressed via a
-    /// separate [`filter_target`
-    /// method](https://docs.rs/diesel/2.1.4/diesel/query_builder/trait.DecoratableTarget.html#tymethod.filter_target).
+    /// [the `filter` method]. But the special case of `ON CONFLICT ... WHERE`
+    /// is expressed via a separate [`filter_target` method].
     ///
     /// Our first inclination might be to just ban `filter_target` entirely,
-    /// using Clippy's
-    /// [`disallowed_methods`](https://rust-lang.github.io/rust-clippy/master/index.html#disallowed_methods)
-    /// lint. This would work great if all we had was full indexes! But we do
-    /// necessarily have partial indexes, and we must do something about them.
+    /// using Clippy's [`disallowed_methods`] lint. This would work great if
+    /// all we had was full indexes! But we do necessarily have partial
+    /// indexes, and we must do something about them.
     ///
     /// That's where `as_partial_index` comes in.
     ///
@@ -227,13 +219,12 @@ pub trait IncompleteOnConflictExt {
     /// then the sky is green", but are valid in classical logic.
     ///
     /// The fact that contradictions are "poisonous" to classical logic is a
-    /// well-known problem, called the [principle of
-    /// explosion](https://en.wikipedia.org/wiki/Principle_of_explosion). This
-    /// is not new -- Aristotle was likely aware of it, and it was first
-    /// described fully by William of Soissons in the 12th century.
-    /// Intuitively, **this is even worse** than the earlier case where `q` is
-    /// a tautology: at least there, `q` is actually true so it doesn't feel
-    /// too bad that `p` doesn't matter.
+    /// well-known problem, called the [principle of explosion]. This is not
+    /// new---Aristotle was likely aware of it, and it was first described
+    /// fully by William of Soissons in the 12th century. Intuitively, **this
+    /// is even worse** than the earlier case where `q` is a tautology: at
+    /// least there, `q` is actually true so it doesn't feel too bad that `p`
+    /// doesn't matter.
     ///
     /// ## 8. Putting it all together
     ///
@@ -265,21 +256,17 @@ pub trait IncompleteOnConflictExt {
     ///
     /// ## Further notes
     ///
-    /// The [paradoxes of material
-    /// implication](https://en.wikipedia.org/wiki/Paradoxes_of_material_implication)
-    /// are one of the central topics in philosophical logic. Many
-    /// non-classical logical systems have been proposed to address this,
-    /// including [paraconsistent
-    /// logics](https://en.wikipedia.org/wiki/Paraconsistent_logic) and
-    /// [relevance logics](https://en.wikipedia.org/wiki/Relevance_logic). The
-    /// common thread among these systems is that they define implication
-    /// differently from classical logic, in a way that tries to match our
-    /// common understanding better.
+    /// The [paradoxes of material implication] are one of the central topics
+    /// in philosophical logic. Many non-classical logical systems have been
+    /// proposed to address this, including [paraconsistent logics] and
+    /// [relevance logics]. The common thread among these systems is that they
+    /// define implication differently from classical logic, in a way that
+    /// tries to match our common understanding better.
     ///
-    /// SQL uses the non-classical [three-valued
-    /// logic](https://en.wikipedia.org/wiki/Three-valued_logic) called K3.
-    /// This logic defines material implication in the same way and has the
-    /// same issues as material implication in classical logic.
+    /// Above, we focused on classical logic. SQL uses the non-classical
+    /// [three-valued logic] called **K3**. This logic defines implication in
+    /// the same way, and with the same issues, as material implication in
+    /// classical logic.
     ///
     /// With Cockroach 23.2.0 and earlier versions, for a conflict on a full
     /// index, you can even specify non-existent columns: `ON CONFLICT ...
@@ -292,9 +279,31 @@ pub trait IncompleteOnConflictExt {
     ///
     /// Other references:
     ///
-    /// * [Omicron issue](https://github.com/oxidecomputer/omicron/issues/5047)
-    /// * [CockroachDB
-    ///   issue](https://github.com/cockroachdb/cockroach/issues/119117)
+    /// * [Omicron issue
+    ///   #5047](https://github.com/oxidecomputer/omicron/issues/5047)
+    /// * [CockroachDB issue
+    ///   #119197](https://github.com/cockroachdb/cockroach/issues/119117)
+    ///
+    /// [partial indexes]: https://www.cockroachlabs.com/docs/stable/partial-indexes.html
+    /// [the `ON_CONFLICT` clause]:
+    ///     https://www.cockroachlabs.com/docs/stable/insert#on-conflict-clause
+    /// [material implication]:
+    ///     https://en.wikipedia.org/wiki/Material_conditional
+    /// [Diesel]: https://diesel.rs/
+    /// [the `filter` method]:
+    ///     https://docs.rs/diesel/2.1.4/diesel/query_dsl/methods/trait.FilterDsl.html#tymethod.filter
+    /// [`filter_target` method]:
+    ///    https://docs.rs/diesel/2.1.4/diesel/query_dsl/trait.FilterTarget.html#tymethod.filter_targehttps://docs.rs/diesel/2.1.4/diesel/upsert/trait.DecoratableTarget.html#tymethod.filter_targett
+    /// [`disallowed_methods`]:
+    ///     https://rust-lang.github.io/rust-clippy/master/index.html#disallowed_methods
+    /// [principle of explosion]:
+    ///     https://en.wikipedia.org/wiki/Principle_of_explosion
+    /// [paradoxes of material implication]:
+    ///     https://en.wikipedia.org/wiki/Paradoxes_of_material_implication
+    /// [paraconsistent logics]:
+    ///     https://en.wikipedia.org/wiki/Paraconsistent_logic
+    /// [relevance logics]: https://en.wikipedia.org/wiki/Relevance_logic
+    /// [three-valued logic]: https://en.wikipedia.org/wiki/Three-valued_logic
     fn as_partial_index(self) -> Self::AsPartialIndexOutput;
 }
 
