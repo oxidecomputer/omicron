@@ -20,6 +20,7 @@ pub(crate) mod error;
 mod explain;
 pub mod fixed_data;
 pub mod lookup;
+mod on_conflict_ext;
 // Public for doctests.
 pub mod pagination;
 mod pool;
@@ -44,6 +45,7 @@ pub use nexus_db_model::schema;
 pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
+pub use on_conflict_ext::IncompleteOnConflictExt;
 pub use pool::{DbConnection, Pool};
 pub use saga_recovery::{recover, CompletionTask, RecoveryTask};
 pub use saga_types::SecId;

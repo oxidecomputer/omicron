@@ -228,8 +228,8 @@ hyper = "0.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
-indexmap = "2.2.2"
-indicatif = { version = "0.17.7", features = ["rayon"] }
+indexmap = "2.2.3"
+indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
 installinator-artifact-client = { path = "clients/installinator-artifact-client" }
@@ -322,7 +322,7 @@ rcgen = "0.12.1"
 reedline = "0.28.0"
 ref-cast = "1.0"
 regex = "1.10.3"
-regress = "0.7.1"
+regress = "0.8.0"
 reqwest = { version = "0.11", default-features = false }
 ring = "0.17.7"
 rpassword = "7.3.1"
@@ -371,7 +371,7 @@ static_assertions = "1.1.0"
 # harder than expected to make breaking changes (even if you specify a specific
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
 steno = "0.4.0"
-strum = { version = "0.25", features = [ "derive" ] }
+strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
 supports-color = "2.1.0"
 swrite = "0.1.0"
@@ -392,7 +392,7 @@ tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1
 tokio-stream = "0.1.14"
 tokio-tungstenite = "0.20"
 tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
-toml = "0.8.9"
+toml = "0.8.10"
 toml_edit = "0.21.1"
 tough = { version = "0.16.0", features = [ "http" ] }
 trust-dns-client = "0.22"
