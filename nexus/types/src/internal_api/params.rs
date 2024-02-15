@@ -263,7 +263,7 @@ pub struct RackInitializationRequest {
     /// The external qsfp ports per sidecar
     pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
-    pub rack_network_config: Option<RackNetworkConfig>,
+    pub rack_network_config: RackNetworkConfig,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;

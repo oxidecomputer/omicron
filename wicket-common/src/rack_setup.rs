@@ -5,12 +5,24 @@
 // Copyright 2023 Oxide Computer Company
 
 use omicron_common::address;
-use omicron_common::api::internal::shared::RackNetworkConfig;
+use omicron_common::api::internal::shared::BgpConfig;
+use omicron_common::api::internal::shared::PortConfigV1;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+
+/// User-specified parts of
+/// [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct UserSpecifiedRackNetworkConfig {
+    pub infra_ip_first: Ipv4Addr,
+    pub infra_ip_last: Ipv4Addr,
+    pub ports: Vec<PortConfigV1>,
+    pub bgp: Vec<BgpConfig>,
+}
 
 // The portion of `CurrentRssUserConfig` that can be posted in one shot; it is
 // provided by the wicket user uploading a TOML file, currently.
@@ -27,5 +39,5 @@ pub struct PutRssUserConfigInsensitive {
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
-    pub rack_network_config: RackNetworkConfig,
+    pub rack_network_config: UserSpecifiedRackNetworkConfig,
 }

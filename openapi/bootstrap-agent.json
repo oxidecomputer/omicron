@@ -651,17 +651,12 @@
             }
           },
           "rack_network_config": {
-            "nullable": true,
             "description": "Initial rack network configuration",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RackNetworkConfigV1"
               }
             ]
-          },
-          "rack_subnet": {
-            "type": "string",
-            "format": "ipv6"
           },
           "recovery_silo": {
             "description": "Configuration of the Recovery Silo (the initial Silo)",
@@ -688,7 +683,7 @@
           "external_dns_zone_name",
           "internal_services_ip_pool_ranges",
           "ntp_servers",
-          "rack_subnet",
+          "rack_network_config",
           "recovery_silo"
         ]
       },

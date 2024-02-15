@@ -340,6 +340,8 @@ pub struct BackgroundTaskConfig {
     pub sync_service_zone_nat: SyncServiceZoneNatConfig,
     /// configuration for the bfd manager task
     pub bfd_manager: BfdManagerConfig,
+    /// configuration for region replacement task
+    pub region_replacement: RegionReplacementConfig,
 }
 
 #[serde_as]
@@ -442,6 +444,14 @@ pub struct BlueprintTasksConfig {
     /// executes the latest target blueprint
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs_execute: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionReplacementConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 /// Configuration for a nexus server
@@ -548,8 +558,8 @@ mod test {
         ConfigDropshotWithTls, ConsoleConfig, Database, DeploymentConfig,
         DnsTasksConfig, DpdConfig, ExternalEndpointsConfig, InternalDns,
         InventoryConfig, LoadError, LoadErrorKind, MgdConfig, NatCleanupConfig,
-        PackageConfig, PhantomDiskConfig, SchemeName, TimeseriesDbConfig,
-        Tunables, UpdatesConfig,
+        PackageConfig, PhantomDiskConfig, RegionReplacementConfig, SchemeName,
+        TimeseriesDbConfig, Tunables, UpdatesConfig,
     };
     use crate::address::{Ipv6Subnet, RACK_PREFIX};
     use crate::api::internal::shared::SwitchLocation;
@@ -706,6 +716,7 @@ mod test {
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
+            region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -819,7 +830,10 @@ mod test {
                         },
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
-                        }
+                        },
+                        region_replacement: RegionReplacementConfig {
+                            period_secs: Duration::from_secs(30),
+                        },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -882,6 +896,7 @@ mod test {
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
+            region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

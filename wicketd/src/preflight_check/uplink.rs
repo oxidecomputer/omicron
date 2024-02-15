@@ -22,7 +22,6 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::api::internal::shared::PortConfigV1;
 use omicron_common::api::internal::shared::PortFec as OmicronPortFec;
 use omicron_common::api::internal::shared::PortSpeed as OmicronPortSpeed;
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::OMICRON_DPD_TAG;
 use schemars::JsonSchema;
@@ -49,6 +48,7 @@ use trust_dns_resolver::error::ResolveError;
 use trust_dns_resolver::error::ResolveErrorKind;
 use trust_dns_resolver::TokioAsyncResolver;
 use update_engine::StepSpec;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
 const DNS_PORT: u16 = 53;
 
@@ -68,7 +68,7 @@ const IPADM: &str = "/usr/sbin/ipadm";
 const ROUTE: &str = "/usr/sbin/route";
 
 pub(super) async fn run_local_uplink_preflight_check(
-    network_config: RackNetworkConfig,
+    network_config: UserSpecifiedRackNetworkConfig,
     dns_servers: Vec<IpAddr>,
     ntp_servers: Vec<String>,
     our_switch_location: SwitchLocation,

@@ -33,7 +33,9 @@ fn main() -> Result<()> {
             // Report a relatively verbose error if we haven't downloaded the requisite
             // openapi spec.
             let local_path =
-                format!("../../out/downloads/ddm-admin-{commit}.json");
+                env::var("DDM_OPENAPI_PATH").unwrap_or_else(|_| {
+                    format!("../../out/downloads/ddm-admin-{commit}.json")
+                });
             if !Path::new(&local_path).exists() {
                 bail!("{local_path} doesn't exist; rerun `tools/ci_download_maghemite_openapi` (after updating `tools/maghemite_ddm_openapi_version` if the maghemite commit in package-manifest.toml has changed)");
             }

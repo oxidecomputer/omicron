@@ -332,6 +332,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
+        api.register(console_api::console_lookup)?;
         api.register(console_api::console_projects)?;
         api.register(console_api::console_projects_new)?;
         api.register(console_api::console_silo_images)?;
@@ -411,7 +412,7 @@ async fn ping(
     Ok(HttpResponseOk(views::Ping { status: views::PingStatus::Ok }))
 }
 
-/// Fetch the top-level IAM policy
+/// Fetch top-level IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/system/policy",
@@ -430,7 +431,7 @@ async fn system_policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update the top-level IAM policy
+/// Update top-level IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/system/policy",
@@ -454,7 +455,7 @@ async fn system_policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the current silo's IAM policy
+/// Fetch current silo's IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/policy",
@@ -481,7 +482,7 @@ pub(crate) async fn policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update the current silo's IAM policy
+/// Update current silo's IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/policy",
@@ -513,7 +514,7 @@ async fn policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View the resource utilization of the user's current silo
+/// Fetch resource utilization for user's current silo
 #[endpoint {
     method = GET,
     path = "/v1/utilization",
@@ -535,7 +536,7 @@ async fn utilization_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View the current utilization of a given silo
+/// Fetch current utilization for given silo
 #[endpoint {
     method = GET,
     path = "/v1/system/utilization/silos/{silo}",
@@ -628,7 +629,7 @@ async fn system_quotas_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View the resource quotas of a given silo
+/// Fetch resource quotas for silo
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/quotas",
@@ -651,7 +652,7 @@ async fn silo_quotas_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update the resource quotas of a given silo
+/// Update resource quotas for silo
 ///
 /// If a quota value is not specified, it will remain unchanged.
 #[endpoint {
@@ -735,9 +736,9 @@ async fn silo_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a silo
+/// Fetch silo
 ///
-/// Fetch a silo by name or ID.
+/// Fetch silo by name or ID.
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}",
@@ -759,7 +760,11 @@ async fn silo_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List IP pools available within silo
+/// List IP pools linked to silo
+///
+/// Linked IP pools are available to users in the specified silo. A silo can
+/// have at most one default pool. IPs are allocated from the default pool when
+/// users ask for one without specifying a pool.
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/ip-pools",
@@ -803,7 +808,7 @@ async fn silo_ip_pool_list(
 
 /// Delete a silo
 ///
-/// Delete a silo by name.
+/// Delete a silo by name or ID.
 #[endpoint {
     method = DELETE,
     path = "/v1/system/silos/{silo}",
@@ -825,7 +830,7 @@ async fn silo_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a silo's IAM policy
+/// Fetch silo IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/policy",
@@ -847,7 +852,7 @@ async fn silo_policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a silo's IAM policy
+/// Update silo IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/policy",
@@ -877,7 +882,7 @@ async fn silo_policy_update(
 
 // Silo-specific user endpoints
 
-/// List built-in (system) users in a silo
+/// List built-in (system) users in silo
 #[endpoint {
     method = GET,
     path = "/v1/system/users",
@@ -918,7 +923,7 @@ struct UserParam {
     user_id: Uuid,
 }
 
-/// Fetch a built-in (system) user
+/// Fetch built-in (system) user
 #[endpoint {
     method = GET,
     path = "/v1/system/users/{user_id}",
@@ -982,7 +987,7 @@ async fn silo_identity_provider_list(
 
 // Silo SAML identity providers
 
-/// Create a SAML IdP
+/// Create SAML IdP
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/saml",
@@ -1011,7 +1016,7 @@ async fn saml_identity_provider_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a SAML IdP
+/// Fetch SAML IdP
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
@@ -1049,7 +1054,7 @@ async fn saml_identity_provider_view(
 
 // "Local" Identity Provider
 
-/// Create a user
+/// Create user
 ///
 /// Users can only be created in Silos with `provision_type` == `Fixed`.
 /// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
@@ -1082,7 +1087,7 @@ async fn local_idp_user_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a user
+/// Delete user
 #[endpoint {
     method = DELETE,
     path = "/v1/system/identity-providers/local/users/{user_id}",
@@ -1106,7 +1111,7 @@ async fn local_idp_user_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set or invalidate a user's password
+/// Set or invalidate user's password
 ///
 /// Passwords can only be updated for users in Silos with identity mode
 /// `LocalOnly`.
@@ -1174,7 +1179,7 @@ async fn project_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a project
+/// Create project
 #[endpoint {
     method = POST,
     path = "/v1/projects",
@@ -1195,7 +1200,7 @@ async fn project_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a project
+/// Fetch project
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}",
@@ -1219,7 +1224,7 @@ async fn project_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a project
+/// Delete project
 #[endpoint {
     method = DELETE,
     path = "/v1/projects/{project}",
@@ -1276,7 +1281,7 @@ async fn project_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a project's IAM policy
+/// Fetch project's IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}/policy",
@@ -1301,7 +1306,7 @@ async fn project_policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a project's IAM policy
+/// Update project's IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/projects/{project}/policy",
@@ -1367,7 +1372,7 @@ async fn project_ip_pool_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an IP pool
+/// Fetch IP pool
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools/{pool}",
@@ -1430,7 +1435,7 @@ pub struct IpPoolPathParam {
     pub pool_name: Name,
 }
 
-/// Create an IP pool
+/// Create IP pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools",
@@ -1451,7 +1456,7 @@ async fn ip_pool_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an IP pool
+/// Fetch IP pool
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}",
@@ -1475,7 +1480,7 @@ async fn ip_pool_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an IP pool
+/// Delete IP pool
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}",
@@ -1497,7 +1502,7 @@ async fn ip_pool_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update an IP pool
+/// Update IP pool
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}",
@@ -1521,7 +1526,7 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List an IP pool's linked silos
+/// List IP pool's linked silos
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/silos",
@@ -1569,7 +1574,11 @@ async fn ip_pool_silo_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Make an IP pool available within a silo
+/// Link IP pool to silo
+///
+/// Users in linked silos can allocate external IPs from this pool for their
+/// instances. A silo can have at most one default pool. IPs are allocated from
+/// the default pool when users ask for one without specifying a pool.
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/silos",
@@ -1595,7 +1604,7 @@ async fn ip_pool_silo_link(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Unlink an IP pool from a silo
+/// Unlink IP pool from silo
 ///
 /// Will fail if there are any outstanding IPs allocated in the silo.
 #[endpoint {
@@ -1620,10 +1629,12 @@ async fn ip_pool_silo_unlink(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Make an IP pool default or not-default for a silo
+/// Make IP pool default for silo
 ///
-/// When a pool is made default for a silo, any existing default will remain
-/// linked to the silo, but will no longer be the default.
+/// When a user asks for an IP (e.g., at instance create time) without
+/// specifying a pool, the IP comes from the default pool if a default is
+/// configured. When a pool is made the default for a silo, any existing default
+/// will remain linked to the silo, but will no longer be the default.
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}/silos/{silo}",
@@ -1650,7 +1661,7 @@ async fn ip_pool_silo_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the IP pool used for Oxide services
+/// Fetch Oxide service IP pool
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service",
@@ -1671,9 +1682,9 @@ async fn ip_pool_service_view(
 
 type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 
-/// List ranges for an IP pool
+/// List ranges for IP pool
 ///
-/// List ranges for an IP pool. Ranges are ordered by their first address.
+/// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
@@ -1717,7 +1728,7 @@ async fn ip_pool_range_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a range to an IP pool
+/// Add range to IP pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/add",
@@ -1741,7 +1752,7 @@ async fn ip_pool_range_add(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Remove a range from an IP pool
+/// Remove range from IP pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/remove",
@@ -1765,10 +1776,9 @@ async fn ip_pool_range_remove(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List ranges for the IP pool used for Oxide services
+/// List IP ranges for the Oxide service pool
 ///
-/// List ranges for the IP pool used for Oxide services. Ranges are ordered by
-/// their first address.
+/// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
@@ -1809,7 +1819,7 @@ async fn ip_pool_service_range_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a range to an IP pool used for Oxide services
+/// Add IP range to Oxide service pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
@@ -1830,7 +1840,7 @@ async fn ip_pool_service_range_add(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Remove a range from an IP pool used for Oxide services
+/// Remove IP range from Oxide service pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/remove",
@@ -1885,7 +1895,7 @@ async fn floating_ip_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a floating IP
+/// Create floating IP
 #[endpoint {
     method = POST,
     path = "/v1/floating-ips",
@@ -1911,7 +1921,7 @@ async fn floating_ip_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a floating IP
+/// Delete floating IP
 #[endpoint {
     method = DELETE,
     path = "/v1/floating-ips/{floating_ip}",
@@ -1941,7 +1951,7 @@ async fn floating_ip_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a floating IP
+/// Fetch floating IP
 #[endpoint {
     method = GET,
     path = "/v1/floating-ips/{floating_ip}",
@@ -1971,7 +1981,9 @@ async fn floating_ip_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Attach a floating IP to an instance or other resource
+/// Attach floating IP
+///
+/// Attach floating IP to an instance or other resource.
 #[endpoint {
     method = POST,
     path = "/v1/floating-ips/{floating_ip}/attach",
@@ -2005,7 +2017,9 @@ async fn floating_ip_attach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Detach a floating IP from an instance or other resource
+/// Detach floating IP
+///
+// Detach floating IP from instance or other resource.
 #[endpoint {
     method = POST,
     path = "/v1/floating-ips/{floating_ip}/detach",
@@ -2097,7 +2111,7 @@ async fn disk_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a disk
+/// Fetch disk
 #[endpoint {
     method = GET,
     path = "/v1/disks/{disk}",
@@ -2123,7 +2137,7 @@ async fn disk_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a disk
+/// Delete disk
 #[endpoint {
     method = DELETE,
     path = "/v1/disks/{disk}",
@@ -2211,7 +2225,7 @@ async fn disk_metrics_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Start importing blocks into a disk
+/// Start importing blocks into disk
 ///
 /// Start the process of importing blocks into a disk
 #[endpoint {
@@ -2242,7 +2256,7 @@ async fn disk_bulk_write_import_start(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Import blocks into a disk
+/// Import blocks into disk
 #[endpoint {
     method = POST,
     path = "/v1/disks/{disk}/bulk-write",
@@ -2273,7 +2287,7 @@ async fn disk_bulk_write_import(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stop importing blocks into a disk
+/// Stop importing blocks into disk
 ///
 /// Stop the process of importing blocks into a disk
 #[endpoint {
@@ -2371,7 +2385,7 @@ async fn instance_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an instance
+/// Create instance
 #[endpoint {
     method = POST,
     path = "/v1/instances",
@@ -2401,7 +2415,7 @@ async fn instance_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an instance
+/// Fetch instance
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}",
@@ -2435,7 +2449,7 @@ async fn instance_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an instance
+/// Delete instance
 #[endpoint {
     method = DELETE,
     path = "/v1/instances/{instance}",
@@ -2531,7 +2545,7 @@ async fn instance_reboot(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Boot an instance
+/// Boot instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/start",
@@ -2560,7 +2574,7 @@ async fn instance_start(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stop an instance
+/// Stop instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/stop",
@@ -2589,7 +2603,7 @@ async fn instance_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an instance's serial console
+/// Fetch instance serial console
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/serial-console",
@@ -2620,7 +2634,7 @@ async fn instance_serial_console(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stream an instance's serial console
+/// Stream instance serial console
 #[channel {
     protocol = WEBSOCKETS,
     path = "/v1/instances/{instance}/serial-console/stream",
@@ -2672,9 +2686,10 @@ async fn instance_serial_console_stream(
     }
 }
 
-/// List the SSH public keys added to the instance via cloud-init during instance creation
+/// List SSH public keys for instance
 ///
-/// Note that this list is a snapshot in time and will not reflect updates made after
+/// List SSH public keys injected via cloud-init during instance creation. Note
+/// that this list is a snapshot in time and will not reflect updates made after
 /// the instance is created.
 #[endpoint {
     method = GET,
@@ -2716,7 +2731,7 @@ async fn instance_ssh_public_key_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List an instance's disks
+/// List disks for instance
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/disks",
@@ -2757,7 +2772,7 @@ async fn instance_disk_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Attach a disk to an instance
+/// Attach disk to instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/disks/attach",
@@ -2789,7 +2804,7 @@ async fn instance_disk_attach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Detach a disk from an instance
+/// Detach disk from instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/disks/detach",
@@ -2860,7 +2875,7 @@ async fn certificate_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new system-wide x.509 certificate
+/// Create new system-wide x.509 certificate
 ///
 /// This certificate is automatically used by the Oxide Control plane to serve
 /// external connections.
@@ -2890,7 +2905,7 @@ struct CertificatePathParam {
     certificate: NameOrId,
 }
 
-/// Fetch a certificate
+/// Fetch certificate
 ///
 /// Returns the details of a specific certificate
 #[endpoint {
@@ -2914,7 +2929,7 @@ async fn certificate_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a certificate
+/// Delete certificate
 ///
 /// Permanently delete a certificate. This operation cannot be undone.
 #[endpoint {
@@ -2942,7 +2957,7 @@ async fn certificate_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an address lot
+/// Create address lot
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/address-lot",
@@ -2968,7 +2983,7 @@ async fn networking_address_lot_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an address lot
+/// Delete address lot
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/address-lot/{address_lot}",
@@ -3025,7 +3040,7 @@ async fn networking_address_lot_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List the blocks in an address lot
+/// List blocks in address lot
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/address-lot/{address_lot}/blocks",
@@ -3061,7 +3076,7 @@ async fn networking_address_lot_block_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a loopback address
+/// Create loopback address
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/loopback-address",
@@ -3102,7 +3117,7 @@ pub struct LoopbackAddressPath {
     pub subnet_mask: u8,
 }
 
-/// Delete a loopback address
+/// Delete loopback address
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
@@ -3249,7 +3264,7 @@ async fn networking_switch_port_settings_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get information about a switch port
+/// Get information about switch port
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings/{port}",
@@ -3352,7 +3367,7 @@ async fn networking_switch_port_clear_settings(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new BGP configuration
+/// Create new BGP configuration
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bgp",
@@ -3449,7 +3464,7 @@ async fn networking_bgp_imported_routes_ipv4(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a BGP configuration
+/// Delete BGP configuration
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/bgp",
@@ -3470,7 +3485,7 @@ async fn networking_bgp_config_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new BGP announce set
+/// Create new BGP announce set
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bgp-announce",
@@ -3518,7 +3533,7 @@ async fn networking_bgp_announce_set_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a BGP announce set
+/// Delete BGP announce set
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/bgp-announce",
@@ -3539,7 +3554,7 @@ async fn networking_bgp_announce_set_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Enable a BFD session.
+/// Enable a BFD session
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bfd-enable",
@@ -3560,7 +3575,7 @@ async fn networking_bfd_enable(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Disable a BFD session.
+/// Disable a BFD session
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bfd-disable",
@@ -3581,7 +3596,7 @@ async fn networking_bfd_disable(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get BFD status.
+/// Get BFD status
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/bfd-status",
@@ -3652,7 +3667,7 @@ async fn image_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an image
+/// Create image
 ///
 /// Create a new image in a project.
 #[endpoint {
@@ -3690,7 +3705,7 @@ async fn image_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an image
+/// Fetch image
 ///
 /// Fetch the details for a specific image in a project.
 #[endpoint {
@@ -3733,7 +3748,7 @@ async fn image_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an image
+/// Delete image
 ///
 /// Permanently delete an image from a project. This operation cannot be undone.
 /// Any instances in the project using the image will continue to run, however
@@ -3769,9 +3784,9 @@ async fn image_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Promote a project image
+/// Promote project image
 ///
-/// Promote a project image to be visible to all projects in the silo
+/// Promote project image to be visible to all projects in the silo
 #[endpoint {
     method = POST,
     path = "/v1/images/{image}/promote",
@@ -3803,9 +3818,9 @@ async fn image_promote(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Demote a silo image
+/// Demote silo image
 ///
-/// Demote a silo image to be visible only to a specified project
+/// Demote silo image to be visible only to a specified project
 #[endpoint {
     method = POST,
     path = "/v1/images/{image}/demote",
@@ -3877,7 +3892,7 @@ async fn instance_network_interface_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a network interface
+/// Create network interface
 #[endpoint {
     method = POST,
     path = "/v1/network-interfaces",
@@ -3906,7 +3921,7 @@ async fn instance_network_interface_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a network interface
+/// Delete network interface
 ///
 /// Note that the primary interface for an instance cannot be deleted if there
 /// are any secondary interfaces. A new primary interface must be designated
@@ -3943,7 +3958,7 @@ async fn instance_network_interface_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a network interface
+/// Fetch network interface
 #[endpoint {
     method = GET,
     path = "/v1/network-interfaces/{interface}",
@@ -3974,7 +3989,7 @@ async fn instance_network_interface_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a network interface
+/// Update network interface
 #[endpoint {
     method = PUT,
     path = "/v1/network-interfaces/{interface}",
@@ -4048,7 +4063,7 @@ async fn instance_external_ip_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Allocate and attach an ephemeral IP to an instance
+/// Allocate and attach ephemeral IP to instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/external-ips/ephemeral",
@@ -4086,7 +4101,7 @@ async fn instance_ephemeral_ip_attach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Detach and deallocate an ephemeral IP from an instance
+/// Detach and deallocate ephemeral IP from instance
 #[endpoint {
     method = DELETE,
     path = "/v1/instances/{instance}/external-ips/ephemeral",
@@ -4158,7 +4173,7 @@ async fn snapshot_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a snapshot
+/// Create snapshot
 ///
 /// Creates a point-in-time snapshot from a disk.
 #[endpoint {
@@ -4186,7 +4201,7 @@ async fn snapshot_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a snapshot
+/// Fetch snapshot
 #[endpoint {
     method = GET,
     path = "/v1/snapshots/{snapshot}",
@@ -4214,7 +4229,7 @@ async fn snapshot_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a snapshot
+/// Delete snapshot
 #[endpoint {
     method = DELETE,
     path = "/v1/snapshots/{snapshot}",
@@ -4281,7 +4296,7 @@ async fn vpc_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a VPC
+/// Create VPC
 #[endpoint {
     method = POST,
     path = "/v1/vpcs",
@@ -4307,7 +4322,7 @@ async fn vpc_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a VPC
+/// Fetch VPC
 #[endpoint {
     method = GET,
     path = "/v1/vpcs/{vpc}",
@@ -4362,7 +4377,7 @@ async fn vpc_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a VPC
+/// Delete VPC
 #[endpoint {
     method = DELETE,
     path = "/v1/vpcs/{vpc}",
@@ -4423,7 +4438,7 @@ async fn vpc_subnet_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a subnet
+/// Create subnet
 #[endpoint {
     method = POST,
     path = "/v1/vpc-subnets",
@@ -4448,7 +4463,7 @@ async fn vpc_subnet_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a subnet
+/// Fetch subnet
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets/{subnet}",
@@ -4477,7 +4492,7 @@ async fn vpc_subnet_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a subnet
+/// Delete subnet
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-subnets/{subnet}",
@@ -4506,7 +4521,7 @@ async fn vpc_subnet_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a subnet
+/// Update subnet
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-subnets/{subnet}",
@@ -4686,7 +4701,7 @@ async fn vpc_router_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a router
+/// Fetch router
 #[endpoint {
     method = GET,
     path = "/v1/vpc-routers/{router}",
@@ -4716,7 +4731,7 @@ async fn vpc_router_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a VPC router
+/// Create VPC router
 #[endpoint {
     method = POST,
     path = "/v1/vpc-routers",
@@ -4748,7 +4763,7 @@ async fn vpc_router_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a router
+/// Delete router
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-routers/{router}",
@@ -4778,7 +4793,7 @@ async fn vpc_router_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a router
+/// Update router
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-routers/{router}",
@@ -4852,7 +4867,7 @@ async fn vpc_router_route_list(
 
 // Vpc Router Routes
 
-/// Fetch a route
+/// Fetch route
 #[endpoint {
     method = GET,
     path = "/v1/vpc-router-routes/{route}",
@@ -4885,7 +4900,7 @@ async fn vpc_router_route_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a router
+/// Create router
 #[endpoint {
     method = POST,
     path = "/v1/vpc-router-routes",
@@ -4917,7 +4932,7 @@ async fn vpc_router_route_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a route
+/// Delete route
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-router-routes/{route}",
@@ -4949,7 +4964,7 @@ async fn vpc_router_route_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a route
+/// Update route
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-router-routes/{route}",
@@ -5024,7 +5039,7 @@ struct RackPathParam {
     rack_id: Uuid,
 }
 
-/// Fetch a rack
+/// Fetch rack
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/racks/{rack_id}",
@@ -5045,7 +5060,7 @@ async fn rack_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List uninitialized sleds in a given rack
+/// List uninitialized sleds
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds-uninitialized",
@@ -5072,7 +5087,7 @@ async fn sled_list_uninitialized(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a sled to an initialized rack
+/// Add sled to initialized rack
 //
 // TODO: In the future this should really be a PUT request, once we resolve
 // https://github.com/oxidecomputer/omicron/issues/4494. It should also
@@ -5129,7 +5144,7 @@ async fn sled_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a sled
+/// Fetch sled
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}",
@@ -5151,7 +5166,7 @@ async fn sled_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set the sled's provision state
+/// Set sled provision state
 #[endpoint {
     method = PUT,
     path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
@@ -5189,7 +5204,7 @@ async fn sled_set_provision_state(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List instances running on a given sled
+/// List instances running on given sled
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}/instances",
@@ -5290,7 +5305,7 @@ async fn switch_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a switch
+/// Fetch switch
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switches/{switch_id}",
@@ -5473,7 +5488,7 @@ async fn silo_metric(
 
 // Updates
 
-/// Upload a TUF repository
+/// Upload TUF repository
 #[endpoint {
     method = PUT,
     path = "/v1/system/update/repository",
@@ -5498,7 +5513,9 @@ async fn system_update_put_repository(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get the description of a repository by system version.
+/// Fetch TUF repository description
+///
+/// Fetch description of TUF repository by system version.
 #[endpoint {
     method = GET,
     path = "/v1/system/update/repository/{system_version}",
@@ -5653,7 +5670,7 @@ async fn user_builtin_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a built-in user
+/// Fetch built-in user
 #[endpoint {
     method = GET,
     path = "/v1/system/users-builtin/{user}",
@@ -5735,7 +5752,7 @@ async fn role_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a built-in role
+/// Fetch built-in role
 #[endpoint {
     method = GET,
     path = "/v1/system/roles/{role_name}",
@@ -5759,7 +5776,7 @@ async fn role_view(
 
 // Current user
 
-/// Fetch the user associated with the current session
+/// Fetch user for current session
 #[endpoint {
    method = GET,
    path = "/v1/me",
@@ -5782,7 +5799,7 @@ pub(crate) async fn current_user_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the silo groups the current user belongs to
+/// Fetch current user's groups
 #[endpoint {
     method = GET,
     path = "/v1/me/groups",
@@ -5856,7 +5873,7 @@ async fn current_user_ssh_key_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an SSH public key
+/// Create SSH public key
 ///
 /// Create an SSH public key for the currently authenticated user.
 #[endpoint {
@@ -5884,9 +5901,9 @@ async fn current_user_ssh_key_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an SSH public key
+/// Fetch SSH public key
 ///
-/// Fetch an SSH public key associated with the currently authenticated user.
+/// Fetch SSH public key associated with the currently authenticated user.
 #[endpoint {
     method = GET,
     path = "/v1/me/ssh-keys/{ssh_key}",
@@ -5918,7 +5935,7 @@ async fn current_user_ssh_key_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an SSH public key
+/// Delete SSH public key
 ///
 /// Delete an SSH public key associated with the currently authenticated user.
 #[endpoint {
