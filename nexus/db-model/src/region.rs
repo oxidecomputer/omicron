@@ -15,7 +15,6 @@ use uuid::Uuid;
 /// allocated within a volume.
 #[derive(
     Queryable,
-    QueryableByName,
     Insertable,
     Debug,
     Clone,

@@ -7,9 +7,13 @@
 //! These largely side-step Diesel's type system,
 //! and are recommended for more complex CTE
 
+use crate::db::pool::DbConnection;
 use diesel::pg::Pg;
+use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::sql_types;
+use diesel::RunQueryDsl;
 use std::cell::Cell;
+use std::marker::PhantomData;
 
 // Keeps a counter to "how many bind parameters have been used" to
 // aid in the construction of the query string.
@@ -149,7 +153,43 @@ impl QueryBuilder {
     }
 
     /// Takes the final boxed query
-    pub fn query(self) -> BoxedQuery {
-        self.query
+    pub fn query<T>(self) -> TypedSqlQuery<T> {
+        TypedSqlQuery { inner: self.query, _phantom: PhantomData }
     }
+}
+
+/// Diesel's [diesel::query_builder::BoxedSqlQuery] has a few drawbacks that
+/// make wrapper more palatable:
+///
+/// - It always implements "Query" with SqlType = Untyped, so a caller could try to
+/// execute this query and get back any type.
+/// - It forces the usage of "QueryableByName", which acts wrong if we're
+/// returning multiple columns with the same name (this is normal! If you want
+/// to UNION two objects that both have "id" columns, this happens).
+#[derive(QueryId)]
+pub struct TypedSqlQuery<T> {
+    inner: diesel::query_builder::BoxedSqlQuery<
+        'static,
+        Pg,
+        diesel::query_builder::SqlQuery,
+    >,
+    _phantom: PhantomData<T>,
+}
+
+impl<T> QueryFragment<Pg> for TypedSqlQuery<T> {
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+        out.unsafe_to_cache_prepared();
+
+        self.inner.walk_ast(out.reborrow())?;
+        Ok(())
+    }
+}
+
+impl<T> RunQueryDsl<DbConnection> for TypedSqlQuery<T> {}
+
+impl<T> Query for TypedSqlQuery<T> {
+    type SqlType = T;
 }

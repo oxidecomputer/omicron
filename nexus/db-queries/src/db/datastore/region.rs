@@ -128,15 +128,7 @@ impl DataStore {
         let (blocks_per_extent, extent_count) =
             Self::get_crucible_allocation(&block_size, size);
 
-        #[derive(diesel::QueryableByName, Queryable)]
-        struct DatasetAndRegion {
-            #[diesel(embed)]
-            dataset: Dataset,
-            #[diesel(embed)]
-            region: Region,
-        }
-
-        let dataset_and_regions: Vec<_> =
+        let dataset_and_regions: Vec<(Dataset, Region)> =
             crate::db::queries::region_allocation::allocation_query(
                 volume_id,
                 block_size.to_bytes() as u64,
@@ -144,14 +136,11 @@ impl DataStore {
                 extent_count,
                 allocation_strategy,
             )
-            .get_results_async::<DatasetAndRegion>(
-                &*self.pool_connection_authorized(&opctx).await?,
-            )
+            .get_results_async(&*self.pool_connection_authorized(&opctx).await?)
             .await
-            .map_err(|e| crate::db::queries::region_allocation::from_diesel(e))?
-            .into_iter()
-            .map(|DatasetAndRegion { dataset, region }| (dataset, region))
-            .collect::<Vec<_>>();
+            .map_err(|e| {
+                crate::db::queries::region_allocation::from_diesel(e)
+            })?;
 
         info!(
             self.log,

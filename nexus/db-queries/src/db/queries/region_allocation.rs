@@ -6,7 +6,8 @@
 
 use crate::db::column_walker::AllColumnsOf;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
-use crate::db::raw_query_builder::QueryBuilder;
+use crate::db::model::{Dataset, Region};
+use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use crate::db::schema;
 use crate::db::true_or_cast_error::matches_sentinel;
 use const_format::concatcp;
@@ -63,17 +64,17 @@ pub fn from_diesel(e: DieselError) -> external::Error {
     error::public_error_from_diesel(e, error::ErrorHandler::Server)
 }
 
+type SelectableSql<T> = <
+    <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
+>::SqlType;
+
 pub fn allocation_query(
     volume_id: uuid::Uuid,
     block_size: u64,
     blocks_per_extent: u64,
     extent_count: u64,
     allocation_strategy: &RegionAllocationStrategy,
-) -> diesel::query_builder::BoxedSqlQuery<
-    'static,
-    Pg,
-    diesel::query_builder::SqlQuery,
-> {
+) -> TypedSqlQuery<(SelectableSql<Dataset>, SelectableSql<Region>)> {
     let (seed, distinct_sleds) = {
         let (input_seed, distinct_sleds) = match allocation_strategy {
             RegionAllocationStrategy::Random { seed } => (seed, false),
