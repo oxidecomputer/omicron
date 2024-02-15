@@ -227,7 +227,8 @@ impl super::Nexus {
             policy: Policy {
                 sleds,
                 service_ip_pool_ranges,
-                target_nexus_zone_count: NEXUS_REDUNDANCY,
+                // TODO-john DO NOT MERGE
+                target_nexus_zone_count: 1 + NEXUS_REDUNDANCY,
             },
             inventory,
         })
