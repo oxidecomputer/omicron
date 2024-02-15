@@ -5,8 +5,10 @@
 //! Utilities for managing IP interfaces.
 
 use crate::zone::IPADM;
-use crate::{execute, ExecutionError, PFEXEC};
-use std::net::Ipv6Addr;
+use crate::{execute, inner, output_to_exec_error, ExecutionError, PFEXEC};
+use std::net::{Ipv4Addr, Ipv6Addr};
+use std::process::Stdio;
+use std::str::FromStr;
 
 /// Wraps commands for interacting with interfaces.
 pub struct Ipadm {}
@@ -106,5 +108,83 @@ impl Ipadm {
             Ok(_) => (),
         };
         Ok(())
+    }
+
+    // Create IPv4 gateway on the IP interface if it doesn't already exist
+    pub fn create_opte_ipv4_gateway(
+        opte_iface: &Ipv4Addr,
+    ) -> Result<(), ExecutionError> {
+        let addrobj = format!("{}/public", opte_iface);
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[IPADM, "show-addr", &addrobj]);
+        match execute(cmd) {
+            Err(_) => {
+                let mut cmd = std::process::Command::new(PFEXEC);
+                let cmd = cmd.args(&[
+                    IPADM,
+                    "create-addr",
+                    "-t",
+                    "-T",
+                    "dhcp",
+                    &addrobj,
+                ]);
+                execute(cmd)?;
+            }
+            Ok(_) => (),
+        };
+        Ok(())
+    }
+
+    // Retrieve OPTE IP from interface
+    pub fn retrieve_opte_ip(
+        opte_iface: &Ipv4Addr,
+    ) -> Result<Ipv4Addr, ExecutionError> {
+        let addrobj = format!("{}/public", opte_iface);
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let child_cmd = cmd
+            .args(&[IPADM, "show-addr", "-p", "-o", "ADDR", &addrobj])
+            .stdout(Stdio::piped());
+        let mut child = child_cmd.spawn().map_err(|err| {
+            ExecutionError::ExecutionStart {
+                command: inner::to_string(child_cmd),
+                err,
+            }
+        })?;
+
+        let Some(child_stdio) = child.stdout.take() else {
+            return Err(ExecutionError::EmptyOutput {
+                command: inner::to_string(child_cmd),
+            });
+        };
+
+        let child_stdio: Stdio = child_stdio.try_into().map_err(|_| {
+            ExecutionError::EmptyOutput { command: inner::to_string(child_cmd) }
+        })?;
+
+        let mut cmd = std::process::Command::new("cut");
+        let cut_cmd = cmd
+            .args(&["-d", "'/'", "-f", "1"])
+            .stdin(child_stdio)
+            .stdout(Stdio::piped());
+        let cut =
+            cut_cmd.spawn().map_err(|err| ExecutionError::ExecutionStart {
+                command: inner::to_string(cut_cmd),
+                err,
+            })?;
+
+        let out = cut.wait_with_output().unwrap();
+        if !out.status.success() {
+            return Err(output_to_exec_error(cut_cmd, &out));
+        };
+
+        let opte_ip = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .next()
+            .map(|s| s.trim())
+            .ok_or_else(|| output_to_exec_error(cut_cmd, &out))?
+            .to_string();
+
+        let addr = Ipv4Addr::from_str(&opte_ip).unwrap();
+        Ok(addr)
     }
 }

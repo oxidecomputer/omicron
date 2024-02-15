@@ -64,6 +64,9 @@ pub enum ExecutionError {
 
     #[error("Zone is not running")]
     NotRunning,
+
+    #[error("Output of [{command}] is empty")]
+    EmptyOutput { command: String },
 }
 
 // We wrap this method in an inner module to make it possible to mock
