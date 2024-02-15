@@ -655,7 +655,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
@@ -1946,7 +1946,7 @@ dependencies = [
  "progenitor-client 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "quote",
  "rand 0.8.5",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "rustfmt-wrapper",
  "schemars",
@@ -2862,9 +2862,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.14.2"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f93e7192158dbcda357bdec5fb5788eebf8bbac027f3f33e719d29135ae84156"
+checksum = "290f1a1d9242c78d09ce40a5e87e7554ee637af1351968159f4952f028f75604"
 dependencies = [
  "ahash",
  "allocator-api2",
@@ -3368,7 +3368,7 @@ dependencies = [
  "opte-ioctl",
  "oxide-vpc",
  "oxlog",
- "regress",
+ "regress 0.8.0",
  "schemars",
  "serde",
  "serde_json",
@@ -3410,7 +3410,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "824b2ae422412366ba479e8111fd301f7b5faece8149317bb81925979a53f520"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.2",
+ "hashbrown 0.14.3",
  "serde",
 ]
 
@@ -3504,7 +3504,7 @@ dependencies = [
  "installinator-common",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
@@ -3979,7 +3979,7 @@ version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2994eeba8ed550fd9b47a0b38f0242bc3344e496483c6180b69139cc2fa5d1d7"
 dependencies = [
- "hashbrown 0.14.2",
+ "hashbrown 0.14.3",
 ]
 
 [[package]]
@@ -4302,7 +4302,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
@@ -4872,7 +4872,7 @@ dependencies = [
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "proptest",
  "rand 0.8.5",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "semver 1.0.21",
@@ -5366,7 +5366,7 @@ dependencies = [
  "getrandom 0.2.10",
  "group",
  "hashbrown 0.13.2",
- "hashbrown 0.14.2",
+ "hashbrown 0.14.3",
  "hex",
  "hmac",
  "hyper 0.14.27",
@@ -5648,7 +5648,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "rand 0.8.5",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -7063,6 +7063,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "regress"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f5f39ba4513916c1b2657b72af6ec671f091cd637992f58d0ede5cae4e5dea0"
+dependencies = [
+ "hashbrown 0.14.3",
+ "memchr",
+]
+
+[[package]]
 name = "relative-path"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8137,7 +8147,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
@@ -9711,7 +9721,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress",
+ "regress 0.7.1",
  "schemars",
  "serde_json",
  "syn 2.0.48",
@@ -10446,7 +10456,7 @@ dependencies = [
  "ipnetwork",
  "omicron-workspace-hack",
  "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "regress",
+ "regress 0.8.0",
  "reqwest",
  "schemars",
  "serde",
