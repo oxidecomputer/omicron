@@ -32,6 +32,7 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
 use gateway_client::types::SpType;
 use ipnetwork::IpNetwork;
@@ -599,6 +600,42 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
         direction: dropshot::PaginationOrder::Ascending,
         limit,
     }
+}
+
+/// Helper function to looks up an instance with the given ID.
+async fn lookup_instance(
+    datastore: &DataStore,
+    instance_id: Uuid,
+) -> anyhow::Result<Option<Instance>> {
+    use db::schema::instance::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::instance
+        .filter(dsl::id.eq(instance_id))
+        .limit(1)
+        .select(Instance::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading instance {instance_id}"))
+}
+
+/// Helper function to looks up a project with the given ID.
+async fn lookup_project(
+    datastore: &DataStore,
+    project_id: Uuid,
+) -> anyhow::Result<Option<Project>> {
+    use db::schema::project::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::project
+        .filter(dsl::id.eq(project_id))
+        .limit(1)
+        .select(Project::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading project {project_id}"))
 }
 
 // Disks
@@ -1844,42 +1881,27 @@ async fn cmd_db_eips(
                     kind: format!("{:?}", service.1.kind),
                 }
             } else {
-                use db::schema::instance::dsl as instance_dsl;
-                let instance = match instance_dsl::instance
-                    .filter(instance_dsl::id.eq(owner_id))
-                    .limit(1)
-                    .select(Instance::as_select())
-                    .load_async(&*datastore.pool_connection_for_tests().await?)
-                    .await
-                    .context("loading requested instance")?
-                    .pop()
-                {
-                    Some(instance) => instance,
-                    None => {
-                        eprintln!("instance with id {owner_id} not found");
-                        continue;
-                    }
-                };
+                let instance =
+                    match lookup_instance(datastore, owner_id).await? {
+                        Some(instance) => instance,
+                        None => {
+                            eprintln!("instance with id {owner_id} not found");
+                            continue;
+                        }
+                    };
 
-                use db::schema::project::dsl as project_dsl;
-                let project = match project_dsl::project
-                    .filter(project_dsl::id.eq(instance.project_id))
-                    .limit(1)
-                    .select(Project::as_select())
-                    .load_async(&*datastore.pool_connection_for_tests().await?)
-                    .await
-                    .context("loading requested project")?
-                    .pop()
-                {
-                    Some(project) => project,
-                    None => {
-                        eprintln!(
-                            "project with id {} not found",
-                            instance.project_id
-                        );
-                        continue;
-                    }
-                };
+                let project =
+                    match lookup_project(datastore, instance.project_id).await?
+                    {
+                        Some(project) => project,
+                        None => {
+                            eprintln!(
+                                "project with id {} not found",
+                                instance.project_id
+                            );
+                            continue;
+                        }
+                    };
 
                 Owner::Instance {
                     id: owner_id,
@@ -1950,7 +1972,7 @@ async fn cmd_db_network_list_vnics(
         kind: &'static str,
         subnet: String,
         parent_id: Uuid,
-        description: String,
+        parent_name: String,
     }
     use db::schema::network_interface::dsl;
     let mut query = dsl::network_interface.into_boxed();
@@ -1980,9 +2002,40 @@ async fn cmd_db_network_list_vnics(
     let mut rows = Vec::new();
 
     for nic in &nics {
-        let kind = match nic.kind {
-            NetworkInterfaceKind::Instance => "instance",
-            NetworkInterfaceKind::Service => "service",
+        let (kind, parent_name) = match nic.kind {
+            NetworkInterfaceKind::Instance => {
+                match lookup_instance(datastore, nic.parent_id).await? {
+                    Some(instance) => {
+                        match lookup_project(datastore, instance.project_id)
+                            .await?
+                        {
+                            Some(project) => (
+                                "instance",
+                                format!(
+                                    "{}/{}",
+                                    project.name(),
+                                    instance.name()
+                                ),
+                            ),
+                            None => {
+                                eprintln!(
+                                    "project with id {} not found",
+                                    instance.project_id
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    None => {
+                        ("instance?", "parent instance not found".to_string())
+                    }
+                }
+            }
+            NetworkInterfaceKind::Service => {
+                // We create service NICs named after the service, so we can use
+                // the nic name instead of looking up the service.
+                ("service", nic.name().to_string())
+            }
         };
 
         let subnet = {
@@ -2018,7 +2071,7 @@ async fn cmd_db_network_list_vnics(
             kind,
             subnet,
             parent_id: nic.parent_id,
-            description: nic.description().to_string(),
+            parent_name,
         };
         rows.push(row);
     }
