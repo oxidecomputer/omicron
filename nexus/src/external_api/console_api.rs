@@ -700,6 +700,7 @@ macro_rules! console_page_wildcard {
 console_page_wildcard!(console_projects, "/projects/{path:.*}");
 console_page_wildcard!(console_settings_page, "/settings/{path:.*}");
 console_page_wildcard!(console_system_page, "/system/{path:.*}");
+console_page_wildcard!(console_lookup, "/lookup/{path:.*}");
 console_page!(console_root, "/");
 console_page!(console_projects_new, "/projects-new");
 console_page!(console_silo_images, "/images");
