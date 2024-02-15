@@ -82,6 +82,16 @@ impl TryFrom<Certificate> for views::Certificate {
         Ok(Self {
             identity: cert.identity(),
             service: cert.service.try_into()?,
+            cert: String::from_utf8(cert.cert)
+                .map_err(|err| {
+                    Error::InternalError {
+                        internal_message: format!(
+                            "Failed to construct string from stored certificate: {}",
+                            err
+                        )
+                    }
+                }
+            )?,
         })
     }
 }
