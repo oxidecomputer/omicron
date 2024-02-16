@@ -399,10 +399,10 @@ tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
 toml = "0.8.10"
 toml_edit = "0.21.1"
 tough = { version = "0.16.0", features = [ "http" ] }
-trust-dns-client = "0.22"
-trust-dns-proto = "0.22"
-trust-dns-resolver = "0.22"
-trust-dns-server = "0.22"
+trust-dns-client = "0.23"
+trust-dns-proto = "0.23"
+trust-dns-resolver = "0.23"
+trust-dns-server = "0.23"
 trybuild = "1.0.89"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
