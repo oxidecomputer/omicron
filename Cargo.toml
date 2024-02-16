@@ -397,7 +397,7 @@ tokio-stream = "0.1.14"
 tokio-tungstenite = "0.20"
 tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
 toml = "0.8.10"
-toml_edit = "0.21.1"
+toml_edit = "0.22.6"
 tough = { version = "0.16.0", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
