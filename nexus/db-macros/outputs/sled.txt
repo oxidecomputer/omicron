@@ -7,7 +7,10 @@ pub enum Sled<'a> {
     /// We're looking for a resource with the given primary key
     ///
     /// This has no parent container -- a by-id lookup is always global
-    PrimaryKey(Root<'a>, ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::SledKind>),
+    PrimaryKey(
+        Root<'a>,
+        ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::SledKind>,
+    ),
 }
 impl<'a> Sled<'a> {
     /// Fetch the record corresponding to the selected resource

@@ -16,7 +16,9 @@ pub struct AssetWithUuidKindIdentity {
     pub time_modified: ::chrono::DateTime<::chrono::Utc>,
 }
 impl AssetWithUuidKindIdentity {
-    pub fn new(id: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>) -> Self {
+    pub fn new(
+        id: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>,
+    ) -> Self {
         let now = ::chrono::Utc::now();
         Self {
             id: crate::to_db_typed_uuid(id),
