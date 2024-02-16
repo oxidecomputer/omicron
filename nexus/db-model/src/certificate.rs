@@ -86,11 +86,8 @@ impl TryFrom<Certificate> for views::Certificate {
             // database with PEM encoding which are essentially bundles of Base64 encoded text.
             // The only cases in which this conversion should fail is when our internal database
             // representation of the certificate is invalid.
-            cert: String::from_utf8(cert.cert).map_err(|err| {
-                Error::internal_error(&format!(
-                    "Failed to construct string from stored certificate: {}",
-                    err
-                ))
+            cert: String::from_utf8(cert.cert).map_err(|_| {
+                Error::internal_error("Certificate is not valid UTF-8")
             })?,
         })
     }
