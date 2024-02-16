@@ -44,6 +44,7 @@ members = [
     "nexus/defaults",
     "nexus/deployment",
     "nexus/inventory",
+    "nexus/macros-common",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -66,6 +67,7 @@ members = [
     "tufaceous",
     "update-common",
     "update-engine",
+    "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -113,6 +115,7 @@ default-members = [
     "nexus",
     "nexus/authz-macros",
     "nexus/blueprint-execution",
+    "nexus/macros-common",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -138,6 +141,7 @@ default-members = [
     "tufaceous",
     "update-common",
     "update-engine",
+    "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -256,6 +260,7 @@ nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-deployment = { path = "nexus/deployment" }
 nexus-inventory = { path = "nexus/inventory" }
+nexus-macros-common = { path = "nexus/macros-common" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
@@ -415,6 +420,14 @@ zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async", "sync"] }
 
+# newtype-uuid is set to default-features = false because we don't want to
+# depend on std in omicron-uuid-kinds (in case a no-std library wants to access
+# the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
+# std and the other features enabled because they'll refer to it via
+# omicron-uuid-kinds.workspace = true.
+newtype-uuid = { version = "1.0.1", default-features = false }
+omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
+
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that
 # will cause dev and test builds to diverge, which will cause more Cargo build
@@ -570,6 +583,7 @@ opt-level = 3
 [profile.dev.package.keccak]
 opt-level = 3
 
+
 #
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
@@ -617,3 +631,17 @@ path = "workspace-hack"
 [patch.crates-io.samael]
 git = "https://github.com/oxidecomputer/samael"
 branch = "oxide/omicron"
+
+# Several crates such as crucible and propolis have have a Git dependency on
+# this repo. Omicron itself depends on these crates, which can lead to two
+# copies of these crates in the dependency graph. (As a Git dependency, and as
+# a path dependency.) The goal of omicron-uuid-kinds is to provide a unified
+# registry of UUID kinds. Two copies of the same kinds floating around is
+# unnecessary and painful.
+#
+# This directive ensures that whenever we see omicron-uuid-kinds as a Git
+# dependency, we'll use the path dependency version of the crate instead.
+#
+# See also: uuid-kinds/README.adoc.
+[patch."https://github.com/oxidecomputer/omicron"]
+omicron-uuid-kinds = { path = "uuid-kinds" }

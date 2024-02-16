@@ -6,6 +6,7 @@ use std::str::FromStr;
 
 use crate::{
     schema::{tuf_artifact, tuf_repo, tuf_repo_artifact},
+    typed_uuid::DbTypedUuid,
     SemverVersion,
 };
 use chrono::{DateTime, Utc};
@@ -17,6 +18,8 @@ use omicron_common::{
         ArtifactKind,
     },
 };
+use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
@@ -73,7 +76,7 @@ impl TufRepoDescription {
 )]
 #[diesel(table_name = tuf_repo)]
 pub struct TufRepo {
-    pub id: Uuid,
+    pub id: DbTypedUuid<TufRepoKind>,
     pub time_created: DateTime<Utc>,
     // XXX: We're overloading ArtifactHash here to also mean the hash of the
     // repository zip itself.
@@ -94,7 +97,7 @@ impl TufRepo {
         file_name: String,
     ) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: TypedUuid::new_v4().into(),
             time_created: Utc::now(),
             sha256,
             targets_role_version: targets_role_version as i64,
@@ -132,8 +135,8 @@ impl TufRepo {
     }
 
     /// Returns the repository's ID.
-    pub fn id(&self) -> Uuid {
-        self.id
+    pub fn id(&self) -> TypedUuid<TufRepoKind> {
+        self.id.into()
     }
 
     /// Returns the targets role version.

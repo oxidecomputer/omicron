@@ -354,6 +354,7 @@ version = "0.1.0"
 dependencies = [
  "expectorate",
  "heck 0.4.1",
+ "nexus-macros-common",
  "omicron-workspace-hack",
  "prettyplease",
  "proc-macro2",
@@ -1548,6 +1549,7 @@ version = "0.1.0"
 dependencies = [
  "expectorate",
  "heck 0.4.1",
+ "nexus-macros-common",
  "omicron-workspace-hack",
  "prettyplease",
  "proc-macro2",
@@ -4257,6 +4259,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "newtype-uuid"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a5ff2b31594942586c1520da8f1e5c705729ec67b3c2ad0fe459f0b576e4d9a"
+dependencies = [
+ "schemars",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "newtype_derive"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4318,6 +4331,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "db-macros",
+ "derive-where",
  "diesel",
  "expectorate",
  "hex",
@@ -4330,6 +4344,7 @@ dependencies = [
  "omicron-common",
  "omicron-passwords",
  "omicron-rpaths",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "parse-display",
  "pq-sys",
@@ -4388,6 +4403,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
  "openapiv3",
@@ -4483,6 +4499,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-macros-common"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.48",
+]
+
+[[package]]
 name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
@@ -4557,6 +4583,7 @@ dependencies = [
  "gateway-client",
  "omicron-common",
  "omicron-passwords",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "openssl",
  "parse-display",
@@ -4865,6 +4892,7 @@ dependencies = [
  "ipnetwork",
  "libc",
  "macaddr",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
  "parse-display",
@@ -5317,6 +5345,14 @@ dependencies = [
  "tokio-postgres",
  "usdt 0.5.0",
  "walkdir",
+]
+
+[[package]]
+name = "omicron-uuid-kinds"
+version = "0.1.0"
+dependencies = [
+ "newtype-uuid",
+ "schemars",
 ]
 
 [[package]]

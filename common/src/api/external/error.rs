@@ -9,6 +9,7 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
+use omicron_uuid_kinds::GenericUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Display;
@@ -152,6 +153,11 @@ pub enum LookupType {
 }
 
 impl LookupType {
+    /// Constructs a `ById` lookup type from a typed or untyped UUID.
+    pub fn by_id<T: GenericUuid>(id: T) -> Self {
+        LookupType::ById(id.into_untyped_uuid())
+    }
+
     /// Returns an ObjectNotFound error appropriate for the case where this
     /// lookup failed
     pub fn into_not_found(self, type_name: ResourceType) -> Error {

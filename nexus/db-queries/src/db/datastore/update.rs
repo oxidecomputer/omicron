@@ -21,8 +21,9 @@ use omicron_common::api::external::{
     self, CreateResult, LookupResult, LookupType, ResourceType,
     TufRepoInsertStatus,
 };
+use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TypedUuid;
 use swrite::{swrite, SWrite};
-use uuid::Uuid;
 
 /// The return value of [`DataStore::update_tuf_repo_description_insert`].
 ///
@@ -43,7 +44,7 @@ impl TufRepoInsertResponse {
 }
 
 async fn artifacts_for_repo(
-    repo_id: Uuid,
+    repo_id: TypedUuid<TufRepoKind>,
     conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
 ) -> Result<Vec<TufArtifact>, DieselError> {
     use db::schema::tuf_artifact::dsl as tuf_artifact_dsl;
@@ -61,7 +62,10 @@ async fn artifacts_for_repo(
     // Don't bother paginating because each repo should only have a few (under
     // 20) artifacts.
     tuf_repo_artifact_dsl::tuf_repo_artifact
-        .filter(tuf_repo_artifact_dsl::tuf_repo_id.eq(repo_id))
+        .filter(
+            tuf_repo_artifact_dsl::tuf_repo_id
+                .eq(nexus_db_model::to_db_typed_uuid(repo_id)),
+        )
         .inner_join(tuf_artifact_dsl::tuf_artifact.on(join_on_dsl))
         .select(TufArtifact::as_select())
         .load_async(conn)
@@ -138,7 +142,7 @@ impl DataStore {
                 )
             })?;
 
-        let artifacts = artifacts_for_repo(repo.id, &conn)
+        let artifacts = artifacts_for_repo(repo.id.into(), &conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
         Ok(TufRepoDescription { repo, artifacts })
@@ -177,7 +181,8 @@ async fn insert_impl(
             }
 
             // Just return the existing repo along with all of its artifacts.
-            let artifacts = artifacts_for_repo(existing_repo.id, &conn).await?;
+            let artifacts =
+                artifacts_for_repo(existing_repo.id.into(), &conn).await?;
 
             let recorded =
                 TufRepoDescription { repo: existing_repo, artifacts };
