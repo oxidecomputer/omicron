@@ -906,6 +906,25 @@ impl SledAgent {
             .services
             .ensure_all_omicron_zones_persistent(requested_zones)
             .await?;
+
+        // It's possible we just added new zones, in which case we may need new
+        // firewall rules.
+        //
+        // In theory, we should only need to request new firewall rules if we
+        // just added a zone. In practice knowing whether that's true would
+        // require state across mulitple calls; for example:
+        //
+        // 1. Client calls this endpoint. We succeed in adding a zone, so we try
+        //    to refresh firewall rules, but the refresh fails. We return a 500.
+        // 2. Client retries; we already succeeded in adding their zone, so this
+        //    time we don't start any new zones. How do we know we still need to
+        //    refresh firewall rules from the previous request?
+        //
+        // Instead, we'll unconditionally request a firewall rule refresh every
+        // time. If this succeeds, our caller knows that any zones they sent us
+        // are both running and any relevant firewall rules have been applied.
+        self.request_firewall_update().await?;
+
         Ok(())
     }
 
