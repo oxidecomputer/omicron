@@ -82,16 +82,16 @@ impl TryFrom<Certificate> for views::Certificate {
         Ok(Self {
             identity: cert.identity(),
             service: cert.service.try_into()?,
-            cert: String::from_utf8(cert.cert)
-                .map_err(|err| {
-                    Error::InternalError {
-                        internal_message: format!(
-                            "Failed to construct string from stored certificate: {}",
-                            err
-                        )
-                    }
-                }
-            )?,
+            // This is expected to succeed in normal circumstances. Certificates are stored in the
+            // database with PEM encoding which are essentially bundles of Base64 encoded text.
+            // The only cases in which this conversion should fail is when our internal database
+            // representation of the certificate is invalid.
+            cert: String::from_utf8(cert.cert).map_err(|err| {
+                Error::internal_error(&format!(
+                    "Failed to construct string from stored certificate: {}",
+                    err
+                ))
+            })?,
         })
     }
 }
