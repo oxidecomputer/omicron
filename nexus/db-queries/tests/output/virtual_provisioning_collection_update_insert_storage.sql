@@ -39,17 +39,17 @@ WITH
               WHERE
                 virtual_provisioning_resource.id = $4
               LIMIT
-                $5
+                1
             )
-            = $6
+            = 0
             AND CAST(
                 IF(
                   (
-                    $7 = $8
-                    OR (SELECT quotas.cpus FROM quotas LIMIT $9)
+                    $5 = 0
+                    OR (SELECT quotas.cpus FROM quotas LIMIT 1)
                       >= (
-                          (SELECT silo_provisioned.cpus_provisioned FROM silo_provisioned LIMIT $10)
-                          + $11
+                          (SELECT silo_provisioned.cpus_provisioned FROM silo_provisioned LIMIT 1)
+                          + $6
                         )
                   ),
                   'TRUE',
@@ -61,11 +61,10 @@ WITH
           AND CAST(
               IF(
                 (
-                  $12 = $13
-                  OR (SELECT quotas.memory FROM quotas LIMIT $14)
+                  $7 = 0
+                  OR (SELECT quotas.memory FROM quotas LIMIT 1)
                     >= (
-                        (SELECT silo_provisioned.ram_provisioned FROM silo_provisioned LIMIT $15)
-                        + $16
+                        (SELECT silo_provisioned.ram_provisioned FROM silo_provisioned LIMIT 1) + $8
                       )
                 ),
                 'TRUE',
@@ -77,8 +76,8 @@ WITH
         AND CAST(
             IF(
               (
-                $17 = $18
-                OR (SELECT quotas.storage FROM quotas LIMIT $19)
+                $9 = 0
+                OR (SELECT quotas.storage FROM quotas LIMIT 1)
                   >= (
                       (
                         SELECT
@@ -86,9 +85,9 @@ WITH
                         FROM
                           silo_provisioned
                         LIMIT
-                          $20
+                          1
                       )
-                      + $21
+                      + $10
                     )
               ),
               'TRUE',
@@ -112,7 +111,7 @@ WITH
             ram_provisioned
           )
       VALUES
-        ($22, DEFAULT, $23, $24, $25, $26)
+        ($11, DEFAULT, $12, $13, $14, $15)
       ON CONFLICT
       DO
         NOTHING
@@ -131,10 +130,10 @@ WITH
       SET
         time_modified = current_timestamp(),
         virtual_disk_bytes_provisioned
-          = virtual_provisioning_collection.virtual_disk_bytes_provisioned + $27
+          = virtual_provisioning_collection.virtual_disk_bytes_provisioned + $16
       WHERE
         virtual_provisioning_collection.id = ANY (SELECT all_collections.id FROM all_collections)
-        AND (SELECT do_update.update FROM do_update LIMIT $28)
+        AND (SELECT do_update.update FROM do_update LIMIT 1)
       RETURNING
         virtual_provisioning_collection.id,
         virtual_provisioning_collection.time_modified,
