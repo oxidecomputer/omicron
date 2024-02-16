@@ -12,9 +12,16 @@ use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::{info, Logger};
 use std::fs;
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
+
+fn parse_ipv4(s: &str) -> anyhow::Result<Ipv4Addr> {
+    if s == "unknown" {
+        return Err(anyhow!("ERROR: Missing input value"));
+    };
+    s.parse().map_err(|_| anyhow!("ERROR: Invalid IPv4 address"))
+}
 
 fn parse_ipv6(s: &str) -> anyhow::Result<Ipv6Addr> {
     if s == "unknown" {
@@ -28,6 +35,13 @@ fn parse_datalink(s: &str) -> anyhow::Result<String> {
         return Err(anyhow!("ERROR: Missing data link"));
     };
     s.parse().map_err(|_| anyhow!("ERROR: Invalid data link"))
+}
+
+fn parse_opte_iface(s: &str) -> anyhow::Result<String> {
+    if s == "unknown" {
+        return Err(anyhow!("ERROR: Missing OPTE interface"));
+    };
+    s.parse().map_err(|_| anyhow!("ERROR: Invalid OPTE interface"))
 }
 
 #[tokio::main]
@@ -74,11 +88,34 @@ async fn do_run() -> Result<(), CmdError> {
                     .value_parser(parse_ipv6),
                 ),
         )
+        .subcommand(
+            Command::new("opte-interface-set-up")
+                .about("Sets up OPTE interface")
+                .arg(
+                    arg!(
+                        -i --opte_interface <STRING> "opte_interface"
+                    )
+                    .required(true)
+                    .value_parser(parse_opte_iface),
+                )
+                .arg(
+                    arg!(
+                        -g --opte_gateway <Ipv4Addr> "opte_gateway"
+                    )
+                    .required(true)
+                    .value_parser(parse_ipv4),
+                ),
+        )
         .get_matches();
 
     if let Some(matches) = matches.subcommand_matches("set-up") {
-        set_up(matches, log).await?;
+        set_up(matches, log.clone()).await?;
     }
+
+    if let Some(matches) = matches.subcommand_matches("opte-interface-set-up") {
+        opte_interface_set_up(matches, log).await?;
+    }
+
     Ok(())
 }
 
@@ -123,6 +160,34 @@ async fn set_up(matches: &ArgMatches, log: Logger) -> Result<(), CmdError> {
         ),
     )
     .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+
+    Ok(())
+}
+
+async fn opte_interface_set_up(
+    matches: &ArgMatches,
+    log: Logger,
+) -> Result<(), CmdError> {
+    let interface: &String = matches.get_one("opte_interface").unwrap();
+    let gateway: Ipv4Addr = *matches.get_one("opte_gateway").unwrap();
+
+    info!(&log, "Creating gateway on the OPTE IP interface if it doesn't already exist"; "OPTE interface" => ?interface);
+    Ipadm::create_opte_gateway(interface)
+        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+
+    info!(&log, "Retrieving OPTE IP from the interface"; "OPTE interface" => ?interface);
+    let opte_ip = Ipadm::retrieve_opte_ip(interface)
+        .map_err(|err| CmdError::Failure(anyhow!(err)));
+
+    print!("{:?}", opte_ip);
+
+    info!(&log, "Ensuring there is a gateway route"; "OPTE gateway" => ?gateway, "OPTE IP" => ?opte_ip, "OPTE interface" => ?interface);
+    Route::ensure_opte_route(&gateway, interface)
+        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+
+    info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
+    Route::ensure_default_route_with_gateway(Gateway::Ipv4(gateway))
+        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     Ok(())
 }

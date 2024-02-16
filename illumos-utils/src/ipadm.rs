@@ -110,9 +110,9 @@ impl Ipadm {
         Ok(())
     }
 
-    // Create IPv4 gateway on the IP interface if it doesn't already exist
-    pub fn create_opte_ipv4_gateway(
-        opte_iface: &Ipv4Addr,
+    // Create gateway on the IP interface if it doesn't already exist
+    pub fn create_opte_gateway(
+        opte_iface: &String,
     ) -> Result<(), ExecutionError> {
         let addrobj = format!("{}/public", opte_iface);
         let mut cmd = std::process::Command::new(PFEXEC);
@@ -137,7 +137,7 @@ impl Ipadm {
 
     // Retrieve OPTE IP from interface
     pub fn retrieve_opte_ip(
-        opte_iface: &Ipv4Addr,
+        opte_iface: &String,
     ) -> Result<Ipv4Addr, ExecutionError> {
         let addrobj = format!("{}/public", opte_iface);
         let mut cmd = std::process::Command::new(PFEXEC);
@@ -163,7 +163,7 @@ impl Ipadm {
 
         let mut cmd = std::process::Command::new("cut");
         let cut_cmd = cmd
-            .args(&["-d", "'/'", "-f", "1"])
+            .args(&["-d", "/", "-f", "1"])
             .stdin(child_stdio)
             .stdout(Stdio::piped());
         let cut =

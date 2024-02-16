@@ -61,9 +61,9 @@ impl Route {
         Ok(())
     }
 
-    pub fn ensure_opte_interface(
+    pub fn ensure_opte_route(
         gateway: &Ipv4Addr,
-        iface: &Ipv4Addr,
+        iface: &String,
     ) -> Result<(), ExecutionError> {
         let opte_ip = Ipadm::retrieve_opte_ip(iface)?;
         // Add the desired route if it doesn't already exist
