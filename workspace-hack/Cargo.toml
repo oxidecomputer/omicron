@@ -28,8 +28,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.4.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.0", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.5", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.15" }
@@ -134,8 +134,8 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.5.0", features = ["serde"] }
 chrono = { version = "0.4.31", features = ["alloc", "serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.4.3", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.4.2", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.0", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.0", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 const-oid = { version = "0.9.5", default-features = false, features = ["db", "std"] }
 crossbeam-epoch = { version = "0.9.15" }
@@ -242,28 +242,24 @@ rustix = { version = "0.38.31", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
-errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
@@ -271,7 +267,6 @@ rustix = { version = "0.38.31", features = ["fs", "termios"] }
 [target.x86_64-unknown-illumos.dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
-errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
@@ -281,7 +276,6 @@ toml_edit = { version = "0.19.15", features = ["serde"] }
 [target.x86_64-unknown-illumos.build-dependencies]
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.4.0", default-features = false, features = ["std"] }
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
-errno = { version = "0.3.8", default-features = false, features = ["std"] }
 mio = { version = "0.8.9", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.31", features = ["fs", "termios"] }
