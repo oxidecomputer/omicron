@@ -246,8 +246,8 @@ struct NextVni {
 impl NextVni {
     fn new(vni: Vni) -> Self {
         let VniShifts { min_shift, max_shift } = VniShifts::new(vni);
-        let generator =
-            DefaultShiftGenerator { base: vni, max_shift, min_shift };
+        let generator = DefaultShiftGenerator::new(vni, max_shift, min_shift)
+            .expect("invalid min/max shift");
         let inner = NextItem::new_unscoped(generator);
         Self { inner }
     }
@@ -262,8 +262,8 @@ impl NextVni {
             -i32::try_from(base_u32)
                 .expect("Expected a valid VNI at this point"),
         );
-        let generator =
-            DefaultShiftGenerator { base: vni, max_shift, min_shift };
+        let generator = DefaultShiftGenerator::new(vni, max_shift, min_shift)
+            .expect("invalid min/max shift");
         let inner = NextItem::new_unscoped(generator);
         Self { inner }
     }
