@@ -112,9 +112,9 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "0.5.0"
+version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f58811cfac344940f1a400b6e6231ce35171f614f26439e80f8c1465c5cc0c"
+checksum = "6e2e1ebcb11de5c03c67de28a7df593d32191b44939c482e97702baaaa6ab6a5"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -150,12 +150,12 @@ dependencies = [
 
 [[package]]
 name = "anstyle-wincon"
-version = "2.1.0"
+version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58f54d10c6dfa51283a066ceab3ec1ab78d13fae00aa49243a45e4571fb79dfd"
+checksum = "1cd54b81ec8d6180e24654d0b371ad22fc3dd083b6ff8ba325b72e00c87660a7"
 dependencies = [
  "anstyle",
- "windows-sys 0.48.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -332,7 +332,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc7b2dbe9169059af0f821e811180fddc971fc210c776c133c7819ccd6e478db"
 dependencies = [
- "rustix 0.38.31",
+ "rustix",
  "tempfile",
  "windows-sys 0.52.0",
 ]
@@ -988,9 +988,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.4.3"
+version = "4.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84ed82781cea27b43c9b106a979fe450a13a31aab0500595fb3fc06616de08e6"
+checksum = "80c21025abd42669a92efc996ef13cfb2c5c627858421ea58d5c3b331a6c134f"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -998,22 +998,22 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.4.2"
+version = "4.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bb9faaa7c2ef94b2743a21f5a29e6f0010dff4caa69ac8e9d6cf8b6fa74da08"
+checksum = "458bf1f341769dfcf849846f65dffdf9146daa56bcd2a47cb4e1de9915567c99"
 dependencies = [
  "anstream",
  "anstyle",
  "clap_lex",
- "strsim 0.10.0",
+ "strsim 0.11.0",
  "terminal_size",
 ]
 
 [[package]]
 name = "clap_derive"
-version = "4.4.2"
+version = "4.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0862016ff20d69b84ef8247369fabf5c008a7417002411897d40ee1f4532b873"
+checksum = "307bc0538d5f0f83b8248db3087aa92fe504e4691294d0c96c0eabc33f47ba47"
 dependencies = [
  "heck 0.4.1",
  "proc-macro2",
@@ -1023,9 +1023,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "0.5.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd7cc57abe963c6d3b9d8be5b06ba7c8957a930305ca90304f24ef040aa6f961"
+checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 
 [[package]]
 name = "clipboard-win"
@@ -1201,7 +1201,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.4.3",
+ "clap 4.5.0",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -1852,7 +1852,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -2268,7 +2268,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef033ed5e9bad94e55838ca0ca906db0e043f517adda0c8b79c7a8c66c93c1b5"
 dependencies = [
  "cfg-if",
- "rustix 0.38.31",
+ "rustix",
  "windows-sys 0.48.0",
 ]
 
@@ -2279,7 +2279,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7e5768da2206272c81ef0b5e951a41862938a6070da63bcea197899942d3b947"
 dependencies = [
  "cfg-if",
- "rustix 0.38.31",
+ "rustix",
  "windows-sys 0.52.0",
 ]
 
@@ -2557,7 +2557,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.3",
+ "clap 4.5.0",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -3462,7 +3462,7 @@ dependencies = [
  "bytes",
  "camino",
  "cancel-safe-futures",
- "clap 4.4.3",
+ "clap 4.5.0",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3522,7 +3522,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "expectorate",
  "hyper 0.14.27",
@@ -3603,7 +3603,7 @@ name = "internal-dns-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "internal-dns",
  "omicron-common",
@@ -3611,17 +3611,6 @@ dependencies = [
  "slog",
  "tokio",
  "trust-dns-resolver",
-]
-
-[[package]]
-name = "io-lifetimes"
-version = "1.0.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eae7b9aee968036d54dce06cebaefd919e4472e753296daccd6d344e3e2df0c2"
-dependencies = [
- "hermit-abi 0.3.2",
- "libc",
- "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -3675,7 +3664,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb0889898416213fab133e1d33a0e5858a48177452750691bde3666d0fdbaf8b"
 dependencies = [
  "hermit-abi 0.3.2",
- "rustix 0.38.31",
+ "rustix",
  "windows-sys 0.48.0",
 ]
 
@@ -3883,7 +3872,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d8de370f98a6cb8a4606618e53e802f93b094ddec0f96988eaec2c27e6e9ce7"
 dependencies = [
- "clap 4.4.3",
+ "clap 4.5.0",
  "termcolor",
  "threadpool",
 ]
@@ -3913,12 +3902,6 @@ checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 
 [[package]]
 name = "linux-raw-sys"
-version = "0.3.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef53942eb7bf7ff43a617b3e2c1c4a5ecf5944a7c1bc12d7ee39bbb15e5c1519"
-
-[[package]]
-name = "linux-raw-sys"
 version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01cda141df6706de531b6c46c3a33ecca755538219bd484262fa09410c13539c"
@@ -3945,7 +3928,7 @@ version = "0.2.4"
 source = "git+https://github.com/oxidecomputer/lpc55_support#96f064eaae5e95930efaab6c29fd1b2e22225dac"
 dependencies = [
  "bitfield",
- "clap 4.4.3",
+ "clap 4.5.0",
  "packed_struct",
  "serde",
 ]
@@ -4925,7 +4908,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "expectorate",
  "futures",
@@ -4958,7 +4941,7 @@ dependencies = [
  "anyhow",
  "base64",
  "camino",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "expectorate",
  "futures",
@@ -5009,7 +4992,7 @@ dependencies = [
  "camino-tempfile",
  "cancel-safe-futures",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "criterion",
  "crucible-agent-client",
  "crucible-pantry-client",
@@ -5119,7 +5102,7 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "crossterm",
  "crucible-agent-client",
  "csv",
@@ -5170,7 +5153,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "clap 4.4.3",
+ "clap 4.5.0",
  "expectorate",
  "futures",
  "hex",
@@ -5237,7 +5220,7 @@ dependencies = [
  "cancel-safe-futures",
  "cfg-if",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "crucible-agent-client",
  "ddm-admin-client",
  "derive_more",
@@ -5373,7 +5356,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cipher",
- "clap 4.4.3",
+ "clap 4.5.0",
  "clap_builder",
  "console",
  "const-oid",
@@ -5387,7 +5370,6 @@ dependencies = [
  "dof 0.3.0",
  "either",
  "elliptic-curve",
- "errno",
  "ff",
  "flate2",
  "futures",
@@ -5436,7 +5418,7 @@ dependencies = [
  "regex-syntax 0.8.2",
  "reqwest",
  "ring 0.17.7",
- "rustix 0.38.31",
+ "rustix",
  "schemars",
  "semver 1.0.21",
  "serde",
@@ -5750,7 +5732,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "expectorate",
  "futures",
@@ -5793,7 +5775,7 @@ dependencies = [
  "bytes",
  "camino",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "expectorate",
  "futures",
@@ -5863,7 +5845,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "nexus-client",
  "omicron-common",
@@ -5885,7 +5867,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "omicron-workspace-hack",
  "uuid",
 ]
@@ -6689,7 +6671,7 @@ dependencies = [
  "anyhow",
  "atty",
  "base64",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "futures",
  "hyper 0.14.27",
@@ -7431,20 +7413,6 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "0.37.23"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d69718bf81c6127a49dc64e44a742e8bb9213c0ff8869a22c308f84c1d4ab06"
-dependencies = [
- "bitflags 1.3.2",
- "errno",
- "io-lifetimes",
- "libc",
- "linux-raw-sys 0.3.8",
- "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "rustix"
 version = "0.38.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ea3e1a662af26cd7a3ba09c0297a31af215563ecf42817c98df621387f4e949"
@@ -7452,7 +7420,7 @@ dependencies = [
  "bitflags 2.4.0",
  "errno",
  "libc",
- "linux-raw-sys 0.4.13",
+ "linux-raw-sys",
  "windows-sys 0.52.0",
 ]
 
@@ -8465,7 +8433,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -8654,6 +8622,12 @@ name = "strsim"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73473c0e59e6d5812c5dfe2a064a6444949f089e20eec9a2e5506596494e4623"
+
+[[package]]
+name = "strsim"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ee073c9e4cd00e28217186dbe12796d692868f432bf2e97ee73bed0c56dfa01"
 
 [[package]]
 name = "structmeta"
@@ -8952,7 +8926,7 @@ checksum = "a365e8cd18e44762ef95d87f284f4b5cd04107fec2ff3052bd6a3e6069669e67"
 dependencies = [
  "cfg-if",
  "fastrand",
- "rustix 0.38.31",
+ "rustix",
  "windows-sys 0.52.0",
 ]
 
@@ -8978,11 +8952,11 @@ dependencies = [
 
 [[package]]
 name = "terminal_size"
-version = "0.2.6"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e6bf6f19e9f8ed8d4048dc22981458ebcf406d67e94cd422e5ecd73d63b3237"
+checksum = "21bebf2b7c9e0a515f6e0f8c51dc0f8e4696391e6f1ff30379559f8365fb0df7"
 dependencies = [
- "rustix 0.37.23",
+ "rustix",
  "windows-sys 0.48.0",
 ]
 
@@ -9643,7 +9617,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "console",
  "datatest-stable",
  "fs-err",
@@ -9889,7 +9863,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.4.3",
+ "clap 4.5.0",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -9920,7 +9894,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "cancel-safe-futures",
- "clap 4.4.3",
+ "clap 4.5.0",
  "debug-ignore",
  "derive-where",
  "either",
@@ -10334,7 +10308,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.4.3",
+ "clap 4.5.0",
  "crossterm",
  "futures",
  "humantime",
@@ -10395,7 +10369,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.4.3",
+ "clap 4.5.0",
  "crossterm",
  "omicron-workspace-hack",
  "reedline",
@@ -10420,7 +10394,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.4.3",
+ "clap 4.5.0",
  "ddm-admin-client",
  "debug-ignore",
  "display-error-chain",
@@ -10737,7 +10711,7 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "cargo_toml",
- "clap 4.4.3",
+ "clap 4.5.0",
 ]
 
 [[package]]
@@ -10870,7 +10844,7 @@ name = "zone-network-setup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.4.3",
+ "clap 4.5.0",
  "dropshot",
  "illumos-utils",
  "omicron-common",
