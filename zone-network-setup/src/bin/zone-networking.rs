@@ -5,12 +5,12 @@
 //! CLI to set up zone networking
 
 use anyhow::anyhow;
-use clap::{arg, command};
+use clap::{arg, command, ArgMatches, Command};
 use illumos_utils::ipadm::Ipadm;
 use illumos_utils::route::{Gateway, Route};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use slog::info;
+use slog::{info, Logger};
 use std::fs;
 use std::net::Ipv6Addr;
 
@@ -47,34 +47,51 @@ async fn do_run() -> Result<(), CmdError> {
     .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     let matches = command!()
-        .arg(
-            arg!(
-                -d --datalink <STRING> "datalink"
-            )
-            .required(true)
-            .value_parser(parse_datalink),
-        )
-        .arg(
-            arg!(
-                -g --gateway <Ipv6Addr> "gateway"
-            )
-            .required(true)
-            .value_parser(parse_ipv6),
-        )
-        .arg(
-            arg!(
-                -s --static_addr <Ipv6Addr> "static_addr"
-            )
-            .required(true)
-            .value_parser(parse_ipv6),
+        .subcommand(
+            Command::new("set-up")
+                .about(
+                    "Sets up common networking configuration across all zones",
+                )
+                .arg(
+                    arg!(
+                        -d --datalink <STRING> "datalink"
+                    )
+                    .required(true)
+                    .value_parser(parse_datalink),
+                )
+                .arg(
+                    arg!(
+                        -g --gateway <Ipv6Addr> "gateway"
+                    )
+                    .required(true)
+                    .value_parser(parse_ipv6),
+                )
+                .arg(
+                    arg!(
+                        -s --static_addr <Ipv6Addr> "static_addr"
+                    )
+                    .required(true)
+                    .value_parser(parse_ipv6),
+                ),
         )
         .get_matches();
 
-    let zonename =
-        zone::current().await.expect("Could not determine local zone name");
+    if let Some(matches) = matches.subcommand_matches("set-up") {
+        set_up(matches, log).await?;
+    }
+    Ok(())
+}
+
+async fn set_up(matches: &ArgMatches, log: Logger) -> Result<(), CmdError> {
     let datalink: &String = matches.get_one("datalink").unwrap();
     let static_addr: &Ipv6Addr = matches.get_one("static_addr").unwrap();
     let gateway: Ipv6Addr = *matches.get_one("gateway").unwrap();
+    let zonename = zone::current().await.map_err(|err| {
+        CmdError::Failure(anyhow!(
+            "Could not determine local zone name: {}",
+            err
+        ))
+    })?;
 
     // TODO: remove when https://github.com/oxidecomputer/stlouis/issues/435 is
     // addressed
