@@ -35,7 +35,7 @@ pub trait Resource {
 
     fn identity(&self) -> IdentityMetadata {
         IdentityMetadata {
-            id: self.id().to_untyped_uuid(),
+            id: self.id().into_untyped_uuid(),
             name: self.name().clone(),
             description: self.description().to_string(),
             time_created: self.time_created(),
@@ -71,7 +71,7 @@ pub trait Asset {
 
     fn identity(&self) -> AssetIdentityMetadata {
         AssetIdentityMetadata {
-            id: self.id().to_untyped_uuid(),
+            id: self.id().into_untyped_uuid(),
             time_created: self.time_created(),
             time_modified: self.time_modified(),
         }

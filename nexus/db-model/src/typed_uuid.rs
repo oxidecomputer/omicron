@@ -105,8 +105,8 @@ impl<T: TypedUuidKind> GenericUuid for DbTypedUuid<T> {
     }
 
     #[inline]
-    fn to_untyped_uuid(self) -> Uuid {
-        self.0.to_untyped_uuid()
+    fn into_untyped_uuid(self) -> Uuid {
+        self.0.into_untyped_uuid()
     }
 
     #[inline]

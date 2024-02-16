@@ -24,6 +24,12 @@ pub const MAX_PORT: u16 = u16::MAX;
 /// minimum possible value for a tcp or udp port
 pub const MIN_PORT: u16 = u16::MIN;
 
+/// The amount of redundancy for Nexus services.
+///
+/// This is used by both RSS (to distribute the initial set of services) and the
+/// Reconfigurator (to know whether to add new Nexus zones)
+pub const NEXUS_REDUNDANCY: usize = 3;
+
 /// The amount of redundancy for internal DNS servers.
 ///
 /// Must be less than or equal to MAX_DNS_REDUNDANCY.
@@ -454,6 +460,18 @@ impl TryFrom<(Ipv6Addr, Ipv6Addr)> for IpRange {
 
     fn try_from(pair: (Ipv6Addr, Ipv6Addr)) -> Result<Self, Self::Error> {
         Ipv6Range::new(pair.0, pair.1).map(IpRange::V6)
+    }
+}
+
+impl From<Ipv4Range> for IpRange {
+    fn from(value: Ipv4Range) -> Self {
+        Self::V4(value)
+    }
+}
+
+impl From<Ipv6Range> for IpRange {
+    fn from(value: Ipv6Range) -> Self {
+        Self::V6(value)
     }
 }
 

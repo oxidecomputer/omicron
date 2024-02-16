@@ -6,6 +6,7 @@
 
 use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
+use crate::app::sagas::SagaRequest;
 use crate::config;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -82,7 +83,7 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
-pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
+pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
@@ -362,6 +363,8 @@ impl Nexus {
             Arc::clone(&db_datastore),
         );
 
+        let (saga_request, mut saga_request_recv) = SagaRequest::channel();
+
         let background_tasks = background::BackgroundTasks::start(
             &background_ctx,
             Arc::clone(&db_datastore),
@@ -370,6 +373,7 @@ impl Nexus {
             &mg_clients,
             config.deployment.id,
             resolver.clone(),
+            saga_request,
         );
 
         let external_resolver = {
@@ -483,6 +487,29 @@ impl Nexus {
                 }
             }
         });
+
+        // Spawn a task to receive SagaRequests from RPWs, and execute them
+        {
+            let nexus = nexus.clone();
+            tokio::spawn(async move {
+                loop {
+                    match saga_request_recv.recv().await {
+                        None => {
+                            // If this channel is closed, then RPWs will not be
+                            // able to request that sagas be run. This will
+                            // likely only occur when Nexus itself is shutting
+                            // down, so emit an error and exit the task.
+                            error!(&nexus.log, "saga request channel closed!");
+                            break;
+                        }
+
+                        Some(saga_request) => {
+                            nexus.handle_saga_request(saga_request).await;
+                        }
+                    }
+                }
+            });
+        }
 
         Ok(nexus)
     }
@@ -827,6 +854,17 @@ impl Nexus {
 
     pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
         self.internal_resolver.clone()
+    }
+
+    /// Reliable persistent workflows can request that sagas be executed by
+    /// sending a SagaRequest to a supplied channel. Execute those here.
+    pub(crate) async fn handle_saga_request(&self, saga_request: SagaRequest) {
+        match saga_request {
+            #[cfg(test)]
+            SagaRequest::TestOnly => {
+                unimplemented!();
+            }
+        }
     }
 }
 

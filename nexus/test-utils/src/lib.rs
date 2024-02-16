@@ -65,7 +65,7 @@ pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
-pub const RACK_SUBNET: &str = "fd00:1122:3344:01::/56";
+pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
 
 /// Password for the user created by the test suite
 ///
@@ -608,6 +608,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .unwrap()
                         .into(),
                     mac,
+                    slot: 0,
                 },
             },
             internal_dns::ServiceName::Nexus,
@@ -831,6 +832,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .unwrap()
                         .into(),
                     mac,
+                    slot: 0,
                 },
             },
             internal_dns::ServiceName::ExternalDns,

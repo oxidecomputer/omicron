@@ -155,7 +155,7 @@ pub enum LookupType {
 impl LookupType {
     /// Constructs a `ById` lookup type from a typed or untyped UUID.
     pub fn by_id<T: GenericUuid>(id: T) -> Self {
-        LookupType::ById(id.to_untyped_uuid())
+        LookupType::ById(id.into_untyped_uuid())
     }
 
     /// Returns an ObjectNotFound error appropriate for the case where this
@@ -502,7 +502,8 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
             )
             | progenitor::progenitor_client::Error::UnexpectedResponse(_)
             | progenitor::progenitor_client::Error::InvalidUpgrade(_)
-            | progenitor::progenitor_client::Error::ResponseBodyError(_) => {
+            | progenitor::progenitor_client::Error::ResponseBodyError(_)
+            | progenitor::progenitor_client::Error::PreHookError(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.

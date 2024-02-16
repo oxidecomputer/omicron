@@ -164,7 +164,7 @@ impl<'a> Sled<'a> {
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Sled,
                         LookupType::ById(
-                            ::newtype_uuid::GenericUuid::to_untyped_uuid(*v0),
+                            ::newtype_uuid::GenericUuid::into_untyped_uuid(*v0),
                         ),
                     ),
                 )
@@ -172,7 +172,7 @@ impl<'a> Sled<'a> {
         let authz_sled = Self::make_authz(
             &&authz::FLEET,
             &db_row,
-            LookupType::ById(::newtype_uuid::GenericUuid::to_untyped_uuid(*v0)),
+            LookupType::ById(::newtype_uuid::GenericUuid::into_untyped_uuid(*v0)),
         );
         Ok((authz_sled, db_row))
     }

@@ -26,6 +26,8 @@ use omicron_common::FileKv;
 use slog::{info, Drain, Logger};
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -361,6 +363,7 @@ pub async fn run_standalone_server(
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
+                    slot: 0,
                 },
             },
             service_id: Uuid::new_v4(),
@@ -394,6 +397,7 @@ pub async fn run_standalone_server(
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
+                    slot: 0,
                 },
             },
             service_id: Uuid::new_v4(),
@@ -455,7 +459,13 @@ pub async fn run_standalone_server(
         external_port_count: NexusTypes::ExternalPortDiscovery::Static(
             HashMap::new(),
         ),
-        rack_network_config: None,
+        rack_network_config: NexusTypes::RackNetworkConfigV1 {
+            rack_subnet: Ipv6Addr::LOCALHOST.into(),
+            infra_ip_first: Ipv4Addr::LOCALHOST,
+            infra_ip_last: Ipv4Addr::LOCALHOST,
+            ports: Vec::new(),
+            bgp: Vec::new(),
+        },
     };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;

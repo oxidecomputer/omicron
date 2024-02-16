@@ -133,7 +133,7 @@ pub async fn make_resources(
     builder.new_resource(authz::TufRepo::new(
         authz::FLEET,
         tuf_repo_id,
-        LookupType::ById(tuf_repo_id.to_untyped_uuid()),
+        LookupType::ById(tuf_repo_id.into_untyped_uuid()),
     ));
 
     let artifact_id = ArtifactId {
@@ -161,7 +161,7 @@ pub async fn make_resources(
     builder.new_resource(authz::LoopbackAddress::new(
         authz::FLEET,
         loopback_address_id,
-        LookupType::ById(loopback_address_id.to_untyped_uuid()),
+        LookupType::ById(loopback_address_id.into_untyped_uuid()),
     ));
 
     builder.build()
