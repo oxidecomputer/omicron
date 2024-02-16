@@ -21,7 +21,7 @@ pub struct ResourceWithUuidKindIdentity {
 }
 impl ResourceWithUuidKindIdentity {
     pub fn new(
-        id: ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::CustomKind>,
+        id: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>,
         params: ::omicron_common::api::external::IdentityMetadataCreateParams,
     ) -> Self {
         let now = ::chrono::Utc::now();
@@ -44,9 +44,9 @@ const _: () = {
     }
 };
 impl ::nexus_types::identity::Resource for ResourceWithUuidKind {
-    type IdType = ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::CustomKind>;
-    fn id(&self) -> ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::CustomKind> {
-        ::newtype_uuid::TypedUuid::from(self.identity.id)
+    type IdType = ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>;
+    fn id(&self) -> ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind> {
+        ::omicron_uuid_kinds::TypedUuid::from(self.identity.id)
     }
     fn name(&self) -> &::omicron_common::api::external::Name {
         &self.identity.name.0

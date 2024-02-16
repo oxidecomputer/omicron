@@ -26,7 +26,6 @@ hyper.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
-newtype-uuid.workspace = true
 once_cell.workspace = true
 openssl.workspace = true
 oso.workspace = true

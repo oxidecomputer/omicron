@@ -17,7 +17,7 @@ hex.workspace = true
 http.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
-newtype-uuid.workspace = true
+omicron-uuid-kinds.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }

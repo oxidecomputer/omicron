@@ -16,7 +16,7 @@ pub struct AssetWithUuidKindIdentity {
     pub time_modified: ::chrono::DateTime<::chrono::Utc>,
 }
 impl AssetWithUuidKindIdentity {
-    pub fn new(id: ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::CustomKind>) -> Self {
+    pub fn new(id: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>) -> Self {
         let now = ::chrono::Utc::now();
         Self {
             id: crate::to_db_typed_uuid(id),
@@ -34,9 +34,9 @@ const _: () = {
     }
 };
 impl ::nexus_types::identity::Asset for AssetWithUuidKind {
-    type IdType = ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::CustomKind>;
-    fn id(&self) -> ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::CustomKind> {
-        ::newtype_uuid::TypedUuid::from(self.identity.id)
+    type IdType = ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>;
+    fn id(&self) -> ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind> {
+        ::omicron_uuid_kinds::TypedUuid::from(self.identity.id)
     }
     fn time_created(&self) -> ::chrono::DateTime<::chrono::Utc> {
         self.identity.time_created

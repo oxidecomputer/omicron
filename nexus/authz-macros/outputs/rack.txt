@@ -2,7 +2,7 @@
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Rack {
     parent: Fleet,
-    key: ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::RackKind>,
+    key: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::RackKind>,
     lookup_type: LookupType,
 }
 impl Rack {
@@ -11,7 +11,7 @@ impl Rack {
     /// `lookup_type`
     pub fn new(
         parent: Fleet,
-        key: ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::RackKind>,
+        key: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::RackKind>,
         lookup_type: LookupType,
     ) -> Rack {
         Rack {
@@ -25,12 +25,12 @@ impl Rack {
     /// uses a different input key type.
     pub fn with_primary_key(
         parent: Fleet,
-        key: ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::RackKind>,
+        key: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::RackKind>,
         lookup_type: LookupType,
     ) -> Rack {
         Rack { parent, key, lookup_type }
     }
-    pub fn id(&self) -> ::newtype_uuid::TypedUuid<::omicron_uuid_kinds::RackKind> {
+    pub fn id(&self) -> ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::RackKind> {
         self.key.clone().into()
     }
     /// Describes how to register this type with Oso

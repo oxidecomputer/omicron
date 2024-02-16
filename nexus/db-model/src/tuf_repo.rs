@@ -11,7 +11,6 @@ use crate::{
 };
 use chrono::{DateTime, Utc};
 use diesel::{deserialize::FromSql, serialize::ToSql, sql_types::Text};
-use newtype_uuid::TypedUuid;
 use omicron_common::{
     api::external,
     update::{
@@ -20,6 +19,7 @@ use omicron_common::{
     },
 };
 use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;

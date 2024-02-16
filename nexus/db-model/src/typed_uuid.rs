@@ -9,7 +9,7 @@ use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
-use newtype_uuid::{GenericUuid, TypedUuid, TypedUuidKind};
+use omicron_uuid_kinds::{GenericUuid, TypedUuid, TypedUuidKind};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -76,7 +76,7 @@ impl<T: TypedUuidKind> fmt::Display for DbTypedUuid<T> {
 }
 
 impl<T: TypedUuidKind> FromStr for DbTypedUuid<T> {
-    type Err = newtype_uuid::ParseError;
+    type Err = omicron_uuid_kinds::ParseError;
 
     #[inline]
     fn from_str(s: &str) -> Result<Self, Self::Err> {

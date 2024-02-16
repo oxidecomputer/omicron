@@ -891,7 +891,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     {
         let pkey_name = &pkey_names[0];
         let by_id = quote! {
-            ::newtype_uuid::GenericUuid::into_untyped_uuid(*#pkey_name)
+            ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*#pkey_name)
         };
         quote! { LookupType::ById(#by_id) }
     } else {

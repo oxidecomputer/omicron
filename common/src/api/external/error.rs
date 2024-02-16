@@ -9,7 +9,7 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
-use newtype_uuid::GenericUuid;
+use omicron_uuid_kinds::GenericUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Display;

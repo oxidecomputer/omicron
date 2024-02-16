@@ -6,9 +6,14 @@
 
 //! A registry for UUID kinds used in Omicron and related projects.
 //!
-//! See the readme to this crate for more information.
+//! See this crate's `README.md` for more information.
 
-use newtype_uuid::{TypedUuidKind, TypedUuidTag};
+// Export these types so that other users don't have to pull in newtype-uuid.
+#[doc(no_inline)]
+pub use newtype_uuid::{
+    GenericUuid, ParseError, TagError, TypedUuid, TypedUuidKind, TypedUuidTag,
+};
+
 #[cfg(feature = "schemars08")]
 use schemars::JsonSchema;
 

@@ -16,13 +16,13 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
-use newtype_uuid::TypedUuid;
 use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
 use omicron_common::api::external::{
     self, CreateResult, LookupResult, LookupType, ResourceType,
     TufRepoInsertStatus,
 };
 use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TypedUuid;
 use swrite::{swrite, SWrite};
 
 /// The return value of [`DataStore::update_tuf_repo_description_insert`].

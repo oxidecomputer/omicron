@@ -27,7 +27,7 @@ pub enum PrimaryKeyType {
 impl PrimaryKeyType {
     /// Constructs a new `TypedUuid` variant.
     pub fn new_typed_uuid(kind: &syn::Ident) -> Self {
-        let external = parse_quote!(::newtype_uuid::TypedUuid<::omicron_uuid_kinds::#kind>);
+        let external = parse_quote!(::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::#kind>);
         let db = parse_quote!(crate::typed_uuid::DbTypedUuid<::omicron_uuid_kinds::#kind>);
         PrimaryKeyType::TypedUuid { external, db }
     }
@@ -102,7 +102,7 @@ impl PrimaryKeyType {
         match self {
             PrimaryKeyType::Standard(_) => tokens,
             PrimaryKeyType::TypedUuid { .. } => {
-                quote! { ::newtype_uuid::TypedUuid::from(#tokens) }
+                quote! { ::omicron_uuid_kinds::TypedUuid::from(#tokens) }
             }
         }
     }

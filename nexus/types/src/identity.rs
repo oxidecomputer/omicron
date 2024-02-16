@@ -7,9 +7,9 @@
 // Copyright 2021 Oxide Computer Company
 
 use chrono::{DateTime, Utc};
-use newtype_uuid::GenericUuid;
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::GenericUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;

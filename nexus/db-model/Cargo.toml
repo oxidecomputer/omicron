@@ -16,7 +16,6 @@ hex.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
-newtype-uuid.workspace = true
 omicron-uuid-kinds.workspace = true
 parse-display.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
