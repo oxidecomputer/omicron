@@ -50,6 +50,26 @@ pub struct Reconfigure {
     pub threshold: Threshold,
 }
 
+/// Requests received from Nexus
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum NexusReq {
+    /// Retrieve the hash of a share for an LRTQ node
+    /// This is necessary when coordinating upgrades
+    GetLrtqShareHash,
+
+    /// Inform a member to upgrade from LRTQ by creating a new PrepareMsg for
+    /// epoch 0 and persisting it.
+    UpgradeFromLrtq(UpgradeFromLrtqMsg),
+
+    /// If the upgrade has not yet been activated, then it can be cancelled
+    /// and tried again.
+    CancelUpgradeFromLrtq(CancelUpgradeFromLrtqMsg),
+}
+
+/// Responses to Nexus Requests
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum NexusRsp {}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PrepareMsg {
     config: Configuration,
@@ -67,6 +87,7 @@ pub struct Envelope {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum Output {
     Envelope(Envelope),
+    NexusRsp(NexusRsp),
     PersistPrepare(PrepareMsg),
     PersistCommit(CommitMsg),
     PersistDecommissioned { from: BaseboardId, epoch: Epoch },
@@ -82,6 +103,18 @@ pub struct GossipMsg {
     /// configuration for `epoch`. Members fill in their own
     /// bit after they have committed.
     committed_bitmap: u32,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct UpgradeFromLrtqMsg {
+    pub upgrade_id: Uuid,
+    pub members: BTreeSet<BaseboardId>,
+    pub share_digests: BTreeSet<Sha3_256Digest>,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct CancelUpgradeFromLrtqMsg {
+    pub upgrade_id: Uuid,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -130,8 +163,9 @@ pub struct Configuration {
     pub epoch: Epoch,
     pub last_committed_epoch: Epoch,
 
-    // We pick the first member of epoch 0 as coordinator when initializing from lrtq
-    pub coordinator: Option<BaseboardId>,
+    /// We pick the first member of epoch 0 as coordinator when initializing from
+    /// lrtq so we don't have to use an option
+    pub coordinator: BaseboardId,
     pub members: BTreeMap<BaseboardId, ShareDigest>,
     pub threshold: Threshold,
 
@@ -164,7 +198,6 @@ pub struct EncryptedData {
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct State {
     pub node: BaseboardId,
-    pub current_config: Configuration,
     pub configurations: BTreeMap<Epoch, Configuration>,
     pub prepares: BTreeMap<Epoch, PrepareMsg>,
     pub commits: BTreeMap<Epoch, CommitMsg>,
@@ -178,7 +211,9 @@ pub struct State {
 
 // TODO: thiserror
 #[derive(Debug)]
-pub struct ReconfigurationError {}
+pub enum ReconfigurationError {
+    StaleEpoch(Epoch),
+}
 
 /// A node capable of participating in trust quorum
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -193,10 +228,6 @@ impl Node {
         Node { id, state: None, outgoing: Vec::new() }
     }
 
-    pub fn init_from_lrtq() -> Node {
-        todo!()
-    }
-
     pub fn id(&self) -> &BaseboardId {
         &self.id
     }
@@ -205,6 +236,14 @@ impl Node {
         &mut self,
         msg: Reconfigure,
     ) -> Result<impl Iterator<Item = Output> + '_, ReconfigurationError> {
+        if let Some(state) = &self.state {
+            // If we have a `State`, we must have at least one `Prepare`
+            let highest_epoch = state.prepares.keys().last().unwrap();
+            if msg.epoch <= *highest_epoch {
+                return Err(ReconfigurationError::StaleEpoch(msg.epoch));
+            }
+        }
+
         // TODO: Everything else
         Ok(self.outgoing.drain(..))
     }
@@ -213,6 +252,11 @@ impl Node {
         &mut self,
         msg: Msg,
     ) -> impl Iterator<Item = Output> + '_ {
+        // TODO: Everything else
+        self.outgoing.drain(..)
+    }
+
+    pub fn tick(&mut self, now: Instant) -> impl Iterator<Item = Output> + '_ {
         // TODO: Everything else
         self.outgoing.drain(..)
     }
