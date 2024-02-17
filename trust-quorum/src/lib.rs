@@ -58,6 +58,10 @@ pub struct NexusReq {
     pub kind: NexusReqKind,
 }
 
+/// Data for a message sent from Nexus and proxied via the sled-agent
+///
+/// As this is a "no io" implementation, appropriate ledger data is
+/// read and loaded in by sled-agent.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum NexusReqKind {
     /// Nexus seeds a few nodes with commits and then they get gossiped around
@@ -128,11 +132,22 @@ pub struct CommittedMsg {
     committed_bitmap: u32,
 }
 
+/// Data loaded from the ledger by sled-agent on instruction from Nexus
+///
+/// The epoch is always 0, because LRTQ does not allow key-rotation
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct LrtqLedgerData {
+    pub rack_uuid: Uuid,
+    pub threshold: Threshold,
+    pub share: Share,
+}
+
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct UpgradeFromLrtqMsg {
     pub upgrade_id: Uuid,
     pub members: BTreeSet<BaseboardId>,
     pub share_digests: BTreeSet<Sha3_256Digest>,
+    pub lrtq_ledger_data: LrtqLedgerData,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
