@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::ops::RangeBounds;
 use std::time::Instant;
 use uuid::Uuid;
 
@@ -14,19 +13,27 @@ use uuid::Uuid;
 // - one identifier (x-coordinate) byte, and one 32-byte y-coordinate.
 const SHARE_SIZE: usize = 33;
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct RackId(Uuid);
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct Epoch(u64);
 
 /// The number of shares required to reconstruct the rack secret
 ///
 /// Typically referred to as `k` in the docs
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct Threshold(pub u8);
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct BaseboardId {
     part_number: String,
     serial_number: String,
@@ -56,6 +63,15 @@ pub struct Envelope {
     msg: Msg,
 }
 
+// The output of a given API call
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Output {
+    Envelope(Envelope),
+    PersistPrepare(PrepareMsg),
+    PersistCommit(CommitMsg),
+    PersistDecommissioned { from: BaseboardId, epoch: Epoch },
+}
+
 /// A message that is sent between peers until all healthy peers have seen it
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct GossipMsg {
@@ -63,7 +79,8 @@ pub struct GossipMsg {
 
     /// A bitmap of which nodes have so far committed the configuration
     /// for `epoch`. This order, and number, of bits matches that of the
-    /// configuration for `epoch`.
+    /// configuration for `epoch`. Members fill in their own
+    /// bit after they have committed.
     committed_bitmap: u32,
 }
 
@@ -76,6 +93,16 @@ pub enum Msg {
     // TODO: Fill in
     GetShare,
     Share,
+
+    // A member that was offline while a reconfiguration was taking place can
+    // request its `PrepareMsg` from another member. A node will know to request
+    // its Prepare message if it sees a Commit for a `Prepare` that it doesn't have
+    // or it sees a `GossipMsg` for a commit and thinks it might be a peer
+    GetPrepare,
+
+    /// A response from a `GetPrepare` request indicating that the peer is not a
+    /// member of the group for a given epoch.
+    NotAMember(Epoch),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -141,6 +168,12 @@ pub struct State {
     pub configurations: BTreeMap<Epoch, Configuration>,
     pub prepares: BTreeMap<Epoch, PrepareMsg>,
     pub commits: BTreeMap<Epoch, CommitMsg>,
+
+    // Has the node received a `NotAMember` message for the latest epoch? If at
+    // any time this gets set, than the it remains true for the lifetime of the
+    // node. The sled corresponding to the node must be factory reset by wiping
+    // its storage.
+    pub decommissioned: bool,
 }
 
 // TODO: thiserror
@@ -152,7 +185,7 @@ pub struct ReconfigurationError {}
 pub struct Node {
     id: BaseboardId,
     state: Option<State>,
-    outgoing: Vec<Envelope>,
+    outgoing: Vec<Output>,
 }
 
 impl Node {
@@ -171,7 +204,7 @@ impl Node {
     pub fn start_reconfiguration(
         &mut self,
         msg: Reconfigure,
-    ) -> Result<impl Iterator<Item = Envelope> + '_, ReconfigurationError> {
+    ) -> Result<impl Iterator<Item = Output> + '_, ReconfigurationError> {
         // TODO: Everything else
         Ok(self.outgoing.drain(..))
     }
@@ -179,8 +212,28 @@ impl Node {
     pub fn handle_msg(
         &mut self,
         msg: Msg,
-    ) -> impl Iterator<Item = Envelope> + '_ {
+    ) -> impl Iterator<Item = Output> + '_ {
         // TODO: Everything else
         self.outgoing.drain(..)
+    }
+
+    fn send(&mut self, to: BaseboardId, msg: Msg) {
+        self.outgoing.push(Output::Envelope(Envelope {
+            to,
+            from: self.id.clone(),
+            msg,
+        }));
+    }
+
+    fn persist_prepare(&mut self, msg: PrepareMsg) {
+        self.outgoing.push(Output::PersistPrepare(msg));
+    }
+
+    fn persist_commit(&mut self, msg: CommitMsg) {
+        self.outgoing.push(Output::PersistCommit(msg));
+    }
+
+    fn persist_decomissioned(&mut self, from: BaseboardId, epoch: Epoch) {
+        self.outgoing.push(Output::PersistDecommissioned { from, epoch });
     }
 }
