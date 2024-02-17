@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 use uuid::Uuid;
+use zeroize::ZeroizeOnDrop;
 
 // Each share is a point on a polynomial (Curve25519). Each share is 33 bytes
 // - one identifier (x-coordinate) byte, and one 32-byte y-coordinate.
@@ -52,23 +53,45 @@ pub struct Reconfigure {
 
 /// Requests received from Nexus
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum NexusReq {
+pub struct NexusReq {
+    pub id: Uuid,
+    pub kind: NexusReqKind,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum NexusReqKind {
+    /// Nexus seeds a few nodes with commits and then they get gossiped around
+    Commit(CommitMsg),
+
+    /// Get the bitmap of which members have seen a commit for a given epoch
+
     /// Retrieve the hash of a share for an LRTQ node
+    ///
     /// This is necessary when coordinating upgrades
     GetLrtqShareHash,
 
     /// Inform a member to upgrade from LRTQ by creating a new PrepareMsg for
-    /// epoch 0 and persisting it.
+    /// epoch 0 and persisting it
     UpgradeFromLrtq(UpgradeFromLrtqMsg),
 
     /// If the upgrade has not yet been activated, then it can be cancelled
-    /// and tried again.
+    /// and tried again
     CancelUpgradeFromLrtq(CancelUpgradeFromLrtqMsg),
 }
 
 /// Responses to Nexus Requests
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum NexusRsp {}
+pub struct NexusRsp {
+    pub request_id: Uuid,
+    pub from: BaseboardId,
+    pub kind: NexusRspKind,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum NexusRspKind {
+    LrtqShareHash(Sha3_256Digest),
+    UpgradeFromLrtqAck { upgrade_id: Uuid },
+}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct PrepareMsg {
@@ -95,7 +118,7 @@ pub enum Output {
 
 /// A message that is sent between peers until all healthy peers have seen it
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct GossipMsg {
+pub struct CommittedMsg {
     epoch: Epoch,
 
     /// A bitmap of which nodes have so far committed the configuration
@@ -121,21 +144,10 @@ pub struct CancelUpgradeFromLrtqMsg {
 pub enum Msg {
     Prepare(PrepareMsg),
     Commit(CommitMsg),
-    GossipMsg(GossipMsg),
+    Committed(CommittedMsg),
 
-    // TODO: Fill in
-    GetShare,
-    Share,
-
-    // A member that was offline while a reconfiguration was taking place can
-    // request its `PrepareMsg` from another member. A node will know to request
-    // its Prepare message if it sees a Commit for a `Prepare` that it doesn't have
-    // or it sees a `GossipMsg` for a commit and thinks it might be a peer
-    GetPrepare,
-
-    /// A response from a `GetPrepare` request indicating that the peer is not a
-    /// member of the group for a given epoch.
-    NotAMember(Epoch),
+    GetShare(Epoch),
+    Share { epoch: Epoch, share: Share },
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -145,8 +157,17 @@ pub struct CommitMsg {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EncryptedShares(pub Vec<u8>);
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Share(pub Vec<u8>);
+#[derive(
+    Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ZeroizeOnDrop,
+)]
+pub struct Share(Vec<u8>);
+
+impl Share {
+    pub fn new(share: Vec<u8>) -> Share {
+        assert_eq!(share.len(), SHARE_SIZE);
+        Share(share)
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct ShareDigest(Sha3_256Digest);
@@ -175,15 +196,6 @@ pub struct Configuration {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EncryptedData {
-    /// The encrypted key shares for the current epoch in the same order as
-    /// `members`
-    pub encrypted_shares: EncryptedShares,
-
-    /// A random value used to derive the key to encrypt the shares
-    ///
-    /// We only encrypt the shares once and so we use a nonce of all zeros
-    pub encrypted_shares_salt: [u8; 32],
-
     /// The encrypted rack secert for the last committed epoch
     /// `members`
     pub encrypted_last_committed_rack_secret: EncryptedShares,
@@ -202,7 +214,8 @@ pub struct State {
     pub prepares: BTreeMap<Epoch, PrepareMsg>,
     pub commits: BTreeMap<Epoch, CommitMsg>,
 
-    // Has the node received a `NotAMember` message for the latest epoch? If at
+    // Has the node seen a commit for an epoch higher than it's current
+    // configuration for which it has not received a `PrepareMsg` for? If at
     // any time this gets set, than the it remains true for the lifetime of the
     // node. The sled corresponding to the node must be factory reset by wiping
     // its storage.
@@ -232,24 +245,16 @@ impl Node {
         &self.id
     }
 
-    pub fn start_reconfiguration(
+    pub fn handle_nexus_request(
         &mut self,
-        msg: Reconfigure,
-    ) -> Result<impl Iterator<Item = Output> + '_, ReconfigurationError> {
-        if let Some(state) = &self.state {
-            // If we have a `State`, we must have at least one `Prepare`
-            let highest_epoch = state.prepares.keys().last().unwrap();
-            if msg.epoch <= *highest_epoch {
-                return Err(ReconfigurationError::StaleEpoch(msg.epoch));
-            }
-        }
-
-        // TODO: Everything else
-        Ok(self.outgoing.drain(..))
+        msg: NexusReq,
+    ) -> impl Iterator<Item = Output> + '_ {
+        self.outgoing.drain(..)
     }
 
-    pub fn handle_msg(
+    pub fn handle_peer_msg(
         &mut self,
+        from: BaseboardId,
         msg: Msg,
     ) -> impl Iterator<Item = Output> + '_ {
         // TODO: Everything else
@@ -266,6 +271,14 @@ impl Node {
             to,
             from: self.id.clone(),
             msg,
+        }));
+    }
+
+    fn reply_to_nexus(&mut self, request_id: Uuid, rsp: NexusRspKind) {
+        self.outgoing.push(Output::NexusRsp(NexusRsp {
+            request_id,
+            from: self.id.clone(),
+            kind: rsp,
         }));
     }
 
