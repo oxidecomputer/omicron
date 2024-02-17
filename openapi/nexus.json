@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "0.0.1"
+    "version": "0.0.6"
   },
   "paths": {
     "/device/auth": {
@@ -223,7 +223,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Create a new system-wide x.509 certificate",
+        "summary": "Create new system-wide x.509 certificate",
         "description": "This certificate is automatically used by the Oxide Control plane to serve external connections.",
         "operationId": "certificate_create",
         "requestBody": {
@@ -261,7 +261,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Fetch a certificate",
+        "summary": "Fetch certificate",
         "description": "Returns the details of a specific certificate",
         "operationId": "certificate_view",
         "parameters": [
@@ -297,7 +297,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Delete a certificate",
+        "summary": "Delete certificate",
         "description": "Permanently delete a certificate. This operation cannot be undone.",
         "operationId": "certificate_delete",
         "parameters": [
@@ -443,7 +443,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Fetch a disk",
+        "summary": "Fetch disk",
         "operationId": "disk_view",
         "parameters": [
           {
@@ -487,7 +487,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Delete a disk",
+        "summary": "Delete disk",
         "operationId": "disk_delete",
         "parameters": [
           {
@@ -526,7 +526,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Import blocks into a disk",
+        "summary": "Import blocks into disk",
         "operationId": "disk_bulk_write_import",
         "parameters": [
           {
@@ -575,7 +575,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Start importing blocks into a disk",
+        "summary": "Start importing blocks into disk",
         "description": "Start the process of importing blocks into a disk",
         "operationId": "disk_bulk_write_import_start",
         "parameters": [
@@ -615,7 +615,7 @@
         "tags": [
           "disks"
         ],
-        "summary": "Stop importing blocks into a disk",
+        "summary": "Stop importing blocks into disk",
         "description": "Stop the process of importing blocks into a disk",
         "operationId": "disk_bulk_write_import_stop",
         "parameters": [
@@ -876,7 +876,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Create a floating IP",
+        "summary": "Create floating IP",
         "operationId": "floating_ip_create",
         "parameters": [
           {
@@ -924,7 +924,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Fetch a floating IP",
+        "summary": "Fetch floating IP",
         "operationId": "floating_ip_view",
         "parameters": [
           {
@@ -968,7 +968,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Delete a floating IP",
+        "summary": "Delete floating IP",
         "operationId": "floating_ip_delete",
         "parameters": [
           {
@@ -1007,7 +1007,8 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Attach a floating IP to an instance or other resource",
+        "summary": "Attach floating IP",
+        "description": "Attach floating IP to an instance or other resource.",
         "operationId": "floating_ip_attach",
         "parameters": [
           {
@@ -1063,7 +1064,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Detach a floating IP from an instance or other resource",
+        "summary": "Detach floating IP",
         "operationId": "floating_ip_detach",
         "parameters": [
           {
@@ -1273,7 +1274,7 @@
         "tags": [
           "images"
         ],
-        "summary": "Create an image",
+        "summary": "Create image",
         "description": "Create a new image in a project.",
         "operationId": "image_create",
         "parameters": [
@@ -1321,7 +1322,7 @@
         "tags": [
           "images"
         ],
-        "summary": "Fetch an image",
+        "summary": "Fetch image",
         "description": "Fetch the details for a specific image in a project.",
         "operationId": "image_view",
         "parameters": [
@@ -1366,7 +1367,7 @@
         "tags": [
           "images"
         ],
-        "summary": "Delete an image",
+        "summary": "Delete image",
         "description": "Permanently delete an image from a project. This operation cannot be undone. Any instances in the project using the image will continue to run, however new instances can not be created with this image.",
         "operationId": "image_delete",
         "parameters": [
@@ -1406,8 +1407,8 @@
         "tags": [
           "images"
         ],
-        "summary": "Demote a silo image",
-        "description": "Demote a silo image to be visible only to a specified project",
+        "summary": "Demote silo image",
+        "description": "Demote silo image to be visible only to a specified project",
         "operationId": "image_demote",
         "parameters": [
           {
@@ -1454,8 +1455,8 @@
         "tags": [
           "images"
         ],
-        "summary": "Promote a project image",
-        "description": "Promote a project image to be visible to all projects in the silo",
+        "summary": "Promote project image",
+        "description": "Promote project image to be visible to all projects in the silo",
         "operationId": "image_promote",
         "parameters": [
           {
@@ -1568,7 +1569,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Create an instance",
+        "summary": "Create instance",
         "operationId": "instance_create",
         "parameters": [
           {
@@ -1616,7 +1617,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Fetch an instance",
+        "summary": "Fetch instance",
         "operationId": "instance_view",
         "parameters": [
           {
@@ -1660,7 +1661,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Delete an instance",
+        "summary": "Delete instance",
         "operationId": "instance_delete",
         "parameters": [
           {
@@ -1699,7 +1700,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "List an instance's disks",
+        "summary": "List disks for instance",
         "operationId": "instance_disk_list",
         "parameters": [
           {
@@ -1775,7 +1776,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Attach a disk to an instance",
+        "summary": "Attach disk to instance",
         "operationId": "instance_disk_attach",
         "parameters": [
           {
@@ -1831,7 +1832,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Detach a disk from an instance",
+        "summary": "Detach disk from instance",
         "operationId": "instance_disk_detach",
         "parameters": [
           {
@@ -1933,7 +1934,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Allocate and attach an ephemeral IP to an instance",
+        "summary": "Allocate and attach ephemeral IP to instance",
         "operationId": "instance_ephemeral_ip_attach",
         "parameters": [
           {
@@ -1987,7 +1988,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Detach and deallocate an ephemeral IP from an instance",
+        "summary": "Detach and deallocate ephemeral IP from instance",
         "operationId": "instance_ephemeral_ip_detach",
         "parameters": [
           {
@@ -2128,7 +2129,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Fetch an instance's serial console",
+        "summary": "Fetch instance serial console",
         "operationId": "instance_serial_console",
         "parameters": [
           {
@@ -2207,7 +2208,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Stream an instance's serial console",
+        "summary": "Stream instance serial console",
         "operationId": "instance_serial_console_stream",
         "parameters": [
           {
@@ -2257,8 +2258,8 @@
         "tags": [
           "instances"
         ],
-        "summary": "List the SSH public keys added to the instance via cloud-init during instance creation",
-        "description": "Note that this list is a snapshot in time and will not reflect updates made after the instance is created.",
+        "summary": "List SSH public keys for instance",
+        "description": "List SSH public keys injected via cloud-init during instance creation. Note that this list is a snapshot in time and will not reflect updates made after the instance is created.",
         "operationId": "instance_ssh_public_key_list",
         "parameters": [
           {
@@ -2334,7 +2335,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Boot an instance",
+        "summary": "Boot instance",
         "operationId": "instance_start",
         "parameters": [
           {
@@ -2380,7 +2381,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Stop an instance",
+        "summary": "Stop instance",
         "operationId": "instance_stop",
         "parameters": [
           {
@@ -2485,7 +2486,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Fetch an IP pool",
+        "summary": "Fetch IP pool",
         "operationId": "project_ip_pool_view",
         "parameters": [
           {
@@ -2583,7 +2584,7 @@
         "tags": [
           "session"
         ],
-        "summary": "Fetch the user associated with the current session",
+        "summary": "Fetch user for current session",
         "operationId": "current_user_view",
         "responses": {
           "200": {
@@ -2610,7 +2611,7 @@
         "tags": [
           "session"
         ],
-        "summary": "Fetch the silo groups the current user belongs to",
+        "summary": "Fetch current user's groups",
         "operationId": "current_user_groups",
         "parameters": [
           {
@@ -2727,7 +2728,7 @@
         "tags": [
           "session"
         ],
-        "summary": "Create an SSH public key",
+        "summary": "Create SSH public key",
         "description": "Create an SSH public key for the currently authenticated user.",
         "operationId": "current_user_ssh_key_create",
         "requestBody": {
@@ -2765,8 +2766,8 @@
         "tags": [
           "session"
         ],
-        "summary": "Fetch an SSH public key",
-        "description": "Fetch an SSH public key associated with the currently authenticated user.",
+        "summary": "Fetch SSH public key",
+        "description": "Fetch SSH public key associated with the currently authenticated user.",
         "operationId": "current_user_ssh_key_view",
         "parameters": [
           {
@@ -2802,7 +2803,7 @@
         "tags": [
           "session"
         ],
-        "summary": "Delete an SSH public key",
+        "summary": "Delete SSH public key",
         "description": "Delete an SSH public key associated with the currently authenticated user.",
         "operationId": "current_user_ssh_key_delete",
         "parameters": [
@@ -3006,7 +3007,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Create a network interface",
+        "summary": "Create network interface",
         "operationId": "instance_network_interface_create",
         "parameters": [
           {
@@ -3062,7 +3063,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Fetch a network interface",
+        "summary": "Fetch network interface",
         "operationId": "instance_network_interface_view",
         "parameters": [
           {
@@ -3114,7 +3115,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Update a network interface",
+        "summary": "Update network interface",
         "operationId": "instance_network_interface_update",
         "parameters": [
           {
@@ -3176,7 +3177,7 @@
         "tags": [
           "instances"
         ],
-        "summary": "Delete a network interface",
+        "summary": "Delete network interface",
         "description": "Note that the primary interface for an instance cannot be deleted if there are any secondary interfaces. A new primary interface must be designated first. The primary interface can be deleted if there are no secondary interfaces.",
         "operationId": "instance_network_interface_delete",
         "parameters": [
@@ -3252,7 +3253,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Fetch the current silo's IAM policy",
+        "summary": "Fetch current silo's IAM policy",
         "operationId": "policy_view",
         "responses": {
           "200": {
@@ -3277,7 +3278,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "Update the current silo's IAM policy",
+        "summary": "Update current silo's IAM policy",
         "operationId": "policy_update",
         "requestBody": {
           "content": {
@@ -3371,7 +3372,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Create a project",
+        "summary": "Create project",
         "operationId": "project_create",
         "requestBody": {
           "content": {
@@ -3408,7 +3409,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Fetch a project",
+        "summary": "Fetch project",
         "operationId": "project_view",
         "parameters": [
           {
@@ -3490,7 +3491,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Delete a project",
+        "summary": "Delete project",
         "operationId": "project_delete",
         "parameters": [
           {
@@ -3521,7 +3522,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Fetch a project's IAM policy",
+        "summary": "Fetch project's IAM policy",
         "operationId": "project_policy_view",
         "parameters": [
           {
@@ -3557,7 +3558,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "Update a project's IAM policy",
+        "summary": "Update project's IAM policy",
         "operationId": "project_policy_update",
         "parameters": [
           {
@@ -3672,7 +3673,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Create a snapshot",
+        "summary": "Create snapshot",
         "description": "Creates a point-in-time snapshot from a disk.",
         "operationId": "snapshot_create",
         "parameters": [
@@ -3721,7 +3722,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Fetch a snapshot",
+        "summary": "Fetch snapshot",
         "operationId": "snapshot_view",
         "parameters": [
           {
@@ -3765,7 +3766,7 @@
         "tags": [
           "snapshots"
         ],
-        "summary": "Delete a snapshot",
+        "summary": "Delete snapshot",
         "operationId": "snapshot_delete",
         "parameters": [
           {
@@ -3922,7 +3923,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Fetch a rack",
+        "summary": "Fetch rack",
         "operationId": "rack_view",
         "parameters": [
           {
@@ -4018,7 +4019,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Add a sled to an initialized rack",
+        "summary": "Add sled to initialized rack",
         "operationId": "sled_add",
         "requestBody": {
           "content": {
@@ -4048,7 +4049,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Fetch a sled",
+        "summary": "Fetch sled",
         "operationId": "sled_view",
         "parameters": [
           {
@@ -4156,7 +4157,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "List instances running on a given sled",
+        "summary": "List instances running on given sled",
         "operationId": "sled_instance_list",
         "parameters": [
           {
@@ -4225,7 +4226,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Set the sled's provision state",
+        "summary": "Set sled provision state",
         "operationId": "sled_set_provision_state",
         "parameters": [
           {
@@ -4274,7 +4275,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "List uninitialized sleds in a given rack",
+        "summary": "List uninitialized sleds",
         "operationId": "sled_list_uninitialized",
         "parameters": [
           {
@@ -4562,7 +4563,7 @@
         "tags": [
           "system/hardware"
         ],
-        "summary": "Fetch a switch",
+        "summary": "Fetch switch",
         "operationId": "switch_view",
         "parameters": [
           {
@@ -4670,7 +4671,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Create a user",
+        "summary": "Create user",
         "description": "Users can only be created in Silos with `provision_type` == `Fixed`. Otherwise, Silo users are just-in-time (JIT) provisioned when a user first logs in using an external Identity Provider.",
         "operationId": "local_idp_user_create",
         "parameters": [
@@ -4719,7 +4720,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Delete a user",
+        "summary": "Delete user",
         "operationId": "local_idp_user_delete",
         "parameters": [
           {
@@ -4760,7 +4761,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Set or invalidate a user's password",
+        "summary": "Set or invalidate user's password",
         "description": "Passwords can only be updated for users in Silos with identity mode `LocalOnly`.",
         "operationId": "local_idp_user_set_password",
         "parameters": [
@@ -4812,7 +4813,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Create a SAML IdP",
+        "summary": "Create SAML IdP",
         "operationId": "saml_identity_provider_create",
         "parameters": [
           {
@@ -4860,7 +4861,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Fetch a SAML IdP",
+        "summary": "Fetch SAML IdP",
         "operationId": "saml_identity_provider_view",
         "parameters": [
           {
@@ -4964,7 +4965,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create an IP pool",
+        "summary": "Create IP pool",
         "operationId": "ip_pool_create",
         "requestBody": {
           "content": {
@@ -5001,7 +5002,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Fetch an IP pool",
+        "summary": "Fetch IP pool",
         "operationId": "ip_pool_view",
         "parameters": [
           {
@@ -5037,7 +5038,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Update an IP pool",
+        "summary": "Update IP pool",
         "operationId": "ip_pool_update",
         "parameters": [
           {
@@ -5083,7 +5084,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete an IP pool",
+        "summary": "Delete IP pool",
         "operationId": "ip_pool_delete",
         "parameters": [
           {
@@ -5114,8 +5115,8 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "List ranges for an IP pool",
-        "description": "List ranges for an IP pool. Ranges are ordered by their first address.",
+        "summary": "List ranges for IP pool",
+        "description": "Ranges are ordered by their first address.",
         "operationId": "ip_pool_range_list",
         "parameters": [
           {
@@ -5176,7 +5177,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Add a range to an IP pool",
+        "summary": "Add range to IP pool",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -5224,7 +5225,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Remove a range from an IP pool",
+        "summary": "Remove range from IP pool",
         "operationId": "ip_pool_range_remove",
         "parameters": [
           {
@@ -5265,7 +5266,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "List an IP pool's linked silos",
+        "summary": "List IP pool's linked silos",
         "operationId": "ip_pool_silo_list",
         "parameters": [
           {
@@ -5331,7 +5332,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Link an IP pool to a silo",
+        "summary": "Link IP pool to silo",
         "description": "Users in linked silos can allocate external IPs from this pool for their instances. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
         "operationId": "ip_pool_silo_link",
         "parameters": [
@@ -5434,7 +5435,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Unlink an IP pool from a silo",
+        "summary": "Unlink IP pool from silo",
         "description": "Will fail if there are any outstanding IPs allocated in the silo.",
         "operationId": "ip_pool_silo_unlink",
         "parameters": [
@@ -5473,7 +5474,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Fetch the Oxide service IP pool",
+        "summary": "Fetch Oxide service IP pool",
         "operationId": "ip_pool_service_view",
         "responses": {
           "200": {
@@ -5774,7 +5775,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create an address lot",
+        "summary": "Create address lot",
         "operationId": "networking_address_lot_create",
         "requestBody": {
           "content": {
@@ -5811,7 +5812,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete an address lot",
+        "summary": "Delete address lot",
         "operationId": "networking_address_lot_delete",
         "parameters": [
           {
@@ -5842,7 +5843,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "List the blocks in an address lot",
+        "summary": "List blocks in address lot",
         "operationId": "networking_address_lot_block_list",
         "parameters": [
           {
@@ -6066,7 +6067,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create a new BGP configuration",
+        "summary": "Create new BGP configuration",
         "operationId": "networking_bgp_config_create",
         "requestBody": {
           "content": {
@@ -6101,7 +6102,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete a BGP configuration",
+        "summary": "Delete BGP configuration",
         "operationId": "networking_bgp_config_delete",
         "parameters": [
           {
@@ -6172,7 +6173,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create a new BGP announce set",
+        "summary": "Create new BGP announce set",
         "operationId": "networking_bgp_announce_set_create",
         "requestBody": {
           "content": {
@@ -6207,7 +6208,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete a BGP announce set",
+        "summary": "Delete BGP announce set",
         "operationId": "networking_bgp_announce_set_delete",
         "parameters": [
           {
@@ -6370,7 +6371,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Create a loopback address",
+        "summary": "Create loopback address",
         "operationId": "networking_loopback_address_create",
         "requestBody": {
           "content": {
@@ -6407,7 +6408,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Delete a loopback address",
+        "summary": "Delete loopback address",
         "operationId": "networking_loopback_address_delete",
         "parameters": [
           {
@@ -6599,7 +6600,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Get information about a switch port",
+        "summary": "Get information about switch port",
         "operationId": "networking_switch_port_settings_view",
         "parameters": [
           {
@@ -6637,7 +6638,7 @@
         "tags": [
           "policy"
         ],
-        "summary": "Fetch the top-level IAM policy",
+        "summary": "Fetch top-level IAM policy",
         "operationId": "system_policy_view",
         "responses": {
           "200": {
@@ -6662,7 +6663,7 @@
         "tags": [
           "policy"
         ],
-        "summary": "Update the top-level IAM policy",
+        "summary": "Update top-level IAM policy",
         "operationId": "system_policy_update",
         "requestBody": {
           "content": {
@@ -6751,7 +6752,7 @@
         "tags": [
           "roles"
         ],
-        "summary": "Fetch a built-in role",
+        "summary": "Fetch built-in role",
         "operationId": "role_view",
         "parameters": [
           {
@@ -6943,8 +6944,8 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Fetch a silo",
-        "description": "Fetch a silo by name or ID.",
+        "summary": "Fetch silo",
+        "description": "Fetch silo by name or ID.",
         "operationId": "silo_view",
         "parameters": [
           {
@@ -7081,7 +7082,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Fetch a silo's IAM policy",
+        "summary": "Fetch silo IAM policy",
         "operationId": "silo_policy_view",
         "parameters": [
           {
@@ -7117,7 +7118,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Update a silo's IAM policy",
+        "summary": "Update silo IAM policy",
         "operationId": "silo_policy_update",
         "parameters": [
           {
@@ -7165,7 +7166,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "View the resource quotas of a given silo",
+        "summary": "Fetch resource quotas for silo",
         "operationId": "silo_quotas_view",
         "parameters": [
           {
@@ -7201,7 +7202,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Update the resource quotas of a given silo",
+        "summary": "Update resource quotas for silo",
         "description": "If a quota value is not specified, it will remain unchanged.",
         "operationId": "silo_quotas_update",
         "parameters": [
@@ -7250,7 +7251,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "List built-in (system) users in a silo",
+        "summary": "List built-in (system) users in silo",
         "operationId": "silo_user_list",
         "parameters": [
           {
@@ -7319,7 +7320,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Fetch a built-in (system) user",
+        "summary": "Fetch built-in (system) user",
         "operationId": "silo_user_view",
         "parameters": [
           {
@@ -7426,7 +7427,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "Fetch a built-in user",
+        "summary": "Fetch built-in user",
         "operationId": "user_builtin_view",
         "parameters": [
           {
@@ -7522,7 +7523,7 @@
         "tags": [
           "system/silos"
         ],
-        "summary": "View the current utilization of a given silo",
+        "summary": "Fetch current utilization for given silo",
         "operationId": "silo_utilization_view",
         "parameters": [
           {
@@ -7628,7 +7629,7 @@
         "tags": [
           "silos"
         ],
-        "summary": "View the resource utilization of the user's current silo",
+        "summary": "Fetch resource utilization for user's current silo",
         "operationId": "utilization_view",
         "responses": {
           "200": {
@@ -7830,7 +7831,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Create a subnet",
+        "summary": "Create subnet",
         "operationId": "vpc_subnet_create",
         "parameters": [
           {
@@ -7886,7 +7887,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Fetch a subnet",
+        "summary": "Fetch subnet",
         "operationId": "vpc_subnet_view",
         "parameters": [
           {
@@ -7938,7 +7939,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Update a subnet",
+        "summary": "Update subnet",
         "operationId": "vpc_subnet_update",
         "parameters": [
           {
@@ -8000,7 +8001,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Delete a subnet",
+        "summary": "Delete subnet",
         "operationId": "vpc_subnet_delete",
         "parameters": [
           {
@@ -8198,7 +8199,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Create a VPC",
+        "summary": "Create VPC",
         "operationId": "vpc_create",
         "parameters": [
           {
@@ -8246,7 +8247,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Fetch a VPC",
+        "summary": "Fetch VPC",
         "operationId": "vpc_view",
         "parameters": [
           {
@@ -8344,7 +8345,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Delete a VPC",
+        "summary": "Delete VPC",
         "operationId": "vpc_delete",
         "parameters": [
           {

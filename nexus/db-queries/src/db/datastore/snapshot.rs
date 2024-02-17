@@ -20,6 +20,7 @@ use crate::db::model::SnapshotState;
 use crate::db::pagination::paginated;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
+use crate::db::IncompleteOnConflictExt;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
@@ -69,7 +70,7 @@ impl DataStore {
                     // As written below,
                     //
                     //    .on_conflict((dsl::project_id, dsl::name))
-                    //    .filter_target(dsl::time_deleted.is_null())
+                    //    .as_partial_index()
                     //    .do_update()
                     //    .set(dsl::time_modified.eq(dsl::time_modified))
                     //
@@ -79,7 +80,7 @@ impl DataStore {
                     // (marked with >>):
                     //
                     //    .on_conflict((dsl::project_id, dsl::name))
-                    //    .filter_target(dsl::time_deleted.is_null())
+                    //    .as_partial_index()
                     //    .do_update()
                     //    .set(dsl::time_modified.eq(dsl::time_modified))
                     // >> .filter(dsl::id.eq(snapshot.id()))
@@ -118,7 +119,7 @@ impl DataStore {
                         diesel::insert_into(dsl::snapshot)
                             .values(snapshot)
                             .on_conflict((dsl::project_id, dsl::name))
-                            .filter_target(dsl::time_deleted.is_null())
+                            .as_partial_index()
                             .do_update()
                             .set(dsl::time_modified.eq(dsl::time_modified)),
                     )

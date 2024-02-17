@@ -496,7 +496,8 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
             )
             | progenitor::progenitor_client::Error::UnexpectedResponse(_)
             | progenitor::progenitor_client::Error::InvalidUpgrade(_)
-            | progenitor::progenitor_client::Error::ResponseBodyError(_) => {
+            | progenitor::progenitor_client::Error::ResponseBodyError(_)
+            | progenitor::progenitor_client::Error::PreHookError(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.

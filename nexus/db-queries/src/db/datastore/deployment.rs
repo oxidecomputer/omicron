@@ -1053,6 +1053,8 @@ mod tests {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
     use omicron_test_utils::dev;
@@ -1061,7 +1063,11 @@ mod tests {
     use std::mem;
     use std::net::Ipv6Addr;
 
-    static EMPTY_POLICY: Policy = Policy { sleds: BTreeMap::new() };
+    static EMPTY_POLICY: Policy = Policy {
+        sleds: BTreeMap::new(),
+        service_ip_pool_ranges: Vec::new(),
+        target_nexus_zone_count: 0,
+    };
 
     // This is a not-super-future-maintainer-friendly helper to check that all
     // the subtables related to blueprints have been pruned of a specific
@@ -1111,7 +1117,12 @@ mod tests {
             })
             .collect();
         let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
-        SledResources { zpools, subnet: Ipv6Subnet::new(ip) }
+        SledResources {
+            policy: SledPolicy::provisionable(),
+            state: SledState::Active,
+            zpools,
+            subnet: Ipv6Subnet::new(ip),
+        }
     }
 
     // Create a `Policy` that contains all the sleds found in `collection`
@@ -1131,6 +1142,11 @@ mod tests {
                     )
                 })
                 .collect(),
+            service_ip_pool_ranges: Vec::new(),
+            target_nexus_zone_count: collection
+                .all_omicron_zones()
+                .filter(|z| z.zone_type.is_nexus())
+                .count(),
         }
     }
 
@@ -1320,7 +1336,8 @@ mod tests {
 
         // Create a builder for a child blueprint.
         let mut builder =
-            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test");
+            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test")
+                .expect("failed to create builder");
 
         // Add zones to our new sled.
         assert_eq!(
@@ -1465,9 +1482,11 @@ mod tests {
         .unwrap();
         let blueprint2 =
             BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test2")
+                .expect("failed to create builder")
                 .build();
         let blueprint3 =
             BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test3")
+                .expect("failed to create builder")
                 .build();
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
@@ -1559,6 +1578,7 @@ mod tests {
         // with enabled=false, that status is serialized.
         let blueprint4 =
             BlueprintBuilder::new_based_on(&blueprint3, &EMPTY_POLICY, "test3")
+                .expect("failed to create builder")
                 .build();
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();

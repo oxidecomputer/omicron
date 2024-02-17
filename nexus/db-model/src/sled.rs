@@ -112,7 +112,6 @@ impl From<Sled> for views::Sled {
                 revision: sled.revision,
             },
             policy: sled.policy.into(),
-            provision_policy: sled.policy.to_provision_policy(),
             state: sled.state.into(),
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,

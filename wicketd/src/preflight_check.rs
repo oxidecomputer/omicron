@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use slog::o;
 use slog::Logger;
@@ -12,6 +11,7 @@ use std::sync::Mutex;
 use tokio::sync::oneshot;
 use update_engine::events::EventReport;
 use update_engine::GenericSpec;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 
 mod uplink;
 
@@ -44,7 +44,7 @@ impl PreflightCheckerHandler {
 
     pub(crate) async fn uplink_start(
         &self,
-        network_config: RackNetworkConfig,
+        network_config: UserSpecifiedRackNetworkConfig,
         dns_servers: Vec<IpAddr>,
         ntp_servers: Vec<String>,
         our_switch_location: SwitchLocation,
@@ -94,7 +94,7 @@ pub(crate) struct PreflightCheckerBusy;
 #[derive(Debug)]
 enum PreflightCheck {
     Uplink {
-        network_config: RackNetworkConfig,
+        network_config: UserSpecifiedRackNetworkConfig,
         dns_servers: Vec<IpAddr>,
         ntp_servers: Vec<String>,
         our_switch_location: SwitchLocation,

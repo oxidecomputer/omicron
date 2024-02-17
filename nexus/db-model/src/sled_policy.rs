@@ -20,7 +20,7 @@ impl_enum_type!(
 
     // Enum values
     InService => b"in_service"
-    InServiceNoProvision => b"in_service_no_provision"
+    NoProvision => b"no_provision"
     Expunged => b"expunged"
 );
 
@@ -33,21 +33,8 @@ pub fn to_db_sled_policy(policy: SledPolicy) -> DbSledPolicy {
         } => DbSledPolicy::InService,
         SledPolicy::InService {
             provision_policy: SledProvisionPolicy::NonProvisionable,
-        } => DbSledPolicy::InServiceNoProvision,
+        } => DbSledPolicy::NoProvision,
         SledPolicy::Expunged => DbSledPolicy::Expunged,
-    }
-}
-
-impl DbSledPolicy {
-    /// Converts self into the appropriate provision policy, in a lossy manner.
-    pub fn to_provision_policy(self) -> SledProvisionPolicy {
-        match self {
-            DbSledPolicy::InService => SledProvisionPolicy::Provisionable,
-            DbSledPolicy::InServiceNoProvision => {
-                SledProvisionPolicy::NonProvisionable
-            }
-            DbSledPolicy::Expunged => SledProvisionPolicy::NonProvisionable,
-        }
     }
 }
 
@@ -57,7 +44,7 @@ impl From<DbSledPolicy> for SledPolicy {
             DbSledPolicy::InService => SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::Provisionable,
             },
-            DbSledPolicy::InServiceNoProvision => SledPolicy::InService {
+            DbSledPolicy::NoProvision => SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             },
             DbSledPolicy::Expunged => SledPolicy::Expunged,

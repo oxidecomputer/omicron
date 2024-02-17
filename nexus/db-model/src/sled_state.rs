@@ -5,13 +5,14 @@
 use super::impl_enum_type;
 use nexus_types::external_api::views;
 use serde::{Deserialize, Serialize};
+use strum::EnumIter;
 
 impl_enum_type!(
     #[derive(Clone, SqlType, Debug, QueryId)]
     #[diesel(postgres_type(name = "sled_state", schema = "public"))]
     pub struct SledStateEnum;
 
-    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq, Eq, EnumIter)]
     #[diesel(sql_type = SledStateEnum)]
     pub enum SledState;
 

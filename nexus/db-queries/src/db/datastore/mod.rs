@@ -105,6 +105,7 @@ pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
+pub use sled::SledUpsertOutput;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::read_only_resources_associated_with_volume;
@@ -150,6 +151,7 @@ pub type DataStoreConnection<'a> =
     bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
 
 pub struct DataStore {
+    log: Logger,
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
     transaction_retry_producer: crate::transaction_retry::Producer,
@@ -164,8 +166,9 @@ impl DataStore {
     /// Ignores the underlying DB version. Should be used with caution, as usage
     /// of this method can construct a Datastore which does not understand
     /// the underlying CockroachDB schema. Data corruption could result.
-    pub fn new_unchecked(pool: Arc<Pool>) -> Result<Self, String> {
+    pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Result<Self, String> {
         let datastore = DataStore {
+            log,
             pool,
             virtual_provisioning_collection_producer:
                 crate::provisioning::Producer::new(),
@@ -184,7 +187,8 @@ impl DataStore {
         pool: Arc<Pool>,
         config: Option<&SchemaConfig>,
     ) -> Result<Self, String> {
-        let datastore = Self::new_unchecked(pool)?;
+        let datastore =
+            Self::new_unchecked(log.new(o!("component" => "datastore")), pool)?;
 
         // Keep looping until we find that the schema matches our expectation.
         const EXPECTED_VERSION: SemverVersion =
@@ -230,6 +234,7 @@ impl DataStore {
         name: &'static str,
     ) -> crate::transaction_retry::RetryHelper {
         crate::transaction_retry::RetryHelper::new(
+            &self.log,
             &self.transaction_retry_producer,
             name,
         )
@@ -636,7 +641,7 @@ mod test {
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled_update).await.unwrap();
+        datastore.sled_upsert(sled_update).await.unwrap().unwrap();
         sled_id
     }
 
@@ -1309,7 +1314,7 @@ mod test {
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled1).await.unwrap();
+        datastore.sled_upsert(sled1).await.unwrap().unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
@@ -1320,7 +1325,7 @@ mod test {
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled2).await.unwrap();
+        datastore.sled_upsert(sled2).await.unwrap().unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);

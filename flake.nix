@@ -17,7 +17,11 @@
         system = "x86_64-linux";
       };
       # use the Rust toolchain defined in the `rust-toolchain.toml` file.
-      rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+      rustToolchain = (pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+        extensions = [
+          "rust-src" # for rust-analyzer
+        ];
+      };
 
       buildInputs = with pkgs; [
         # libs
@@ -98,6 +102,8 @@
           version = mgVersion;
         };
 
+      # given a list of strings of the form `PREFIX="SHA256"`, finds the string
+      # starting with the provided `name` and returns the hash for that prefix.
       findSha = with pkgs.lib;
         shas: (name:
           let
@@ -119,9 +125,7 @@
               file = builtins.readFile
                 ./tools/dendrite_stub_checksums;
             in
-            strings.splitString
-              "\n"
-              file;
+            strings.splitString "\n" file;
           findStubSha = name: findSha stubShas "CIDL_SHA256_${name}";
           fetchLinuxBin = file:
             downloadBuildomat {
@@ -288,10 +292,16 @@
           name = "cockroachdb";
           binName = "cockroach";
           version = readVersionFile "${name}_version";
+          sha256 =
+            let
+              shaFile = builtins.readFile  ./tools/${name}_checksums;
+              shas = lib.strings.splitString "\n" shaFile;
+            in
+            findSha shas "CIDL_SHA256_LINUX";
           src = builtins.fetchurl
             {
+              inherit sha256;
               url = "https://binaries.cockroachdb.com/${binName}-v${version}.linux-amd64.tgz";
-              sha256 = "1aglbwh27275bicyvij11s3as4zypqwc26p9gyh5zr3y1s123hr4";
             };
         in
         stdenv.mkDerivation

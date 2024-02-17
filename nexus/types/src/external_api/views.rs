@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
 use std::net::IpAddr;
+use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
 use super::params::PhysicalDiskKind;
@@ -421,14 +422,6 @@ pub struct Sled {
     pub rack_id: Uuid,
     /// The operator-defined policy of a sled.
     pub policy: SledPolicy,
-    /// The provision policy of the sled.
-    ///
-    /// This used to be called `provision_state` but was renamed to
-    /// `provision_policy`, because it is operator-set similar to `policy`. The
-    /// serialization name `provision_state` has been retained for backwards
-    /// compatibility.
-    #[serde(rename = "provision_state")]
-    pub provision_policy: SledProvisionPolicy,
     /// The current state Nexus believes the sled to be in.
     pub state: SledState,
     /// The number of hardware threads which can execute on this sled
@@ -442,7 +435,15 @@ pub struct Sled {
 /// This controls whether new resources are going to be provisioned on this
 /// sled.
 #[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SledProvisionPolicy {
@@ -457,14 +458,10 @@ pub enum SledProvisionPolicy {
 
 impl SledProvisionPolicy {
     /// Returns the opposite of the current provision state.
-    pub fn invert(self) -> Self {
+    pub const fn invert(self) -> Self {
         match self {
-            SledProvisionPolicy::Provisionable => {
-                SledProvisionPolicy::NonProvisionable
-            }
-            SledProvisionPolicy::NonProvisionable => {
-                SledProvisionPolicy::Provisionable
-            }
+            Self::Provisionable => Self::NonProvisionable,
+            Self::NonProvisionable => Self::Provisionable,
         }
     }
 }
@@ -490,13 +487,65 @@ pub enum SledPolicy {
     ///
     /// An expunged sled is always non-provisionable.
     Expunged,
+    // NOTE: if you add a new value here, be sure to add it to
+    // the `IntoEnumIterator` impl below!
+}
+
+// Can't automatically derive strum::EnumIter because that doesn't provide a
+// way to iterate over nested enums.
+impl IntoEnumIterator for SledPolicy {
+    type Iterator = std::array::IntoIter<Self, 3>;
+
+    fn iter() -> Self::Iterator {
+        [
+            Self::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
+            Self::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+            Self::Expunged,
+        ]
+        .into_iter()
+    }
 }
 
 impl SledPolicy {
     /// Creates a new `SledPolicy` that is in-service and provisionable.
     pub fn provisionable() -> Self {
-        SledPolicy::InService {
-            provision_policy: SledProvisionPolicy::Provisionable,
+        Self::InService { provision_policy: SledProvisionPolicy::Provisionable }
+    }
+
+    /// Returns the list of all in-service policies.
+    pub fn all_in_service() -> &'static [Self] {
+        &[
+            Self::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
+            Self::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+        ]
+    }
+
+    /// Returns true if the sled can have services provisioned on it.
+    pub fn is_provisionable(&self) -> bool {
+        match self {
+            Self::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            } => true,
+            Self::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            }
+            | Self::Expunged => false,
+        }
+    }
+
+    /// Returns the provision policy, if the sled is in service.
+    pub fn provision_policy(&self) -> Option<SledProvisionPolicy> {
+        match self {
+            Self::InService { provision_policy } => Some(*provision_policy),
+            Self::Expunged => None,
         }
     }
 
@@ -504,15 +553,15 @@ impl SledPolicy {
     pub fn is_decommissionable(&self) -> bool {
         // This should be kept in sync with decommissionable_states below.
         match self {
-            SledPolicy::InService { .. } => false,
-            SledPolicy::Expunged => true,
+            Self::InService { .. } => false,
+            Self::Expunged => true,
         }
     }
 
     /// Returns all the possible policies a sled can have for it to be
     /// decommissioned.
-    pub fn all_decommissionable() -> &'static [SledPolicy] {
-        &[SledPolicy::Expunged]
+    pub fn all_decommissionable() -> &'static [Self] {
+        &[Self::Expunged]
     }
 }
 
@@ -532,7 +581,15 @@ impl fmt::Display for SledPolicy {
 
 /// The current state of the sled, as determined by Nexus.
 #[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum SledState {
@@ -545,6 +602,21 @@ pub enum SledState {
     /// it will never return to service. (The actual hardware may be reused,
     /// but it will be treated as a brand-new sled.)
     Decommissioned,
+}
+
+impl SledState {
+    /// Returns true if the sled state makes it eligible for services that
+    /// aren't required to be on every sled.
+    ///
+    /// For example, NTP must exist on every sled, but Nexus does not have to.
+    pub fn is_eligible_for_discretionary_services(&self) -> bool {
+        // (Explicit match, so that this fails to compile if a new state is
+        // added.)
+        match self {
+            SledState::Active => true,
+            SledState::Decommissioned => false,
+        }
+    }
 }
 
 /// An operator's view of an instance running on a given sled
