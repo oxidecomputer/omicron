@@ -5194,7 +5194,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IpRange"
+                "$ref": "#/components/schemas/Ipv4Range"
               }
             }
           },
