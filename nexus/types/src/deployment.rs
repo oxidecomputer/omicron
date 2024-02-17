@@ -631,8 +631,8 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                     f,
                     "+        zone {} type {} underlay IP {} (added)",
                     zone.id,
-                    zone.underlay_address,
                     zone.zone_type.label(),
+                    zone.underlay_address,
                 )?;
             }
         }

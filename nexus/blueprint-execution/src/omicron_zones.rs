@@ -196,7 +196,8 @@ mod test {
             datastore
                 .sled_upsert(update)
                 .await
-                .expect("Failed to insert sled to db");
+                .expect("Failed to insert sled to db")
+                .unwrap();
         }
 
         // The particular dataset doesn't matter for this test.
