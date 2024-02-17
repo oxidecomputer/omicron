@@ -68,6 +68,7 @@ pub enum NexusReqKind {
     Commit(CommitMsg),
 
     /// Get the bitmap of which members have seen a commit for a given epoch
+    GetCommitted(Epoch),
 
     /// Retrieve the hash of a share for an LRTQ node
     ///
@@ -93,8 +94,38 @@ pub struct NexusRsp {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum NexusRspKind {
+    CommitAck(Epoch),
     LrtqShareHash(Sha3_256Digest),
     UpgradeFromLrtqAck { upgrade_id: Uuid },
+    CancelUpgradeFromLrtqAck { upgrade_id: Uuid },
+    Committed(CommittedMsg),
+    Error(NexusRspError),
+}
+
+#[derive(
+    Debug,
+    Clone,
+    thiserror::Error,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
+pub enum NexusRspError {
+    #[error("sled was decommissioned on msg from {from:?} at epoch {epoch:?}: last prepared epoch = {last_prepared_epoch:?}")]
+    SledDecommissioned {
+        from: BaseboardId,
+        epoch: Epoch,
+        last_prepared_epoch: Option<Epoch>,
+    },
+
+    #[error("sled has already committed a request at epoch {0:?}")]
+    AlreadyCommitted(Epoch),
+
+    #[error("sled has already prepared a request at epoch {0:?}")]
+    AlreadyPrepared(Epoch),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -223,9 +254,17 @@ pub struct EncryptedData {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecommissionedMetadata {
+    /// The committed epoch, later than its current configuration at which the
+    /// node learned that it had been decommissioned.
+    epoch: Epoch,
+
+    /// Which node this commit information was learned from  
+    from: BaseboardId,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct State {
-    pub node: BaseboardId,
-    pub configurations: BTreeMap<Epoch, Configuration>,
     pub prepares: BTreeMap<Epoch, PrepareMsg>,
     pub commits: BTreeMap<Epoch, CommitMsg>,
 
@@ -234,26 +273,30 @@ pub struct State {
     // any time this gets set, than the it remains true for the lifetime of the
     // node. The sled corresponding to the node must be factory reset by wiping
     // its storage.
-    pub decommissioned: bool,
+    pub decommissioned: Option<DecommissionedMetadata>,
 }
 
-// TODO: thiserror
-#[derive(Debug)]
-pub enum ReconfigurationError {
-    StaleEpoch(Epoch),
+impl State {
+    fn last_prepared_epoch(&self) -> Option<Epoch> {
+        self.prepares.keys().last().map(|epoch| *epoch)
+    }
+
+    fn last_committed_epoch(&self) -> Option<Epoch> {
+        self.commits.keys().last().map(|epoch| *epoch)
+    }
 }
 
 /// A node capable of participating in trust quorum
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     id: BaseboardId,
-    state: Option<State>,
+    state: State,
     outgoing: Vec<Output>,
 }
 
 impl Node {
     pub fn new(id: BaseboardId) -> Node {
-        Node { id, state: None, outgoing: Vec::new() }
+        Node { id, state: State::default(), outgoing: Vec::new() }
     }
 
     pub fn id(&self) -> &BaseboardId {
@@ -262,8 +305,19 @@ impl Node {
 
     pub fn handle_nexus_request(
         &mut self,
-        msg: NexusReq,
+        NexusReq { id, kind }: NexusReq,
     ) -> impl Iterator<Item = Output> + '_ {
+        match kind {
+            NexusReqKind::Commit(msg) => todo!(),
+            NexusReqKind::GetCommitted(epoch) => todo!(),
+            NexusReqKind::GetLrtqShareHash => todo!(),
+            NexusReqKind::UpgradeFromLrtq(msg) => {
+                self.upgrade_from_lrtq(id, msg)
+            }
+            NexusReqKind::CancelUpgradeFromLrtq(msg) => {
+                self.cancel_upgrade_from_lrtq(id, msg)
+            }
+        }
         self.outgoing.drain(..)
     }
 
@@ -279,6 +333,38 @@ impl Node {
     pub fn tick(&mut self, now: Instant) -> impl Iterator<Item = Output> + '_ {
         // TODO: Everything else
         self.outgoing.drain(..)
+    }
+
+    fn upgrade_from_lrtq(&mut self, request_id: Uuid, msg: UpgradeFromLrtqMsg) {
+        if let Some(decommissioned) = &self.state.decommissioned {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::SledDecommissioned {
+                    from: decommissioned.from.clone(),
+                    epoch: decommissioned.epoch,
+                    last_prepared_epoch: self.state.last_prepared_epoch(),
+                }),
+            );
+            return;
+        }
+
+        if let Some(epoch) = self.state.last_prepared_epoch() {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
+            );
+            return;
+        }
+
+        // TODO: Create and persist a prepare, and ack to Nexus
+    }
+
+    fn cancel_upgrade_from_lrtq(
+        &mut self,
+        request_id: Uuid,
+        msg: CancelUpgradeFromLrtqMsg,
+    ) {
+        todo!()
     }
 
     fn send(&mut self, to: BaseboardId, msg: Msg) {
