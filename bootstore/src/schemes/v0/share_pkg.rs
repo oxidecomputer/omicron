@@ -19,7 +19,7 @@ use uuid::Uuid;
 use zeroize::Zeroizing;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-// Each share is a point on a polynomial (Curve25519).  Each share is 33 bytes
+// Each share is a point on a polynomial (Curve25519). Each share is 33 bytes
 // - one identifier (x-coordinate) byte, and one 32-byte y-coordinate.
 const SHARE_SIZE: usize = 33;
 

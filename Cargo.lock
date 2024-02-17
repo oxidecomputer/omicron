@@ -12562,6 +12562,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "trust-quorum"
+version = "0.1.0"
+dependencies = [
+ "bcs",
+ "camino",
+ "chacha20poly1305",
+ "derive_more",
+ "hex",
+ "hkdf",
+ "rand 0.8.5",
+ "secrecy",
+ "serde",
+ "serde_with",
+ "sha3",
+ "slog",
+ "thiserror",
+ "tokio",
+ "uuid",
+ "vsss-rs",
+ "zeroize",
+]
+
+[[package]]
 name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
