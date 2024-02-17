@@ -252,7 +252,7 @@ mime_guess = "2.0.4"
 mockall = "0.12"
 newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
-multimap = "0.8.1"
+multimap = "0.10.0"
 nexus-blueprint-execution = { path = "nexus/blueprint-execution" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
