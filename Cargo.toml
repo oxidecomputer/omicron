@@ -387,7 +387,7 @@ tempdir = "0.3"
 tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
-textwrap = "0.16.0"
+textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
