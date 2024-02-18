@@ -2,13 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Implementation of the oxide rack trust quorum protocol
+//! Implementation of the oxide rack trust quorum protocol
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::time::Instant;
 use uuid::Uuid;
 use zeroize::ZeroizeOnDrop;
+
+mod configuration;
+mod messages;
+pub use configuration::Configuration;
+pub use messages::*;
 
 // Each share is a point on a polynomial (Curve25519). Each share is 33 bytes
 // - one identifier (x-coordinate) byte, and one 32-byte y-coordinate.
@@ -40,100 +45,6 @@ pub struct BaseboardId {
     serial_number: String,
 }
 
-/// An API request to a node to start coordinating a reconfiguration
-///
-/// This is a message sent by Nexus in a real deployment
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Reconfigure {
-    pub epoch: Epoch,
-    pub last_committed_epoch: Epoch,
-    pub members: BTreeSet<BaseboardId>,
-    pub threshold: Threshold,
-}
-
-/// Requests received from Nexus
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct NexusReq {
-    pub id: Uuid,
-    pub kind: NexusReqKind,
-}
-
-/// Data for a message sent from Nexus and proxied via the sled-agent
-///
-/// As this is a "no io" implementation, appropriate ledger data is
-/// read and loaded in by sled-agent.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum NexusReqKind {
-    /// Nexus seeds a few nodes with commits and then they get gossiped around
-    Commit(CommitMsg),
-
-    /// Get the bitmap of which members have seen a commit for a given epoch
-    GetCommitted(Epoch),
-
-    /// Retrieve the hash of a share for an LRTQ node
-    ///
-    /// This is necessary when coordinating upgrades
-    GetLrtqShareHash,
-
-    /// Inform a member to upgrade from LRTQ by creating a new PrepareMsg for
-    /// epoch 0 and persisting it
-    UpgradeFromLrtq(UpgradeFromLrtqMsg),
-
-    /// If the upgrade has not yet been activated, then it can be cancelled
-    /// and tried again
-    CancelUpgradeFromLrtq(CancelUpgradeFromLrtqMsg),
-}
-
-/// Responses to Nexus Requests
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct NexusRsp {
-    pub request_id: Uuid,
-    pub from: BaseboardId,
-    pub kind: NexusRspKind,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum NexusRspKind {
-    CommitAck(Epoch),
-    LrtqShareHash(Sha3_256Digest),
-    UpgradeFromLrtqAck { upgrade_id: Uuid },
-    CancelUpgradeFromLrtqAck { upgrade_id: Uuid },
-    Committed(CommittedMsg),
-    Error(NexusRspError),
-}
-
-#[derive(
-    Debug,
-    Clone,
-    thiserror::Error,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-)]
-pub enum NexusRspError {
-    #[error("sled was decommissioned on msg from {from:?} at epoch {epoch:?}: last prepared epoch = {last_prepared_epoch:?}")]
-    SledDecommissioned {
-        from: BaseboardId,
-        epoch: Epoch,
-        last_prepared_epoch: Option<Epoch>,
-    },
-
-    #[error("sled has already committed a request at epoch {0:?}")]
-    AlreadyCommitted(Epoch),
-
-    #[error("sled has already prepared a request at epoch {0:?}")]
-    AlreadyPrepared(Epoch),
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct PrepareMsg {
-    config: Configuration,
-    share: Share,
-}
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Envelope {
     to: BaseboardId,
@@ -151,61 +62,12 @@ pub enum Output {
     PersistDecommissioned { from: BaseboardId, epoch: Epoch },
 }
 
-/// A message that is sent between peers until all healthy peers have seen it
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct CommittedMsg {
-    epoch: Epoch,
-
-    /// A bitmap of which nodes have so far committed the configuration
-    /// for `epoch`. This order, and number, of bits matches that of the
-    /// configuration for `epoch`. Members fill in their own
-    /// bit after they have committed.
-    committed_bitmap: u32,
-}
-
-/// Data loaded from the ledger by sled-agent on instruction from Nexus
-///
-/// The epoch is always 0, because LRTQ does not allow key-rotation
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct LrtqLedgerData {
-    pub rack_uuid: Uuid,
-    pub threshold: Threshold,
-    pub share: Share,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct UpgradeFromLrtqMsg {
-    pub upgrade_id: Uuid,
-    pub members: BTreeSet<BaseboardId>,
-    pub share_digests: BTreeSet<Sha3_256Digest>,
-    pub lrtq_ledger_data: LrtqLedgerData,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct CancelUpgradeFromLrtqMsg {
-    pub upgrade_id: Uuid,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Msg {
-    Prepare(PrepareMsg),
-    Commit(CommitMsg),
-    Committed(CommittedMsg),
-
-    GetShare(Epoch),
-    Share { epoch: Epoch, share: Share },
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct CommitMsg {
-    epoch: Epoch,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct EncryptedShares(pub Vec<u8>);
+pub struct EncryptedRackSecret(pub Vec<u8>);
 #[derive(
     Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ZeroizeOnDrop,
 )]
+
 pub struct Share(Vec<u8>);
 
 impl Share {
@@ -222,36 +84,6 @@ pub struct ShareDigest(Sha3_256Digest);
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct Sha3_256Digest([u8; 32]);
-
-/// The configuration for a given epoch
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct Configuration {
-    pub rack_uuid: RackId,
-    pub epoch: Epoch,
-    pub last_committed_epoch: Epoch,
-
-    /// We pick the first member of epoch 0 as coordinator when initializing from
-    /// lrtq so we don't have to use an option
-    pub coordinator: BaseboardId,
-    pub members: BTreeMap<BaseboardId, ShareDigest>,
-    pub threshold: Threshold,
-
-    // There is no encrypted data for epoch 0
-    pub encrypted: Option<EncryptedData>,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct EncryptedData {
-    /// The encrypted rack secert for the last committed epoch
-    /// `members`
-    pub encrypted_last_committed_rack_secret: EncryptedShares,
-
-    /// A random value used to derive the key to encrypt the rack secret from
-    /// the last committed epoch
-    ///
-    /// We only encrypt the shares once and so we use a nonce of all zeros
-    pub encrypted_last_committed_rack_secret_salt: [u8; 32],
-}
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DecommissionedMetadata {
@@ -337,7 +169,7 @@ impl Node {
 
     fn upgrade_from_lrtq(&mut self, request_id: Uuid, msg: UpgradeFromLrtqMsg) {
         if let Some(decommissioned) = &self.state.decommissioned {
-            self.reply_to_nexus(
+            return self.reply_to_nexus(
                 request_id,
                 NexusRspKind::Error(NexusRspError::SledDecommissioned {
                     from: decommissioned.from.clone(),
@@ -345,18 +177,64 @@ impl Node {
                     last_prepared_epoch: self.state.last_prepared_epoch(),
                 }),
             );
-            return;
         }
 
         if let Some(epoch) = self.state.last_prepared_epoch() {
-            self.reply_to_nexus(
+            return self.reply_to_nexus(
                 request_id,
                 NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
             );
-            return;
         }
 
-        // TODO: Create and persist a prepare, and ack to Nexus
+        if msg.members.len() <= msg.lrtq_ledger_data.threshold.0 as usize {
+            return self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(
+                    NexusRspError::MembershipThresholdMismatch {
+                        num_members: msg.members.len(),
+                        threshold: msg.lrtq_ledger_data.threshold,
+                    },
+                ),
+            );
+        }
+
+        if msg.members.len() < 3 || msg.members.len() > 32 {
+            return self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::InvalidMembershipSize(
+                    msg.members.len(),
+                )),
+            );
+        }
+
+        if msg.lrtq_ledger_data.threshold.0 < 2
+            || msg.lrtq_ledger_data.threshold.0 > 31
+        {
+            return self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::InvalidThreshold(
+                    msg.lrtq_ledger_data.threshold,
+                )),
+            );
+        }
+
+        // Create and persist a prepare, and ack to Nexus
+        let config = Configuration {
+            rack_uuid: msg.lrtq_ledger_data.rack_uuid,
+            epoch: Epoch(0),
+            last_committed_epoch: Epoch(0),
+            coordinator: msg.members.keys().next().unwrap().clone(),
+            members: msg.members,
+            threshold: msg.lrtq_ledger_data.threshold,
+            encrypted: None,
+        };
+
+        let prepare = PrepareMsg { config, share: msg.lrtq_ledger_data.share };
+        self.persist_prepare(prepare);
+        self.reply_to_nexus(
+            request_id,
+            NexusRspKind::UpgradeFromLrtqAck { upgrade_id: msg.upgrade_id },
+        );
     }
 
     fn cancel_upgrade_from_lrtq(
