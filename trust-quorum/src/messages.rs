@@ -110,7 +110,9 @@ pub enum NexusRspError {
     InvalidThreshold(Threshold),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct PrepareMsg {
     pub config: Configuration,
     pub share: Share,

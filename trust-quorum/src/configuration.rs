@@ -9,9 +9,12 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use uuid::Uuid;
 
 /// The configuration for a given epoch
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct Configuration {
     pub rack_uuid: RackId,
     pub epoch: Epoch,
@@ -25,9 +28,14 @@ pub struct Configuration {
 
     // There is no encrypted data for epoch 0
     pub encrypted: Option<EncryptedData>,
+
+    // This is only possibly set for epoch 0
+    pub lrtq_upgrade_id: Option<Uuid>,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct EncryptedData {
     /// The encrypted rack secret for the last committed epoch
     pub encrypted_last_committed_rack_secret: EncryptedRackSecret,

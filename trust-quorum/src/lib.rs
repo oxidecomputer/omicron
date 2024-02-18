@@ -60,12 +60,23 @@ pub enum Output {
     PersistPrepare(PrepareMsg),
     PersistCommit(CommitMsg),
     PersistDecommissioned { from: BaseboardId, epoch: Epoch },
+    PersistLrtqCancelled { lrtq_upgrade_id: Uuid },
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct EncryptedRackSecret(pub Vec<u8>);
 #[derive(
-    Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ZeroizeOnDrop,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    ZeroizeOnDrop,
 )]
 
 pub struct Share(Vec<u8>);
@@ -77,7 +88,9 @@ impl Share {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct ShareDigest(Sha3_256Digest);
 
 #[derive(
@@ -109,12 +122,17 @@ pub struct State {
 }
 
 impl State {
-    fn last_prepared_epoch(&self) -> Option<Epoch> {
+    pub fn last_prepared_epoch(&self) -> Option<Epoch> {
         self.prepares.keys().last().map(|epoch| *epoch)
     }
 
-    fn last_committed_epoch(&self) -> Option<Epoch> {
+    pub fn last_committed_epoch(&self) -> Option<Epoch> {
         self.commits.keys().last().map(|epoch| *epoch)
+    }
+
+    // Get the configuration for the current epoch from its prepare message
+    pub fn configuration(&self, epoch: Epoch) -> Option<&Configuration> {
+        self.prepares.get(&epoch).map(|p| &p.config)
     }
 }
 
@@ -227,9 +245,11 @@ impl Node {
             members: msg.members,
             threshold: msg.lrtq_ledger_data.threshold,
             encrypted: None,
+            lrtq_upgrade_id: Some(msg.upgrade_id),
         };
 
         let prepare = PrepareMsg { config, share: msg.lrtq_ledger_data.share };
+        self.state.prepares.insert(Epoch(0), prepare.clone());
         self.persist_prepare(prepare);
         self.reply_to_nexus(
             request_id,
@@ -242,7 +262,48 @@ impl Node {
         request_id: Uuid,
         msg: CancelUpgradeFromLrtqMsg,
     ) {
-        todo!()
+        if let Some(decommissioned) = &self.state.decommissioned {
+            return self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::SledDecommissioned {
+                    from: decommissioned.from.clone(),
+                    epoch: decommissioned.epoch,
+                    last_prepared_epoch: self.state.last_prepared_epoch(),
+                }),
+            );
+        }
+
+        if let Some(epoch) = self.state.last_committed_epoch() {
+            return self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::AlreadyCommitted(epoch)),
+            );
+        }
+
+        if let Some(epoch) = self.state.last_prepared_epoch() {
+            if epoch > Epoch(0) {
+                return self.reply_to_nexus(
+                    request_id,
+                    NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
+                );
+            }
+        }
+
+        if let Some(config) = self.state.configuration(Epoch(0)) {
+            if config.lrtq_upgrade_id == Some(msg.upgrade_id) {
+                // Success!
+                self.state.prepares.remove(&Epoch(0));
+                self.persist_lrtq_cancelled(msg.upgrade_id);
+            } else {
+                // Stale reconfiguration Id.
+                // TODO: What should we do here?
+                // Log this?
+                // Replying to nexus doesn't seem to make much sense as the
+                // request could be stale
+            }
+        }
+
+        // No prepares or anything. Just consider this idempotent.
     }
 
     fn send(&mut self, to: BaseboardId, msg: Msg) {
@@ -271,5 +332,9 @@ impl Node {
 
     fn persist_decomissioned(&mut self, from: BaseboardId, epoch: Epoch) {
         self.outgoing.push(Output::PersistDecommissioned { from, epoch });
+    }
+
+    fn persist_lrtq_cancelled(&mut self, lrtq_upgrade_id: Uuid) {
+        self.outgoing.push(Output::PersistLrtqCancelled { lrtq_upgrade_id });
     }
 }
