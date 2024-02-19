@@ -120,7 +120,7 @@ setup_hint = """
 service_name = "oximeter"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 [package.oximeter-collector]
@@ -140,7 +140,12 @@ output.intermediate_only = true
 service_name = "clickhouse"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [
+  "clickhouse_svc.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
 output.type = "zone"
 
 [package.clickhouse_svc]
@@ -161,7 +166,12 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "clickhouse_keeper"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [
+  "clickhouse_keeper_svc.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
 output.type = "zone"
 
 [package.clickhouse_keeper_svc]
@@ -182,7 +192,12 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "cockroachdb"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ 
+  "cockroachdb-service.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
 output.type = "zone"
 
 [package.cockroachdb-service]
@@ -220,7 +235,13 @@ output.type = "zone"
 service_name = "external_dns"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ 
+  "dns-server.tar.gz",
+  "external-dns-customizations.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz",
+  "opte-interface-setup.tar.gz"
+]
 output.type = "zone"
 
 [package.dns-server]
@@ -247,7 +268,6 @@ only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [ 
   { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" },
-  # TODO: Removeme as we'll have a separate service for setting up OPTE interfaces
   { from = "smf/external-dns/method_script.sh", to = "/opt/oxide/lib/svc/manifest/external_dns.sh" },
 ]
 output.intermediate_only = true
@@ -630,14 +650,31 @@ source.packages = [
 ]
 output.type = "zone"
 
-[package.zone-network-setup]
+[package.zone-network-install]
 service_name = "zone-network-setup"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+    { from = "smf/zone-network-setup/manifest.xml", to = "/var/svc/manifest/site/zone-network-setup/manifest.xml" },
+]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.zone-network-setup]
+service_name = "zone-network-cli"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["zone-networking"]
 source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
+[package.opte-interface-setup]
+service_name = "opte-interface-setup"
+only_for_targets.image = "standard"
+source.type = "local"
 source.paths = [
-    { from = "smf/zone-network-setup/manifest.xml", to = "/var/svc/manifest/site/zone-network-setup/manifest.xml" },
+    { from = "smf/opte-interface-setup/manifest.xml", to = "/var/svc/manifest/site/opte-interface-setup/manifest.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true

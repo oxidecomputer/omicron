@@ -1447,6 +1447,30 @@ impl ServiceManager {
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
+    fn opte_interface_set_up_install(
+        zone: &InstalledZone,
+    ) -> Result<ServiceBuilder, Error> {
+        let port_idx = 0;
+        let port = zone.opte_ports().nth(port_idx).ok_or_else(|| {
+            Error::ZoneEnsureAddress(EnsureAddressError::MissingOptePort {
+                zone: String::from(zone.name()),
+                port_idx,
+            })
+        })?;
+
+        let opte_interface = port.vnic_name();
+        let opte_gateway = &port.gateway().ip().to_string();
+
+        let mut config_builder = PropertyGroupBuilder::new("config");
+        config_builder = config_builder
+            .add_property("interface", "astring", opte_interface)
+            .add_property("gateway", "astring", opte_gateway);
+
+        Ok(ServiceBuilder::new("oxide/opte-interface-setup")
+            .add_property_group(config_builder)
+            .add_instance(ServiceInstanceBuilder::new("default")))
+    }
+
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
@@ -1851,45 +1875,6 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                // Like Nexus, we need to be reachable externally via
-                // `dns_address` but we don't listen on that address
-                // directly but instead on a VPC private IP. OPTE will
-                // en/decapsulate as appropriate.
-                let port_idx = 0;
-                let port = installed_zone
-                    .opte_ports()
-                    .nth(port_idx)
-                    .ok_or_else(|| {
-                        Error::ZoneEnsureAddress(
-                            EnsureAddressError::MissingOptePort {
-                                zone: String::from(installed_zone.name()),
-                                port_idx,
-                            },
-                        )
-                    })?;
-
-                // TODO: These should be set up as part of the networking service perhaps?
-                // Nexus will likely need this as well
-                //
-                // OPTE_INTERFACE="$(svcprop -c -p config/opte_interface "${SMF_FMRI}")"
-                // OPTE_GATEWAY="$(svcprop -c -p config/opte_gateway "${SMF_FMRI}")"
-                //
-                // # Set up OPTE interface
-                // if [[ "$OPTE_GATEWAY" =~ .*:.* ]]; then
-                //     # IPv6 gateway
-                //     echo "IPv6 OPTE gateways are not yet supported"
-                //     exit 1
-                // else
-                //     # IPv4 gateway
-                //     ipadm show-addr "$OPTE_INTERFACE/public"  || ipadm create-addr -t -T dhcp "$OPTE_INTERFACE/public"
-                //     OPTE_IP=$(ipadm show-addr -p -o ADDR "$OPTE_INTERFACE/public" | cut -d'/' -f 1)
-                //     route get -host "$OPTE_GATEWAY" "$OPTE_IP" -interface -ifp "$OPTE_INTERFACE" || route add -host "$OPTE_GATEWAY" "$OPTE_IP" -interface -ifp "$OPTE_INTERFACE"
-                //     route get -inet default "$OPTE_GATEWAY" || route add -inet default "$OPTE_GATEWAY"
-                // fi
-                //
-                let opte_interface = port.vnic_name();
-                let opte_gateway = &port.gateway().ip().to_string();
-
                 let static_addr = underlay_address.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
@@ -1898,16 +1883,18 @@ impl ServiceManager {
                     &static_addr.clone(),
                 )?;
 
+                // Like Nexus, we need to be reachable externally via
+                // `dns_address` but we don't listen on that address
+                // directly but instead on a VPC private IP. OPTE will
+                // en/decapsulate as appropriate.
+                let opte_interface_setup = Self::opte_interface_set_up_install(&installed_zone)?;
+
                 let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
-                let dns_addr = format!("{}", DNS_PORT);
+                let dns_port = format!("{}", DNS_PORT);
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
-                    // TODO: Removeme and move to new opte interface service
-                    .add_property("opte_gateway", "astring", opte_gateway)
-                    .add_property("opte_interface", "astring", opte_interface)
-                    // TODO: Keep these two
                     .add_property("http_address", "astring", &http_addr)
-                    .add_property("dns_address", "astring", &dns_addr);
+                    .add_property("dns_port", "astring", &dns_port);
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1916,6 +1903,7 @@ impl ServiceManager {
 
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
+                    .add_service(opte_interface_setup)
                     .add_service(disabled_ssh_service)
                     .add_service(external_dns_service);
                 profile

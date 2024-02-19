@@ -16,6 +16,11 @@
   <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
 
+  <dependency name='opte_interface_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/opte-interface-setup:default' />
+  </dependency>
+
   <exec_method type='method' name='start'
       exec='/opt/oxide/lib/svc/manifest/external_dns.sh'
     timeout_seconds='0' />
@@ -23,10 +28,7 @@
 
   <property_group name='config' type='application'>
     <propval name='http_address' type='astring' value='unknown' />
-    <propval name='dns_address' type='astring' value='unknown' />
-    <!-- TODO: Removeme when new opte interface service exists -->
-    <propval name='opte_interface' type='astring' value='unknown' />
-    <propval name='opte_gateway' type='astring' value='unknown' />
+    <propval name='dns_port' type='astring' value='unknown' />
   </property_group>
 
   <property_group name='startd' type='framework'>
