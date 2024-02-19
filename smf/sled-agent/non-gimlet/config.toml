@@ -16,8 +16,7 @@ sidecar_revision.soft_zone = { front_port_count = 1, rear_port_count = 1 }
 
 # Setting this to true causes sled-agent to always report that its time is
 # in-sync, rather than querying its NTP zone.
-# TODO: Removeme before merging PR (set back to false)
-skip_timesync = true
+skip_timesync = false
 
 # For testing purposes, A file-backed zpool can be manually created with the
 # following:
