@@ -50,7 +50,7 @@ pub struct BaseboardId {
 pub struct Envelope {
     to: BaseboardId,
     from: BaseboardId,
-    msg: Msg,
+    msg: PeerMsg,
 }
 
 // The output of a given API call
@@ -190,6 +190,8 @@ impl Node {
         &mut self,
         NexusReq { id, kind }: NexusReq,
     ) -> impl Iterator<Item = Output> + '_ {
+        // All errors are solely for early return purposes.
+        // The actual errors are sent to nexus as replies.
         let _ = match kind {
             NexusReqKind::Commit(msg) => todo!(),
             NexusReqKind::GetCommitted(epoch) => todo!(),
@@ -207,7 +209,7 @@ impl Node {
     pub fn handle_peer_msg(
         &mut self,
         from: BaseboardId,
-        msg: Msg,
+        msg: PeerMsg,
     ) -> impl Iterator<Item = Output> + '_ {
         // TODO: Everything else
         self.outgoing.drain(..)
@@ -446,7 +448,7 @@ impl Node {
         Ok(())
     }
 
-    fn send(&mut self, to: BaseboardId, msg: Msg) {
+    fn send(&mut self, to: BaseboardId, msg: PeerMsg) {
         self.outgoing.push(Output::Envelope(Envelope {
             to,
             from: self.id.clone(),

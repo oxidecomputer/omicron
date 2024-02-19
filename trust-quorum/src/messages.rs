@@ -145,7 +145,7 @@ pub struct CancelUpgradeFromLrtqMsg {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum Msg {
+pub enum PeerMsg {
     Prepare(PrepareMsg),
     Commit(CommitMsg),
     Committed(CommittedMsg),
