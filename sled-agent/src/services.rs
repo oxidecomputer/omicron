@@ -1887,7 +1887,8 @@ impl ServiceManager {
                 // `dns_address` but we don't listen on that address
                 // directly but instead on a VPC private IP. OPTE will
                 // en/decapsulate as appropriate.
-                let opte_interface_setup = Self::opte_interface_set_up_install(&installed_zone)?;
+                let opte_interface_setup =
+                    Self::opte_interface_set_up_install(&installed_zone)?;
 
                 let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
                 let dns_port = format!("{}", DNS_PORT);
