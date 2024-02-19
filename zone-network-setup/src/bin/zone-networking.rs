@@ -105,7 +105,8 @@ async fn do_run() -> Result<(), CmdError> {
                     .required(true)
                     .value_parser(parse_ipv4),
                 ),
-        ).subcommand(
+        )
+        .subcommand(
             Command::new("get-opte-ip")
                 .about("Retrieves OPTE IP from interface")
                 .arg(
