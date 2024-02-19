@@ -1890,10 +1890,25 @@ impl ServiceManager {
                 let opte_interface_setup =
                     Self::opte_interface_set_up_install(&installed_zone)?;
 
+                let port_idx = 0;
+                let port = installed_zone
+                    .opte_ports()
+                    .nth(port_idx)
+                    .ok_or_else(|| {
+                        Error::ZoneEnsureAddress(
+                            EnsureAddressError::MissingOptePort {
+                                zone: String::from(installed_zone.name()),
+                                port_idx,
+                            },
+                        )
+                    })?;
+                let opte_interface = port.vnic_name();
+
                 let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
                 let dns_port = format!("{}", DNS_PORT);
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
+                    .add_property("opte_interface", "astring", &opte_interface)
                     .add_property("http_address", "astring", &http_addr)
                     .add_property("dns_port", "astring", &dns_port);
                 let external_dns_service =
