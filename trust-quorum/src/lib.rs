@@ -5,6 +5,7 @@
 //! Implementation of the oxide rack trust quorum protocol
 
 use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
 use std::collections::BTreeMap;
 use std::time::Instant;
 use uuid::Uuid;
@@ -67,6 +68,7 @@ pub enum Output {
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub struct EncryptedRackSecret(pub Vec<u8>);
+
 #[derive(
     Debug,
     Clone,
@@ -78,13 +80,20 @@ pub struct EncryptedRackSecret(pub Vec<u8>);
     Deserialize,
     ZeroizeOnDrop,
 )]
-
 pub struct Share(Vec<u8>);
 
 impl Share {
     pub fn new(share: Vec<u8>) -> Share {
         assert_eq!(share.len(), SHARE_SIZE);
         Share(share)
+    }
+}
+
+impl From<&Share> for ShareDigest {
+    fn from(share: &Share) -> Self {
+        ShareDigest(Sha3_256Digest(
+            Sha3_256::digest(&share.0).as_slice().try_into().unwrap(),
+        ))
     }
 }
 
@@ -106,6 +115,18 @@ pub struct DecommissionedMetadata {
 
     /// Which node this commit information was learned from  
     from: BaseboardId,
+}
+
+/// Data loaded from the ledger by sled-agent on instruction from Nexus
+///
+/// The epoch is always 0, because LRTQ does not allow key-rotation
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub struct LrtqLedgerData {
+    pub rack_uuid: RackId,
+    pub threshold: Threshold,
+    pub share: Share,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -142,11 +163,23 @@ pub struct Node {
     id: BaseboardId,
     state: State,
     outgoing: Vec<Output>,
+
+    // If this node was an LRTQ node, sled-agent will start it with the ledger
+    // data it read from disk. This allows us to upgrade from LRTQ.
+    lrtq_ledger_data: Option<LrtqLedgerData>,
 }
 
 impl Node {
-    pub fn new(id: BaseboardId) -> Node {
-        Node { id, state: State::default(), outgoing: Vec::new() }
+    pub fn new(
+        id: BaseboardId,
+        lrtq_ledger_data: Option<LrtqLedgerData>,
+    ) -> Node {
+        Node {
+            id,
+            state: State::default(),
+            outgoing: Vec::new(),
+            lrtq_ledger_data,
+        }
     }
 
     pub fn id(&self) -> &BaseboardId {
@@ -157,17 +190,17 @@ impl Node {
         &mut self,
         NexusReq { id, kind }: NexusReq,
     ) -> impl Iterator<Item = Output> + '_ {
-        match kind {
+        let _ = match kind {
             NexusReqKind::Commit(msg) => todo!(),
             NexusReqKind::GetCommitted(epoch) => todo!(),
-            NexusReqKind::GetLrtqShareHash => todo!(),
+            NexusReqKind::GetLrtqShareHash => self.get_lrtq_share_digest(id),
             NexusReqKind::UpgradeFromLrtq(msg) => {
                 self.upgrade_from_lrtq(id, msg)
             }
             NexusReqKind::CancelUpgradeFromLrtq(msg) => {
                 self.cancel_upgrade_from_lrtq(id, msg)
             }
-        }
+        };
         self.outgoing.drain(..)
     }
 
@@ -185,109 +218,77 @@ impl Node {
         self.outgoing.drain(..)
     }
 
-    fn upgrade_from_lrtq(&mut self, request_id: Uuid, msg: UpgradeFromLrtqMsg) {
-        if let Some(decommissioned) = &self.state.decommissioned {
-            return self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::SledDecommissioned {
-                    from: decommissioned.from.clone(),
-                    epoch: decommissioned.epoch,
-                    last_prepared_epoch: self.state.last_prepared_epoch(),
-                }),
-            );
-        }
+    /// If an LRTQ upgrade has not yet taken place, and this is an lrtq node
+    /// then calculate the digest of this nodes lrtq share and send it to nexus.
+    /// Otherwise send an error to nexus.
+    fn get_lrtq_share_digest(&mut self, request_id: Uuid) -> Result<(), ()> {
+        self.check_in_service(request_id)?;
+        // We only allow retrieval of the lrtq share digest before an lrtq
+        // upgrade has been attempted. Nexus can try again, but first it must
+        // attempt to cancel the current outstanding reconfiguration. There is
+        // no reason to leak any information, even a hash, if its unnecessary
+        // for the application to have that information.
+        self.check_no_prepares(request_id)?;
+        let lrtq_ledger_data = self.get_lrtq_ledger_data(request_id)?;
 
-        if let Some(epoch) = self.state.last_prepared_epoch() {
-            return self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
-            );
-        }
+        self.reply_to_nexus(
+            request_id,
+            NexusRspKind::LrtqShareDigest(ShareDigest::from(
+                &lrtq_ledger_data.share,
+            )),
+        );
 
-        if msg.members.len() <= msg.lrtq_ledger_data.threshold.0 as usize {
-            return self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(
-                    NexusRspError::MembershipThresholdMismatch {
-                        num_members: msg.members.len(),
-                        threshold: msg.lrtq_ledger_data.threshold,
-                    },
-                ),
-            );
-        }
+        Ok(())
+    }
 
-        if msg.members.len() < 3 || msg.members.len() > 32 {
-            return self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::InvalidMembershipSize(
-                    msg.members.len(),
-                )),
-            );
-        }
+    /// Perform an upgrade from lrtq into v1 of the trust-quorum protocol
+    fn upgrade_from_lrtq(
+        &mut self,
+        request_id: Uuid,
+        msg: UpgradeFromLrtqMsg,
+    ) -> Result<(), ()> {
+        self.check_in_service(request_id)?;
+        self.check_no_prepares(request_id)?;
 
-        if msg.lrtq_ledger_data.threshold.0 < 2
-            || msg.lrtq_ledger_data.threshold.0 > 31
-        {
-            return self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::InvalidThreshold(
-                    msg.lrtq_ledger_data.threshold,
-                )),
-            );
-        }
+        // Return early if we are not an lrtq node
+        let lrtq_ledger_data = self.get_lrtq_ledger_data(request_id)?;
+
+        self.check_membership_constraints(
+            request_id,
+            msg.members.len(),
+            lrtq_ledger_data.threshold,
+        )?;
 
         // Create and persist a prepare, and ack to Nexus
         let config = Configuration {
-            rack_uuid: msg.lrtq_ledger_data.rack_uuid,
+            rack_uuid: lrtq_ledger_data.rack_uuid,
             epoch: Epoch(0),
             last_committed_epoch: Epoch(0),
             coordinator: msg.members.keys().next().unwrap().clone(),
             members: msg.members,
-            threshold: msg.lrtq_ledger_data.threshold,
+            threshold: lrtq_ledger_data.threshold,
             encrypted: None,
             lrtq_upgrade_id: Some(msg.upgrade_id),
         };
 
-        let prepare = PrepareMsg { config, share: msg.lrtq_ledger_data.share };
+        let prepare = PrepareMsg { config, share: lrtq_ledger_data.share };
         self.state.prepares.insert(Epoch(0), prepare.clone());
         self.persist_prepare(prepare);
         self.reply_to_nexus(
             request_id,
             NexusRspKind::UpgradeFromLrtqAck { upgrade_id: msg.upgrade_id },
         );
+
+        Ok(())
     }
 
     fn cancel_upgrade_from_lrtq(
         &mut self,
         request_id: Uuid,
         msg: CancelUpgradeFromLrtqMsg,
-    ) {
-        if let Some(decommissioned) = &self.state.decommissioned {
-            return self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::SledDecommissioned {
-                    from: decommissioned.from.clone(),
-                    epoch: decommissioned.epoch,
-                    last_prepared_epoch: self.state.last_prepared_epoch(),
-                }),
-            );
-        }
-
-        if let Some(epoch) = self.state.last_committed_epoch() {
-            return self.reply_to_nexus(
-                request_id,
-                NexusRspKind::Error(NexusRspError::AlreadyCommitted(epoch)),
-            );
-        }
-
-        if let Some(epoch) = self.state.last_prepared_epoch() {
-            if epoch > Epoch(0) {
-                return self.reply_to_nexus(
-                    request_id,
-                    NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
-                );
-            }
-        }
+    ) -> Result<(), ()> {
+        self.check_in_service(request_id)?;
+        self.check_only_epoch_zero_prepared(request_id)?;
 
         if let Some(config) = self.state.configuration(Epoch(0)) {
             if config.lrtq_upgrade_id == Some(msg.upgrade_id) {
@@ -304,6 +305,145 @@ impl Node {
         }
 
         // No prepares or anything. Just consider this idempotent.
+        Ok(())
+    }
+
+    /// Get the lrtq ledger data if this node is an lrtq node
+    ///
+    /// Send an error reply to nexus if not an lrtq node, and return an error.
+    ///
+    /// Note: The error is simply to allow early return, and conveys no
+    /// information, as that is already in the reply to nexus.
+    pub fn get_lrtq_ledger_data(
+        &mut self,
+        request_id: Uuid,
+    ) -> Result<LrtqLedgerData, ()> {
+        if let Some(lrtq_ledger_data) = &self.lrtq_ledger_data {
+            Ok(lrtq_ledger_data.clone())
+        } else {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::NotAnLrtqMember),
+            );
+            return Err(());
+        }
+    }
+
+    /// Verify that the node is not decommissioned
+    ///
+    /// Send a reply to nexus if it is, and return an error.
+    ///
+    /// Note: The error is simply to allow early return, and conveys no
+    /// information, as that is already in the reply to nexus.
+    fn check_in_service(&mut self, request_id: Uuid) -> Result<(), ()> {
+        if let Some(decommissioned) = &self.state.decommissioned {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::SledDecommissioned {
+                    from: decommissioned.from.clone(),
+                    epoch: decommissioned.epoch,
+                    last_prepared_epoch: self.state.last_prepared_epoch(),
+                }),
+            );
+            return Err(());
+        }
+        Ok(())
+    }
+
+    /// Verify that no configurations have been prepared yet
+    ///
+    /// Send a reply to nexus if there are any prepares, and return an error.
+    ///
+    /// Note: The error is simply to allow early return, and conveys no
+    /// information, as that is already in the reply to nexus.
+    fn check_no_prepares(&mut self, request_id: Uuid) -> Result<(), ()> {
+        if let Some(epoch) = self.state.last_prepared_epoch() {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
+            );
+            return Err(());
+        }
+        Ok(())
+    }
+
+    /// Verify that so far this node has only prepared epoch 0 and not yet committed it.
+    ///
+    /// Send a reply to nexus if this is false, and return an error.
+    ///
+    /// Note: The error is simply to allow early return, and conveys no
+    /// information, as that is already in the reply to nexus.
+    fn check_only_epoch_zero_prepared(
+        &mut self,
+        request_id: Uuid,
+    ) -> Result<(), ()> {
+        if let Some(epoch) = self.state.last_committed_epoch() {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::AlreadyCommitted(epoch)),
+            );
+            return Err(());
+        }
+
+        if let Some(epoch) = self.state.last_prepared_epoch() {
+            if epoch > Epoch(0) {
+                self.reply_to_nexus(
+                    request_id,
+                    NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
+                );
+            }
+            return Err(());
+        }
+
+        Ok(())
+    }
+
+    /// Verify that the cluster membership and threshold sizes are within
+    /// constraints
+    ///
+    /// Send a reply to nexus if the constraints are invalid and return an
+    /// error.
+    ///
+    /// Note: The error is simply to allow early return, and conveys no
+    /// information, as that is already in the reply to nexus.
+    fn check_membership_constraints(
+        &mut self,
+        request_id: Uuid,
+        num_members: usize,
+        threshold: Threshold,
+    ) -> Result<(), ()> {
+        if num_members <= threshold.0 as usize {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(
+                    NexusRspError::MembershipThresholdMismatch {
+                        num_members,
+                        threshold,
+                    },
+                ),
+            );
+            return Err(());
+        }
+
+        if num_members < 3 || num_members > 32 {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::InvalidMembershipSize(
+                    num_members,
+                )),
+            );
+            return Err(());
+        }
+
+        if threshold.0 < 2 || threshold.0 > 31 {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(NexusRspError::InvalidThreshold(threshold)),
+            );
+            return Err(());
+        }
+
+        Ok(())
     }
 
     fn send(&mut self, to: BaseboardId, msg: Msg) {

@@ -43,7 +43,7 @@ pub enum NexusReqKind {
 
     /// Retrieve the hash of a share for an LRTQ node
     ///
-    /// This is necessary when coordinating upgrades
+    /// This is necessary when coordinating upgrades from LRTQ
     GetLrtqShareHash,
 
     /// Inform a member to upgrade from LRTQ by creating a new PrepareMsg for
@@ -108,6 +108,9 @@ pub enum NexusRspError {
 
     #[error("invalid threshold: {0:?}: threshold must be between 2 and 31 inclusive")]
     InvalidThreshold(Threshold),
+
+    #[error("This node is not an LRTQ member")]
+    NotAnLrtqMember,
 }
 
 #[derive(
@@ -130,21 +133,10 @@ pub struct CommittedMsg {
     pub committed_bitmap: u32,
 }
 
-/// Data loaded from the ledger by sled-agent on instruction from Nexus
-///
-/// The epoch is always 0, because LRTQ does not allow key-rotation
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct LrtqLedgerData {
-    pub rack_uuid: RackId,
-    pub threshold: Threshold,
-    pub share: Share,
-}
-
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct UpgradeFromLrtqMsg {
     pub upgrade_id: Uuid,
     pub members: BTreeMap<BaseboardId, ShareDigest>,
-    pub lrtq_ledger_data: LrtqLedgerData,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
