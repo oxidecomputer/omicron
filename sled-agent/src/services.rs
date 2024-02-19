@@ -1905,7 +1905,7 @@ impl ServiceManager {
                 let opte_ip = port.ip();
 
                 let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
-                let dns_addr = format!("{}:{}",opte_ip, DNS_PORT);
+                let dns_addr = format!("{}:{}", opte_ip, DNS_PORT);
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property("http_address", "astring", &http_addr)
