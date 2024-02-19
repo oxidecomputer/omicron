@@ -15,7 +15,7 @@ struct PortInner {
     // Name of the port as identified by OPTE
     name: String,
     // IP address within the VPC Subnet
-    _ip: IpAddr,
+    ip: IpAddr,
     // VPC-private MAC address
     mac: MacAddr6,
     // Emulated PCI slot for the guest NIC, passed to Propolis
@@ -95,7 +95,7 @@ impl Port {
         Self {
             inner: Arc::new(PortInner {
                 name,
-                _ip: ip,
+                ip,
                 mac,
                 slot,
                 vni,
@@ -103,6 +103,10 @@ impl Port {
                 vnic,
             }),
         }
+    }
+
+    pub fn ip(&self) -> &IpAddr {
+        &self.inner.ip
     }
 
     pub fn name(&self) -> &str {

@@ -28,8 +28,7 @@
 
   <property_group name='config' type='application'>
     <propval name='http_address' type='astring' value='unknown' />
-    <propval name='dns_port' type='astring' value='unknown' />
-    <propval name='opte_interface' type='astring' value='unknown' />
+    <propval name='dns_addr' type='astring' value='unknown' />
   </property_group>
 
   <property_group name='startd' type='framework'>

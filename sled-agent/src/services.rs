@@ -1902,15 +1902,14 @@ impl ServiceManager {
                             },
                         )
                     })?;
-                let opte_interface = port.vnic_name();
+                let opte_ip = port.ip();
 
                 let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
-                let dns_port = format!("{}", DNS_PORT);
+                let dns_addr = format!("{}:{}",opte_ip, DNS_PORT);
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
-                    .add_property("opte_interface", "astring", &opte_interface)
                     .add_property("http_address", "astring", &http_addr)
-                    .add_property("dns_port", "astring", &dns_port);
+                    .add_property("dns_addr", "astring", &dns_addr);
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")
