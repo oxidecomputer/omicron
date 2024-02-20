@@ -21,6 +21,7 @@ mod builder;
 mod collector;
 pub mod examples;
 mod sled_agent_enumerator;
+mod synthetic;
 
 // only exposed for test code to construct collections
 pub use builder::CollectionBuilder;

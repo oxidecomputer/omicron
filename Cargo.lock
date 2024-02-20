@@ -4474,6 +4474,7 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
+ "ipnet",
  "nexus-types",
  "omicron-common",
  "omicron-sled-agent",
