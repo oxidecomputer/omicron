@@ -11,13 +11,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-/// An API request to a node to start coordinating a reconfiguration
-///
-/// This is a message sent by Nexus in a real deployment
+/// A request from nexus informing a node to start coordinating a
+/// reconfiguration
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Reconfigure {
     pub epoch: Epoch,
-    pub last_committed_epoch: Epoch,
+    pub last_committed_epoch: Option<Epoch>,
     pub members: BTreeSet<BaseboardId>,
     pub threshold: Threshold,
 }
@@ -35,6 +34,9 @@ pub struct NexusReq {
 /// read and loaded in by sled-agent.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum NexusReqKind {
+    /// Start a reconfiguration
+    Reconfigure(Reconfigure),
+
     /// Nexus seeds a few nodes with commits and then they get gossiped around
     Commit(CommitMsg),
 
@@ -111,6 +113,15 @@ pub enum NexusRspError {
 
     #[error("This node is not an LRTQ member")]
     NotAnLrtqMember,
+
+    #[error("Node has last committed epoch of {node_epoch:?}, message contains {msg_epoch:?}")]
+    LastCommittedEpochMismatch {
+        node_epoch: Option<Epoch>,
+        msg_epoch: Option<Epoch>,
+    },
+
+    #[error("sled has already prepared a request at epoch {existing:?}, and cannot prepare another at a smaller or equivalent epoch {new:?}")]
+    PreparedEpochMismatch { existing: Epoch, new: Epoch },
 }
 
 #[derive(
@@ -147,6 +158,7 @@ pub struct CancelUpgradeFromLrtqMsg {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum PeerMsg {
     Prepare(PrepareMsg),
+    PrepareAck,
     Commit(CommitMsg),
     Committed(CommittedMsg),
 

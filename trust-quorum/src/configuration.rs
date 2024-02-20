@@ -18,7 +18,9 @@ use uuid::Uuid;
 pub struct Configuration {
     pub rack_uuid: RackId,
     pub epoch: Epoch,
-    pub last_committed_epoch: Epoch,
+
+    /// There is no last epoch for epoch 0
+    pub last_committed_epoch: Option<Epoch>,
 
     /// We pick the first member of epoch 0 as coordinator when initializing from
     /// lrtq so we don't have to use an option

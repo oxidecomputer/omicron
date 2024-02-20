@@ -4,15 +4,17 @@
 
 //! Implementation of the oxide rack trust quorum protocol
 
+use rack_secret::RackSecret;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 use uuid::Uuid;
 use zeroize::ZeroizeOnDrop;
 
 mod configuration;
 mod messages;
+mod rack_secret;
 pub use configuration::Configuration;
 pub use messages::*;
 
@@ -70,17 +72,17 @@ pub enum Output {
 pub struct EncryptedRackSecret(pub Vec<u8>);
 
 #[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    ZeroizeOnDrop,
+    Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ZeroizeOnDrop,
 )]
 pub struct Share(Vec<u8>);
+
+// We don't want to risk debug-logging the actual share contents, so implement
+// `Debug` manually.
+impl std::fmt::Debug for Share {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Share").finish()
+    }
+}
 
 impl Share {
     pub fn new(share: Vec<u8>) -> Share {
@@ -120,6 +122,9 @@ pub struct DecommissionedMetadata {
 /// Data loaded from the ledger by sled-agent on instruction from Nexus
 ///
 /// The epoch is always 0, because LRTQ does not allow key-rotation
+///
+/// Technically, this is persistant state, but it is not altered by this
+/// protocol and therefore it is not part of `PersistentState`.
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
@@ -129,8 +134,9 @@ pub struct LrtqLedgerData {
     pub share: Share,
 }
 
+/// All the persistent state for this protocol
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct State {
+pub struct PersistentState {
     pub prepares: BTreeMap<Epoch, PrepareMsg>,
     pub commits: BTreeMap<Epoch, CommitMsg>,
 
@@ -142,7 +148,7 @@ pub struct State {
     pub decommissioned: Option<DecommissionedMetadata>,
 }
 
-impl State {
+impl PersistentState {
     pub fn last_prepared_epoch(&self) -> Option<Epoch> {
         self.prepares.keys().last().map(|epoch| *epoch)
     }
@@ -157,11 +163,58 @@ impl State {
     }
 }
 
+/// The state of a reconfiguration coordinator
+pub struct CoordinatorState {
+    start_time: Instant,
+
+    // We copy the last committed reconfiguration here so that decisions
+    // can be made with only the state local to this `CoordinatorState`.
+    // If we get a prepare message or commit message with a later epoch
+    // we will abandon this coordinator state.
+    last_committed_configuration: Configuration,
+    epoch: Epoch,
+    members: BTreeSet<BaseboardId>,
+    threshold: Threshold,
+    // Received key shares for the last committed epoch
+    // Only used if there actually is a last_committed_epoch
+    received_key_shares: BTreeMap<BaseboardId, Share>,
+
+    // Once we've received enough key shares for the last committed epoch (if
+    // there is one), we can reconstruct the rack secret and drop the shares.
+    last_committed_rack_secret: Option<RackSecret>,
+
+    // Once we've recreated the rack secret for the last committed epoch
+    // we will generate a rack secret and split it into key shares.
+    // then populate a `PrepareMsg` for each member. When the member acknowledges
+    // receipt, we will remove the prepare message. Once all members acknowledge
+    // their prepare, we are done and can respond to nexus.
+    prepares: BTreeMap<BaseboardId, PrepareMsg>,
+}
+
+impl CoordinatorState {
+    pub fn new(
+        now: Instant,
+        reconfigure: Reconfigure,
+        last_committed_configuration: Configuration,
+    ) -> CoordinatorState {
+        CoordinatorState {
+            start_time: now,
+            last_committed_configuration,
+            epoch: reconfigure.epoch,
+            members: reconfigure.members,
+            threshold: reconfigure.threshold,
+            received_key_shares: BTreeMap::default(),
+            last_committed_rack_secret: None,
+            prepares: BTreeMap::default(),
+        }
+    }
+}
+
 /// A node capable of participating in trust quorum
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     id: BaseboardId,
-    state: State,
+    persistent_state: PersistentState,
     outgoing: Vec<Output>,
 
     // If this node was an LRTQ node, sled-agent will start it with the ledger
@@ -176,7 +229,7 @@ impl Node {
     ) -> Node {
         Node {
             id,
-            state: State::default(),
+            persistent_state: PersistentState::default(),
             outgoing: Vec::new(),
             lrtq_ledger_data,
         }
@@ -188,11 +241,15 @@ impl Node {
 
     pub fn handle_nexus_request(
         &mut self,
+        now: Instant,
         NexusReq { id, kind }: NexusReq,
     ) -> impl Iterator<Item = Output> + '_ {
         // All errors are solely for early return purposes.
         // The actual errors are sent to nexus as replies.
         let _ = match kind {
+            NexusReqKind::Reconfigure(msg) => {
+                self.coordinate_reconfiguration(id, now, msg)
+            }
             NexusReqKind::Commit(msg) => todo!(),
             NexusReqKind::GetCommitted(epoch) => todo!(),
             NexusReqKind::GetLrtqShareHash => self.get_lrtq_share_digest(id),
@@ -218,6 +275,53 @@ impl Node {
     pub fn tick(&mut self, now: Instant) -> impl Iterator<Item = Output> + '_ {
         // TODO: Everything else
         self.outgoing.drain(..)
+    }
+
+    /// Generate a new rack secret for the given epoch, encrypt the old one with
+    /// a key derived from the new rack secret, split the rack secret,
+    /// create a bunch of `PrepareMsgs` and send them to peer nodes.
+    fn coordinate_reconfiguration(
+        &mut self,
+        request_id: Uuid,
+        now: Instant,
+        msg: Reconfigure,
+    ) -> Result<(), ()> {
+        self.check_in_service(request_id)?;
+
+        let last_committed_epoch = self.persistent_state.last_committed_epoch();
+
+        // We can only reconfigure if the current epoch matches the last
+        // committed epoch in the `Reconfigure` request.
+        if msg.last_committed_epoch != last_committed_epoch {
+            self.reply_to_nexus(
+                request_id,
+                NexusRspKind::Error(
+                    NexusRspError::LastCommittedEpochMismatch {
+                        node_epoch: last_committed_epoch,
+                        msg_epoch: msg.last_committed_epoch,
+                    },
+                ),
+            );
+            return Err(());
+        }
+
+        // We must not have seen a prepare for this epoch or any greater epoch
+        if let Some(last_prepared_epoch) =
+            self.persistent_state.last_prepared_epoch()
+        {
+            if msg.epoch <= last_prepared_epoch {
+                self.reply_to_nexus(
+                    request_id,
+                    NexusRspKind::Error(NexusRspError::PreparedEpochMismatch {
+                        existing: last_prepared_epoch,
+                        new: msg.epoch,
+                    }),
+                );
+            }
+            return Err(());
+        }
+
+        Ok(())
     }
 
     /// If an LRTQ upgrade has not yet taken place, and this is an lrtq node
@@ -265,7 +369,7 @@ impl Node {
         let config = Configuration {
             rack_uuid: lrtq_ledger_data.rack_uuid,
             epoch: Epoch(0),
-            last_committed_epoch: Epoch(0),
+            last_committed_epoch: None,
             coordinator: msg.members.keys().next().unwrap().clone(),
             members: msg.members,
             threshold: lrtq_ledger_data.threshold,
@@ -274,7 +378,7 @@ impl Node {
         };
 
         let prepare = PrepareMsg { config, share: lrtq_ledger_data.share };
-        self.state.prepares.insert(Epoch(0), prepare.clone());
+        self.persistent_state.prepares.insert(Epoch(0), prepare.clone());
         self.persist_prepare(prepare);
         self.reply_to_nexus(
             request_id,
@@ -292,10 +396,10 @@ impl Node {
         self.check_in_service(request_id)?;
         self.check_only_epoch_zero_prepared(request_id)?;
 
-        if let Some(config) = self.state.configuration(Epoch(0)) {
+        if let Some(config) = self.persistent_state.configuration(Epoch(0)) {
             if config.lrtq_upgrade_id == Some(msg.upgrade_id) {
                 // Success!
-                self.state.prepares.remove(&Epoch(0));
+                self.persistent_state.prepares.remove(&Epoch(0));
                 self.persist_lrtq_cancelled(msg.upgrade_id);
             } else {
                 // Stale reconfiguration Id.
@@ -316,7 +420,7 @@ impl Node {
     ///
     /// Note: The error is simply to allow early return, and conveys no
     /// information, as that is already in the reply to nexus.
-    pub fn get_lrtq_ledger_data(
+    fn get_lrtq_ledger_data(
         &mut self,
         request_id: Uuid,
     ) -> Result<LrtqLedgerData, ()> {
@@ -338,13 +442,15 @@ impl Node {
     /// Note: The error is simply to allow early return, and conveys no
     /// information, as that is already in the reply to nexus.
     fn check_in_service(&mut self, request_id: Uuid) -> Result<(), ()> {
-        if let Some(decommissioned) = &self.state.decommissioned {
+        if let Some(decommissioned) = &self.persistent_state.decommissioned {
             self.reply_to_nexus(
                 request_id,
                 NexusRspKind::Error(NexusRspError::SledDecommissioned {
                     from: decommissioned.from.clone(),
                     epoch: decommissioned.epoch,
-                    last_prepared_epoch: self.state.last_prepared_epoch(),
+                    last_prepared_epoch: self
+                        .persistent_state
+                        .last_prepared_epoch(),
                 }),
             );
             return Err(());
@@ -359,7 +465,7 @@ impl Node {
     /// Note: The error is simply to allow early return, and conveys no
     /// information, as that is already in the reply to nexus.
     fn check_no_prepares(&mut self, request_id: Uuid) -> Result<(), ()> {
-        if let Some(epoch) = self.state.last_prepared_epoch() {
+        if let Some(epoch) = self.persistent_state.last_prepared_epoch() {
             self.reply_to_nexus(
                 request_id,
                 NexusRspKind::Error(NexusRspError::AlreadyPrepared(epoch)),
@@ -379,7 +485,7 @@ impl Node {
         &mut self,
         request_id: Uuid,
     ) -> Result<(), ()> {
-        if let Some(epoch) = self.state.last_committed_epoch() {
+        if let Some(epoch) = self.persistent_state.last_committed_epoch() {
             self.reply_to_nexus(
                 request_id,
                 NexusRspKind::Error(NexusRspError::AlreadyCommitted(epoch)),
@@ -387,7 +493,7 @@ impl Node {
             return Err(());
         }
 
-        if let Some(epoch) = self.state.last_prepared_epoch() {
+        if let Some(epoch) = self.persistent_state.last_prepared_epoch() {
             if epoch > Epoch(0) {
                 self.reply_to_nexus(
                     request_id,
