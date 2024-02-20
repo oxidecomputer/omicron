@@ -124,7 +124,7 @@ mod test {
 
         let example = example();
         let error = DnsDiff::new(&example_empty, &example)
-            .expect_err("unexpectedly succeeded comparing two empty configs");
+            .expect_err("unexpectedly succeeded comparing an empty config");
         assert!(
             format!("{:#}", error).contains("expected exactly one DNS zone")
         );
@@ -144,8 +144,9 @@ mod test {
                 },
             ],
         };
-        let error = DnsDiff::new(&example_multiple, &example)
-            .expect_err("unexpectedly succeeded comparing two empty configs");
+        let error = DnsDiff::new(&example_multiple, &example).expect_err(
+            "unexpectedly succeeded comparing config with multiple zones",
+        );
         assert!(
             format!("{:#}", error).contains("expected exactly one DNS zone")
         );

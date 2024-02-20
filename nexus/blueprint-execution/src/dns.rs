@@ -35,16 +35,13 @@ use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
-pub async fn deploy_dns<S>(
+pub(crate) async fn deploy_dns(
     opctx: &OpContext,
     datastore: &DataStore,
-    creator: S,
+    creator: String,
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
-) -> Result<(), Error>
-where
-    String: From<S>,
-{
+) -> Result<(), Error> {
     // First, fetch the current DNS config.
     let dns_config_current = datastore
         .dns_config_read(opctx, DnsGroup::Internal)
@@ -161,6 +158,7 @@ where
     datastore.dns_update_from_version(opctx, update, generation).await
 }
 
+/// Returns the expected contents of internal DNS based on the given blueprint
 pub fn blueprint_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
@@ -250,6 +248,9 @@ pub fn blueprint_dns_config(
             .unwrap();
     }
 
+    // We set the generation number for the internal DNS to be newer than
+    // whatever it was when this blueprint was generated.  This will only be
+    // used if the generated DNS contents are different from what's current.
     dns_builder.generation(blueprint.internal_dns_version.next());
     dns_builder.build()
 }
