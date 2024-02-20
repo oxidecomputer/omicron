@@ -37,7 +37,6 @@ use nexus_types::external_api::params::IpPoolSiloUpdate;
 use nexus_types::external_api::params::IpPoolUpdate;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::shared::Ipv6Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
@@ -45,6 +44,7 @@ use nexus_types::external_api::views::IpPoolSiloLink;
 use nexus_types::external_api::views::Silo;
 use nexus_types::external_api::views::SiloIpPool;
 use nexus_types::identity::Resource;
+use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentity;
@@ -853,59 +853,60 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     };
     test_bad_ip_ranges(client, &ip_pool_add_range_url, &ipv4_range).await;
 
+    // TODO: put back IPv6 tests when IPv6 ranges are supported again
     // Test data for IPv6 ranges that should fail due to overlap
-    let ipv6_range = TestRange {
-        base_range: IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
-            )
-            .unwrap(),
-        ),
-        bad_ranges: vec![
-            // The exact same range
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
-                )
-                .unwrap(),
-            ),
-            // Overlaps below
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 15),
-                )
-                .unwrap(),
-            ),
-            // Overlaps above
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 15),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 25),
-                )
-                .unwrap(),
-            ),
-            // Contains the base range
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 100),
-                )
-                .unwrap(),
-            ),
-            // Contained by the base range
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 12),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 13),
-                )
-                .unwrap(),
-            ),
-        ],
-    };
-    test_bad_ip_ranges(client, &ip_pool_add_range_url, &ipv6_range).await;
+    // let ipv6_range = TestRange {
+    //     base_range: IpRange::V6(
+    //         Ipv6Range::new(
+    //             std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+    //             std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
+    //         )
+    //         .unwrap(),
+    //     ),
+    //     bad_ranges: vec![
+    //         // The exact same range
+    //         IpRange::V6(
+    //             Ipv6Range::new(
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
+    //             )
+    //             .unwrap(),
+    //         ),
+    //         // Overlaps below
+    //         IpRange::V6(
+    //             Ipv6Range::new(
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5),
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 15),
+    //             )
+    //             .unwrap(),
+    //         ),
+    //         // Overlaps above
+    //         IpRange::V6(
+    //             Ipv6Range::new(
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 15),
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 25),
+    //             )
+    //             .unwrap(),
+    //         ),
+    //         // Contains the base range
+    //         IpRange::V6(
+    //             Ipv6Range::new(
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 100),
+    //             )
+    //             .unwrap(),
+    //         ),
+    //         // Contained by the base range
+    //         IpRange::V6(
+    //             Ipv6Range::new(
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 12),
+    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 13),
+    //             )
+    //             .unwrap(),
+    //         ),
+    //     ],
+    // };
+    // test_bad_ip_ranges(client, &ip_pool_add_range_url, &ipv6_range).await;
 }
 
 async fn test_bad_ip_ranges(
@@ -953,6 +954,36 @@ async fn test_bad_ip_ranges(
 }
 
 #[nexus_test]
+async fn test_ip_pool_range_rejects_v6(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    create_ip_pool(client, "p0", None).await;
+
+    let range = IpRange::V6(
+        Ipv6Range::new(
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
+        )
+        .unwrap(),
+    );
+
+    let add_url = "/v1/system/ip-pools/p0/ranges/add";
+    let error =
+        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
+            .await;
+
+    let msg = "unable to parse JSON body: first: invalid IPv4 address syntax";
+    assert!(error.message.starts_with(msg));
+
+    // same deal with service pool
+    let add_url = "/v1/system/ip-pools-service/ranges/add";
+    let error =
+        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
+            .await;
+    assert!(error.message.starts_with(msg));
+}
+
+#[nexus_test]
 async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let ip_pools_url = "/v1/system/ip-pools";
@@ -984,17 +1015,17 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     // address, which sorts all IPv4 before IPv6, then within protocol versions
     // by their first address.
     let ranges = [
-        IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 11),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
+        IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 3),
+                std::net::Ipv4Addr::new(10, 0, 0, 4),
             )
             .unwrap(),
         ),
-        IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+        IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 5),
+                std::net::Ipv4Addr::new(10, 0, 0, 6),
             )
             .unwrap(),
         ),
@@ -1262,15 +1293,15 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     let ranges = [
         IpRange::V4(
             Ipv4Range::new(
-                std::net::Ipv4Addr::new(10, 0, 0, 1),
-                std::net::Ipv4Addr::new(10, 0, 0, 2),
+                std::net::Ipv4Addr::new(10, 0, 0, 3),
+                std::net::Ipv4Addr::new(10, 0, 0, 4),
             )
             .unwrap(),
         ),
-        IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+        IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 1),
+                std::net::Ipv4Addr::new(10, 0, 0, 2),
             )
             .unwrap(),
         ),

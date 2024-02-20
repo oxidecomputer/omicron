@@ -1737,6 +1737,7 @@ async fn ip_pool_range_list(
 async fn ip_pool_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
+    // The plan is to change this back to shared::IpRange once IPv6 works
     range_params: TypedBody<shared::Ipv4Range>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
     let apictx = &rqctx.context();
@@ -1744,6 +1745,8 @@ async fn ip_pool_range_add(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let path = path_params.into_inner();
+        // This is a bit of a hack to keep the service functions general with
+        // respect to IP version while disallowing IPv6 ranges at the API layer
         let range = shared::IpRange::V4(range_params.into_inner());
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         let out = nexus.ip_pool_add_range(&opctx, &pool_lookup, &range).await?;
@@ -1761,6 +1764,8 @@ async fn ip_pool_range_add(
 async fn ip_pool_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
+    // Note that add is restricted to IPv4 while remove allows v4 or v6. This is
+    // meant as a safeguard in case existing systems have v6 ranges to remove.
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = &rqctx.context();
@@ -1827,13 +1832,16 @@ async fn ip_pool_service_range_list(
 }]
 async fn ip_pool_service_range_add(
     rqctx: RequestContext<Arc<ServerContext>>,
-    range_params: TypedBody<shared::IpRange>,
+    // The plan is to change this back to shared::IpRange once IPv6 works
+    range_params: TypedBody<shared::Ipv4Range>,
 ) -> Result<HttpResponseCreated<IpPoolRange>, HttpError> {
     let apictx = &rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
-        let range = range_params.into_inner();
+        // This is a bit of a hack to keep the service functions general with
+        // respect to IP version while disallowing IPv6 ranges at the API layer
+        let range = shared::IpRange::V4(range_params.into_inner());
         let out = nexus.ip_pool_service_add_range(&opctx, &range).await?;
         Ok(HttpResponseCreated(out.into()))
     };
@@ -1848,6 +1856,8 @@ async fn ip_pool_service_range_add(
 }]
 async fn ip_pool_service_range_remove(
     rqctx: RequestContext<Arc<ServerContext>>,
+    // Note that add is restricted to IPv4 while remove allows v4 or v6. This is
+    // meant as a safeguard in case existing systems have v6 ranges to remove.
     range_params: TypedBody<shared::IpRange>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = &rqctx.context();
