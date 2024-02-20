@@ -1,0 +1,66 @@
+///Auto-generated identity for [`ResourceWithUuidKind`] from deriving [`macro@Resource`].
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    Selectable,
+    Queryable,
+    Insertable,
+    serde::Serialize,
+    serde::Deserialize
+)]
+#[diesel(table_name = my_target)]
+pub struct ResourceWithUuidKindIdentity {
+    pub id: crate::typed_uuid::DbTypedUuid<::omicron_uuid_kinds::CustomKind>,
+    pub name: crate::db::model::Name,
+    pub description: ::std::string::String,
+    pub time_created: ::chrono::DateTime<::chrono::Utc>,
+    pub time_modified: ::chrono::DateTime<::chrono::Utc>,
+    pub time_deleted: ::std::option::Option<chrono::DateTime<chrono::Utc>>,
+}
+impl ResourceWithUuidKindIdentity {
+    pub fn new(
+        id: ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>,
+        params: ::omicron_common::api::external::IdentityMetadataCreateParams,
+    ) -> Self {
+        let now = ::chrono::Utc::now();
+        Self {
+            id: crate::to_db_typed_uuid(id),
+            name: params.name.into(),
+            description: params.description,
+            time_created: now,
+            time_modified: now,
+            time_deleted: None,
+        }
+    }
+}
+trait __ResourceWithUuidKindIdentityMarker {}
+impl __ResourceWithUuidKindIdentityMarker for ResourceWithUuidKindIdentity {}
+const _: () = {
+    fn assert_identity<T: __ResourceWithUuidKindIdentityMarker>() {}
+    fn assert_all() {
+        assert_identity::<ResourceWithUuidKindIdentity>();
+    }
+};
+impl ::nexus_types::identity::Resource for ResourceWithUuidKind {
+    type IdType = ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind>;
+    fn id(&self) -> ::omicron_uuid_kinds::TypedUuid<::omicron_uuid_kinds::CustomKind> {
+        ::omicron_uuid_kinds::TypedUuid::from(self.identity.id)
+    }
+    fn name(&self) -> &::omicron_common::api::external::Name {
+        &self.identity.name.0
+    }
+    fn description(&self) -> &str {
+        &self.identity.description
+    }
+    fn time_created(&self) -> ::chrono::DateTime<::chrono::Utc> {
+        self.identity.time_created
+    }
+    fn time_modified(&self) -> ::chrono::DateTime<::chrono::Utc> {
+        self.identity.time_modified
+    }
+    fn time_deleted(&self) -> ::std::option::Option<::chrono::DateTime<::chrono::Utc>> {
+        self.identity.time_deleted
+    }
+}

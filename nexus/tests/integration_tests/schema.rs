@@ -10,6 +10,7 @@ use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_queries::db::datastore::{
     all_sql_for_version_migration, EARLIEST_SUPPORTED_VERSION,
 };
+use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -117,6 +118,11 @@ async fn apply_update(
     info!(log, "Performing upgrade");
 
     let client = crdb.connect().await.expect("failed to connect");
+
+    client
+        .batch_execute(DISALLOW_FULL_TABLE_SCAN_SQL)
+        .await
+        .expect("failed to disallow full table scans");
 
     // We skip this for the earliest supported version because these tables
     // might not exist yet.

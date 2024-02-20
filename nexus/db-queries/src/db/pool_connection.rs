@@ -78,7 +78,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
 ];
 const CUSTOM_TYPE_SCHEMA: &'static str = "public";
 
-const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
+pub const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
     "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
 
 #[derive(Debug)]

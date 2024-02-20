@@ -516,8 +516,8 @@ impl NextIpv4Address {
         let subnet = IpNetwork::from(subnet);
         let net = IpNetwork::from(first_available_address(&subnet));
         let max_shift = i64::from(last_address_offset(&subnet));
-        let generator =
-            DefaultShiftGenerator { base: net, max_shift, min_shift: 0 };
+        let generator = DefaultShiftGenerator::new(net, max_shift, 0)
+            .expect("invalid min/max shift");
         Self { inner: NextItem::new_scoped(generator, subnet_id) }
     }
 }
@@ -575,12 +575,13 @@ pub struct NextNicSlot {
 
 impl NextNicSlot {
     pub fn new(parent_id: Uuid) -> Self {
-        let generator = DefaultShiftGenerator {
-            base: 0,
-            max_shift: i64::try_from(MAX_NICS_PER_INSTANCE)
+        let generator = DefaultShiftGenerator::new(
+            0,
+            i64::try_from(MAX_NICS_PER_INSTANCE)
                 .expect("Too many network interfaces"),
-            min_shift: 0,
-        };
+            0,
+        )
+        .expect("invalid min/max shift");
         Self { inner: NextItem::new_scoped(generator, parent_id) }
     }
 }
@@ -607,25 +608,62 @@ pub struct NextMacAddress {
     >,
 }
 
+// Helper to ensure we correctly compute the min/max shifts for a next MAC
+// query.
+#[derive(Copy, Clone, Debug)]
+struct NextMacShifts {
+    base: MacAddr,
+    min_shift: i64,
+    max_shift: i64,
+}
+
+impl NextMacShifts {
+    fn for_guest() -> Self {
+        let base = MacAddr::random_guest();
+        Self::shifts_for(base, MacAddr::MIN_GUEST_ADDR, MacAddr::MAX_GUEST_ADDR)
+    }
+
+    fn for_system() -> NextMacShifts {
+        let base = MacAddr::random_system();
+        Self::shifts_for(
+            base,
+            MacAddr::MIN_SYSTEM_ADDR,
+            MacAddr::MAX_SYSTEM_ADDR,
+        )
+    }
+
+    fn shifts_for(base: MacAddr, min: i64, max: i64) -> NextMacShifts {
+        let x = base.to_i64();
+
+        // The max shift is the distance to the last value. This min shift is
+        // always expressed as a negative number, giving the largest leftward
+        // shift, i.e., the distance to the first value.
+        let max_shift = max - x;
+        let min_shift = min - x;
+        Self { base, min_shift, max_shift }
+    }
+}
+
 impl NextMacAddress {
     pub fn new(vpc_id: Uuid, kind: NetworkInterfaceKind) -> Self {
         let (base, max_shift, min_shift) = match kind {
             NetworkInterfaceKind::Instance => {
-                let base = MacAddr::random_guest();
-                let x = base.to_i64();
-                let max_shift = MacAddr::MAX_GUEST_ADDR - x;
-                let min_shift = x - MacAddr::MIN_GUEST_ADDR;
+                let NextMacShifts { base, min_shift, max_shift } =
+                    NextMacShifts::for_guest();
                 (base.into(), max_shift, min_shift)
             }
             NetworkInterfaceKind::Service => {
-                let base = MacAddr::random_system();
-                let x = base.to_i64();
-                let max_shift = MacAddr::MAX_SYSTEM_ADDR - x;
-                let min_shift = x - MacAddr::MAX_SYSTEM_ADDR;
+                let NextMacShifts { base, min_shift, max_shift } =
+                    NextMacShifts::for_system();
                 (base.into(), max_shift, min_shift)
             }
         };
-        let generator = DefaultShiftGenerator { base, max_shift, min_shift };
+        let generator = DefaultShiftGenerator::new(base, max_shift, min_shift)
+            .unwrap_or_else(|| {
+                panic!(
+                "invalid min shift ({min_shift}) or max_shift ({max_shift})"
+            )
+            });
         Self { inner: NextItem::new_scoped(generator, vpc_id) }
     }
 }
@@ -1713,6 +1751,7 @@ mod tests {
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
+    use crate::db::queries::network_interface::NextMacShifts;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use ipnetwork::Ipv4Network;
@@ -2800,5 +2839,38 @@ mod tests {
             first_available_address(&subnet),
             "fd00::5".parse::<IpAddr>().unwrap(),
         );
+    }
+
+    #[test]
+    fn test_next_mac_shifts_for_system() {
+        let NextMacShifts { base, min_shift, max_shift } =
+            NextMacShifts::for_system();
+        assert!(base.is_system());
+        assert!(
+            min_shift <= 0,
+            "expected min shift to be negative, found {min_shift}"
+        );
+        assert!(max_shift >= 0, "found {max_shift}");
+        let x = base.to_i64();
+        assert_eq!(x + min_shift, MacAddr::MIN_SYSTEM_ADDR);
+        assert_eq!(x + max_shift, MacAddr::MAX_SYSTEM_ADDR);
+    }
+
+    #[test]
+    fn test_next_mac_shifts_for_guest() {
+        let NextMacShifts { base, min_shift, max_shift } =
+            NextMacShifts::for_guest();
+        assert!(base.is_guest());
+        assert!(
+            min_shift <= 0,
+            "expected min shift to be negative, found {min_shift}"
+        );
+        assert!(
+            max_shift >= 0,
+            "expected max shift to be positive, found {max_shift}"
+        );
+        let x = base.to_i64();
+        assert_eq!(x + min_shift, MacAddr::MIN_GUEST_ADDR);
+        assert_eq!(x + max_shift, MacAddr::MAX_GUEST_ADDR);
     }
 }
