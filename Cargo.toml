@@ -44,6 +44,7 @@ members = [
     "nexus/defaults",
     "nexus/deployment",
     "nexus/inventory",
+    "nexus/macros-common",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -66,6 +67,7 @@ members = [
     "tufaceous",
     "update-common",
     "update-engine",
+    "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -113,6 +115,7 @@ default-members = [
     "nexus",
     "nexus/authz-macros",
     "nexus/blueprint-execution",
+    "nexus/macros-common",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -138,6 +141,7 @@ default-members = [
     "tufaceous",
     "update-common",
     "update-engine",
+    "uuid-kinds",
     "wicket-common",
     "wicket-dbg",
     "wicket",
@@ -151,7 +155,7 @@ anyhow = "1.0"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
-assert_cmd = "2.0.13"
+assert_cmd = "2.0.14"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
 async-trait = "0.1.77"
 atomicwrites = "0.4.3"
@@ -173,7 +177,7 @@ chacha20poly1305 = "0.10.1"
 ciborium = "0.2.2"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
-clap = { version = "4.4", features = ["cargo", "derive", "env", "wrap_help"] }
+clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
@@ -197,7 +201,7 @@ dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
 dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.16"
-either = "1.9.0"
+either = "1.10.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.23"
@@ -248,7 +252,7 @@ mime_guess = "2.0.4"
 mockall = "0.12"
 newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
-multimap = "0.8.1"
+multimap = "0.10.0"
 nexus-blueprint-execution = { path = "nexus/blueprint-execution" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
@@ -256,6 +260,7 @@ nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-deployment = { path = "nexus/deployment" }
 nexus-inventory = { path = "nexus/inventory" }
+nexus-macros-common = { path = "nexus/macros-common" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
@@ -264,7 +269,7 @@ nexus-test-interface = { path = "nexus/test-interface" }
 nexus-test-utils-macros = { path = "nexus/test-utils-macros" }
 nexus-test-utils = { path = "nexus/test-utils" }
 nexus-types = { path = "nexus/types" }
-num-integer = "0.1.45"
+num-integer = "0.1.46"
 num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
@@ -318,30 +323,30 @@ rand = "0.8.5"
 ratatui = "0.26.1"
 rayon = "1.8"
 rcgen = "0.12.1"
-reedline = "0.28.0"
+reedline = "0.29.0"
 ref-cast = "1.0"
 regex = "1.10.3"
 regress = "0.8.0"
 reqwest = { version = "0.11", default-features = false }
-ring = "0.17.7"
+ring = "0.17.8"
 rpassword = "7.3.1"
 rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
-rustls-pemfile = "2.0.0"
+rustls-pemfile = "2.1.0"
 rustyline = "13.0.0"
 samael = { version = "0.0.14", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
-semver = { version = "1.0.21", features = ["std", "serde"] }
+semver = { version = "1.0.22", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.113"
+serde_json = "1.0.114"
 serde_path_to_error = "0.1.15"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
-serde_with = "3.6.0"
+serde_with = "3.6.1"
 sha2 = "0.10.8"
 sha3 = "0.10.8"
 shell-words = "1.1.0"
@@ -372,7 +377,7 @@ static_assertions = "1.1.0"
 steno = "0.4.0"
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
-supports-color = "2.1.0"
+supports-color = "3.0.0"
 swrite = "0.1.0"
 libsw = { version = "3.3.1", features = ["tokio"] }
 syn = { version = "2.0" }
@@ -382,7 +387,7 @@ tempdir = "0.3"
 tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
-textwrap = "0.16.0"
+textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }
@@ -392,7 +397,7 @@ tokio-stream = "0.1.14"
 tokio-tungstenite = "0.20"
 tokio-util = { version = "0.7.10", features = ["io", "io-util"] }
 toml = "0.8.10"
-toml_edit = "0.21.1"
+toml_edit = "0.22.6"
 tough = { version = "0.16.0", features = [ "http" ] }
 trust-dns-client = "0.22"
 trust-dns-proto = "0.22"
@@ -414,6 +419,14 @@ wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async", "sync"] }
+
+# newtype-uuid is set to default-features = false because we don't want to
+# depend on std in omicron-uuid-kinds (in case a no-std library wants to access
+# the kinds). However, uses of omicron-uuid-kinds _within omicron_ will have
+# std and the other features enabled because they'll refer to it via
+# omicron-uuid-kinds.workspace = true.
+newtype-uuid = { version = "1.0.1", default-features = false }
+omicron-uuid-kinds = { path = "uuid-kinds", features = ["serde", "schemars08", "uuid-v4"] }
 
 # NOTE: The test profile inherits from the dev profile, so settings under
 # profile.dev get inherited. AVOID setting anything under profile.test: that
@@ -570,6 +583,7 @@ opt-level = 3
 [profile.dev.package.keccak]
 opt-level = 3
 
+
 #
 # It's common during development to use a local copy of various complex
 # dependencies.  If you want to use those, uncomment one of these blocks.
@@ -617,3 +631,17 @@ path = "workspace-hack"
 [patch.crates-io.samael]
 git = "https://github.com/oxidecomputer/samael"
 branch = "oxide/omicron"
+
+# Several crates such as crucible and propolis have have a Git dependency on
+# this repo. Omicron itself depends on these crates, which can lead to two
+# copies of these crates in the dependency graph. (As a Git dependency, and as
+# a path dependency.) The goal of omicron-uuid-kinds is to provide a unified
+# registry of UUID kinds. Two copies of the same kinds floating around is
+# unnecessary and painful.
+#
+# This directive ensures that whenever we see omicron-uuid-kinds as a Git
+# dependency, we'll use the path dependency version of the crate instead.
+#
+# See also: uuid-kinds/README.adoc.
+[patch."https://github.com/oxidecomputer/omicron"]
+omicron-uuid-kinds = { path = "uuid-kinds" }

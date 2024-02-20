@@ -10,6 +10,7 @@ use crate::authz;
 use crate::db::model::ArtifactId;
 use nexus_db_model::SemverVersion;
 use omicron_common::api::external::LookupType;
+use omicron_uuid_kinds::GenericUuid;
 use oso::PolarClass;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -132,7 +133,7 @@ pub async fn make_resources(
     builder.new_resource(authz::TufRepo::new(
         authz::FLEET,
         tuf_repo_id,
-        LookupType::ById(tuf_repo_id),
+        LookupType::ById(tuf_repo_id.into_untyped_uuid()),
     ));
 
     let artifact_id = ArtifactId {
@@ -160,7 +161,7 @@ pub async fn make_resources(
     builder.new_resource(authz::LoopbackAddress::new(
         authz::FLEET,
         loopback_address_id,
-        LookupType::ById(loopback_address_id),
+        LookupType::ById(loopback_address_id.into_untyped_uuid()),
     ));
 
     builder.build()

@@ -37,7 +37,8 @@ pub fn is_retryable(error: &DnsConfigError<crate::types::Error>) -> bool {
         | DnsConfigError::InvalidResponsePayload(_, _)
         | DnsConfigError::UnexpectedResponse(_)
         | DnsConfigError::InvalidUpgrade(_)
-        | DnsConfigError::ResponseBodyError(_) => return false,
+        | DnsConfigError::ResponseBodyError(_)
+        | DnsConfigError::PreHookError(_) => return false,
         DnsConfigError::ErrorResponse(response_value) => response_value,
     };
 
