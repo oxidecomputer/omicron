@@ -5,22 +5,30 @@
 //! Builders for constructing inventory collections and blueprints for synthetic
 //! systems
 
+use crate::blueprint_builder::BlueprintBuilder;
 use anyhow::{anyhow, bail, Context};
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use nexus_inventory::CollectionBuilder;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::Policy;
+use nexus_types::deployment::SledResources;
+use nexus_types::external_api::views::SledProvisionState;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SledRole;
 use nexus_types::inventory::SpType;
+use nexus_types::inventory::ZpoolName;
 use omicron_common::address::get_sled_address;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
@@ -154,12 +162,13 @@ impl SyntheticSystemBuilder {
             sled.unique,
             sled.hardware,
             hardware_slot,
+            sled.npools,
         );
         self.sleds.push(sled);
         Ok(self)
     }
 
-    pub fn to_collection(&mut self) -> anyhow::Result<Collection> {
+    pub fn to_collection(&self) -> anyhow::Result<Collection> {
         let collector_label = self
             .collector
             .as_ref()
@@ -184,6 +193,44 @@ impl SyntheticSystemBuilder {
         }
 
         Ok(builder.build())
+    }
+
+    pub fn to_policy(&self) -> anyhow::Result<Policy> {
+        // XXX-dap configurable?
+        let service_ip_pool_ranges = vec![IpRange::try_from((
+            "192.168.1.20".parse::<Ipv4Addr>().unwrap(),
+            "192.168.1.29".parse::<Ipv4Addr>().unwrap(),
+        ))
+        .unwrap()];
+        // XXX-dap configurable?
+        let target_nexus_zone_count = 3;
+        let sleds = self
+            .sleds
+            .iter()
+            .map(|sled| {
+                let sled_resources = SledResources {
+                    provision_state: SledProvisionState::Provisionable,
+                    zpools: sled.zpools.iter().cloned().collect(),
+                    subnet: sled.sled_subnet,
+                };
+                (sled.sled_id, sled_resources)
+            })
+            .collect();
+
+        Ok(Policy {
+            sleds,
+            service_ip_pool_ranges: service_ip_pool_ranges,
+            target_nexus_zone_count: target_nexus_zone_count,
+        })
+    }
+
+    pub fn to_blueprint(&self, creator: &str) -> anyhow::Result<Blueprint> {
+        BlueprintBuilder::build_initial_from_collection(
+            &self.to_collection()?,
+            &self.to_policy()?,
+            creator,
+        )
+        .context("building blueprint for synthetic system")
     }
 }
 
@@ -262,6 +309,7 @@ struct Sled {
     revision: u32,
     hardware: SledHardware,
     hardware_slot: u32,
+    zpools: Vec<ZpoolName>,
 }
 
 impl Sled {
@@ -272,11 +320,15 @@ impl Sled {
         unique: Option<String>,
         hardware: SledHardware,
         hardware_slot: u32,
+        nzpools: u8,
     ) -> Sled {
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
         let model = format!("model{}", unique);
         let serial = format!("serial{}", unique);
         let revision = 0;
+        let zpools = (0..nzpools)
+            .map(|_| format!("oxp_{}", Uuid::new_v4()).parse().unwrap())
+            .collect();
 
         Sled {
             sled_id,
@@ -288,6 +340,7 @@ impl Sled {
             revision,
             hardware,
             hardware_slot,
+            zpools,
         }
     }
 
