@@ -161,28 +161,32 @@ impl PersistentState {
     pub fn configuration(&self, epoch: Epoch) -> Option<&Configuration> {
         self.prepares.get(&epoch).map(|p| &p.config)
     }
+
+    pub fn last_committed_reconfiguration(&self) -> Option<&Configuration> {
+        self.last_committed_epoch().map(|epoch| {
+            // There *must* be a prepare if we have a commit
+            self.configuration(epoch).expect("missing prepare")
+        })
+    }
 }
 
 /// The state of a reconfiguration coordinator
 pub struct CoordinatorState {
     start_time: Instant,
-
     // We copy the last committed reconfiguration here so that decisions
     // can be made with only the state local to this `CoordinatorState`.
     // If we get a prepare message or commit message with a later epoch
     // we will abandon this coordinator state.
-    last_committed_configuration: Configuration,
+    last_committed_configuration: Option<Configuration>,
     epoch: Epoch,
     members: BTreeSet<BaseboardId>,
     threshold: Threshold,
     // Received key shares for the last committed epoch
     // Only used if there actually is a last_committed_epoch
     received_key_shares: BTreeMap<BaseboardId, Share>,
-
     // Once we've received enough key shares for the last committed epoch (if
     // there is one), we can reconstruct the rack secret and drop the shares.
     last_committed_rack_secret: Option<RackSecret>,
-
     // Once we've recreated the rack secret for the last committed epoch
     // we will generate a rack secret and split it into key shares.
     // then populate a `PrepareMsg` for each member. When the member acknowledges
@@ -195,7 +199,7 @@ impl CoordinatorState {
     pub fn new(
         now: Instant,
         reconfigure: Reconfigure,
-        last_committed_configuration: Configuration,
+        last_committed_configuration: Option<Configuration>,
     ) -> CoordinatorState {
         CoordinatorState {
             start_time: now,
@@ -211,7 +215,6 @@ impl CoordinatorState {
 }
 
 /// A node capable of participating in trust quorum
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Node {
     id: BaseboardId,
     persistent_state: PersistentState,
@@ -220,6 +223,9 @@ pub struct Node {
     // If this node was an LRTQ node, sled-agent will start it with the ledger
     // data it read from disk. This allows us to upgrade from LRTQ.
     lrtq_ledger_data: Option<LrtqLedgerData>,
+
+    // The state of a coordinator performing a reconfiguration
+    coordinator_state: Option<CoordinatorState>,
 }
 
 impl Node {
@@ -232,6 +238,7 @@ impl Node {
             persistent_state: PersistentState::default(),
             outgoing: Vec::new(),
             lrtq_ledger_data,
+            coordinator_state: None,
         }
     }
 
@@ -321,7 +328,51 @@ impl Node {
             return Err(());
         }
 
+        // If we are already coordinating, we must abandon that coordination.
+        // TODO: Logging?
+        self.coordinator_state = Some(CoordinatorState::new(
+            now,
+            msg,
+            self.persistent_state.last_committed_reconfiguration().cloned(),
+        ));
+
+        // Start collecting shares for `last_committed_epoch`
+        self.start_collecting_shares_as_coordinator();
+
         Ok(())
+    }
+
+    /// Send a `GetShare` request for every member in the last committed epoch
+    /// so we can recreate the rack secret of the last committed epoch and
+    /// encrypt it with the new rack secret to enable key rotation.
+    fn start_collecting_shares_as_coordinator(&mut self) {
+        // We do this whole dance and allocation because
+        // of borrock limitations.
+        let (last_committed_members, last_committed_epoch): (
+            Vec<BaseboardId>,
+            Epoch,
+        ) = if let Some(coordinator_state) = &self.coordinator_state {
+            if let Some(last_committed_config) =
+                &coordinator_state.last_committed_configuration
+            {
+                (
+                    last_committed_config
+                        .members
+                        .iter()
+                        .map(|m| m.0.clone())
+                        .collect(),
+                    last_committed_config.epoch,
+                )
+            } else {
+                return;
+            }
+        } else {
+            return;
+        };
+
+        for member in last_committed_members {
+            self.send_to_peer(member, PeerMsg::GetShare(last_committed_epoch));
+        }
     }
 
     /// If an LRTQ upgrade has not yet taken place, and this is an lrtq node
@@ -554,7 +605,7 @@ impl Node {
         Ok(())
     }
 
-    fn send(&mut self, to: BaseboardId, msg: PeerMsg) {
+    fn send_to_peer(&mut self, to: BaseboardId, msg: PeerMsg) {
         self.outgoing.push(Output::Envelope(Envelope {
             to,
             from: self.id.clone(),
