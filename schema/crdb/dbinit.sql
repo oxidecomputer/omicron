@@ -3093,15 +3093,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- now gone.
     parent_blueprint_id UUID,
 
-    -- identifies the latest internal DNS version when blueprint planning began
-    -- XXX-dap when it comes time for the migration, make sure to update
-    -- existing rows
-    internal_dns_version INT8,
-
     -- These fields are for debugging only.
     time_created TIMESTAMPTZ NOT NULL,
     creator TEXT NOT NULL,
     comment TEXT NOT NULL
+
+    -- identifies the latest internal DNS version when blueprint planning began
+    internal_dns_version INT8,
 );
 
 -- table describing both the current and historical target blueprints of the

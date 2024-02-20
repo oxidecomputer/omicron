@@ -80,7 +80,13 @@ where
     omicron_zones::deploy_zones(&opctx, &sleds_by_id, &blueprint.omicron_zones)
         .await?;
 
-    dns::deploy_dns(&opctx, &datastore, nexus_label, &blueprint, &sleds_by_id)
-        .await
-        .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])
+    dns::deploy_dns(
+        &opctx,
+        &datastore,
+        String::from(nexus_label),
+        &blueprint,
+        &sleds_by_id,
+    )
+    .await
+    .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])
 }
