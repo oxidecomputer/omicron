@@ -4448,6 +4448,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "gateway-client",
  "internal-dns",
  "ipnet",
  "ipnetwork",
@@ -4474,7 +4475,6 @@ dependencies = [
  "gateway-client",
  "gateway-messages",
  "gateway-test-utils",
- "ipnet",
  "nexus-types",
  "omicron-common",
  "omicron-sled-agent",

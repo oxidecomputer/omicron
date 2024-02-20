@@ -5,10 +5,10 @@
 //! Builders for constructing inventory collections and blueprints for synthetic
 //! systems
 
-use crate::CollectionBuilder;
 use anyhow::{anyhow, bail, Context};
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
+use nexus_inventory::CollectionBuilder;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
@@ -89,24 +89,24 @@ impl SyntheticSystemBuilder {
     }
 
     /// Returns a complete system deployed on a single Sled
-    pub fn single_sled() -> Self {
+    pub fn single_sled() -> anyhow::Result<Self> {
         let mut builder = SyntheticSystemBuilder::new();
         let sled = SledBuilder::new();
-        builder.sled(sled);
-        builder
+        builder.sled(sled)?;
+        Ok(builder)
     }
 
     /// Returns a complete system resembling a full rack
-    pub fn full_rack() -> Self {
+    pub fn full_rack() -> anyhow::Result<Self> {
         let mut builder = SyntheticSystemBuilder::new();
         for slot_number in 1..32 {
             let mut sled = SledBuilder::new();
             if slot_number == 14 || slot_number == 16 {
                 sled.sled_role(SledRole::Scrimlet);
             }
-            builder.sled(sled);
+            builder.sled(sled)?;
         }
-        builder
+        Ok(builder)
     }
 
     pub fn collector_label<S>(&mut self, collector_label: S) -> &mut Self

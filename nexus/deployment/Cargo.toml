@@ -6,12 +6,14 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+gateway-client.workspace = true
 internal-dns.workspace = true
 ipnet.workspace = true
 ipnetwork.workspace = true
 nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+sled-agent-client.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
