@@ -20,18 +20,72 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use std::collections::BTreeSet;
+use std::fmt::Debug;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
-#[derive(Debug, Clone)]
+trait SubnetIterator: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug {}
+impl<T> SubnetIterator for T where
+    T: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug
+{
+}
+
+#[derive(Debug)]
 pub struct SyntheticSystemBuilder {
     collector: Option<String>,
-    sleds: Vec<SledBuilder>,
+    sleds: Vec<Sled>,
+    sled_subnets: Box<dyn SubnetIterator>,
+    available_non_scrimlet_slots: BTreeSet<u32>,
+    available_scrimlet_slots: BTreeSet<u32>,
 }
 
 impl SyntheticSystemBuilder {
     pub fn new() -> Self {
-        SyntheticSystemBuilder { sleds: Vec::new(), collector: None }
+        // Prepare sets of available slots (cubby numbers) for (1) all
+        // non-Scrimlet sleds, and (2) Scrimlets in particular.  These do not
+        // overlap.
+        //
+        // We will use these in two places:
+        //
+        // (1) when the caller specifies what slot a sled should go into, to
+        //     validate that the slot is available and make sure we don't use it
+        //     again
+        //
+        // (2) when the caller adds a sled but leaves the slot unspecified, so
+        //     that we can assign it a slot number
+        //
+        // We use `BTreeSet` because it efficiently expresses what we want,
+        // though the set sizes are small enough that it doesn't much matter.
+        // XXX-dap are these constants defined somewhere?
+        let available_scrimlet_slots: BTreeSet<u32> = BTreeSet::from([14, 16]);
+        let available_non_scrimlet_slots: BTreeSet<u32> = (0..=31)
+            .collect::<BTreeSet<_>>()
+            .difference(&available_scrimlet_slots)
+            .copied()
+            .collect();
+
+        // Prepare an iterator to allow us to assign sled subnets.
+        let rack_subnet_base: Ipv6Addr =
+            "fd00:1122:3344:0100::".parse().unwrap();
+        let rack_subnet =
+            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
+        // Skip the initial DNS subnet.
+        // XXX-dap should this be documented somewhere with a constant?  RSS
+        // seems to hardcode it in sled-agent/src/rack_setup/plan/sled.rs.
+        let sled_subnets = Box::new(
+            rack_subnet
+                .subnets(SLED_PREFIX)
+                .unwrap()
+                .skip(1)
+                .map(|s| Ipv6Subnet::new(s.network())),
+        );
+        SyntheticSystemBuilder {
+            sleds: Vec::new(),
+            collector: None,
+            sled_subnets,
+            available_non_scrimlet_slots,
+            available_scrimlet_slots,
+        }
     }
 
     /// Returns a complete system deployed on a single Sled
@@ -63,9 +117,46 @@ impl SyntheticSystemBuilder {
         self
     }
 
-    pub fn sled(&mut self, sled: SledBuilder) -> &mut Self {
+    pub fn sled(&mut self, sled: SledBuilder) -> anyhow::Result<&mut Self> {
+        let sled_subnet = self
+            .sled_subnets
+            .next()
+            .ok_or_else(|| anyhow!("ran out of IPv6 subnets for sleds"))?;
+        let hardware_slot = if let Some(slot) = sled.hardware_slot {
+            // If the caller specified a slot number, use that.
+            // Make sure it's still available, though.
+            if !self.available_scrimlet_slots.remove(&slot)
+                && !self.available_non_scrimlet_slots.remove(&slot)
+            {
+                bail!("sled slot {} was used twice", slot);
+            }
+            slot
+        } else if sled.sled_role == SledRole::Scrimlet {
+            // Otherwise, if this is a Scrimlet, it must be in one of the
+            // allowed Scrimlet slots.
+            self.available_scrimlet_slots
+                .pop_first()
+                .ok_or_else(|| anyhow!("ran out of slots for Scrimlets"))?
+        } else {
+            // Otherwise, prefer a non-Scrimlet slots, but allow a Scrimlet slot
+            // to be used if we run out of non-Scrimlet slots.
+            self.available_non_scrimlet_slots
+                .pop_first()
+                .or_else(|| self.available_scrimlet_slots.pop_first())
+                .ok_or_else(|| anyhow!("ran out of slots for non-Scrimlets"))?
+        };
+
+        let sled_id = sled.id.unwrap_or_else(Uuid::new_v4);
+        let sled = Sled::new(
+            sled_id,
+            sled_subnet,
+            sled.sled_role,
+            sled.unique,
+            sled.hardware,
+            hardware_slot,
+        );
         self.sleds.push(sled);
-        self
+        Ok(self)
     }
 
     pub fn to_collection(&mut self) -> anyhow::Result<Collection> {
@@ -76,118 +167,19 @@ impl SyntheticSystemBuilder {
             .unwrap_or_else(|| String::from("example"));
         let mut builder = CollectionBuilder::new(collector_label);
 
-        // Assemble sets of available slots for use by sleds in general and for
-        // Scrimlets.  Start with all possible rack slots, then remove any that
-        // were explicitly assigned by the caller.  Report an error if any were
-        // used twice.
-        let mut available_scrimlet_slots = BTreeSet::from([14, 16]);
-        let mut available_sled_slots: BTreeSet<u32> = (1..=32).collect();
-
         for s in &self.sleds {
-            if let Some(slot) = s.hardware_slot {
-                if !available_sled_slots.remove(&slot) {
-                    bail!("sled slot {} was used twice", slot);
-                }
-
-                available_scrimlet_slots.remove(&slot);
-            }
-        }
-
-        // Now, assign slot numbers to any Scrimlets that were not given them.
-        // This is important to do up front because we will allow non-Scrimlets
-        // to use the same slots later if they're still available.
-        for s in &mut self.sleds {
-            if s.sled_role == SledRole::Scrimlet && s.hardware_slot.is_none() {
-                let slot =
-                    available_scrimlet_slots.pop_first().ok_or_else(|| {
-                        anyhow!("ran out of slots available for Scrimlets")
-                    })?;
-                assert!(available_sled_slots.remove(&slot));
-                s.hardware_slot(slot);
-            }
-        }
-        let mut available_sled_slots = available_sled_slots.into_iter();
-
-        // Prepare an iterator to allow us to assign sled subnets.
-        let rack_subnet_base: Ipv6Addr =
-            "fd00:1122:3344:0100::".parse().unwrap();
-        let rack_subnet =
-            ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
-        // Skip the initial DNS subnet.
-        // XXX-dap should this be documented somewhere with a constant?  RSS
-        // seems to hardcode it in sled-agent/src/rack_setup/plan/sled.rs.
-        let mut possible_sled_subnets =
-            rack_subnet.subnets(SLED_PREFIX).unwrap().skip(1);
-
-        // Now assemble inventory for each sled.
-        for s in &self.sleds {
-            let slot = s
-                .hardware_slot
-                .or_else(|| available_sled_slots.next())
-                .ok_or_else(|| anyhow!("ran out of available sled slots"))?;
-
-            let sled_id = s.id.unwrap_or_else(Uuid::new_v4);
-            let unique = s.unique.clone().unwrap_or_else(|| slot.to_string());
-            let model = format!("model{}", unique);
-            let serial = format!("serial{}", unique);
-            let sp_state = SpState {
-                base_mac_address: [0; 6],
-                hubris_archive_id: format!("hubris{}", unique),
-                model: model.clone(),
-                power_state: PowerState::A2,
-                revision: 0,
-                rot: RotState::Enabled {
-                    active: RotSlot::A,
-                    pending_persistent_boot_preference: None,
-                    persistent_boot_preference: RotSlot::A,
-                    slot_a_sha3_256_digest: Some(String::from("slotAdigest1")),
-                    slot_b_sha3_256_digest: Some(String::from("slotBdigest1")),
-                    transient_boot_preference: None,
-                },
-                serial_number: serial.clone(),
-            };
-
-            let baseboard = match s.hardware {
-                SledHardware::Gimlet => {
-                    sled_agent_client::types::Baseboard::Gimlet {
-                        identifier: serial,
-                        model,
-                        revision: i64::from(sp_state.revision),
-                    }
-                }
-                SledHardware::Pc => sled_agent_client::types::Baseboard::Pc {
-                    identifier: serial,
-                    model: model,
-                },
-                SledHardware::Unknown | SledHardware::Empty => {
-                    sled_agent_client::types::Baseboard::Unknown
-                }
-            };
-
-            if !matches!(&s.hardware, SledHardware::Empty) {
+            let slot = s.hardware_slot;
+            if let Some(sp_state) = s.sp_state() {
                 builder
                     .found_sp_state("fake MGS 1", SpType::Sled, slot, sp_state)
                     .context("recording SP state")?;
             }
 
-            let sled_ip_subnet = possible_sled_subnets
-                .next()
-                .ok_or_else(|| anyhow!("ran out of sled subnets"))?;
-            let sled_subnet: Ipv6Subnet<SLED_PREFIX> =
-                Ipv6Subnet::new(sled_ip_subnet.network());
-            let sled_agent_address = get_sled_address(sled_subnet).to_string();
-            let sled_agent = sled_agent_client::types::Inventory {
-                baseboard,
-                reservoir_size: ByteCount::from(1024),
-                sled_role: s.sled_role,
-                sled_agent_address,
-                sled_id,
-                usable_hardware_threads: 10,
-                usable_physical_ram: ByteCount::from(1024 * 1024),
-            };
-
             builder
-                .found_sled_inventory("fake sled agent", sled_agent)
+                .found_sled_inventory(
+                    "fake sled agent",
+                    s.sled_agent_inventory(),
+                )
                 .context("recording sled agent")?;
         }
 
@@ -256,5 +248,104 @@ impl SledBuilder {
     pub fn sled_role(&mut self, sled_role: SledRole) -> &mut Self {
         self.sled_role = sled_role;
         self
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Sled {
+    sled_id: Uuid,
+    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+    sled_role: SledRole,
+    unique: String,
+    model: String,
+    serial: String,
+    revision: u32,
+    hardware: SledHardware,
+    hardware_slot: u32,
+}
+
+impl Sled {
+    fn new(
+        sled_id: Uuid,
+        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
+        sled_role: SledRole,
+        unique: Option<String>,
+        hardware: SledHardware,
+        hardware_slot: u32,
+    ) -> Sled {
+        let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
+        let model = format!("model{}", unique);
+        let serial = format!("serial{}", unique);
+        let revision = 0;
+
+        Sled {
+            sled_id,
+            sled_subnet,
+            sled_role,
+            unique,
+            model,
+            serial,
+            revision,
+            hardware,
+            hardware_slot,
+        }
+    }
+
+    fn sp_state(&self) -> Option<SpState> {
+        match self.hardware {
+            SledHardware::Empty => None,
+            SledHardware::Gimlet | SledHardware::Pc | SledHardware::Unknown => {
+                let unique = &self.unique;
+                Some(SpState {
+                    base_mac_address: [0; 6],
+                    hubris_archive_id: format!("hubris{}", unique),
+                    model: self.model.clone(),
+                    power_state: PowerState::A2,
+                    revision: self.revision,
+                    rot: RotState::Enabled {
+                        active: RotSlot::A,
+                        pending_persistent_boot_preference: None,
+                        persistent_boot_preference: RotSlot::A,
+                        slot_a_sha3_256_digest: Some(String::from(
+                            "slotAdigest1",
+                        )),
+                        slot_b_sha3_256_digest: Some(String::from(
+                            "slotBdigest1",
+                        )),
+                        transient_boot_preference: None,
+                    },
+                    serial_number: self.serial.clone(),
+                })
+            }
+        }
+    }
+
+    fn sled_agent_inventory(&self) -> sled_agent_client::types::Inventory {
+        let baseboard = match self.hardware {
+            SledHardware::Gimlet => {
+                sled_agent_client::types::Baseboard::Gimlet {
+                    identifier: self.serial.clone(),
+                    model: self.model.clone(),
+                    revision: i64::from(self.revision),
+                }
+            }
+            SledHardware::Pc => sled_agent_client::types::Baseboard::Pc {
+                identifier: self.serial.clone(),
+                model: self.model.clone(),
+            },
+            SledHardware::Unknown | SledHardware::Empty => {
+                sled_agent_client::types::Baseboard::Unknown
+            }
+        };
+        let sled_agent_address = get_sled_address(self.sled_subnet).to_string();
+        sled_agent_client::types::Inventory {
+            baseboard,
+            reservoir_size: ByteCount::from(1024),
+            sled_role: self.sled_role,
+            sled_agent_address,
+            sled_id: self.sled_id,
+            usable_hardware_threads: 10,
+            usable_physical_ram: ByteCount::from(1024 * 1024),
+        }
     }
 }
