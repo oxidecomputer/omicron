@@ -64,7 +64,7 @@ pub(crate) async fn deploy_dns(
     let maybe_update = dns_compute_update(
         &log,
         comment,
-        String::from(creator),
+        creator,
         &dns_config_current,
         &dns_config_blueprint,
     )?;
