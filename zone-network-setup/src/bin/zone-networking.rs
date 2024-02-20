@@ -12,9 +12,16 @@ use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use slog::{info, Logger};
 use std::fs;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub const HOSTS_FILE: &str = "/etc/inet/hosts";
+
+fn parse_ip(s: &str) -> anyhow::Result<IpAddr> {
+    if s == "unknown" {
+        return Err(anyhow!("ERROR: Missing input value"));
+    };
+    s.parse().map_err(|_| anyhow!("ERROR: Invalid IP address"))
+}
 
 fn parse_ipv4(s: &str) -> anyhow::Result<Ipv4Addr> {
     if s == "unknown" {
@@ -104,17 +111,13 @@ async fn do_run() -> Result<(), CmdError> {
                     )
                     .required(true)
                     .value_parser(parse_ipv4),
-                ),
-        )
-        .subcommand(
-            Command::new("get-opte-ip")
-                .about("Retrieves OPTE IP from interface")
+                )
                 .arg(
                     arg!(
-                        -i --opte_interface <STRING> "opte_interface"
+                        -p --opte_ip <IpAddr> "opte_ip"
                     )
                     .required(true)
-                    .value_parser(parse_opte_iface),
+                    .value_parser(parse_ip),
                 ),
         )
         .get_matches();
@@ -125,10 +128,6 @@ async fn do_run() -> Result<(), CmdError> {
 
     if let Some(matches) = matches.subcommand_matches("opte-interface-set-up") {
         opte_interface_set_up(matches, log.clone()).await?;
-    }
-
-    if let Some(matches) = matches.subcommand_matches("get-opte-ip") {
-        retrieve_opte_ip(matches, log).await?;
     }
 
     Ok(())
@@ -185,39 +184,19 @@ async fn opte_interface_set_up(
 ) -> Result<(), CmdError> {
     let interface: &String = matches.get_one("opte_interface").unwrap();
     let gateway: Ipv4Addr = *matches.get_one("opte_gateway").unwrap();
+    let opte_ip: &IpAddr = matches.get_one("opte_ip").unwrap();
 
     info!(&log, "Creating gateway on the OPTE IP interface if it doesn't already exist"; "OPTE interface" => ?interface);
     Ipadm::create_opte_gateway(interface)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
-    // Retrieving the OPTE IP here isn't necessary for running the service, it exists solely to record it in the log.
-    // We'll fail if the command fails anyway, as the service can't run if there is no OPTE IP.
-    let opte_ip = Ipadm::retrieve_opte_ip(interface)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-    info!(&log, "Retrieved OPTE IP from the interface"; "OPTE interface" => ?interface, "OPTE IP" => ?opte_ip);
-
-    info!(&log, "Ensuring there is a gateway route"; "OPTE gateway" => ?gateway, "OPTE interface" => ?interface);
-    Route::ensure_opte_route(&gateway, interface)
+    info!(&log, "Ensuring there is a gateway route"; "OPTE gateway" => ?gateway, "OPTE interface" => ?interface, "OPTE IP" => ?opte_ip);
+    Route::ensure_opte_route(&gateway, interface, &opte_ip)
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     info!(&log, "Ensuring there is a default route"; "gateway" => ?gateway);
     Route::ensure_default_route_with_gateway(Gateway::Ipv4(gateway))
         .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
-    Ok(())
-}
-
-async fn retrieve_opte_ip(
-    matches: &ArgMatches,
-    log: Logger,
-) -> Result<(), CmdError> {
-    let interface: &String = matches.get_one("opte_interface").unwrap();
-
-    info!(&log, "Retrieving OPTE IP from the interface"; "OPTE interface" => ?interface);
-    let opte_ip = Ipadm::retrieve_opte_ip(interface)
-        .map_err(|err| CmdError::Failure(anyhow!(err)))?;
-
-    print!("{opte_ip}");
 
     Ok(())
 }

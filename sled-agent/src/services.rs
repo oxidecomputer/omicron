@@ -1459,12 +1459,14 @@ impl ServiceManager {
         })?;
 
         let opte_interface = port.vnic_name();
-        let opte_gateway = &port.gateway().ip().to_string();
+        let opte_gateway = port.gateway().ip().to_string();
+        let opte_ip = port.ip().to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
             .add_property("interface", "astring", opte_interface)
-            .add_property("gateway", "astring", opte_gateway);
+            .add_property("gateway", "astring", &opte_gateway)
+            .add_property("ip", "astring", &opte_ip);
 
         Ok(ServiceBuilder::new("oxide/opte-interface-setup")
             .add_property_group(config_builder)
@@ -1909,7 +1911,7 @@ impl ServiceManager {
 
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property("http_address", "astring", &http_addr)
-                    .add_property("dns_addr", "astring", &dns_addr);
+                    .add_property("dns_address", "astring", &dns_addr);
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")

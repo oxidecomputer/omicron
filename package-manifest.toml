@@ -266,11 +266,7 @@ output.type = "zone"
 service_name = "external-dns-customizations"
 only_for_targets.image = "standard"
 source.type = "local"
-source.paths = [ 
-  { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" },
-  # TODO: Removeme if experiment works
-  { from = "smf/external-dns/method_script.sh", to = "/opt/oxide/lib/svc/manifest/external_dns.sh" },
-]
+source.paths = [ { from = "smf/external-dns", to = "/var/svc/manifest/site/external_dns" } ]
 output.intermediate_only = true
 output.type = "zone"
 

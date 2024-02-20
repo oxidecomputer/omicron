@@ -22,13 +22,13 @@
   </dependency>
 
   <exec_method type='method' name='start'
-      exec='/opt/oxide/lib/svc/manifest/external_dns.sh'
+      exec='ctrun -l child -o noorphan,regent /opt/oxide/dns-server/bin/dns-server --config-file /var/svc/manifest/site/external_dns/config.toml --http-address %{config/http_address} --dns-address %{config/dns_address} &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
     <propval name='http_address' type='astring' value='unknown' />
-    <propval name='dns_addr' type='astring' value='unknown' />
+    <propval name='dns_address' type='astring' value='unknown' />
   </property_group>
 
   <property_group name='startd' type='framework'>
