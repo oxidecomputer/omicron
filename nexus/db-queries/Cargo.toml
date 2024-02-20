@@ -45,7 +45,7 @@ static_assertions.workspace = true
 steno.workspace = true
 swrite.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 uuid.workspace = true
 usdt.workspace = true
 
@@ -55,6 +55,7 @@ nexus-db-model.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 omicron-workspace-hack.workspace = true
 

@@ -835,6 +835,35 @@
         }
       }
     },
+    "/sled-agents/{sled_id}/firewall-rules-update": {
+      "post": {
+        "summary": "Request a new set of firewall rules for a sled.",
+        "description": "This causes Nexus to read the latest set of rules for the sled, and call a Sled endpoint which applies the rules to all OPTE ports that happen to exist.",
+        "operationId": "sled_firewall_rules_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sled-agents/{sled_id}/zpools/{zpool_id}": {
       "put": {
         "summary": "Report that a pool for a specified sled has come online.",
@@ -6244,13 +6273,19 @@
           },
           "name": {
             "$ref": "#/components/schemas/Name"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           }
         },
         "required": [
           "id",
           "ip",
           "mac",
-          "name"
+          "name",
+          "slot"
         ]
       },
       "ServicePutRequest": {

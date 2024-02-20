@@ -447,10 +447,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "ff6c4df2e816eee6e7b2b0488777d30ef35ee217"
+source.commit = "c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "aa10aa245a92e657fc074bd588ef6bbddaad2d9c946a8e1b91c02dce7e057561"
+source.sha256 = "0203b7f702377c877c4132851ca102d68cd8fd2c20e4fd5b59d950cbb07fd9ff"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -514,8 +514,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "fd159136c552d8b4ec4d49dd9bae7e38f6a636e6"
-source.sha256 = "1e24598ba77dc00682cdf54fc370696ef5aa49ed510ab7f72fcc91d61d679e7b"
+source.commit = "3618dd6017b363c5d34399273453cf50b9c9a43e"
+source.sha256 = "eb98985871f321411f7875ef7751dba85ae0dd3034877b63ccb78cedcb96e6e7"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -539,8 +539,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "fd159136c552d8b4ec4d49dd9bae7e38f6a636e6"
-source.sha256 = "720df8aff3aaa0f8a86ec606089ebf8b5068d7f3c243bd4c868b96ef72d13485"
+source.commit = "3618dd6017b363c5d34399273453cf50b9c9a43e"
+source.sha256 = "cc0429f0d9ce6df94e834cea89cabbdf4d1fbfe623369dd3eb84c5b2677414be"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -557,8 +557,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "fd159136c552d8b4ec4d49dd9bae7e38f6a636e6"
-source.sha256 = "5e34a10d9dca6c94f96075140d42b755dee1f5e6a3485fc239b12e12b89a30c5"
+source.commit = "3618dd6017b363c5d34399273453cf50b9c9a43e"
+source.sha256 = "fa25585fb3aa1a888b76133af3060b859cbea8e53287bb1cc64e70889db37679"
 output.type = "zone"
 output.intermediate_only = true
 

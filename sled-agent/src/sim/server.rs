@@ -363,6 +363,7 @@ pub async fn run_standalone_server(
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
+                    slot: 0,
                 },
             },
             service_id: Uuid::new_v4(),
@@ -396,6 +397,7 @@ pub async fn run_standalone_server(
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
+                    slot: 0,
                 },
             },
             service_id: Uuid::new_v4(),

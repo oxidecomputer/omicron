@@ -17,7 +17,11 @@
         system = "x86_64-linux";
       };
       # use the Rust toolchain defined in the `rust-toolchain.toml` file.
-      rustToolchain = pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+      rustToolchain = (pkgs.pkgsBuildHost.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml).override {
+        extensions = [
+          "rust-src" # for rust-analyzer
+        ];
+      };
 
       buildInputs = with pkgs; [
         # libs

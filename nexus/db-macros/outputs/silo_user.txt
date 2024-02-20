@@ -169,14 +169,16 @@ impl<'a> SiloUser<'a> {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::SiloUser,
-                        LookupType::ById(v0.clone()),
+                        LookupType::ById(
+                            ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0),
+                        ),
                     ),
                 )
             })?;
         let authz_silo_user = Self::make_authz(
             &&authz::FLEET,
             &db_row,
-            LookupType::ById(v0.clone()),
+            LookupType::ById(::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*v0)),
         );
         Ok((authz_silo_user, db_row))
     }

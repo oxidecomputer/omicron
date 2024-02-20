@@ -21,6 +21,7 @@ pub(crate) mod error;
 mod explain;
 pub mod fixed_data;
 pub mod lookup;
+mod on_conflict_ext;
 // Public for doctests.
 pub mod pagination;
 mod pool;
@@ -34,6 +35,11 @@ pub mod subquery;
 pub(crate) mod true_or_cast_error;
 mod update_and_check;
 
+/// Batch statement to disable full table scans.
+// This is `pub` so tests that don't go through our connection pool can disable
+// full table scans the same way pooled connections do.
+pub use pool_connection::DISALLOW_FULL_TABLE_SCAN_SQL;
+
 #[cfg(test)]
 mod test_utils;
 
@@ -44,6 +50,7 @@ pub use nexus_db_model::schema;
 pub use crate::db::error::TransactionError;
 pub use config::Config;
 pub use datastore::DataStore;
+pub use on_conflict_ext::IncompleteOnConflictExt;
 pub use pool::{DbConnection, Pool};
 pub use saga_recovery::{recover, CompletionTask, RecoveryTask};
 pub use saga_types::SecId;
