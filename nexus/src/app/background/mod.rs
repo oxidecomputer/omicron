@@ -18,11 +18,12 @@ mod nat_cleanup;
 mod phantom_disks;
 mod region_replacement;
 mod status;
-mod sync_bootstore_network_settings;
-mod sync_routing;
+// TODO: delete - maybe we won't use these?
+// mod sync_bootstore_network_settings;
+// mod sync_routing;
 mod sync_service_zone_nat;
 mod sync_switch_port_settings;
-mod sync_switch_zone_smf;
+// mod sync_switch_zone_smf;
 
 pub use common::Driver;
 pub use common::TaskHandle;

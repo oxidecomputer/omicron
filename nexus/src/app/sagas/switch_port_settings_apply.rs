@@ -2,31 +2,23 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{NexusActionContext, NEXUS_DPD_TAG};
-use crate::app::sagas::retry_until_known_result;
+use super::NexusActionContext;
 use crate::app::sagas::switch_port_settings_common::{
-    api_to_dpd_port_settings, ensure_switch_port_bgp_settings,
-    ensure_switch_port_uplink, select_dendrite_client, select_mg_client,
-    switch_sled_agent, write_bootstore_config,
+    ensure_switch_port_bgp_settings, select_mg_client, switch_sled_agent,
+    write_bootstore_config,
 };
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
 use anyhow::Error;
 use db::datastore::SwitchPortSettingsCombinedResult;
-use dpd_client::types::PortId;
-use mg_admin_client::types::{
-    AddStaticRoute4Request, DeleteStaticRoute4Request, Prefix4, StaticRoute4,
-    StaticRoute4List,
-};
 use nexus_db_model::NETWORK_KEY;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::{authn, db};
-use omicron_common::api::external::{self, NameOrId};
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
-use std::str::FromStr;
 use std::sync::Arc;
 use steno::ActionError;
 use uuid::Uuid;
@@ -51,14 +43,6 @@ declare_saga_actions! {
     }
     GET_SWITCH_PORT_SETTINGS -> "switch_port_settings" {
         + spa_get_switch_port_settings
-    }
-    ENSURE_SWITCH_PORT_UPLINK -> "ensure_switch_port_uplink" {
-        + spa_ensure_switch_port_uplink
-        - spa_undo_ensure_switch_port_uplink
-    }
-    ENSURE_SWITCH_ROUTES -> "ensure_switch_routes" {
-        + spa_ensure_switch_routes
-        - spa_undo_ensure_switch_routes
     }
     ENSURE_SWITCH_PORT_BGP_SETTINGS -> "ensure_switch_port_bgp_settings" {
         + spa_ensure_switch_port_bgp_settings
@@ -89,8 +73,6 @@ impl NexusSaga for SagaSwitchPortSettingsApply {
     ) -> Result<steno::Dag, SagaInitError> {
         builder.append(associate_switch_port_action());
         builder.append(get_switch_port_settings_action());
-        builder.append(ensure_switch_port_uplink_action());
-        builder.append(ensure_switch_routes_action());
         builder.append(ensure_switch_port_bgp_settings_action());
         builder.append(ensure_switch_port_bootstore_network_settings_action());
         Ok(builder.build()?)
@@ -155,82 +137,6 @@ async fn spa_get_switch_port_settings(
         })?;
 
     Ok(port_settings)
-}
-
-async fn spa_ensure_switch_routes(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    let settings = sagactx
-        .lookup::<SwitchPortSettingsCombinedResult>("switch_port_settings")?;
-
-    let mut rq = AddStaticRoute4Request {
-        routes: StaticRoute4List { list: Vec::new() },
-    };
-    for r in settings.routes {
-        let nexthop = match r.gw.ip() {
-            IpAddr::V4(v4) => v4,
-            IpAddr::V6(_) => continue,
-        };
-        let prefix = match r.dst.ip() {
-            IpAddr::V4(v4) => Prefix4 { value: v4, length: r.dst.prefix() },
-            IpAddr::V6(_) => continue,
-        };
-        let sr = StaticRoute4 { nexthop, prefix };
-        rq.routes.list.push(sr);
-    }
-
-    let mg_client: Arc<mg_admin_client::Client> =
-        select_mg_client(&sagactx, &opctx, params.switch_port_id).await?;
-
-    mg_client.inner.static_add_v4_route(&rq).await.map_err(|e| {
-        ActionError::action_failed(format!("mgd static route add {e}"))
-    })?;
-
-    Ok(())
-}
-
-async fn spa_undo_ensure_switch_routes(
-    sagactx: NexusActionContext,
-) -> Result<(), Error> {
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    let settings = sagactx
-        .lookup::<SwitchPortSettingsCombinedResult>("switch_port_settings")?;
-
-    let mut rq = DeleteStaticRoute4Request {
-        routes: StaticRoute4List { list: Vec::new() },
-    };
-
-    for r in settings.routes {
-        let nexthop = match r.gw.ip() {
-            IpAddr::V4(v4) => v4,
-            IpAddr::V6(_) => continue,
-        };
-        let prefix = match r.gw.ip() {
-            IpAddr::V4(v4) => Prefix4 { value: v4, length: r.gw.prefix() },
-            IpAddr::V6(_) => continue,
-        };
-        let sr = StaticRoute4 { nexthop, prefix };
-        rq.routes.list.push(sr);
-    }
-
-    let mg_client: Arc<mg_admin_client::Client> =
-        select_mg_client(&sagactx, &opctx, params.switch_port_id).await?;
-
-    mg_client.inner.static_remove_v4_route(&rq).await.map_err(|e| {
-        ActionError::action_failed(format!("mgd static route remove {e}"))
-    })?;
-
-    Ok(())
 }
 
 async fn spa_undo_ensure_switch_port_bgp_settings(
@@ -349,48 +255,6 @@ async fn spa_undo_ensure_switch_port_bootstore_network_settings(
     write_bootstore_config(&sa, &config).await?;
 
     Ok(())
-}
-
-/// Update SMF properties in switch zones
-/// These SMF properties track which interfaces are uplinks. Networking
-/// services need this information to properly enable external communication
-/// during rack startup
-async fn spa_ensure_switch_port_uplink(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    ensure_switch_port_uplink(
-        sagactx,
-        &opctx,
-        false,
-        None,
-        params.switch_port_id,
-        params.switch_port_name,
-    )
-    .await
-}
-
-async fn spa_undo_ensure_switch_port_uplink(
-    sagactx: NexusActionContext,
-) -> Result<(), Error> {
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-    Ok(ensure_switch_port_uplink(
-        sagactx,
-        &opctx,
-        true,
-        None,
-        params.switch_port_id,
-        params.switch_port_name,
-    )
-    .await?)
 }
 
 // a common route representation for dendrite and port settings

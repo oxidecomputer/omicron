@@ -178,7 +178,7 @@ impl BackgroundTasks {
         let task_inventory_collection = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
-                resolver,
+                resolver.clone(),
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
                 config.inventory.disable,
@@ -265,7 +265,7 @@ impl BackgroundTasks {
                 config.switch_port_settings_manager.period_secs,
                 Box::new(SwitchPortSettingsManager::new(
                     datastore.clone(),
-                    dpd_clients.clone(),
+                    resolver.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
