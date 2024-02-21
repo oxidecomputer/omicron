@@ -184,6 +184,7 @@ mod test {
     use nexus_inventory::now_db_precision;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{Blueprint, BlueprintTarget};
+    use omicron_common::api::external::Generation;
     use serde::Deserialize;
     use std::collections::{BTreeMap, BTreeSet};
     use uuid::Uuid;
@@ -206,6 +207,7 @@ mod test {
                 omicron_zones: BTreeMap::new(),
                 zones_in_service: BTreeSet::new(),
                 parent_blueprint_id,
+                internal_dns_version: Generation::new(),
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),

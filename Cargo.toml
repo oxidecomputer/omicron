@@ -155,7 +155,7 @@ anyhow = "1.0"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
-assert_cmd = "2.0.13"
+assert_cmd = "2.0.14"
 async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
 async-trait = "0.1.77"
 atomicwrites = "0.4.3"
@@ -328,21 +328,21 @@ ref-cast = "1.0"
 regex = "1.10.3"
 regress = "0.8.0"
 reqwest = { version = "0.11", default-features = false }
-ring = "0.17.7"
+ring = "0.17.8"
 rpassword = "7.3.1"
 rstest = "0.18.2"
 rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
-rustls-pemfile = "2.0.0"
+rustls-pemfile = "2.1.0"
 rustyline = "13.0.0"
 samael = { version = "0.0.14", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
-semver = { version = "1.0.21", features = ["std", "serde"] }
+semver = { version = "1.0.22", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.113"
+serde_json = "1.0.114"
 serde_path_to_error = "0.1.15"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -387,7 +387,7 @@ tempdir = "0.3"
 tempfile = "3.10"
 term = "0.7"
 termios = "0.3"
-textwrap = "0.16.0"
+textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "http://github.com/oxidecomputer/tofino", branch = "main" }

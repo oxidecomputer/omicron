@@ -134,6 +134,14 @@ impl Collection {
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
         self.omicron_zones.values().flat_map(|z| z.zones.zones.iter())
     }
+
+    /// Iterate over the sled ids of sleds identified as Scrimlets
+    pub fn scrimlets(&self) -> impl Iterator<Item = Uuid> + '_ {
+        self.sled_agents
+            .iter()
+            .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
+            .map(|(sled_id, _)| *sled_id)
+    }
 }
 
 /// A unique baseboard id found during a collection
