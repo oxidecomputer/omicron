@@ -23,19 +23,17 @@ use nexus_types::deployment::SourceNatConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use slog::info;
 use slog::warn;
-use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use uuid::Uuid;
 
 pub(crate) async fn ensure_zone_resources_allocated(
-    log: &Logger,
     opctx: &OpContext,
     datastore: &DataStore,
     zones: &BTreeMap<Uuid, OmicronZonesConfig>,
 ) -> anyhow::Result<()> {
-    let allocator = ResourceAllocator { log, opctx, datastore };
+    let allocator = ResourceAllocator { opctx, datastore };
 
     for config in zones.values() {
         for z in &config.zones {
@@ -81,7 +79,6 @@ pub(crate) async fn ensure_zone_resources_allocated(
 }
 
 struct ResourceAllocator<'a> {
-    log: &'a Logger,
     opctx: &'a OpContext,
     datastore: &'a DataStore,
 }
@@ -120,7 +117,7 @@ impl<'a> ResourceAllocator<'a> {
                         .unwrap_or(true)
                 {
                     info!(
-                        self.log, "found already-allocated external IP";
+                        self.opctx.log, "found already-allocated external IP";
                         "zone_type" => zone_type,
                         "zone_id" => %zone_id,
                         "ip" => %external_ip,
@@ -130,7 +127,7 @@ impl<'a> ResourceAllocator<'a> {
             }
 
             warn!(
-                self.log, "zone has unexpected IPs allocated";
+                self.opctx.log, "zone has unexpected IPs allocated";
                 "zone_type" => zone_type,
                 "zone_id" => %zone_id,
                 "want_ip" => %external_ip,
@@ -143,7 +140,7 @@ impl<'a> ResourceAllocator<'a> {
         }
 
         info!(
-            self.log, "external IP allocation required for zone";
+            self.opctx.log, "external IP allocation required for zone";
             "zone_type" => zone_type,
             "zone_id" => %zone_id,
             "ip" => %external_ip,
@@ -183,7 +180,7 @@ impl<'a> ResourceAllocator<'a> {
                     && allocated_nic.primary == nic.primary
                 {
                     info!(
-                        self.log, "found already-allocated NIC";
+                        self.opctx.log, "found already-allocated NIC";
                         "zone_type" => zone_type,
                         "zone_id" => %zone_id,
                         "nic" => ?allocated_nic,
@@ -193,7 +190,7 @@ impl<'a> ResourceAllocator<'a> {
             }
 
             warn!(
-                self.log, "zone has unexpected NICs allocated";
+                self.opctx.log, "zone has unexpected NICs allocated";
                 "zone_type" => zone_type,
                 "zone_id" => %zone_id,
                 "want_nic" => ?nic,
@@ -207,7 +204,7 @@ impl<'a> ResourceAllocator<'a> {
         }
 
         info!(
-            self.log, "NIC allocation required for zone";
+            self.opctx.log, "NIC allocation required for zone";
             "zone_type" => zone_type,
             "zone_id" => %zone_id,
             "nid" => ?nic,
@@ -268,7 +265,7 @@ impl<'a> ResourceAllocator<'a> {
             })?;
 
         info!(
-            self.log, "successfully allocated external IP";
+            self.opctx.log, "successfully allocated external IP";
             "zone_type" => zone_type,
             "zone_id" => %service_id,
             "ip" => %external_ip,
@@ -322,7 +319,7 @@ impl<'a> ResourceAllocator<'a> {
             })?;
 
         info!(
-            self.log, "successfully allocated external SNAT IP";
+            self.opctx.log, "successfully allocated external SNAT IP";
             "zone_type" => zone_type,
             "zone_id" => %service_id,
             "snat" => ?snat,
@@ -399,7 +396,7 @@ impl<'a> ResourceAllocator<'a> {
             || created_nic.slot != i16::from(nic.slot)
         {
             warn!(
-                self.log, "unexpected property on allocated NIC";
+                self.opctx.log, "unexpected property on allocated NIC";
                 "db_primary" => created_nic.primary,
                 "expected_primary" => nic.primary,
                 "db_slot" => created_nic.slot,
@@ -425,7 +422,7 @@ impl<'a> ResourceAllocator<'a> {
         }
 
         info!(
-            self.log, "successfully allocated service vNIC";
+            self.opctx.log, "successfully allocated service vNIC";
             "zone_type" => zone_type,
             "zone_id" => %service_id,
             "nic" => ?nic,
@@ -667,7 +664,7 @@ mod tests {
 
         // Initialize resource allocation: this should succeed and create all
         // the relevant db records.
-        ensure_zone_resources_allocated(log, &opctx, datastore, &zones)
+        ensure_zone_resources_allocated(&opctx, datastore, &zones)
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
@@ -751,7 +748,7 @@ mod tests {
 
         // We should be able to run the function again with the same inputs, and
         // it should succeed without inserting any new records.
-        ensure_zone_resources_allocated(log, &opctx, datastore, &zones)
+        ensure_zone_resources_allocated(&opctx, datastore, &zones)
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
@@ -864,7 +861,7 @@ mod tests {
 
             // ... check that we get the error we expect
             let err =
-                ensure_zone_resources_allocated(log, &opctx, datastore, &zones)
+                ensure_zone_resources_allocated(&opctx, datastore, &zones)
                     .await
                     .expect_err("unexpected success");
             assert!(
@@ -918,7 +915,6 @@ mod tests {
                     let expected_error = mutate_nic_fn(zone.id, nic);
 
                     let err = ensure_zone_resources_allocated(
-                        log,
                         &opctx,
                         datastore,
                         &mutated_zones,
@@ -948,7 +944,6 @@ mod tests {
                     let expected_error = mutate_nic_fn(zone.id, nic);
 
                     let err = ensure_zone_resources_allocated(
-                        log,
                         &opctx,
                         datastore,
                         &mutated_zones,
@@ -978,7 +973,6 @@ mod tests {
                     let expected_error = mutate_nic_fn(zone.id, nic);
 
                     let err = ensure_zone_resources_allocated(
-                        log,
                         &opctx,
                         datastore,
                         &mutated_zones,
