@@ -518,7 +518,6 @@ mod tests {
             cptestctx.logctx.log.clone(),
             datastore.clone(),
         );
-        let log = &opctx.log;
 
         // Create an external IP range we can use for our services.
         let external_ip_range = IpRange::try_from((
