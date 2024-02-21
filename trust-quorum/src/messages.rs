@@ -7,8 +7,12 @@
 use crate::{
     BaseboardId, Configuration, Epoch, RackId, Share, ShareDigest, Threshold,
 };
+use derive_more::From;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 use uuid::Uuid;
 
 /// A request from nexus informing a node to start coordinating a
@@ -19,6 +23,12 @@ pub struct Reconfigure {
     pub last_committed_epoch: Option<Epoch>,
     pub members: BTreeSet<BaseboardId>,
     pub threshold: Threshold,
+
+    // The total timeout for the operation
+    pub timeout: Duration,
+
+    // The timeout before we send a follow up request to a peer
+    pub retry_timeout: Duration,
 }
 
 /// Requests received from Nexus
@@ -73,6 +83,7 @@ pub enum NexusRspKind {
     CancelUpgradeFromLrtqAck { upgrade_id: Uuid },
     Committed(CommittedMsg),
     Error(NexusRspError),
+    Timeout,
 }
 
 #[derive(
@@ -133,7 +144,9 @@ pub struct PrepareMsg {
 }
 
 /// A message that is sent between peers until all healthy peers have seen it
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct CommittedMsg {
     pub epoch: Epoch,
 
@@ -155,7 +168,9 @@ pub struct CancelUpgradeFromLrtqMsg {
     pub upgrade_id: Uuid,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, From, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum PeerMsg {
     Prepare(PrepareMsg),
     PrepareAck,
@@ -166,7 +181,9 @@ pub enum PeerMsg {
     Share { epoch: Epoch, share: Share },
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub struct CommitMsg {
     epoch: Epoch,
 }

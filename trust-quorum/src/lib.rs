@@ -172,15 +172,14 @@ impl PersistentState {
 
 /// The state of a reconfiguration coordinator
 pub struct CoordinatorState {
+    nexus_request_id: Uuid,
     start_time: Instant,
     // We copy the last committed reconfiguration here so that decisions
     // can be made with only the state local to this `CoordinatorState`.
     // If we get a prepare message or commit message with a later epoch
     // we will abandon this coordinator state.
     last_committed_configuration: Option<Configuration>,
-    epoch: Epoch,
-    members: BTreeSet<BaseboardId>,
-    threshold: Threshold,
+    reconfigure: Reconfigure,
     // Received key shares for the last committed epoch
     // Only used if there actually is a last_committed_epoch
     received_key_shares: BTreeMap<BaseboardId, Share>,
@@ -193,24 +192,45 @@ pub struct CoordinatorState {
     // receipt, we will remove the prepare message. Once all members acknowledge
     // their prepare, we are done and can respond to nexus.
     prepares: BTreeMap<BaseboardId, PrepareMsg>,
+
+    // The next retry timeout deadline
+    retry_deadline: Instant,
 }
 
 impl CoordinatorState {
     pub fn new(
+        nexus_request_id: Uuid,
         now: Instant,
         reconfigure: Reconfigure,
         last_committed_configuration: Option<Configuration>,
     ) -> CoordinatorState {
+        let retry_deadline = now + reconfigure.retry_timeout;
         CoordinatorState {
+            nexus_request_id,
             start_time: now,
             last_committed_configuration,
-            epoch: reconfigure.epoch,
-            members: reconfigure.members,
-            threshold: reconfigure.threshold,
+            reconfigure,
             received_key_shares: BTreeMap::default(),
             last_committed_rack_secret: None,
             prepares: BTreeMap::default(),
+            retry_deadline,
         }
+    }
+
+    /// Return true if the coordinator is sending Prepares and awaiting acks
+    pub fn is_preparing(&self) -> bool {
+        self.last_committed_configuration.is_none()
+            || self.last_committed_rack_secret.is_some()
+    }
+
+    /// Has the entire coordination timed out?
+    pub fn is_expired(&self, now: Instant) -> bool {
+        now > self.start_time + self.reconfigure.timeout
+    }
+
+    /// Do we have a key share for the given node?
+    pub fn has_key_share(&self, node: &BaseboardId) -> bool {
+        self.received_key_shares.contains_key(node)
     }
 }
 
@@ -280,6 +300,8 @@ impl Node {
     }
 
     pub fn tick(&mut self, now: Instant) -> impl Iterator<Item = Output> + '_ {
+        self.tick_coordinator(now);
+
         // TODO: Everything else
         self.outgoing.drain(..)
     }
@@ -330,49 +352,101 @@ impl Node {
 
         // If we are already coordinating, we must abandon that coordination.
         // TODO: Logging?
-        self.coordinator_state = Some(CoordinatorState::new(
+        let mut coordinator_state = CoordinatorState::new(
+            request_id,
             now,
             msg,
             self.persistent_state.last_committed_reconfiguration().cloned(),
-        ));
+        );
 
         // Start collecting shares for `last_committed_epoch`
-        self.start_collecting_shares_as_coordinator();
+        self.collect_shares_as_coordinator(&mut coordinator_state);
+
+        // Save the coordinator state in `self`
+        self.coordinator_state = Some(coordinator_state);
 
         Ok(())
     }
 
     /// Send a `GetShare` request for every member in the last committed epoch
-    /// so we can recreate the rack secret of the last committed epoch and
-    /// encrypt it with the new rack secret to enable key rotation.
-    fn start_collecting_shares_as_coordinator(&mut self) {
-        // We do this whole dance and allocation because
-        // of borrock limitations.
-        let (last_committed_members, last_committed_epoch): (
-            Vec<BaseboardId>,
-            Epoch,
-        ) = if let Some(coordinator_state) = &self.coordinator_state {
-            if let Some(last_committed_config) =
-                &coordinator_state.last_committed_configuration
-            {
-                (
-                    last_committed_config
-                        .members
-                        .iter()
-                        .map(|m| m.0.clone())
-                        .collect(),
-                    last_committed_config.epoch,
-                )
-            } else {
-                return;
+    /// that has not yet returned a share. This is so that we can recreate the
+    /// rack secret of the last committed epoch and encrypt it with the new rack
+    /// secret to enable key rotation.
+    fn collect_shares_as_coordinator(
+        &mut self,
+        coordinator_state: &mut CoordinatorState,
+    ) {
+        if let Some(last_committed_config) =
+            &coordinator_state.last_committed_configuration
+        {
+            for (member, _) in &last_committed_config.members {
+                // Send a `GetShare` request if we haven't received a key
+                // share from this node yet.
+                if !coordinator_state.has_key_share(member) {
+                    self.send_to_peer(
+                        member.clone(),
+                        PeerMsg::GetShare(last_committed_config.epoch),
+                    );
+                }
             }
-        } else {
+        }
+    }
+
+    /// Send any required messages due to a timeout
+    fn tick_coordinator(&mut self, now: Instant) {
+        let Some(mut coordinator_state) = self.coordinator_state.take() else {
+            // Not currently a coordinator
             return;
         };
+        self.tick_coordinator_impl(now, &mut coordinator_state);
 
-        for member in last_committed_members {
-            self.send_to_peer(member, PeerMsg::GetShare(last_committed_epoch));
+        // Put the coordinator state back into `self`, unless it has expired
+        // We perform this inexpensive check twice for safety purposes, so that
+        // we never forget to put the coordinator state back if we need to. We
+        // don't rely on the return value from the tick to indicate whether it
+        // should be put back or not.
+        if !coordinator_state.is_expired(now) {
+            self.coordinator_state = Some(coordinator_state);
         }
+    }
+
+    // A helper method that operates directly on the coordinator state without
+    // worrying about putting it back into `self`. This is specifically to work
+    // around the borrow checker.
+    fn tick_coordinator_impl(
+        &mut self,
+        now: Instant,
+        coordinator_state: &mut CoordinatorState,
+    ) {
+        // Did the coordination timeout? If so, inform nexus.
+        if coordinator_state.is_expired(now) {
+            // TODO: logging?
+            self.reply_to_nexus(
+                coordinator_state.nexus_request_id,
+                NexusRspKind::Timeout,
+            );
+            return;
+        }
+
+        if now < coordinator_state.retry_deadline {
+            // Nothing to do.
+            return;
+        }
+
+        // Resend any necessary messages to peer nodes
+
+        // Are we currently trying to receive key shares or prepare acks?
+        if !coordinator_state.is_preparing() {
+            self.collect_shares_as_coordinator(coordinator_state);
+        } else {
+            for (node, prepare) in &coordinator_state.prepares {
+                self.send_to_peer(node.clone(), prepare.clone().into());
+            }
+        }
+
+        // Reset retry_deadline
+        coordinator_state.retry_deadline =
+            now + coordinator_state.reconfigure.retry_timeout;
     }
 
     /// If an LRTQ upgrade has not yet taken place, and this is an lrtq node
