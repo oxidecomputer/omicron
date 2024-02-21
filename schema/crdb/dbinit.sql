@@ -3099,7 +3099,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     comment TEXT NOT NULL,
 
     -- identifies the latest internal DNS version when blueprint planning began
-    internal_dns_version INT8
+    internal_dns_version INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
