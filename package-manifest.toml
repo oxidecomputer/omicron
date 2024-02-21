@@ -414,7 +414,7 @@ output.intermediate_only = true
 service_name = "crucible"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "crucible.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ "crucible.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 
@@ -422,7 +422,7 @@ output.type = "zone"
 service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "crucible-pantry.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ "crucible-pantry.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 # Packages not built within Omicron, but which must be imported.
