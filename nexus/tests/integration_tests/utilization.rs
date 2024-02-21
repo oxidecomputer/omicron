@@ -3,10 +3,10 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -27,7 +27,17 @@ type ControlPlaneTestContext =
 async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
+
+    // set high quota for test silo
+    let _ = NexusRequest::object_put(
+        client,
+        "/v1/system/silos/test-suite-silo/quotas",
+        Some(&params::SiloQuotasCreate::arbitrarily_high_default()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await;
 
     let current_util = objects_list_page_authz::<SiloUtilization>(
         client,
@@ -36,6 +46,8 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
     .await
     .items;
 
+    // `default-silo` should be the only silo that shows up because
+    // it has a default quota set
     assert_eq!(current_util.len(), 2);
 
     assert_eq!(current_util[0].silo_name, "default-silo");
@@ -47,7 +59,36 @@ async fn test_utilization(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(current_util[1].silo_name, "test-suite-silo");
     assert_eq!(current_util[1].provisioned, SiloQuotasCreate::empty().into());
-    assert_eq!(current_util[1].allocated, SiloQuotasCreate::empty().into());
+    assert_eq!(
+        current_util[1].allocated,
+        SiloQuotasCreate::arbitrarily_high_default().into()
+    );
+
+    let _ = NexusRequest::object_put(
+        client,
+        "/v1/system/silos/test-suite-silo/quotas",
+        Some(&params::SiloQuotasCreate::empty()),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await;
+
+    let current_util = objects_list_page_authz::<SiloUtilization>(
+        client,
+        "/v1/system/utilization/silos",
+    )
+    .await
+    .items;
+
+    // Now that default-silo is the only one with a quota, it should be the only result
+    assert_eq!(current_util.len(), 1);
+
+    assert_eq!(current_util[0].silo_name, "default-silo");
+    assert_eq!(current_util[0].provisioned, SiloQuotasCreate::empty().into());
+    assert_eq!(
+        current_util[0].allocated,
+        SiloQuotasCreate::arbitrarily_high_default().into()
+    );
 
     let _ = create_project(&client, &PROJECT_NAME).await;
     let _ = create_instance(client, &PROJECT_NAME, &INSTANCE_NAME).await;

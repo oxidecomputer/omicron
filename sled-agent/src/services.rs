@@ -57,11 +57,10 @@ use illumos_utils::running_zone::{
 };
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
-use illumos_utils::zone::Zones;
+use illumos_utils::zpool::ZpoolName;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
-use omicron_common::address::AZ_PREFIX;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
@@ -75,13 +74,13 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
+use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_policy_internal_service_aggressive, retry_policy_local,
-    BackoffError,
+    retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::nexus_config::{
@@ -101,7 +100,6 @@ use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
-use std::iter::FromIterator;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -111,6 +109,11 @@ use tokio::sync::Mutex;
 use tokio::sync::{oneshot, MutexGuard};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
+
+#[cfg(test)]
+use illumos_utils::zone::MockZones as Zones;
+#[cfg(not(test))]
+use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
@@ -160,6 +163,16 @@ pub enum Error {
         err: illumos_utils::running_zone::RunCommandError,
     },
 
+    #[error("Cannot list zones")]
+    ZoneList(#[source] illumos_utils::zone::AdmError),
+
+    #[error("Cannot remove zone")]
+    ZoneRemoval {
+        zone_name: String,
+        #[source]
+        err: illumos_utils::zone::AdmError,
+    },
+
     #[error("Failed to boot zone: {0}")]
     ZoneBoot(#[from] illumos_utils::running_zone::BootError),
 
@@ -168,6 +181,9 @@ pub enum Error {
 
     #[error(transparent)]
     ZoneInstall(#[from] illumos_utils::running_zone::InstallZoneError),
+
+    #[error("Failed to initialize zones: {errors:?}")]
+    ZoneEnsure { errors: Vec<(String, Error)> },
 
     #[error("Error contacting ddmd: {0}")]
     DdmError(#[from] DdmError),
@@ -199,8 +215,31 @@ pub enum Error {
     #[error("Failed to get address: {0}")]
     GetAddressFailure(#[from] illumos_utils::zone::GetAddressError),
 
+    #[error(
+        "Failed to launch zone {zone} because ZFS value cannot be accessed"
+    )]
+    GetZfsValue {
+        zone: String,
+        #[source]
+        source: illumos_utils::zfs::GetValueError,
+    },
+
+    #[error("Cannot launch {zone} with {dataset} (saw {prop_name} = {prop_value}, expected {prop_value_expected})")]
+    DatasetNotReady {
+        zone: String,
+        dataset: String,
+        prop_name: String,
+        prop_value: String,
+        prop_value_expected: String,
+    },
+
     #[error("NTP zone not ready")]
     NtpZoneNotReady,
+
+    // This isn't exactly "NtpZoneNotReady" -- it can happen when the NTP zone
+    // is up, but time is still in the process of synchronizing.
+    #[error("Time not yet synchronized")]
+    TimeNotSynchronized,
 
     #[error("Execution error: {0}")]
     ExecutionError(#[from] illumos_utils::ExecutionError),
@@ -244,13 +283,46 @@ impl Error {
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
         match err {
-            err @ Error::RequestedConfigConflicts(_) => {
+            Error::RequestedConfigConflicts(_) => {
                 omicron_common::api::external::Error::invalid_request(
                     &err.to_string(),
                 )
             }
-            err @ Error::RequestedConfigOutdated { .. } => {
+            Error::RequestedConfigOutdated { .. } => {
                 omicron_common::api::external::Error::conflict(&err.to_string())
+            }
+            Error::TimeNotSynchronized => {
+                omicron_common::api::external::Error::unavail(&err.to_string())
+            }
+            Error::ZoneEnsure { errors } => {
+                // As a special case, if any zones failed to timesync,
+                // prioritize that error.
+                //
+                // This conversion to a 503 error was requested in
+                // https://github.com/oxidecomputer/omicron/issues/4776 ,
+                // and we preserve that behavior here, even though we may
+                // launch many zones at the same time.
+                if let Some(err) = errors.iter().find_map(|(_, err)| {
+                    if matches!(err, Error::TimeNotSynchronized) {
+                        Some(err)
+                    } else {
+                        None
+                    }
+                }) {
+                    omicron_common::api::external::Error::unavail(
+                        &err.to_string(),
+                    )
+                } else {
+                    let internal_message = errors
+                        .iter()
+                        .map(|(name, err)| {
+                            format!("failed to start {name}: {err:?}")
+                        })
+                        .join("\n");
+                    omicron_common::api::external::Error::InternalError {
+                        internal_message,
+                    }
+                }
             }
             _ => omicron_common::api::external::Error::InternalError {
                 internal_message: err.to_string(),
@@ -296,7 +368,13 @@ const ZONES_LEDGER_FILENAME: &str = "omicron-zones.json";
 /// wants for all of its zones) with the locally-determined configuration for
 /// these zones.
 #[derive(
-    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub struct OmicronZonesConfigLocal {
     /// generation of the Omicron-provided part of the configuration
@@ -357,7 +435,13 @@ impl OmicronZonesConfigLocal {
 /// wants for this zone) with any locally-determined configuration (like the
 /// path to the root filesystem)
 #[derive(
-    Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
 )]
 pub struct OmicronZoneConfigLocal {
     pub zone: OmicronZoneConfig,
@@ -504,18 +588,46 @@ enum SledLocalZone {
     },
 }
 
+// The return type for `start_omicron_zones`.
+//
+// When multiple zones are started concurrently, some can fail while others
+// succeed. This structure allows the function to return this nuanced
+// information.
+#[must_use]
+struct StartZonesResult {
+    // The set of zones which have successfully started.
+    new_zones: Vec<OmicronZone>,
+
+    // The set of (zone name, error) of zones that failed to start.
+    errors: Vec<(String, Error)>,
+}
+
+// A running zone and the configuration which started it.
+struct OmicronZone {
+    runtime: RunningZone,
+    config: OmicronZoneConfigLocal,
+}
+
+impl OmicronZone {
+    fn name(&self) -> &str {
+        self.runtime.name()
+    }
+}
+
+type ZoneMap = BTreeMap<String, OmicronZone>;
+
 /// Manages miscellaneous Sled-local services.
 pub struct ServiceManagerInner {
     log: Logger,
     global_zone_bootstrap_link_local_address: Ipv6Addr,
     switch_zone: Mutex<SledLocalZone>,
     sled_mode: SledMode,
-    skip_timesync: Option<bool>,
+    time_sync_config: TimeSyncConfig,
     time_synced: AtomicBool,
     switch_zone_maghemite_links: Vec<PhysicalLink>,
     sidecar_revision: SidecarRevision,
     // Zones representing running services
-    zones: Mutex<BTreeMap<String, RunningZone>>,
+    zones: Mutex<ZoneMap>,
     underlay_vnic_allocator: VnicAllocator<Etherstub>,
     underlay_vnic: EtherstubVnic,
     bootstrap_vnic_allocator: VnicAllocator<Etherstub>,
@@ -540,6 +652,16 @@ struct SledAgentInfo {
     rack_network_config: Option<RackNetworkConfig>,
 }
 
+pub(crate) enum TimeSyncConfig {
+    // Waits for NTP to confirm that time has been synchronized.
+    Normal,
+    // Skips timesync unconditionally.
+    Skip,
+    // Fails timesync unconditionally.
+    #[cfg(test)]
+    Fail,
+}
+
 #[derive(Clone)]
 pub struct ServiceManager {
     inner: Arc<ServiceManagerInner>,
@@ -554,7 +676,7 @@ impl ServiceManager {
     /// - `bootstrap_networking`: Collection of etherstubs/VNICs set up when
     ///    bootstrap agent begins
     /// - `sled_mode`: The sled's mode of operation (Gimlet vs Scrimlet).
-    /// - `skip_timesync`: If true, the sled always reports synced time.
+    /// - `time_sync_config`: Describes how the sled awaits synced time.
     /// - `sidecar_revision`: Rev of attached sidecar, if present.
     /// - `switch_zone_maghemite_links`: List of physical links on which
     ///    maghemite should listen.
@@ -565,7 +687,7 @@ impl ServiceManager {
         ddmd_client: DdmAdminClient,
         bootstrap_networking: BootstrapNetworking,
         sled_mode: SledMode,
-        skip_timesync: Option<bool>,
+        time_sync_config: TimeSyncConfig,
         sidecar_revision: SidecarRevision,
         switch_zone_maghemite_links: Vec<PhysicalLink>,
         storage: StorageHandle,
@@ -582,7 +704,7 @@ impl ServiceManager {
                 // Load the switch zone if it already exists?
                 switch_zone: Mutex::new(SledLocalZone::Disabled),
                 sled_mode,
-                skip_timesync,
+                time_sync_config,
                 time_synced: AtomicBool::new(false),
                 sidecar_revision,
                 switch_zone_maghemite_links,
@@ -659,7 +781,7 @@ impl ServiceManager {
         &self,
         // This argument attempts to ensure that the caller holds the right
         // lock.
-        _map: &MutexGuard<'_, BTreeMap<String, RunningZone>>,
+        _map: &MutexGuard<'_, ZoneMap>,
     ) -> Result<Option<Ledger<OmicronZonesConfigLocal>>, Error> {
         // First, try to load the current software's zone ledger.  If that
         // works, we're done.
@@ -834,84 +956,9 @@ impl ServiceManager {
         let omicron_zones_config =
             zones_config.clone().to_omicron_zones_config();
 
-        // Initialize internal DNS only first: we need it to look up the
-        // boundary switch addresses. This dependency is implicit: when we call
-        // `ensure_all_omicron_zones` below, we eventually land in
-        // `opte_ports_needed()`, which for some service types (including Ntp
-        // but _not_ including InternalDns), we perform internal DNS lookups.
-        let all_zones_request = self
-            .ensure_all_omicron_zones(
-                &mut existing_zones,
-                None,
-                omicron_zones_config.clone(),
-                |z: &OmicronZoneConfig| {
-                    matches!(z.zone_type, OmicronZoneType::InternalDns { .. })
-                },
-            )
-            .await?;
-
-        // Initialize NTP services next as they are required for time
-        // synchronization, which is a pre-requisite for the other services. We
-        // keep `OmicronZoneType::InternalDns` because
-        // `ensure_all_omicron_zones` is additive.
-        let all_zones_request = self
-            .ensure_all_omicron_zones(
-                &mut existing_zones,
-                Some(&all_zones_request),
-                omicron_zones_config.clone(),
-                |z: &OmicronZoneConfig| {
-                    matches!(
-                        z.zone_type,
-                        OmicronZoneType::InternalDns { .. }
-                            | OmicronZoneType::BoundaryNtp { .. }
-                            | OmicronZoneType::InternalNtp { .. }
-                    )
-                },
-            )
-            .await?;
-
-        drop(existing_zones);
-
-        info!(&self.inner.log, "Waiting for sled time synchronization");
-
-        retry_notify(
-            retry_policy_local(),
-            || async {
-                match self.timesync_get().await {
-                    Ok(TimeSync { sync: true, .. }) => {
-                        info!(&self.inner.log, "Time is synchronized");
-                        Ok(())
-                    }
-                    Ok(ts) => Err(BackoffError::transient(format!(
-                        "No sync {:?}",
-                        ts
-                    ))),
-                    Err(e) => Err(BackoffError::transient(format!(
-                        "Error checking for time synchronization: {}",
-                        e
-                    ))),
-                }
-            },
-            |error, delay| {
-                warn!(
-                    self.inner.log,
-                    "Time not yet synchronised (retrying in {:?})",
-                    delay;
-                    "error" => ?error
-                );
-            },
-        )
-        .await
-        .expect("Expected an infinite retry loop syncing time");
-
-        let mut existing_zones = self.inner.zones.lock().await;
-
-        // Initialize all remaining services
         self.ensure_all_omicron_zones(
             &mut existing_zones,
-            Some(&all_zones_request),
             omicron_zones_config,
-            |_| true,
         )
         .await?;
         Ok(())
@@ -1260,11 +1307,14 @@ impl ServiceManager {
     // Check the services intended to run in the zone to determine whether any
     // additional privileges need to be enabled for the zone.
     fn privs_needed(zone_args: &ZoneArgs<'_>) -> Vec<String> {
-        let mut needed = Vec::new();
+        let mut needed = vec![
+            "default".to_string(),
+            "dtrace_user".to_string(),
+            "dtrace_proc".to_string(),
+        ];
         for svc_details in zone_args.sled_local_services() {
             match svc_details {
                 SwitchService::Tfport { .. } => {
-                    needed.push("default".to_string());
                     needed.push("sys_dl_config".to_string());
                 }
                 _ => (),
@@ -1275,7 +1325,6 @@ impl ServiceManager {
             match omicron_zone_type {
                 OmicronZoneType::BoundaryNtp { .. }
                 | OmicronZoneType::InternalNtp { .. } => {
-                    needed.push("default".to_string());
                     needed.push("sys_time".to_string());
                     needed.push("proc_priocntl".to_string());
                 }
@@ -1371,8 +1420,27 @@ impl ServiceManager {
             .add_property_group(dns_config_builder)
             // We do need to enable the default instance of the
             // dns/install service.  It's enough to just mention it
-            // here, as the ServiceInstanceBuilder always enables the
-            // instance being added.
+            // here, as the ServiceInstanceBuilder enables the
+            // instance being added by default.
+            .add_instance(ServiceInstanceBuilder::new("default")))
+    }
+
+    fn zone_network_setup_install(
+        info: &SledAgentInfo,
+        zone: &InstalledZone,
+        static_addr: &String,
+    ) -> Result<ServiceBuilder, Error> {
+        let datalink = zone.get_control_vnic_name();
+        let gateway = &info.underlay_address.to_string();
+
+        let mut config_builder = PropertyGroupBuilder::new("config");
+        config_builder = config_builder
+            .add_property("datalink", "astring", datalink)
+            .add_property("gateway", "astring", gateway)
+            .add_property("static_addr", "astring", static_addr);
+
+        Ok(ServiceBuilder::new("oxide/zone-network-setup")
+            .add_property_group(config_builder)
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
@@ -1412,7 +1480,7 @@ impl ServiceManager {
             ZoneArgs::Omicron(zone_config) => zone_config
                 .zone
                 .dataset_name()
-                .map(|n| zone::Dataset { name: n.full() })
+                .map(|n| zone::Dataset { name: n.full_name() })
                 .into_iter()
                 .collect(),
             ZoneArgs::Switch(_) => vec![],
@@ -1473,6 +1541,8 @@ impl ServiceManager {
         //
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
+        let disabled_ssh_service = ServiceBuilder::new("network/ssh")
+            .add_instance(ServiceInstanceBuilder::new("default").disable());
         match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -1487,16 +1557,18 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
+                let dns_service = Self::dns_install(info).await?;
+
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
@@ -1507,6 +1579,8 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
                     .add_service(clickhouse_service)
                     .add_service(dns_service);
                 profile
@@ -1531,16 +1605,18 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
+                let dns_service = Self::dns_install(info).await?;
+
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
@@ -1551,6 +1627,8 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
                     .add_service(clickhouse_keeper_service)
                     .add_service(dns_service);
                 profile
@@ -1578,11 +1656,6 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let dns_service = Self::dns_install(info).await?;
-
-                // Configure the CockroachDB service.
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let address = SocketAddr::new(
                     IpAddr::V6(*underlay_address),
                     COCKROACH_PORT,
@@ -1590,9 +1663,16 @@ impl ServiceManager {
                 let listen_addr = &address.ip().to_string();
                 let listen_port = &address.port().to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
+                let dns_service = Self::dns_install(info).await?;
+
+                // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("store", "astring", "/data");
@@ -1603,6 +1683,8 @@ impl ServiceManager {
                     );
 
                 let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
                     .add_service(cockroachdb_service)
                     .add_service(dns_service);
                 profile
@@ -1626,32 +1708,38 @@ impl ServiceManager {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
                 };
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CRUCIBLE_PORT.to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
 
                 let dataset_name = DatasetName::new(
                     dataset.pool_name.clone(),
                     DatasetKind::Crucible,
                 )
-                .full();
+                .full_name();
                 let uuid = &Uuid::new_v4().to_string();
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("dataset", "astring", &dataset_name)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port)
                     .add_property("uuid", "astring", uuid)
                     .add_property("store", "astring", "/data");
 
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/agent").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(
+                        ServiceBuilder::new("oxide/crucible/agent")
+                            .add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(config),
+                            ),
+                    );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1674,23 +1762,29 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                let datalink = installed_zone.get_control_vnic_name();
-                let gateway = &info.underlay_address.to_string();
                 let listen_addr = &underlay_address.to_string();
                 let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
 
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
                 let config = PropertyGroupBuilder::new("config")
-                    .add_property("datalink", "astring", datalink)
-                    .add_property("gateway", "astring", gateway)
                     .add_property("listen_addr", "astring", listen_addr)
                     .add_property("listen_port", "astring", listen_port);
 
-                let profile = ProfileBuilder::new("omicron").add_service(
-                    ServiceBuilder::new("oxide/crucible/pantry").add_instance(
-                        ServiceInstanceBuilder::new("default")
-                            .add_property_group(config),
-                    ),
-                );
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(
+                        ServiceBuilder::new("oxide/crucible/pantry")
+                            .add_instance(
+                                ServiceInstanceBuilder::new("default")
+                                    .add_property_group(config),
+                            ),
+                    );
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1698,7 +1792,55 @@ impl ServiceManager {
                 let running_zone = RunningZone::boot(installed_zone).await?;
                 return Ok(running_zone);
             }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        id,
+                        zone_type: OmicronZoneType::Oximeter { .. },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
 
+                // Configure the Oximeter service.
+                let address = SocketAddr::new(
+                    IpAddr::V6(*underlay_address),
+                    OXIMETER_PORT,
+                );
+
+                let listen_addr = &address.ip().to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    listen_addr,
+                )?;
+
+                let oximeter_config = PropertyGroupBuilder::new("config")
+                    .add_property("id", "astring", &id.to_string())
+                    .add_property("address", "astring", &address.to_string());
+                let oximeter_service = ServiceBuilder::new("oxide/oximeter")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(oximeter_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(oximeter_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup Oximeter profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
             _ => {}
         }
 
@@ -2054,14 +2196,6 @@ impl ServiceManager {
                         // service is enabled.
                         smfh.refresh()?;
                     }
-
-                    OmicronZoneType::Oximeter { address } => {
-                        info!(self.inner.log, "Setting up oximeter service");
-                        smfh.setprop("config/id", zone_config.zone.id)?;
-                        smfh.setprop("config/address", address.to_string())?;
-                        smfh.refresh()?;
-                    }
-
                     OmicronZoneType::BoundaryNtp {
                         ntp_servers,
                         dns_servers,
@@ -2127,7 +2261,8 @@ impl ServiceManager {
                     | OmicronZoneType::ClickhouseKeeper { .. }
                     | OmicronZoneType::CockroachDb { .. }
                     | OmicronZoneType::Crucible { .. }
-                    | OmicronZoneType::CruciblePantry { .. } => {
+                    | OmicronZoneType::CruciblePantry { .. }
+                    | OmicronZoneType::Oximeter { .. } => {
                         panic!(
                             "{} is a service which exists as part of a \
                             self-assembling zone",
@@ -2547,17 +2682,73 @@ impl ServiceManager {
         Ok(running_zone)
     }
 
-    // Populates `existing_zones` according to the requests in `services`.
-    async fn initialize_omicron_zones_locked(
+    // Ensures that a single Omicron zone is running.
+    //
+    // This method is NOT idempotent.
+    //
+    // - If the zone already exists, in any form, it is fully removed
+    // before being initialized. This is primarily intended to remove "partially
+    // stopped/started" zones with detritus from interfering with a new zone
+    // being launched.
+    // - If zones need time to be synchronized before they are initialized
+    // (e.g., this is a hard requirement for CockroachDb) they can check the
+    // `time_is_synchronized` argument.
+    // - `all_u2_pools` provides a snapshot into durable storage on this sled,
+    // which gives the storage manager an opportunity to validate the zone's
+    // storage configuration against the reality of the current sled.
+    async fn start_omicron_zone(
         &self,
-        existing_zones: &mut BTreeMap<String, RunningZone>,
-        requests: &Vec<OmicronZoneConfigLocal>,
-    ) -> Result<(), Error> {
-        if let Some(name) = requests
-            .iter()
-            .map(|request| request.zone.zone_name())
-            .duplicates()
-            .next()
+        zone: &OmicronZoneConfig,
+        time_is_synchronized: bool,
+        all_u2_pools: &Vec<ZpoolName>,
+    ) -> Result<OmicronZone, Error> {
+        // Ensure the zone has been fully removed before we try to boot it.
+        //
+        // This ensures that old "partially booted/stopped" zones do not
+        // interfere with our installation.
+        self.ensure_removed(&zone).await?;
+
+        // If this zone requires timesync and we aren't ready, fail it early.
+        if zone.zone_type.requires_timesync() && !time_is_synchronized {
+            return Err(Error::TimeNotSynchronized);
+        }
+
+        // Ensure that this zone's storage is ready.
+        let root = self
+            .validate_storage_and_pick_mountpoint(&zone, &all_u2_pools)
+            .await?;
+
+        let config = OmicronZoneConfigLocal { zone: zone.clone(), root };
+
+        let runtime = self
+            .initialize_zone(
+                ZoneArgs::Omicron(&config),
+                // filesystems=
+                &[],
+                // data_links=
+                &[],
+            )
+            .await?;
+
+        Ok(OmicronZone { runtime, config })
+    }
+
+    // Concurrently attempts to start all zones identified by requests.
+    //
+    // This method is NOT idempotent.
+    //
+    // If we try to start ANY zones concurrently, the result is contained
+    // in the `StartZonesResult` value. This will contain the set of zones which
+    // were initialized successfully, as well as the set of zones which failed
+    // to start.
+    async fn start_omicron_zones(
+        &self,
+        requests: impl Iterator<Item = &OmicronZoneConfig> + Clone,
+        time_is_synchronized: bool,
+        all_u2_pools: &Vec<ZpoolName>,
+    ) -> Result<StartZonesResult, Error> {
+        if let Some(name) =
+            requests.clone().map(|zone| zone.zone_name()).duplicates().next()
         {
             return Err(Error::BadServiceRequest {
                 service: name,
@@ -2565,38 +2756,29 @@ impl ServiceManager {
             });
         }
 
-        let futures = requests.iter().map(|request| {
-            async move {
-                self.initialize_zone(
-                    ZoneArgs::Omicron(request),
-                    // filesystems=
-                    &[],
-                    // data_links=
-                    &[],
-                )
+        let futures = requests.map(|zone| async move {
+            self.start_omicron_zone(&zone, time_is_synchronized, all_u2_pools)
                 .await
-                .map_err(|error| (request.zone.zone_name(), error))
-            }
+                .map_err(|err| (zone.zone_name().to_string(), err))
         });
+
         let results = futures::future::join_all(futures).await;
 
+        let mut new_zones = Vec::new();
         let mut errors = Vec::new();
         for result in results {
             match result {
                 Ok(zone) => {
-                    existing_zones.insert(zone.name().to_string(), zone);
+                    info!(self.inner.log, "Zone started"; "zone" => zone.name());
+                    new_zones.push(zone);
                 }
-                Err((zone_name, error)) => {
-                    errors.push((zone_name, Box::new(error)));
+                Err((name, error)) => {
+                    warn!(self.inner.log, "Zone failed to start"; "zone" => &name);
+                    errors.push((name, error))
                 }
             }
         }
-
-        if !errors.is_empty() {
-            return Err(Error::ZoneInitialize(errors));
-        }
-
-        Ok(())
+        Ok(StartZonesResult { new_zones, errors })
     }
 
     /// Create a zone bundle for the provided zone.
@@ -2620,7 +2802,7 @@ impl ServiceManager {
             return self
                 .inner
                 .zone_bundler
-                .create(zone, ZoneBundleCause::ExplicitRequest)
+                .create(&zone.runtime, ZoneBundleCause::ExplicitRequest)
                 .await;
         }
         Err(BundleError::NoSuchZone { name: name.to_string() })
@@ -2658,7 +2840,7 @@ impl ServiceManager {
     /// boot.
     pub async fn ensure_all_omicron_zones_persistent(
         &self,
-        request: OmicronZonesConfig,
+        mut request: OmicronZonesConfig,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -2697,21 +2879,47 @@ impl ServiceManager {
 
         // If the generation is the same as what we're running, but the contents
         // aren't, that's a problem, too.
-        if ledger_zone_config.omicron_generation == request.generation
-            && ledger_zone_config.clone().to_omicron_zones_config().zones
-                != request.zones
-        {
-            return Err(Error::RequestedConfigConflicts(request.generation));
+        if ledger_zone_config.omicron_generation == request.generation {
+            // Nexus should send us consistent zone orderings; however, we may
+            // reorder the zone list inside `ensure_all_omicron_zones`. To avoid
+            // equality checks failing only because the two lists are ordered
+            // differently, sort them both here before comparing.
+            let mut ledger_zones =
+                ledger_zone_config.clone().to_omicron_zones_config().zones;
+
+            // We sort by ID because we assume no two zones have the same ID. If
+            // that assumption is wrong, we may return an error here where the
+            // conflict is soley the list orders, but in such a case that's the
+            // least of our problems.
+            ledger_zones.sort_by_key(|z| z.id);
+            request.zones.sort_by_key(|z| z.id);
+
+            if ledger_zones != request.zones {
+                return Err(Error::RequestedConfigConflicts(
+                    request.generation,
+                ));
+            }
         }
 
-        let new_config = self
-            .ensure_all_omicron_zones(
-                &mut existing_zones,
-                Some(ledger_zone_config),
-                request,
-                |_| true,
-            )
-            .await?;
+        let omicron_generation = request.generation;
+        let ledger_generation = ledger_zone_config.ledger_generation;
+        self.ensure_all_omicron_zones(&mut existing_zones, request).await?;
+        let zones = existing_zones
+            .values()
+            .map(|omicron_zone| omicron_zone.config.clone())
+            .collect();
+
+        let new_config = OmicronZonesConfigLocal {
+            omicron_generation,
+            ledger_generation,
+            zones,
+        };
+
+        // If the contents of the ledger would be identical, we can avoid
+        // performing an update and commit.
+        if *ledger_zone_config == new_config {
+            return Ok(());
+        }
 
         // Update the zones in the ledger and write it back to both M.2s
         *ledger_zone_config = new_config;
@@ -2722,141 +2930,228 @@ impl ServiceManager {
 
     // Ensures that only the following Omicron zones are running.
     //
-    // Does not record any information such that these services are
-    // re-instantiated on boot.
-    async fn ensure_all_omicron_zones<F>(
+    // This method strives to be idempotent.
+    //
+    // - Starting and stopping zones is not an atomic operation - it's possible
+    // that we cannot start a zone after a previous one has been successfully
+    // created (or destroyed) intentionally. As a result, even in error cases,
+    // it's possible that the set of `existing_zones` changes. However, this set
+    // will only change in the direction of `new_request`: zones will only be
+    // removed if they ARE NOT part of `new_request`, and zones will only be
+    // added if they ARE part of `new_request`.
+    // - Zones are not updated in-place: two zone configurations that differ
+    // in any way are treated as entirely distinct.
+    // - This method does not record any information such that these services
+    // are re-instantiated on boot.
+    async fn ensure_all_omicron_zones(
         &self,
         // The MutexGuard here attempts to ensure that the caller has the right
         // lock held when calling this function.
-        existing_zones: &mut MutexGuard<'_, BTreeMap<String, RunningZone>>,
-        old_config: Option<&OmicronZonesConfigLocal>,
+        existing_zones: &mut MutexGuard<'_, ZoneMap>,
         new_request: OmicronZonesConfig,
-        filter: F,
-    ) -> Result<OmicronZonesConfigLocal, Error>
-    where
-        F: Fn(&OmicronZoneConfig) -> bool,
-    {
-        let log = &self.inner.log;
-
+    ) -> Result<(), Error> {
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
-        let old_zones_set: HashSet<OmicronZoneConfig> = old_config
-            .map(|old_config| {
-                HashSet::from_iter(
-                    old_config.zones.iter().map(|z| z.zone.clone()),
-                )
-            })
-            .unwrap_or_else(HashSet::new);
-        let requested_zones_set =
-            HashSet::from_iter(new_request.zones.into_iter().filter(filter));
+        let old_zone_configs: HashSet<OmicronZoneConfig> = existing_zones
+            .values()
+            .map(|omicron_zone| omicron_zone.config.zone.clone())
+            .collect();
+        let requested_zones_set: HashSet<OmicronZoneConfig> =
+            new_request.zones.into_iter().collect();
 
         let zones_to_be_removed =
-            old_zones_set.difference(&requested_zones_set);
-        let zones_to_be_added = requested_zones_set.difference(&old_zones_set);
+            old_zone_configs.difference(&requested_zones_set);
+        let zones_to_be_added =
+            requested_zones_set.difference(&old_zone_configs);
 
         // Destroy zones that should not be running
         for zone in zones_to_be_removed {
-            let expected_zone_name = zone.zone_name();
-            if let Some(mut zone) = existing_zones.remove(&expected_zone_name) {
-                debug!(
-                    log,
-                    "removing an existing zone";
-                    "zone_name" => &expected_zone_name,
-                );
-                if let Err(e) = self
-                    .inner
-                    .zone_bundler
-                    .create(&zone, ZoneBundleCause::UnexpectedZone)
-                    .await
-                {
-                    error!(
-                        log,
-                        "Failed to take bundle of unexpected zone";
-                        "zone_name" => &expected_zone_name,
-                        "reason" => ?e,
-                    );
-                }
-                if let Err(e) = zone.stop().await {
-                    error!(log, "Failed to stop zone {}: {e}", zone.name());
-                }
-            } else {
-                warn!(log, "Expected to remove zone, but could not find it");
-            }
+            self.zone_bundle_and_try_remove(existing_zones, &zone).await;
         }
 
-        // Create zones that should be running
-        let all_u2_roots = self
-            .inner
-            .storage
-            .get_latest_resources()
-            .await
-            .all_u2_mountpoints(ZONE_DATASET);
-        let mut new_zones = Vec::new();
-        for zone in zones_to_be_added {
-            // Check if we think the zone should already be running
-            let name = zone.zone_name();
-            if existing_zones.contains_key(&name) {
-                // Make sure the zone actually exists in the right state too
-                match Zones::find(&name).await {
-                    Ok(Some(zone)) if zone.state() == zone::State::Running => {
-                        info!(log, "skipping running zone"; "zone" => &name);
-                        continue;
-                    }
-                    _ => {
-                        // Mismatch between SA's view and reality, let's try to
-                        // clean up any remanants and try initialize it again
-                        warn!(
-                            log,
-                            "expected to find existing zone in running state";
-                            "zone" => &name,
-                        );
-                        if let Err(e) =
-                            existing_zones.remove(&name).unwrap().stop().await
-                        {
-                            error!(
-                                log,
-                                "Failed to stop zone";
-                                "zone" => &name,
-                                "error" => %e,
-                            );
-                        }
-                    }
-                }
-            }
+        // Collect information that's necessary to start new zones
+        let storage = self.inner.storage.get_latest_resources().await;
+        let all_u2_pools = storage.all_u2_zpools();
+        let time_is_synchronized =
+            match self.timesync_get_locked(&existing_zones).await {
+                // Time is synchronized
+                Ok(TimeSync { sync: true, .. }) => true,
+                // Time is not synchronized, or we can't check
+                _ => false,
+            };
 
-            // For each new zone request, we pick an arbitrary U.2 to store
-            // the zone filesystem. Note: This isn't known to Nexus right now,
-            // so it's a local-to-sled decision.
-            //
-            // This is (currently) intentional, as the zone filesystem should
-            // be destroyed between reboots.
-            let mut rng = rand::thread_rng();
-            let root = all_u2_roots
-                .choose(&mut rng)
-                .ok_or_else(|| Error::U2NotFound)?
-                .clone();
-
-            new_zones.push(OmicronZoneConfigLocal { zone: zone.clone(), root });
-        }
-
-        self.initialize_omicron_zones_locked(existing_zones, &new_zones)
+        // Concurrently boot all new zones
+        let StartZonesResult { new_zones, errors } = self
+            .start_omicron_zones(
+                zones_to_be_added,
+                time_is_synchronized,
+                &all_u2_pools,
+            )
             .await?;
 
-        if let Some(old_config) = old_config {
-            for old_zone in &old_config.zones {
-                if requested_zones_set.contains(&old_zone.zone) {
-                    new_zones.push(old_zone.clone());
-                }
-            }
-        }
+        // Add the new zones to our tracked zone set
+        existing_zones.extend(
+            new_zones.into_iter().map(|zone| (zone.name().to_string(), zone)),
+        );
 
-        Ok(OmicronZonesConfigLocal {
-            omicron_generation: new_request.generation,
-            ledger_generation: old_config
-                .map(|c| c.ledger_generation)
-                .unwrap_or_else(Generation::new),
-            zones: new_zones,
-        })
+        // If any zones failed to start, exit with an error
+        if !errors.is_empty() {
+            return Err(Error::ZoneEnsure { errors });
+        }
+        Ok(())
+    }
+
+    // Attempts to take a zone bundle and remove a zone.
+    //
+    // Logs, but does not return an error on failure.
+    async fn zone_bundle_and_try_remove(
+        &self,
+        existing_zones: &mut MutexGuard<'_, ZoneMap>,
+        zone: &OmicronZoneConfig,
+    ) {
+        let log = &self.inner.log;
+        let expected_zone_name = zone.zone_name();
+        let Some(mut zone) = existing_zones.remove(&expected_zone_name) else {
+            warn!(
+                log,
+                "Expected to remove zone, but could not find it";
+                "zone_name" => &expected_zone_name,
+            );
+            return;
+        };
+        debug!(
+            log,
+            "removing an existing zone";
+            "zone_name" => &expected_zone_name,
+        );
+        if let Err(e) = self
+            .inner
+            .zone_bundler
+            .create(&zone.runtime, ZoneBundleCause::UnexpectedZone)
+            .await
+        {
+            error!(
+                log,
+                "Failed to take bundle of unexpected zone";
+                "zone_name" => &expected_zone_name,
+                "reason" => ?e,
+            );
+        }
+        if let Err(e) = zone.runtime.stop().await {
+            error!(log, "Failed to stop zone {}: {e}", zone.name());
+        }
+    }
+
+    // Ensures that if a zone is about to be installed, it does not exist.
+    async fn ensure_removed(
+        &self,
+        zone: &OmicronZoneConfig,
+    ) -> Result<(), Error> {
+        let zone_name = zone.zone_name();
+        match Zones::find(&zone_name).await {
+            Ok(Some(zone)) => {
+                warn!(
+                    self.inner.log,
+                    "removing zone";
+                    "zone" => &zone_name,
+                    "state" => ?zone.state(),
+                );
+                if let Err(e) =
+                    Zones::halt_and_remove_logged(&self.inner.log, &zone_name)
+                        .await
+                {
+                    error!(
+                        self.inner.log,
+                        "Failed to remove zone";
+                        "zone" => &zone_name,
+                        "error" => %e,
+                    );
+                    return Err(Error::ZoneRemoval {
+                        zone_name: zone_name.to_string(),
+                        err: e,
+                    });
+                }
+                return Ok(());
+            }
+            Ok(None) => return Ok(()),
+            Err(err) => return Err(Error::ZoneList(err)),
+        }
+    }
+
+    // Returns a zone filesystem mountpoint, after ensuring that U.2 storage
+    // is valid.
+    async fn validate_storage_and_pick_mountpoint(
+        &self,
+        zone: &OmicronZoneConfig,
+        all_u2_pools: &Vec<ZpoolName>,
+    ) -> Result<Utf8PathBuf, Error> {
+        let name = zone.zone_name();
+
+        // For each new zone request, we pick a U.2 to store the zone
+        // filesystem. Note: This isn't known to Nexus right now, so it's a
+        // local-to-sled decision.
+        //
+        // Currently, the zone filesystem should be destroyed between
+        // reboots, so it's fine to make this decision locally.
+        let root = if let Some(dataset) = zone.dataset_name() {
+            // Check that the dataset is actually ready to be used.
+            let [zoned, canmount, encryption] =
+                illumos_utils::zfs::Zfs::get_values(
+                    &dataset.full_name(),
+                    &["zoned", "canmount", "encryption"],
+                )
+                .map_err(|err| Error::GetZfsValue {
+                    zone: zone.zone_name(),
+                    source: err,
+                })?;
+
+            let check_property = |name, actual, expected| {
+                if actual != expected {
+                    return Err(Error::DatasetNotReady {
+                        zone: zone.zone_name(),
+                        dataset: dataset.full_name(),
+                        prop_name: String::from(name),
+                        prop_value: actual,
+                        prop_value_expected: String::from(expected),
+                    });
+                }
+                return Ok(());
+            };
+            check_property("zoned", zoned, "on")?;
+            check_property("canmount", canmount, "on")?;
+            if dataset.dataset().dataset_should_be_encrypted() {
+                check_property("encryption", encryption, "aes-256-gcm")?;
+            }
+
+            // If the zone happens to already manage a dataset, then
+            // we co-locate the zone dataset on the same zpool.
+            //
+            // This slightly reduces the underlying fault domain for the
+            // service.
+            let data_pool = dataset.pool();
+            if !all_u2_pools.contains(&data_pool) {
+                warn!(
+                    self.inner.log,
+                    "zone dataset requested on a zpool which doesn't exist";
+                    "zone" => &name,
+                    "zpool" => %data_pool
+                );
+                return Err(Error::MissingDevice {
+                    device: format!("zpool: {data_pool}"),
+                });
+            }
+            data_pool.dataset_mountpoint(ZONE_DATASET)
+        } else {
+            // If the zone it not coupled to other datsets, we pick one
+            // arbitrarily.
+            let mut rng = rand::thread_rng();
+            all_u2_pools
+                .choose(&mut rng)
+                .map(|pool| pool.dataset_mountpoint(ZONE_DATASET))
+                .ok_or_else(|| Error::U2NotFound)?
+                .clone()
+        };
+        Ok(root)
     }
 
     pub async fn cockroachdb_initialize(&self) -> Result<(), Error> {
@@ -2869,7 +3164,7 @@ impl ServiceManager {
             if zone.name().contains(&ZoneType::CockroachDb.to_string()) {
                 let address = Zones::get_address(
                     Some(zone.name()),
-                    &zone.control_interface(),
+                    &zone.runtime.control_interface(),
                 )?
                 .ip();
                 let host = &format!("[{address}]:{COCKROACH_PORT}");
@@ -2877,7 +3172,7 @@ impl ServiceManager {
                     log,
                     "Initializing CRDB Cluster - sending request to {host}"
                 );
-                if let Err(err) = zone.run_cmd(&[
+                if let Err(err) = zone.runtime.run_cmd(&[
                     "/opt/oxide/cockroachdb/bin/cockroach",
                     "init",
                     "--insecure",
@@ -2892,26 +3187,28 @@ impl ServiceManager {
                     }
                 };
                 info!(log, "Formatting CRDB");
-                zone.run_cmd(&[
-                    "/opt/oxide/cockroachdb/bin/cockroach",
-                    "sql",
-                    "--insecure",
-                    "--host",
-                    host,
-                    "--file",
-                    "/opt/oxide/cockroachdb/sql/dbwipe.sql",
-                ])
-                .map_err(|err| Error::CockroachInit { err })?;
-                zone.run_cmd(&[
-                    "/opt/oxide/cockroachdb/bin/cockroach",
-                    "sql",
-                    "--insecure",
-                    "--host",
-                    host,
-                    "--file",
-                    "/opt/oxide/cockroachdb/sql/dbinit.sql",
-                ])
-                .map_err(|err| Error::CockroachInit { err })?;
+                zone.runtime
+                    .run_cmd(&[
+                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        "sql",
+                        "--insecure",
+                        "--host",
+                        host,
+                        "--file",
+                        "/opt/oxide/cockroachdb/sql/dbwipe.sql",
+                    ])
+                    .map_err(|err| Error::CockroachInit { err })?;
+                zone.runtime
+                    .run_cmd(&[
+                        "/opt/oxide/cockroachdb/bin/cockroach",
+                        "sql",
+                        "--insecure",
+                        "--host",
+                        host,
+                        "--file",
+                        "/opt/oxide/cockroachdb/sql/dbinit.sql",
+                    ])
+                    .map_err(|err| Error::CockroachInit { err })?;
                 info!(log, "Formatting CRDB - Completed");
 
                 // In the single-sled case, if there are multiple CRDB nodes on
@@ -2947,8 +3244,24 @@ impl ServiceManager {
 
     pub async fn timesync_get(&self) -> Result<TimeSync, Error> {
         let existing_zones = self.inner.zones.lock().await;
+        self.timesync_get_locked(&existing_zones).await
+    }
 
-        if let Some(true) = self.inner.skip_timesync {
+    async fn timesync_get_locked(
+        &self,
+        existing_zones: &tokio::sync::MutexGuard<'_, ZoneMap>,
+    ) -> Result<TimeSync, Error> {
+        let skip_timesync = match &self.inner.time_sync_config {
+            TimeSyncConfig::Normal => false,
+            TimeSyncConfig::Skip => true,
+            #[cfg(test)]
+            TimeSyncConfig::Fail => {
+                info!(self.inner.log, "Configured to fail timesync checks");
+                return Err(Error::TimeNotSynchronized);
+            }
+        };
+
+        if skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
             self.boottime_rewrite();
             return Ok(TimeSync {
@@ -2976,7 +3289,8 @@ impl ServiceManager {
         // connect to the UNIX socket at
         // format!("{}/var/run/chrony/chronyd.sock", ntp_zone.root())
 
-        match ntp_zone.run_cmd(&["/usr/bin/chronyc", "-c", "tracking"]) {
+        match ntp_zone.runtime.run_cmd(&["/usr/bin/chronyc", "-c", "tracking"])
+        {
             Ok(stdout) => {
                 let v: Vec<&str> = stdout.split(',').collect();
 
@@ -3532,7 +3846,6 @@ mod test {
         svc,
         zone::MockZones,
     };
-    use omicron_common::address::OXIMETER_PORT;
     use sled_storage::disk::{RawDisk, SyntheticDisk};
 
     use sled_storage::manager::{FakeStorageManager, StorageHandle};
@@ -3544,7 +3857,8 @@ mod test {
     const GLOBAL_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
     const SWITCH_ZONE_BOOTSTRAP_IP: Ipv6Addr = Ipv6Addr::LOCALHOST;
 
-    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_oximeter";
+    const EXPECTED_ZONE_NAME_PREFIX: &str = "oxz_ntp";
+    const EXPECTED_PORT: u16 = 12223;
 
     fn make_bootstrap_networking_config() -> BootstrapNetworking {
         BootstrapNetworking {
@@ -3562,8 +3876,19 @@ mod test {
     }
 
     // Returns the expectations for a new service to be created.
-    fn expect_new_service() -> Vec<Box<dyn std::any::Any>> {
+    fn expect_new_service(
+        expected_zone_name_prefix: &str,
+    ) -> Vec<Box<dyn std::any::Any>> {
         illumos_utils::USE_MOCKS.store(true, Ordering::SeqCst);
+
+        // Ensure zone doesn't already exist
+        let find_zone_ctx = MockZones::find_context();
+        let prefix = expected_zone_name_prefix.to_string();
+        find_zone_ctx.expect().return_once(move |zone_name| {
+            assert!(zone_name.starts_with(&prefix));
+            Ok(None)
+        });
+
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().return_once(
@@ -3574,15 +3899,19 @@ mod test {
         );
         // Install the Omicron Zone
         let install_ctx = MockZones::install_omicron_zone_context();
-        install_ctx.expect().return_once(|_, _, name, _, _, _, _, _, _| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
-            Ok(())
-        });
+        let prefix = expected_zone_name_prefix.to_string();
+        install_ctx.expect().return_once(
+            move |_, _, name, _, _, _, _, _, _| {
+                assert!(name.starts_with(&prefix));
+                Ok(())
+            },
+        );
 
         // Boot the zone.
         let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().return_once(|name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
+        let prefix = expected_zone_name_prefix.to_string();
+        boot_ctx.expect().return_once(move |name| {
+            assert!(name.starts_with(&prefix));
             Ok(())
         });
 
@@ -3590,8 +3919,9 @@ mod test {
         // up the zone ID for the booted zone. This goes through
         // `MockZone::id` to find the zone and get its ID.
         let id_ctx = MockZones::id_context();
-        id_ctx.expect().return_once(|name| {
-            assert!(name.starts_with(EXPECTED_ZONE_NAME_PREFIX));
+        let prefix = expected_zone_name_prefix.to_string();
+        id_ctx.expect().return_once(move |name| {
+            assert!(name.starts_with(&prefix));
             Ok(Some(1))
         });
 
@@ -3616,6 +3946,7 @@ mod test {
         });
 
         vec![
+            Box::new(find_zone_ctx),
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
@@ -3633,6 +3964,11 @@ mod test {
     // because these functions may return any number of times.
     fn expect_new_services() -> Vec<Box<dyn std::any::Any>> {
         illumos_utils::USE_MOCKS.store(true, Ordering::SeqCst);
+
+        // Ensure zones don't already exist
+        let find_zone_ctx = MockZones::find_context();
+        find_zone_ctx.expect().returning(move |_zone_name| Ok(None));
+
         // Create a VNIC
         let create_vnic_ctx = MockDladm::create_vnic_context();
         create_vnic_ctx.expect().returning(
@@ -3691,6 +4027,7 @@ mod test {
         });
 
         vec![
+            Box::new(find_zone_ctx),
             Box::new(create_vnic_ctx),
             Box::new(install_ctx),
             Box::new(boot_ctx),
@@ -3707,19 +4044,40 @@ mod test {
         id: Uuid,
         generation: Generation,
     ) {
-        let _expectations = expect_new_service();
         let address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
+        try_new_service_of_type(
+            mgr,
+            id,
+            generation,
+            OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
+        )
+        .await
+        .expect("Could not create service");
+    }
+
+    async fn try_new_service_of_type(
+        mgr: &ServiceManager,
+        id: Uuid,
+        generation: Generation,
+        zone_type: OmicronZoneType,
+    ) -> Result<(), Error> {
+        let zone_prefix = format!("oxz_{}", zone_type.zone_type_str());
+        let _expectations = expect_new_service(&zone_prefix);
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
             generation,
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
-                zone_type: OmicronZoneType::Oximeter { address },
+                zone_type,
             }],
         })
         .await
-        .unwrap();
     }
 
     // Prepare to call "ensure" for a service which already exists. We should
@@ -3730,13 +4088,18 @@ mod test {
         generation: Generation,
     ) {
         let address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
             generation,
             zones: vec![OmicronZoneConfig {
                 id,
                 underlay_address: Ipv6Addr::LOCALHOST,
-                zone_type: OmicronZoneType::Oximeter { address },
+                zone_type: OmicronZoneType::InternalNtp {
+                    address,
+                    ntp_servers: vec![],
+                    dns_servers: vec![],
+                    domain: None,
+                },
             }],
         })
         .await
@@ -3789,6 +4152,7 @@ mod test {
             // files.
             std::fs::write(dir.join("oximeter.tar.gz"), "Not a real file")
                 .unwrap();
+            std::fs::write(dir.join("ntp.tar.gz"), "Not a real file").unwrap();
         }
     }
 
@@ -3844,13 +4208,20 @@ mod test {
         }
 
         fn new_service_manager(self) -> ServiceManager {
+            self.new_service_manager_with_timesync(TimeSyncConfig::Skip)
+        }
+
+        fn new_service_manager_with_timesync(
+            self,
+            time_sync_config: TimeSyncConfig,
+        ) -> ServiceManager {
             let log = &self.log;
             let mgr = ServiceManager::new(
                 log,
                 self.ddmd_client,
                 make_bootstrap_networking_config(),
                 SledMode::Auto,
-                Some(true),
+                time_sync_config,
                 SidecarRevision::Physical("rev-test".to_string()),
                 vec![],
                 self.storage_handle,
@@ -3915,6 +4286,78 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_ensure_service_before_timesync() {
+        let logctx = omicron_test_utils::dev::test_setup_log(
+            "test_ensure_service_before_timesync",
+        );
+        let test_config = TestConfig::new().await;
+        let helper =
+            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
+
+        let mgr =
+            helper.new_service_manager_with_timesync(TimeSyncConfig::Fail);
+        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
+
+        let v1 = Generation::new();
+        let found =
+            mgr.omicron_zones_list().await.expect("failed to list zones");
+        assert_eq!(found.generation, v1);
+        assert!(found.zones.is_empty());
+
+        let v2 = v1.next();
+        let id = Uuid::new_v4();
+
+        // Should fail: time has not yet synchronized.
+        let address =
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
+        let result = try_new_service_of_type(
+            &mgr,
+            id,
+            v2,
+            OmicronZoneType::Oximeter { address },
+        )
+        .await;
+
+        // First, ensure this is the right kind of error.
+        let err = result.unwrap_err();
+        let errors = match &err {
+            Error::ZoneEnsure { errors } => errors,
+            err => panic!("unexpected result: {err:?}"),
+        };
+        assert_eq!(errors.len(), 1);
+        assert_matches::assert_matches!(
+            errors[0].1,
+            Error::TimeNotSynchronized
+        );
+
+        // Next, ensure this still converts to an "unavail" common error
+        let common_err = omicron_common::api::external::Error::from(err);
+        assert_matches::assert_matches!(
+            common_err,
+            omicron_common::api::external::Error::ServiceUnavailable { .. }
+        );
+
+        // Should succeed: we don't care that time has not yet synchronized (for
+        // this specific service).
+        try_new_service_of_type(
+            &mgr,
+            id,
+            v2,
+            OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
+        )
+        .await
+        .unwrap();
+
+        drop_service_manager(mgr);
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_ensure_service_which_already_exists() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_ensure_service_which_already_exists",
@@ -3962,7 +4405,7 @@ mod test {
 
         // Before we re-create the service manager - notably, using the same
         // config file! - expect that a service gets initialized.
-        let _expectations = expect_new_service();
+        let _expectations = expect_new_service(EXPECTED_ZONE_NAME_PREFIX);
         let mgr = helper.new_service_manager();
         LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
 
@@ -4036,11 +4479,16 @@ mod test {
 
         let _expectations = expect_new_services();
         let address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
+            zone_type: OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         }];
         mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
             generation: v2,
@@ -4061,7 +4509,12 @@ mod test {
         zones.push(OmicronZoneConfig {
             id: id2,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
+            zone_type: OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers: vec![],
+                dns_servers: vec![],
+                domain: None,
+            },
         });
 
         // Now try to apply that list with an older generation number.  This
@@ -4181,83 +4634,6 @@ mod test {
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
         assert_eq!(found, expected_config);
-
-        drop_service_manager(mgr);
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn test_old_ledger_migration_continue() {
-        // This test is just like "test_old_ledger_migration", except that we
-        // deploy a new zone after migration and before shutting down the
-        // service manager.  This tests that new changes modify the new,
-        // migrated config.
-        let logctx = omicron_test_utils::dev::test_setup_log(
-            "test_old_ledger_migration_continue",
-        );
-        let test_config = TestConfig::new().await;
-
-        // Before we start the service manager, stuff one of our old-format
-        // service ledgers into place.
-        let contents =
-            include_str!("../tests/old-service-ledgers/rack2-sled10.json");
-        std::fs::write(
-            test_config.config_dir.path().join(SERVICES_LEDGER_FILENAME),
-            contents,
-        )
-        .expect("failed to copy example old-format services ledger into place");
-
-        // Now start the service manager.
-        let helper =
-            LedgerTestHelper::new(logctx.log.clone(), &test_config).await;
-        let mgr = helper.clone().new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
-
-        // Trigger the migration code.
-        let unused = Mutex::new(BTreeMap::new());
-        let migrated_ledger = mgr
-            .load_ledgered_zones(&unused.lock().await)
-            .await
-            .expect("failed to load ledgered zones")
-            .unwrap();
-
-        // The other test verified that migration has happened normally so let's
-        // assume it has.  Now provision a new zone.
-        let vv = migrated_ledger.data().omicron_generation.next();
-        let id = Uuid::new_v4();
-
-        let _expectations = expect_new_services();
-        let address =
-            SocketAddrV6::new(Ipv6Addr::LOCALHOST, OXIMETER_PORT, 0, 0);
-        let mut zones =
-            migrated_ledger.data().clone().to_omicron_zones_config().zones;
-        zones.push(OmicronZoneConfig {
-            id,
-            underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::Oximeter { address },
-        });
-        mgr.ensure_all_omicron_zones_persistent(OmicronZonesConfig {
-            generation: vv,
-            zones,
-        })
-        .await
-        .expect("failed to add new zone after migration");
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.generation, vv);
-        assert_eq!(found.zones.len(), migrated_ledger.data().zones.len() + 1);
-
-        // Just to be sure, shut down the manager and create a new one without
-        // triggering migration again.  It should now report one more zone than
-        // was migrated earlier.
-        drop_service_manager(mgr);
-
-        let mgr = helper.new_service_manager();
-        LedgerTestHelper::sled_agent_started(&logctx.log, &test_config, &mgr);
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
-        assert_eq!(found.generation, vv);
-        assert_eq!(found.zones.len(), migrated_ledger.data().zones.len() + 1);
 
         drop_service_manager(mgr);
         logctx.cleanup_successful();

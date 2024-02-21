@@ -9,17 +9,18 @@ use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkSetupError,
 };
-use crate::bootstrap::params::StartSledAgentRequest;
+use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
 use crate::instance_manager::{InstanceManager, ReservoirMode};
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse, OmicronZonesConfig, SledRole, TimeSync,
-    VpcFirewallRule, ZoneBundleMetadata, Zpool,
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
+    ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
@@ -42,7 +43,7 @@ use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
-use omicron_common::api::external::Vni;
+use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::nexus::{
@@ -104,6 +105,9 @@ pub enum Error {
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
 
+    #[error("Failed to request firewall rules")]
+    FirewallRequest(#[source] nexus_client::Error<nexus_client::types::Error>),
+
     #[error(transparent)]
     Services(#[from] crate::services::Error),
 
@@ -159,7 +163,7 @@ impl From<Error> for omicron_common::api::external::Error {
 impl From<Error> for dropshot::HttpError {
     fn from(err: Error) -> Self {
         match err {
-            crate::sled_agent::Error::Instance(instance_manager_error) => {
+            Error::Instance(instance_manager_error) => {
                 match instance_manager_error {
                     crate::instance_manager::Error::Instance(
                         instance_error,
@@ -196,7 +200,7 @@ impl From<Error> for dropshot::HttpError {
                     e => HttpError::for_internal_error(e.to_string()),
                 }
             }
-            crate::sled_agent::Error::ZoneBundle(ref inner) => match inner {
+            Error::ZoneBundle(ref inner) => match inner {
                 BundleError::NoStorage | BundleError::Unavailable { .. } => {
                     HttpError::for_unavail(None, inner.to_string())
                 }
@@ -211,6 +215,35 @@ impl From<Error> for dropshot::HttpError {
             },
             e => HttpError::for_internal_error(e.to_string()),
         }
+    }
+}
+
+/// Error returned by `SledAgent::inventory()`
+#[derive(thiserror::Error, Debug)]
+pub enum InventoryError {
+    // This error should be impossible because ByteCount supports values from
+    // [0, i64::MAX] and we don't have anything with that many bytes in the
+    // system.
+    #[error(transparent)]
+    BadByteCount(#[from] ByteCountRangeError),
+}
+
+impl From<InventoryError> for omicron_common::api::external::Error {
+    fn from(inventory_error: InventoryError) -> Self {
+        match inventory_error {
+            e @ InventoryError::BadByteCount(..) => {
+                omicron_common::api::external::Error::internal_error(&format!(
+                    "{:#}",
+                    e
+                ))
+            }
+        }
+    }
+}
+
+impl From<InventoryError> for dropshot::HttpError {
+    fn from(error: InventoryError) -> Self {
+        Self::from(omicron_common::api::external::Error::from(error))
     }
 }
 
@@ -572,26 +605,35 @@ impl SledAgent {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                self.inner
-                    .services
-                    .load_services()
+                // Load as many services as we can, and don't exit immediately
+                // upon failure...
+                let load_services_result =
+                    self.inner.services.load_services().await.map_err(|err| {
+                        BackoffError::transient(Error::from(err))
+                    });
+
+                // ... and request firewall rule updates for as many services as
+                // we can. Note that we still make this request even if we only
+                // partially load some services.
+                let firewall_result = self
+                    .request_firewall_update()
                     .await
-                    .map_err(|err| BackoffError::transient(err))
+                    .map_err(|err| BackoffError::transient(err));
+
+                // Only complete if we have loaded all services and firewall
+                // rules successfully.
+                load_services_result.and(firewall_result)
             },
             |err, delay| {
                 warn!(
                     self.log,
                     "Failed to load services, will retry in {:?}", delay;
-                    "error" => %err,
+                    "error" => ?err,
                 );
             },
         )
         .await
         .unwrap(); // we retry forever, so this can't fail
-
-        // Now that we've initialized the sled services, notify nexus again
-        // at which point it'll plumb any necessary firewall rules back to us.
-        self.notify_nexus_about_self(&self.log);
     }
 
     pub(crate) fn switch_zone_underlay_info(
@@ -612,7 +654,26 @@ impl SledAgent {
         &self.inner.start_request
     }
 
-    // Sends a request to Nexus informing it that the current sled exists.
+    /// Requests firewall rules from Nexus.
+    ///
+    /// Does not retry upon failure.
+    async fn request_firewall_update(&self) -> Result<(), Error> {
+        let sled_id = self.inner.id;
+
+        self.inner
+            .nexus_client
+            .client()
+            .sled_firewall_rules_request(&sled_id)
+            .await
+            .map_err(|err| Error::FirewallRequest(err))?;
+        Ok(())
+    }
+
+    /// Sends a request to Nexus informing it that the current sled exists,
+    /// with information abou the existing set of hardware.
+    ///
+    /// Does not block until Nexus is available -- the future created by this
+    /// function is retried in a queue that is polled in the background.
     pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let nexus_client = self.inner.nexus_client.clone();
@@ -628,7 +689,7 @@ impl SledAgent {
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with an randomized, capped
+            // until it succeeds. We retry with a randomized, capped
             // exponential backoff.
             //
             // TODO-robustness if this returns a 400 error, we probably want to
@@ -950,6 +1011,37 @@ impl SledAgent {
             .map_err(|e| Error::Instance(e))
     }
 
+    /// Idempotently ensures that an instance's OPTE/port state includes the
+    /// specified external IP address.
+    ///
+    /// This method will return an error when trying to register an ephemeral IP which
+    /// does not match the current ephemeral IP.
+    pub async fn instance_put_external_ip(
+        &self,
+        instance_id: Uuid,
+        external_ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .add_external_ip(instance_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
+    /// Idempotently ensures that an instance's OPTE/port state does not include the
+    /// specified external IP address in either its ephemeral or floating IP set.
+    pub async fn instance_delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        external_ip: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        self.inner
+            .instances
+            .delete_external_ip(instance_id, external_ip)
+            .await
+            .map_err(|e| Error::Instance(e))
+    }
+
     /// Idempotently ensures that the given virtual disk is attached (or not) as
     /// specified.
     ///
@@ -1056,6 +1148,37 @@ impl SledAgent {
     pub(crate) fn boot_disk_os_writer(&self) -> &BootDiskOsWriter {
         &self.inner.boot_disk_os_writer
     }
+
+    /// Return basic information about ourselves: identity and status
+    ///
+    /// This is basically a GET version of the information we push to Nexus on
+    /// startup.
+    pub(crate) fn inventory(&self) -> Result<Inventory, InventoryError> {
+        let sled_id = self.inner.id;
+        let sled_agent_address = self.inner.sled_address();
+        let is_scrimlet = self.inner.hardware.is_scrimlet();
+        let baseboard = self.inner.hardware.baseboard();
+        let usable_hardware_threads =
+            self.inner.hardware.online_processor_count();
+        let usable_physical_ram =
+            self.inner.hardware.usable_physical_ram_bytes();
+        let reservoir_size = self.inner.instances.reservoir_size();
+        let sled_role = if is_scrimlet {
+            crate::params::SledRole::Scrimlet
+        } else {
+            crate::params::SledRole::Gimlet
+        };
+
+        Ok(Inventory {
+            sled_id,
+            sled_agent_address,
+            sled_role,
+            baseboard,
+            usable_hardware_threads,
+            usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
+            reservoir_size,
+        })
+    }
 }
 
 async fn register_metric_producer_with_nexus(
@@ -1095,8 +1218,8 @@ pub enum AddSledError {
     },
     #[error("Failed to connect to DDM")]
     DdmAdminClient(#[source] ddm_admin_client::DdmError),
-    #[error("Failed to learn bootstrap ip for {0}")]
-    NotFound(Baseboard),
+    #[error("Failed to learn bootstrap ip for {0:?}")]
+    NotFound(BaseboardId),
     #[error("Failed to initialize {sled_id}: {err}")]
     BootstrapTcpClient {
         sled_id: Baseboard,
@@ -1105,9 +1228,9 @@ pub enum AddSledError {
 }
 
 /// Add a sled to an initialized rack.
-pub async fn add_sled_to_initialized_rack(
+pub async fn sled_add(
     log: Logger,
-    sled_id: Baseboard,
+    sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
     // Get all known bootstrap addresses via DDM
@@ -1135,16 +1258,20 @@ pub async fn add_sled_to_initialized_rack(
         })
         .collect::<FuturesUnordered<_>>();
 
-    // Execute the futures until we find our matching sled or done searching
+    // Execute the futures until we find our matching sled or are done searching
     let mut target_ip = None;
+    let mut found_baseboard = None;
     while let Some((ip, result)) = addrs_to_sleds.next().await {
         match result {
             Ok(baseboard) => {
                 // Convert from progenitor type back to `sled-hardware`
                 // type.
-                let found = baseboard.into_inner().into();
-                if sled_id == found {
+                let found: Baseboard = baseboard.into_inner().into();
+                if sled_id.serial_number == found.identifier()
+                    && sled_id.part_number == found.model()
+                {
                     target_ip = Some(ip);
+                    found_baseboard = Some(found);
                     break;
                 }
             }
@@ -1167,10 +1294,14 @@ pub async fn add_sled_to_initialized_rack(
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
+    // Safe to unwrap, because we would have bailed when checking target_ip
+    // above otherwise. baseboard and target_ip are set together.
+    let baseboard = found_baseboard.unwrap();
+
     client.start_sled_agent(&request).await.map_err(|err| {
-        AddSledError::BootstrapTcpClient { sled_id: sled_id.clone(), err }
+        AddSledError::BootstrapTcpClient { sled_id: baseboard.clone(), err }
     })?;
 
-    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %sled_id);
+    info!(log, "Peer agent initialized"; "peer_bootstrap_addr" => %bootstrap_addr, "peer_id" => %baseboard);
     Ok(())
 }

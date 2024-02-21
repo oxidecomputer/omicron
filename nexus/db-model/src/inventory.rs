@@ -4,12 +4,18 @@
 
 //! Types for representing the hardware/software inventory in the database
 
+use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    sw_caboose, sw_root_of_trust_page,
+    inv_omicron_zone, inv_omicron_zone_nic, inv_root_of_trust,
+    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
+    inv_sled_omicron_zones, sw_caboose, sw_root_of_trust_page,
 };
-use crate::{impl_enum_type, SqlU16, SqlU32};
+use crate::{
+    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SqlU16, SqlU32,
+    SqlU8,
+};
+use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
@@ -18,6 +24,7 @@ use diesel::expression::AsExpression;
 use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
+use ipnetwork::IpNetwork;
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
@@ -26,7 +33,7 @@ use uuid::Uuid;
 // See [`nexus_types::inventory::PowerState`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "hw_power_state"))]
+    #[diesel(postgres_type(name = "hw_power_state", schema = "public"))]
     pub struct HwPowerStateEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -62,7 +69,7 @@ impl From<HwPowerState> for PowerState {
 // See [`nexus_types::inventory::RotSlot`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "hw_rot_slot"))]
+    #[diesel(postgres_type(name = "hw_rot_slot", schema = "public"))]
     pub struct HwRotSlotEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -95,7 +102,7 @@ impl From<HwRotSlot> for RotSlot {
 // See [`nexus_types::inventory::CabooseWhich`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "caboose_which"))]
+    #[diesel(postgres_type(name = "caboose_which", schema = "public"))]
     pub struct CabooseWhichEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -136,7 +143,7 @@ impl From<CabooseWhich> for nexus_types::inventory::CabooseWhich {
 // See [`nexus_types::inventory::RotPageWhich`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "root_of_trust_page_which"))]
+    #[diesel(postgres_type(name = "root_of_trust_page_which", schema = "public"))]
     pub struct RotPageWhichEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq)]
@@ -189,7 +196,7 @@ impl From<RotPageWhich> for nexus_types::inventory::RotPageWhich {
 // See [`nexus_types::inventory::SpType`].
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "sp_type"))]
+    #[diesel(postgres_type(name = "sp_type", schema = "public"))]
     pub struct SpTypeEnum;
 
     #[derive(
@@ -537,4 +544,319 @@ pub struct InvRotPage {
 
     pub which: RotPageWhich,
     pub sw_root_of_trust_page_id: Uuid,
+}
+
+// See [`nexus_types::inventory::SledRole`].
+impl_enum_type!(
+    #[derive(SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "sled_role"))]
+    pub struct SledRoleEnum;
+
+    #[derive(
+        Copy,
+        Clone,
+        Debug,
+        AsExpression,
+        FromSqlRow,
+        PartialOrd,
+        Ord,
+        PartialEq,
+        Eq
+    )]
+    #[diesel(sql_type = SledRoleEnum)]
+    pub enum SledRole;
+
+    // Enum values
+    Gimlet => b"gimlet"
+    Scrimlet =>  b"scrimlet"
+);
+
+impl From<nexus_types::inventory::SledRole> for SledRole {
+    fn from(value: nexus_types::inventory::SledRole) -> Self {
+        match value {
+            nexus_types::inventory::SledRole::Gimlet => SledRole::Gimlet,
+            nexus_types::inventory::SledRole::Scrimlet => SledRole::Scrimlet,
+        }
+    }
+}
+
+impl From<SledRole> for nexus_types::inventory::SledRole {
+    fn from(value: SledRole) -> Self {
+        match value {
+            SledRole::Gimlet => nexus_types::inventory::SledRole::Gimlet,
+            SledRole::Scrimlet => nexus_types::inventory::SledRole::Scrimlet,
+        }
+    }
+}
+
+/// See [`nexus_types::inventory::SledAgent`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_sled_agent)]
+pub struct InvSledAgent {
+    pub inv_collection_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub hw_baseboard_id: Option<Uuid>,
+    pub sled_agent_ip: ipv6::Ipv6Addr,
+    pub sled_agent_port: SqlU16,
+    pub sled_role: SledRole,
+    pub usable_hardware_threads: SqlU32,
+    pub usable_physical_ram: ByteCount,
+    pub reservoir_size: ByteCount,
+}
+
+impl InvSledAgent {
+    pub fn new_without_baseboard(
+        collection_id: Uuid,
+        sled_agent: &nexus_types::inventory::SledAgent,
+    ) -> Result<InvSledAgent, anyhow::Error> {
+        // It's irritating to have to check this case at runtime.  The challenge
+        // is that if this sled agent does have a baseboard id, we don't know
+        // what its (SQL) id is.  The only way to get it is to query it from
+        // the database.  As a result, the caller takes a wholly different code
+        // path for that case that doesn't even involve constructing one of
+        // these objects.  (In fact, we never see the id in Rust.)
+        //
+        // To check this at compile time, we'd have to bifurcate
+        // `nexus_types::inventory::SledAgent` into an enum with two variants:
+        // one with a baseboard id and one without.  This would muck up all the
+        // other consumers of this type, just for a highly database-specific
+        // concern.
+        if sled_agent.baseboard_id.is_some() {
+            Err(anyhow!(
+                "attempted to directly insert InvSledAgent with \
+                non-null baseboard id"
+            ))
+        } else {
+            Ok(InvSledAgent {
+                inv_collection_id: collection_id,
+                time_collected: sled_agent.time_collected,
+                source: sled_agent.source.clone(),
+                sled_id: sled_agent.sled_id,
+                hw_baseboard_id: None,
+                sled_agent_ip: ipv6::Ipv6Addr::from(
+                    *sled_agent.sled_agent_address.ip(),
+                ),
+                sled_agent_port: SqlU16(sled_agent.sled_agent_address.port()),
+                sled_role: SledRole::from(sled_agent.sled_role),
+                usable_hardware_threads: SqlU32(
+                    sled_agent.usable_hardware_threads,
+                ),
+                usable_physical_ram: ByteCount::from(
+                    sled_agent.usable_physical_ram,
+                ),
+                reservoir_size: ByteCount::from(sled_agent.reservoir_size),
+            })
+        }
+    }
+}
+
+/// See [`nexus_types::inventory::OmicronZonesFound`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_sled_omicron_zones)]
+pub struct InvSledOmicronZones {
+    pub inv_collection_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub source: String,
+    pub sled_id: Uuid,
+    pub generation: Generation,
+}
+
+impl InvSledOmicronZones {
+    pub fn new(
+        inv_collection_id: Uuid,
+        zones_found: &nexus_types::inventory::OmicronZonesFound,
+    ) -> InvSledOmicronZones {
+        InvSledOmicronZones {
+            inv_collection_id,
+            time_collected: zones_found.time_collected,
+            source: zones_found.source.clone(),
+            sled_id: zones_found.sled_id,
+            generation: Generation(zones_found.zones.generation),
+        }
+    }
+
+    pub fn into_uninit_zones_found(
+        self,
+    ) -> nexus_types::inventory::OmicronZonesFound {
+        nexus_types::inventory::OmicronZonesFound {
+            time_collected: self.time_collected,
+            source: self.source,
+            sled_id: self.sled_id,
+            zones: nexus_types::inventory::OmicronZonesConfig {
+                generation: *self.generation,
+                zones: Vec::new(),
+            },
+        }
+    }
+}
+
+impl_enum_type!(
+    #[derive(Clone, SqlType, Debug, QueryId)]
+    #[diesel(postgres_type(name = "zone_type"))]
+    pub struct ZoneTypeEnum;
+
+    #[derive(Clone, Copy, Debug, Eq, AsExpression, FromSqlRow, PartialEq)]
+    #[diesel(sql_type = ZoneTypeEnum)]
+    pub enum ZoneType;
+
+    // Enum values
+    BoundaryNtp => b"boundary_ntp"
+    Clickhouse => b"clickhouse"
+    ClickhouseKeeper => b"clickhouse_keeper"
+    CockroachDb => b"cockroach_db"
+    Crucible => b"crucible"
+    CruciblePantry => b"crucible_pantry"
+    ExternalDns => b"external_dns"
+    InternalDns => b"internal_dns"
+    InternalNtp => b"internal_ntp"
+    Nexus => b"nexus"
+    Oximeter => b"oximeter"
+);
+
+/// See [`nexus_types::inventory::OmicronZoneConfig`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_zone)]
+pub struct InvOmicronZone {
+    pub inv_collection_id: Uuid,
+    pub sled_id: Uuid,
+    pub id: Uuid,
+    pub underlay_address: ipv6::Ipv6Addr,
+    pub zone_type: ZoneType,
+    pub primary_service_ip: ipv6::Ipv6Addr,
+    pub primary_service_port: SqlU16,
+    pub second_service_ip: Option<IpNetwork>,
+    pub second_service_port: Option<SqlU16>,
+    pub dataset_zpool_name: Option<String>,
+    pub nic_id: Option<Uuid>,
+    pub dns_gz_address: Option<ipv6::Ipv6Addr>,
+    pub dns_gz_address_index: Option<SqlU32>,
+    pub ntp_ntp_servers: Option<Vec<String>>,
+    pub ntp_dns_servers: Option<Vec<IpNetwork>>,
+    pub ntp_domain: Option<String>,
+    pub nexus_external_tls: Option<bool>,
+    pub nexus_external_dns_servers: Option<Vec<IpNetwork>>,
+    pub snat_ip: Option<IpNetwork>,
+    pub snat_first_port: Option<SqlU16>,
+    pub snat_last_port: Option<SqlU16>,
+}
+
+impl InvOmicronZone {
+    pub fn new(
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        zone: &nexus_types::inventory::OmicronZoneConfig,
+    ) -> Result<InvOmicronZone, anyhow::Error> {
+        let zone = OmicronZone::new(sled_id, zone)?;
+        Ok(Self {
+            inv_collection_id,
+            sled_id: zone.sled_id,
+            id: zone.id,
+            underlay_address: zone.underlay_address,
+            zone_type: zone.zone_type,
+            primary_service_ip: zone.primary_service_ip,
+            primary_service_port: zone.primary_service_port,
+            second_service_ip: zone.second_service_ip,
+            second_service_port: zone.second_service_port,
+            dataset_zpool_name: zone.dataset_zpool_name,
+            nic_id: zone.nic_id,
+            dns_gz_address: zone.dns_gz_address,
+            dns_gz_address_index: zone.dns_gz_address_index,
+            ntp_ntp_servers: zone.ntp_ntp_servers,
+            ntp_dns_servers: zone.ntp_dns_servers,
+            ntp_domain: zone.ntp_domain,
+            nexus_external_tls: zone.nexus_external_tls,
+            nexus_external_dns_servers: zone.nexus_external_dns_servers,
+            snat_ip: zone.snat_ip,
+            snat_first_port: zone.snat_first_port,
+            snat_last_port: zone.snat_last_port,
+        })
+    }
+
+    pub fn into_omicron_zone_config(
+        self,
+        nic_row: Option<InvOmicronZoneNic>,
+    ) -> Result<nexus_types::inventory::OmicronZoneConfig, anyhow::Error> {
+        let zone = OmicronZone {
+            sled_id: self.sled_id,
+            id: self.id,
+            underlay_address: self.underlay_address,
+            zone_type: self.zone_type,
+            primary_service_ip: self.primary_service_ip,
+            primary_service_port: self.primary_service_port,
+            second_service_ip: self.second_service_ip,
+            second_service_port: self.second_service_port,
+            dataset_zpool_name: self.dataset_zpool_name,
+            nic_id: self.nic_id,
+            dns_gz_address: self.dns_gz_address,
+            dns_gz_address_index: self.dns_gz_address_index,
+            ntp_ntp_servers: self.ntp_ntp_servers,
+            ntp_dns_servers: self.ntp_dns_servers,
+            ntp_domain: self.ntp_domain,
+            nexus_external_tls: self.nexus_external_tls,
+            nexus_external_dns_servers: self.nexus_external_dns_servers,
+            snat_ip: self.snat_ip,
+            snat_first_port: self.snat_first_port,
+            snat_last_port: self.snat_last_port,
+        };
+        zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_omicron_zone_nic)]
+pub struct InvOmicronZoneNic {
+    inv_collection_id: Uuid,
+    pub id: Uuid,
+    name: Name,
+    ip: IpNetwork,
+    mac: MacAddr,
+    subnet: IpNetwork,
+    vni: SqlU32,
+    is_primary: bool,
+    slot: SqlU8,
+}
+
+impl From<InvOmicronZoneNic> for OmicronZoneNic {
+    fn from(value: InvOmicronZoneNic) -> Self {
+        OmicronZoneNic {
+            id: value.id,
+            name: value.name,
+            ip: value.ip,
+            mac: value.mac,
+            subnet: value.subnet,
+            vni: value.vni,
+            is_primary: value.is_primary,
+            slot: value.slot,
+        }
+    }
+}
+
+impl InvOmicronZoneNic {
+    pub fn new(
+        inv_collection_id: Uuid,
+        zone: &nexus_types::inventory::OmicronZoneConfig,
+    ) -> Result<Option<InvOmicronZoneNic>, anyhow::Error> {
+        let zone_nic = OmicronZoneNic::new(zone)?;
+        Ok(zone_nic.map(|nic| Self {
+            inv_collection_id,
+            id: nic.id,
+            name: nic.name,
+            ip: nic.ip,
+            mac: nic.mac,
+            subnet: nic.subnet,
+            vni: nic.vni,
+            is_primary: nic.is_primary,
+            slot: nic.slot,
+        }))
+    }
+
+    pub fn into_network_interface_for_zone(
+        self,
+        zone_id: Uuid,
+    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+        let zone_nic = OmicronZoneNic::from(self);
+        zone_nic.into_network_interface_for_zone(zone_id)
+    }
 }

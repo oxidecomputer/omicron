@@ -277,7 +277,7 @@ The below example demonstrates a single static gateway route; in-depth explanati
 [rack_network_config]
 # An internal-only IPv6 address block which contains AZ-wide services.
 # This does not need to be changed.
-rack_subnet = "fd00:1122:3344:01::/56"
+rack_subnet = "fd00:1122:3344:0100::/56"
 # A range of IP addresses used by Boundary Services on the network.  In a real
 # system, these would be addresses of the uplink ports on the Sidecar.  With
 # softnpu, only one address is used.
@@ -298,7 +298,7 @@ routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
 # Addresses associated with this port.
 # For softnpu, an address within the "infra" block above that will be used for
 # the softnpu uplink port.  You can just pick the first address in that pool.
-addresses = ["192.168.1.30/32"]
+addresses = ["192.168.1.30/24"]
 # Name of the uplink port.  This should always be "qsfp0" when using softnpu.
 port = "qsfp0"
 # The speed of this port.
@@ -498,41 +498,93 @@ Follow the instructions to set up the https://github.com/oxidecomputer/oxide.rs[
 oxide auth login --host http://192.168.1.21
 ----
 
+=== Configure quotas for your silo
+
+Setting resource quotas is required before you can begin uploading images, provisioning instances, etc.
+In this example we'll update the recovery silo so we can provision instances directly from it:
+
+[source, console]
+----
+$ oxide api /v1/system/silos/recovery/quotas --method PUT --input - <<EOF
+{
+  "cpus": 9999999999,
+  "memory": 999999999999999999,
+  "storage": 999999999999999999
+}
+EOF
+
+# example response
+{
+  "cpus": 9999999999,
+  "memory": 999999999999999999,
+  "silo_id": "fa12b74d-30f8-4d5a-bc0e-4d229f13c6e5",
+  "storage": 999999999999999999
+}
+----
+
 === Create an IP pool
 
 An IP pool is needed to provide external connectivity to Instances.  The addresses you use here should be addresses you've reserved from the external network (see <<_external_networking>>).
 
+Here we will first create an ip pool for the recovery silo:
 [source,console]
-----
-$ oxide ip-pool range add --pool default --first 192.168.1.31 --last 192.168.1.40
-success
-IpPoolRange {
-    id: 4a61e65a-d96d-4c56-9cfd-dc1e44d9e99b,
-    ip_pool_id: 1b1289a7-cefe-4a7e-a8c9-d93330846301,
-    range: V4(
-        Ipv4Range {
-            first: 192.168.1.31,
-            last: 192.168.1.40,
-        },
-    ),
-    time_created: 2023-08-02T16:31:43.679785Z,
+---
+$ oxide api /v1/system/ip-pools --method POST --input - <<EOF
+{
+  "name": "default",
+  "description": "default ip-pool"
 }
-----
+EOF
 
-With SoftNPU you will generally also need to configure Proxy ARP.  Below, `IP_POOL_START` and `IP_POOL_END` are the first and last addresses you used in the previous command:
+# example response
+{
+  "description": "default ip-pool",
+  "id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
+  "name": "default",
+  "time_created": "2024-01-16T22:51:54.679751Z",
+  "time_modified": "2024-01-16T22:51:54.679751Z"
+}
+---
+
+Now we will associate the pool with the recovery silo.
+[source,console]
+---
+$ oxide api /v1/system/ip-pools/default/silos --method POST --input - <<EOF
+{
+  "silo": "recovery",
+  "is_default": true
+}
+EOF
+
+# example response
+{
+  "ip_pool_id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
+  "is_default": true,
+  "silo_id": "5c0aca09-d7ee-4be6-b7b1-060655659f74"
+}
+---
+
+Now we will add an address range to the recovery silo:
 
 [source,console]
 ----
-# dladm won't return leading zeroes but `scadm` expects them
-$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec zlogin sidecar_softnpu /softnpu/scadm \
-  --server /softnpu/server \
-  --client /softnpu/client \
-  standalone \
-  add-proxy-arp \
-  $IP_POOL_START \
-  $IP_POOL_END \
-  $SOFTNPU_MAC
+oxide api /v1/system/ip-pools/default/ranges/add --method POST --input - <<EOF
+{
+  "first": "$IP_POOL_START",
+  "last": "$IP_POOL_END"
+}
+EOF
+
+# example response
+{
+  "id": "6209516e-2b38-4cbd-bff4-688ffa39d50b",
+  "ip_pool_id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
+  "range": {
+    "first": "192.168.1.35",
+    "last": "192.168.1.40"
+  },
+  "time_created": "2024-01-16T22:53:43.179726Z"
+}
 ----
 
 === Create a Project and Image

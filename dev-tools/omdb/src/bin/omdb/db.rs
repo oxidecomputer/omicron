@@ -32,8 +32,10 @@ use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
+use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
 use gateway_client::types::SpType;
+use ipnetwork::IpNetwork;
 use nexus_db_model::saga_types::Saga;
 use nexus_db_model::saga_types::SagaId;
 use nexus_db_model::saga_types::SagaNodeEvent;
@@ -48,6 +50,10 @@ use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
+use nexus_db_model::IpAttachState;
+use nexus_db_model::IpKind;
+use nexus_db_model::NetworkInterface;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
@@ -58,6 +64,7 @@ use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
+use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -78,6 +85,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::MacAddr;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use petgraph::graph::NodeIndex;
 use petgraph::Graph;
@@ -146,6 +154,15 @@ pub struct DbArgs {
     #[clap(long, env("OMDB_DB_URL"))]
     db_url: Option<PostgresConfigWithUrl>,
 
+    #[clap(flatten)]
+    fetch_opts: DbFetchOptions,
+
+    #[command(subcommand)]
+    command: DbCommands,
+}
+
+#[derive(Debug, Args)]
+pub struct DbFetchOptions {
     /// limit to apply to queries that fetch rows
     #[clap(
         long = "fetch-limit",
@@ -154,13 +171,17 @@ pub struct DbArgs {
     )]
     fetch_limit: NonZeroU32,
 
-    #[command(subcommand)]
-    command: DbCommands,
+    /// whether to include soft-deleted records when enumerating objects that
+    /// can be soft-deleted
+    #[clap(long, default_value_t = false)]
+    include_deleted: bool,
 }
 
 /// Subcommands that query or update the database
 #[derive(Debug, Subcommand)]
 enum DbCommands {
+    /// Print information about the rack
+    Rack(RackArgs),
     /// Print information about disks
     Disks(DiskArgs),
     /// Print information about internal and external DNS
@@ -183,6 +204,18 @@ enum DbCommands {
     Snapshots(SnapshotArgs),
     /// Validate the contents of the database
     Validate(ValidateArgs),
+}
+
+#[derive(Debug, Args)]
+struct RackArgs {
+    #[command(subcommand)]
+    command: RackCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum RackCommands {
+    /// Summarize current racks
+    List,
 }
 
 #[derive(Debug, Args)]
@@ -322,6 +355,8 @@ struct NetworkArgs {
 enum NetworkCommands {
     /// List external IPs
     ListEips,
+    /// List virtual network interfaces
+    ListVnics,
 }
 
 #[derive(Debug, Args)]
@@ -490,41 +525,44 @@ impl DbArgs {
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
         let datastore = Arc::new(
-            DataStore::new_unchecked(pool)
+            DataStore::new_unchecked(log.clone(), pool)
                 .map_err(|e| anyhow!(e).context("creating datastore"))?,
         );
         check_schema_version(&datastore).await;
 
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         match &self.command {
+            DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
+                cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
+            }
             DbCommands::Disks(DiskArgs {
                 command: DiskCommands::Info(uuid),
             }) => cmd_db_disk_info(&opctx, &datastore, uuid).await,
             DbCommands::Disks(DiskArgs { command: DiskCommands::List }) => {
-                cmd_db_disk_list(&datastore, self.fetch_limit).await
+                cmd_db_disk_list(&datastore, &self.fetch_opts).await
             }
             DbCommands::Disks(DiskArgs {
                 command: DiskCommands::Physical(uuid),
             }) => {
-                cmd_db_disk_physical(&opctx, &datastore, self.fetch_limit, uuid)
+                cmd_db_disk_physical(&opctx, &datastore, &self.fetch_opts, uuid)
                     .await
             }
             DbCommands::Dns(DnsArgs { command: DnsCommands::Show }) => {
-                cmd_db_dns_show(&opctx, &datastore, self.fetch_limit).await
+                cmd_db_dns_show(&opctx, &datastore, &self.fetch_opts).await
             }
             DbCommands::Dns(DnsArgs { command: DnsCommands::Diff(args) }) => {
-                cmd_db_dns_diff(&opctx, &datastore, self.fetch_limit, args)
+                cmd_db_dns_diff(&opctx, &datastore, &self.fetch_opts, args)
                     .await
             }
             DbCommands::Dns(DnsArgs { command: DnsCommands::Names(args) }) => {
-                cmd_db_dns_names(&opctx, &datastore, self.fetch_limit, args)
+                cmd_db_dns_names(&opctx, &datastore, &self.fetch_opts, args)
                     .await
             }
             DbCommands::Inventory(inventory_args) => {
                 cmd_db_inventory(
                     &opctx,
                     &datastore,
-                    self.fetch_limit,
+                    &self.fetch_opts,
                     inventory_args,
                 )
                 .await
@@ -535,7 +573,7 @@ impl DbArgs {
                 cmd_db_services_list_instances(
                     &opctx,
                     &datastore,
-                    self.fetch_limit,
+                    &self.fetch_opts,
                 )
                 .await
             }
@@ -545,22 +583,33 @@ impl DbArgs {
                 cmd_db_services_list_by_sled(
                     &opctx,
                     &datastore,
-                    self.fetch_limit,
+                    &self.fetch_opts,
                 )
                 .await
             }
             DbCommands::Sleds => {
-                cmd_db_sleds(&opctx, &datastore, self.fetch_limit).await
+                cmd_db_sleds(&opctx, &datastore, &self.fetch_opts).await
             }
             DbCommands::Instances => {
-                cmd_db_instances(&opctx, &datastore, self.fetch_limit).await
+                cmd_db_instances(&opctx, &datastore, &self.fetch_opts).await
             }
             DbCommands::Network(NetworkArgs {
                 command: NetworkCommands::ListEips,
                 verbose,
             }) => {
-                cmd_db_eips(&opctx, &datastore, self.fetch_limit, *verbose)
+                cmd_db_eips(&opctx, &datastore, &self.fetch_opts, *verbose)
                     .await
+            }
+            DbCommands::Network(NetworkArgs {
+                command: NetworkCommands::ListVnics,
+                verbose,
+            }) => {
+                cmd_db_network_list_vnics(
+                    &datastore,
+                    &self.fetch_opts,
+                    *verbose,
+                )
+                .await
             }
             DbCommands::Regions(RegionArgs {
                 command: RegionCommands::List(region_list_args),
@@ -631,19 +680,13 @@ impl DbArgs {
             }) => cmd_db_snapshot_info(&opctx, &datastore, uuid).await,
             DbCommands::Snapshots(SnapshotArgs {
                 command: SnapshotCommands::List,
-            }) => cmd_db_snapshot_list(&datastore, self.fetch_limit).await,
+            }) => cmd_db_snapshot_list(&datastore, &self.fetch_opts).await,
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateVolumeReferences,
-            }) => {
-                cmd_db_validate_volume_references(&datastore, self.fetch_limit)
-                    .await
-            }
+            }) => cmd_db_validate_volume_references(&datastore).await,
             DbCommands::Validate(ValidateArgs {
                 command: ValidateCommands::ValidateRegionSnapshots,
-            }) => {
-                cmd_db_validate_region_snapshots(&datastore, self.fetch_limit)
-                    .await
-            }
+            }) => cmd_db_validate_region_snapshots(&datastore).await,
         }
     }
 }
@@ -726,12 +769,48 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
     }
 }
 
+/// Helper function to looks up an instance with the given ID.
+async fn lookup_instance(
+    datastore: &DataStore,
+    instance_id: Uuid,
+) -> anyhow::Result<Option<Instance>> {
+    use db::schema::instance::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::instance
+        .filter(dsl::id.eq(instance_id))
+        .limit(1)
+        .select(Instance::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading instance {instance_id}"))
+}
+
+/// Helper function to looks up a project with the given ID.
+async fn lookup_project(
+    datastore: &DataStore,
+    project_id: Uuid,
+) -> anyhow::Result<Option<Project>> {
+    use db::schema::project::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::project
+        .filter(dsl::id.eq(project_id))
+        .limit(1)
+        .select(Project::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading project {project_id}"))
+}
+
 // Disks
 
 /// Run `omdb db disk list`.
 async fn cmd_db_disk_list(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -746,15 +825,19 @@ async fn cmd_db_disk_list(
     let ctx = || "listing disks".to_string();
 
     use db::schema::disk::dsl;
-    let disks = dsl::disk
-        .filter(dsl::time_deleted.is_null())
-        .limit(i64::from(u32::from(limit)))
+    let mut query = dsl::disk.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let disks = query
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
         .select(Disk::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await
         .context("loading disks")?;
 
-    check_limit(&disks, limit, ctx);
+    check_limit(&disks, fetch_opts.fetch_limit, ctx);
 
     let rows = disks.into_iter().map(|disk| DiskRow {
         name: disk.name().to_string(),
@@ -766,6 +849,50 @@ async fn cmd_db_disk_list(
             None => "-".to_string(),
         },
     });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+/// Run `omdb db rack info`.
+async fn cmd_db_rack_list(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct RackRow {
+        id: String,
+        initialized: bool,
+        tuf_base_url: String,
+        rack_subnet: String,
+    }
+
+    let ctx = || "listing racks".to_string();
+
+    let limit = fetch_opts.fetch_limit;
+    let rack_list = datastore
+        .rack_list(opctx, &first_page(limit))
+        .await
+        .context("listing racks")?;
+    check_limit(&rack_list, limit, ctx);
+
+    let rows = rack_list.into_iter().map(|rack| RackRow {
+        id: rack.id().to_string(),
+        initialized: rack.initialized,
+        tuf_base_url: rack.tuf_base_url.unwrap_or_else(|| "-".to_string()),
+        rack_subnet: rack
+            .rack_subnet
+            .map(|subnet| subnet.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+    });
+
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -944,15 +1071,19 @@ async fn cmd_db_disk_info(
 async fn cmd_db_disk_physical(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &DiskPhysicalArgs,
 ) -> Result<(), anyhow::Error> {
     let conn = datastore.pool_connection_for_tests().await?;
 
     // We start by finding any zpools that are using the physical disk.
     use db::schema::zpool::dsl as zpool_dsl;
-    let zpools = zpool_dsl::zpool
-        .filter(zpool_dsl::time_deleted.is_null())
+    let mut query = zpool_dsl::zpool.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(zpool_dsl::time_deleted.is_null());
+    }
+
+    let zpools = query
         .filter(zpool_dsl::physical_disk_id.eq(args.uuid))
         .select(Zpool::as_select())
         .load_async(&*conn)
@@ -966,6 +1097,7 @@ async fn cmd_db_disk_physical(
         println!("Found no zpools on physical disk UUID {}", args.uuid);
         return Ok(());
     }
+
     // The current plan is a single zpool per physical disk, so we expect that
     // this will have a single item.  However, If single zpool per disk ever
     // changes, this code will still work.
@@ -975,8 +1107,12 @@ async fn cmd_db_disk_physical(
 
         // Next, we find all the datasets that are on our zpool.
         use db::schema::dataset::dsl as dataset_dsl;
-        let datasets = dataset_dsl::dataset
-            .filter(dataset_dsl::time_deleted.is_null())
+        let mut query = dataset_dsl::dataset.into_boxed();
+        if !fetch_opts.include_deleted {
+            query = query.filter(dataset_dsl::time_deleted.is_null());
+        }
+
+        let datasets = query
             .filter(dataset_dsl::pool_id.eq(zp.id()))
             .select(Dataset::as_select())
             .load_async(&*conn)
@@ -1029,16 +1165,20 @@ async fn cmd_db_disk_physical(
     // to find the virtual disks associated with these volume IDs and
     // display information about those disks.
     use db::schema::disk::dsl;
-    let disks = dsl::disk
-        .filter(dsl::time_deleted.is_null())
+    let mut query = dsl::disk.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let disks = query
         .filter(dsl::volume_id.eq_any(volume_ids))
-        .limit(i64::from(u32::from(limit)))
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
         .select(Disk::as_select())
         .load_async(&*conn)
         .await
         .context("loading disks")?;
 
-    check_limit(&disks, limit, || "listing disks".to_string());
+    check_limit(&disks, fetch_opts.fetch_limit, || "listing disks".to_string());
 
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -1091,6 +1231,7 @@ async fn cmd_db_disk_physical(
     println!("{}", table);
 
     // Collect the region_snapshots associated with the dataset IDs
+    let limit = fetch_opts.fetch_limit;
     use db::schema::region_snapshot::dsl as region_snapshot_dsl;
     let region_snapshots = region_snapshot_dsl::region_snapshot
         .filter(region_snapshot_dsl::dataset_id.eq_any(dataset_ids))
@@ -1139,8 +1280,12 @@ async fn cmd_db_disk_physical(
     // Get the snapshots from the list of IDs we built above.
     // Display information about those snapshots.
     use db::schema::snapshot::dsl as snapshot_dsl;
-    let snapshots = snapshot_dsl::snapshot
-        .filter(snapshot_dsl::time_deleted.is_null())
+    let mut query = snapshot_dsl::snapshot.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(snapshot_dsl::time_deleted.is_null());
+    }
+
+    let snapshots = query
         .filter(snapshot_dsl::id.eq_any(snapshot_ids))
         .limit(i64::from(u32::from(limit)))
         .select(Snapshot::as_select())
@@ -1213,13 +1358,18 @@ impl From<Snapshot> for SnapshotRow {
 /// Run `omdb db snapshot list`.
 async fn cmd_db_snapshot_list(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
     let ctx = || "listing snapshots".to_string();
+    let limit = fetch_opts.fetch_limit;
 
     use db::schema::snapshot::dsl;
-    let snapshots = dsl::snapshot
-        .filter(dsl::time_deleted.is_null())
+    let mut query = dsl::snapshot.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let snapshots = query
         .limit(i64::from(u32::from(limit)))
         .select(Snapshot::as_select())
         .load_async(&*datastore.pool_connection_for_tests().await?)
@@ -1325,8 +1475,9 @@ async fn cmd_db_snapshot_info(
 async fn cmd_db_services_list_instances(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
     let sled_list = datastore
         .sled_list(&opctx, &first_page(limit))
         .await
@@ -1390,8 +1541,9 @@ struct ServiceInstanceSledRow {
 async fn cmd_db_services_list_by_sled(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
     let sled_list = datastore
         .sled_list(&opctx, &first_page(limit))
         .await
@@ -1466,8 +1618,9 @@ impl From<Sled> for SledRow {
 async fn cmd_db_sleds(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
     let sleds = datastore
         .sled_list(&opctx, &first_page(limit))
         .await
@@ -1500,11 +1653,18 @@ struct CustomerInstanceRow {
 async fn cmd_db_instances(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
     use db::schema::vmm::dsl as vmm_dsl;
-    let instances: Vec<InstanceAndActiveVmm> = dsl::instance
+
+    let limit = fetch_opts.fetch_limit;
+    let mut query = dsl::instance.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let instances: Vec<InstanceAndActiveVmm> = query
         .left_join(
             vmm_dsl::vmm.on(vmm_dsl::id
                 .nullable()
@@ -1575,7 +1735,7 @@ async fn cmd_db_instances(
 async fn cmd_db_dns_show(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -1588,6 +1748,7 @@ async fn cmd_db_dns_show(
         reason: String,
     }
 
+    let limit = fetch_opts.fetch_limit;
     let mut rows = Vec::with_capacity(2);
     for group in [DnsGroup::Internal, DnsGroup::External] {
         let ctx = || format!("listing DNS zones for DNS group {:?}", group);
@@ -1660,9 +1821,10 @@ async fn load_zones_version(
 async fn cmd_db_dns_diff(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &DnsVersionArgs,
 ) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
     let (dns_zones, version) =
         load_zones_version(opctx, datastore, limit, args).await?;
 
@@ -1724,9 +1886,10 @@ async fn cmd_db_dns_diff(
 async fn cmd_db_dns_names(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &DnsVersionArgs,
 ) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
     let (group_zones, version) =
         load_zones_version(opctx, datastore, limit, args).await?;
 
@@ -1773,17 +1936,24 @@ async fn cmd_db_dns_names(
 async fn cmd_db_eips(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     verbose: bool,
 ) -> Result<(), anyhow::Error> {
     use db::schema::external_ip::dsl;
-    let ips: Vec<ExternalIp> = dsl::external_ip
-        .filter(dsl::time_deleted.is_null())
+    let mut query = dsl::external_ip.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let ips: Vec<ExternalIp> = query
         .select(ExternalIp::as_select())
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
         .get_results_async(&*datastore.pool_connection_for_tests().await?)
         .await?;
 
-    check_limit(&ips, limit, || String::from("listing external ips"));
+    check_limit(&ips, fetch_opts.fetch_limit, || {
+        String::from("listing external ips")
+    });
 
     struct PortRange {
         first: u16,
@@ -1796,31 +1966,54 @@ async fn cmd_db_eips(
         }
     }
 
-    #[derive(Tabled)]
     enum Owner {
-        Instance { project: String, name: String },
-        Service { kind: String },
+        Instance { id: Uuid, project: String, name: String },
+        Service { id: Uuid, kind: String },
+        Project { id: Uuid, name: String },
         None,
     }
 
-    impl Display for Owner {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    impl Owner {
+        fn kind(&self) -> &'static str {
             match self {
-                Self::Instance { project, name } => {
-                    write!(f, "Instance {project}/{name}")
+                Owner::Instance { .. } => "instance",
+                Owner::Service { .. } => "service",
+                Owner::Project { .. } => "project",
+                Owner::None => "none",
+            }
+        }
+
+        fn id(&self) -> String {
+            match self {
+                Owner::Instance { id, .. }
+                | Owner::Service { id, .. }
+                | Owner::Project { id, .. } => id.to_string(),
+                Owner::None => "none".to_string(),
+            }
+        }
+
+        fn name(&self) -> String {
+            match self {
+                Self::Instance { project, name, .. } => {
+                    format!("{project}/{name}")
                 }
-                Self::Service { kind } => write!(f, "Service {kind}"),
-                Self::None => write!(f, "None"),
+                Self::Service { kind, .. } => kind.to_string(),
+                Self::Project { name, .. } => name.to_string(),
+                Self::None => "none".to_string(),
             }
         }
     }
 
     #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct IpRow {
         ip: ipnetwork::IpNetwork,
         ports: PortRange,
-        kind: String,
-        owner: Owner,
+        kind: IpKind,
+        state: IpAttachState,
+        owner_kind: &'static str,
+        owner_id: String,
+        owner_name: String,
     }
 
     if verbose {
@@ -1850,50 +2043,58 @@ async fn cmd_db_eips(
                         continue;
                     }
                 };
-                Owner::Service { kind: format!("{:?}", service.1.kind) }
+                Owner::Service {
+                    id: owner_id,
+                    kind: format!("{:?}", service.1.kind),
+                }
             } else {
-                use db::schema::instance::dsl as instance_dsl;
-                let instance = match instance_dsl::instance
-                    .filter(instance_dsl::id.eq(owner_id))
-                    .limit(1)
-                    .select(Instance::as_select())
-                    .load_async(&*datastore.pool_connection_for_tests().await?)
-                    .await
-                    .context("loading requested instance")?
-                    .pop()
-                {
-                    Some(instance) => instance,
-                    None => {
-                        eprintln!("instance with id {owner_id} not found");
-                        continue;
-                    }
-                };
+                let instance =
+                    match lookup_instance(datastore, owner_id).await? {
+                        Some(instance) => instance,
+                        None => {
+                            eprintln!("instance with id {owner_id} not found");
+                            continue;
+                        }
+                    };
 
-                use db::schema::project::dsl as project_dsl;
-                let project = match project_dsl::project
-                    .filter(project_dsl::id.eq(instance.project_id))
-                    .limit(1)
-                    .select(Project::as_select())
-                    .load_async(&*datastore.pool_connection_for_tests().await?)
-                    .await
-                    .context("loading requested project")?
-                    .pop()
-                {
-                    Some(instance) => instance,
-                    None => {
-                        eprintln!(
-                            "project with id {} not found",
-                            instance.project_id
-                        );
-                        continue;
-                    }
-                };
+                let project =
+                    match lookup_project(datastore, instance.project_id).await?
+                    {
+                        Some(project) => project,
+                        None => {
+                            eprintln!(
+                                "project with id {} not found",
+                                instance.project_id
+                            );
+                            continue;
+                        }
+                    };
 
                 Owner::Instance {
+                    id: owner_id,
                     project: project.name().to_string(),
                     name: instance.name().to_string(),
                 }
             }
+        } else if let Some(project_id) = ip.project_id {
+            use db::schema::project::dsl as project_dsl;
+            let project = match project_dsl::project
+                .filter(project_dsl::id.eq(project_id))
+                .limit(1)
+                .select(Project::as_select())
+                .load_async(&*datastore.pool_connection_for_tests().await?)
+                .await
+                .context("loading requested project")?
+                .pop()
+            {
+                Some(project) => project,
+                None => {
+                    eprintln!("project with id {} not found", project_id);
+                    continue;
+                }
+            };
+
+            Owner::Project { id: project_id, name: project.name().to_string() }
         } else {
             Owner::None
         };
@@ -1904,8 +2105,140 @@ async fn cmd_db_eips(
                 first: ip.first_port.into(),
                 last: ip.last_port.into(),
             },
-            kind: format!("{:?}", ip.kind),
-            owner,
+            state: ip.state,
+            kind: ip.kind,
+            owner_kind: owner.kind(),
+            owner_id: owner.id(),
+            owner_name: owner.name(),
+        };
+        rows.push(row);
+    }
+
+    rows.sort_by(|a, b| a.ip.cmp(&b.ip));
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .to_string();
+
+    println!("{}", table);
+
+    Ok(())
+}
+
+async fn cmd_db_network_list_vnics(
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    verbose: bool,
+) -> Result<(), anyhow::Error> {
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct NicRow {
+        ip: IpNetwork,
+        mac: MacAddr,
+        slot: i16,
+        primary: bool,
+        kind: &'static str,
+        subnet: String,
+        parent_id: Uuid,
+        parent_name: String,
+    }
+    use db::schema::network_interface::dsl;
+    let mut query = dsl::network_interface.into_boxed();
+    if !fetch_opts.include_deleted {
+        query = query.filter(dsl::time_deleted.is_null());
+    }
+
+    let nics: Vec<NetworkInterface> = query
+        .select(NetworkInterface::as_select())
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .get_results_async(&*datastore.pool_connection_for_tests().await?)
+        .await?;
+
+    check_limit(&nics, fetch_opts.fetch_limit, || {
+        String::from("listing network interfaces")
+    });
+
+    if verbose {
+        for nic in &nics {
+            if verbose {
+                println!("{nic:#?}");
+            }
+        }
+        return Ok(());
+    }
+
+    let mut rows = Vec::new();
+
+    for nic in &nics {
+        let (kind, parent_name) = match nic.kind {
+            NetworkInterfaceKind::Instance => {
+                match lookup_instance(datastore, nic.parent_id).await? {
+                    Some(instance) => {
+                        match lookup_project(datastore, instance.project_id)
+                            .await?
+                        {
+                            Some(project) => (
+                                "instance",
+                                format!(
+                                    "{}/{}",
+                                    project.name(),
+                                    instance.name()
+                                ),
+                            ),
+                            None => {
+                                eprintln!(
+                                    "project with id {} not found",
+                                    instance.project_id
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    None => {
+                        ("instance?", "parent instance not found".to_string())
+                    }
+                }
+            }
+            NetworkInterfaceKind::Service => {
+                // We create service NICs named after the service, so we can use
+                // the nic name instead of looking up the service.
+                ("service", nic.name().to_string())
+            }
+        };
+
+        let subnet = {
+            use db::schema::vpc_subnet::dsl;
+            let subnet = match dsl::vpc_subnet
+                .filter(dsl::id.eq(nic.subnet_id))
+                .limit(1)
+                .select(VpcSubnet::as_select())
+                .load_async(&*datastore.pool_connection_for_tests().await?)
+                .await
+                .context("loading requested subnet")?
+                .pop()
+            {
+                Some(subnet) => subnet,
+                None => {
+                    eprintln!("subnet with id {} not found", nic.subnet_id);
+                    continue;
+                }
+            };
+
+            if nic.ip.is_ipv4() {
+                subnet.ipv4_block.to_string()
+            } else {
+                subnet.ipv6_block.to_string()
+            }
+        };
+
+        let row = NicRow {
+            ip: nic.ip,
+            mac: *nic.mac,
+            slot: nic.slot,
+            primary: nic.primary,
+            kind,
+            subnet,
+            parent_id: nic.parent_id,
+            parent_name,
         };
         rows.push(row);
     }
@@ -3128,7 +3461,6 @@ async fn cmd_db_regions_find_deleted(
 /// Validate the `volume_references` column of the region snapshots table
 async fn cmd_db_validate_volume_references(
     datastore: &DataStore,
-    limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     // First, get all region snapshot records
     let region_snapshots: Vec<RegionSnapshot> = {
@@ -3146,10 +3478,6 @@ async fn cmd_db_validate_volume_references(
                     .await
             })
             .await?;
-
-        check_limit(&region_snapshots, limit, || {
-            String::from("listing region snapshots")
-        });
 
         region_snapshots
     };
@@ -3194,10 +3522,6 @@ async fn cmd_db_validate_volume_references(
                         .await
                 })
                 .await?;
-
-            check_limit(&matching_volumes, limit, || {
-                String::from("finding matching volumes")
-            });
 
             matching_volumes
         };
@@ -3262,7 +3586,6 @@ async fn cmd_db_validate_volume_references(
 
 async fn cmd_db_validate_region_snapshots(
     datastore: &DataStore,
-    limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     let mut regions_to_snapshots_map: BTreeMap<Uuid, HashSet<Uuid>> =
         BTreeMap::default();
@@ -3293,10 +3616,6 @@ async fn cmd_db_validate_region_snapshots(
                         .await
                 })
                 .await?;
-
-        check_limit(&datasets_region_snapshots, limit, || {
-            String::from("listing datasets and region snapshots")
-        });
 
         datasets_region_snapshots
     };
@@ -3469,10 +3788,6 @@ async fn cmd_db_validate_region_snapshots(
             })
             .await?;
 
-        check_limit(&datasets_and_regions, limit, || {
-            String::from("listing datasets and regions")
-        });
-
         datasets_and_regions
     };
 
@@ -3598,9 +3913,10 @@ fn format_record(record: &DnsRecord) -> impl Display {
 async fn cmd_db_inventory(
     opctx: &OpContext,
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     inventory_args: &InventoryArgs,
 ) -> Result<(), anyhow::Error> {
+    let limit = fetch_opts.fetch_limit;
     let conn = datastore.pool_connection_for_tests().await?;
     match inventory_args.command {
         InventoryCommands::BaseboardIds => {
@@ -3625,7 +3941,6 @@ async fn cmd_db_inventory(
                 opctx,
                 datastore,
                 id,
-                limit,
                 long_string_formatter,
             )
             .await
@@ -3830,20 +4145,17 @@ async fn cmd_db_inventory_collections_show(
     opctx: &OpContext,
     datastore: &DataStore,
     id: Uuid,
-    limit: NonZeroU32,
     long_string_formatter: LongStringFormatter,
 ) -> Result<(), anyhow::Error> {
-    let (collection, incomplete) = datastore
-        .inventory_collection_read_best_effort(opctx, id, limit)
+    let collection = datastore
+        .inventory_collection_read(opctx, id)
         .await
         .context("reading collection")?;
-    if incomplete {
-        limit_error(limit, || "loading collection");
-    }
 
     inv_collection_print(&collection).await?;
     let nerrors = inv_collection_print_errors(&collection).await?;
     inv_collection_print_devices(&collection, &long_string_formatter).await?;
+    inv_collection_print_sleds(&collection);
 
     if nerrors > 0 {
         eprintln!(
@@ -4073,6 +4385,58 @@ async fn inv_collection_print_devices(
     }
 
     Ok(())
+}
+
+fn inv_collection_print_sleds(collection: &Collection) {
+    println!("SLED AGENTS");
+    for sled in collection.sled_agents.values() {
+        println!(
+            "\nsled {} (role = {:?}, serial {})",
+            sled.sled_id,
+            sled.sled_role,
+            match &sled.baseboard_id {
+                Some(baseboard_id) => &baseboard_id.serial_number,
+                None => "unknown",
+            },
+        );
+        println!(
+            "    found at:    {} from {}",
+            sled.time_collected, sled.source
+        );
+        println!("    address:     {}", sled.sled_agent_address);
+        println!("    usable hw threads:   {}", sled.usable_hardware_threads);
+        println!(
+            "    usable memory (GiB): {}",
+            sled.usable_physical_ram.to_whole_gibibytes()
+        );
+        println!(
+            "    reservoir (GiB):     {}",
+            sled.reservoir_size.to_whole_gibibytes()
+        );
+
+        if let Some(zones) = collection.omicron_zones.get(&sled.sled_id) {
+            println!(
+                "    zones collected from {} at {}",
+                zones.source, zones.time_collected,
+            );
+            println!(
+                "    zones generation: {} (count: {})",
+                zones.zones.generation,
+                zones.zones.zones.len()
+            );
+
+            if zones.zones.zones.is_empty() {
+                continue;
+            }
+
+            println!("    ZONES FOUND");
+            for z in &zones.zones.zones {
+                println!("      zone {} (type {})", z.id, z.zone_type.label());
+            }
+        } else {
+            println!("  warning: no zone information found");
+        }
+    }
 }
 
 #[derive(Debug)]

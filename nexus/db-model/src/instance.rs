@@ -2,9 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, Disk, Generation, InstanceCpuCount, InstanceState};
+use super::{
+    ByteCount, Disk, ExternalIp, Generation, InstanceCpuCount, InstanceState,
+};
 use crate::collection::DatastoreAttachTargetConfig;
-use crate::schema::{disk, instance};
+use crate::schema::{disk, external_ip, instance};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
@@ -44,7 +46,10 @@ pub struct Instance {
     pub memory: ByteCount,
 
     /// The instance's hostname.
-    // TODO-cleanup: Different type?
+    // TODO-cleanup: We use a validated wrapper type in the API, but not in
+    // between the database. This is to handle existing names that do not pass
+    // the new validation. We should swap this for a SQL-serializable validated
+    // type.
     #[diesel(column_name = hostname)]
     pub hostname: String,
 
@@ -79,7 +84,7 @@ impl Instance {
             user_data: params.user_data.clone(),
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
-            hostname: params.hostname.clone(),
+            hostname: params.hostname.to_string(),
             boot_on_fault: false,
             runtime_state,
         }
@@ -99,6 +104,17 @@ impl DatastoreAttachTargetConfig<Disk> for Instance {
     type ResourceIdColumn = disk::dsl::id;
     type ResourceCollectionIdColumn = disk::dsl::attach_instance_id;
     type ResourceTimeDeletedColumn = disk::dsl::time_deleted;
+}
+
+impl DatastoreAttachTargetConfig<ExternalIp> for Instance {
+    type Id = Uuid;
+
+    type CollectionIdColumn = instance::dsl::id;
+    type CollectionTimeDeletedColumn = instance::dsl::time_deleted;
+
+    type ResourceIdColumn = external_ip::dsl::id;
+    type ResourceCollectionIdColumn = external_ip::dsl::parent_id;
+    type ResourceTimeDeletedColumn = external_ip::dsl::time_deleted;
 }
 
 /// Runtime state of the Instance, including the actual running state and minimal

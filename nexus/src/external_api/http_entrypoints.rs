@@ -6,19 +6,15 @@
 
 use super::{
     console_api, device_auth, params,
-    params::ProjectSelector,
-    shared::UninitializedSled,
     views::{
         self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
         PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
-        Sled, SledInstance, Snapshot, SshKey, Switch, User, UserBuiltin, Vpc,
-        VpcRouter, VpcSubnet,
+        Sled, Snapshot, SshKey, User, UserBuiltin, Utilization, Vpc, VpcRouter,
+        VpcSubnet,
     },
 };
 use crate::external_api::shared;
 use crate::ServerContext;
-use chrono::Utc;
-use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
@@ -37,18 +33,15 @@ use dropshot::WhichPage;
 use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
+use dropshot::{ApiDescription, StreamingBody};
 use ipnetwork::IpNetwork;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::AssetIdentityMetadata;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_db_queries::{
-    authz::ApiResource, db::fixed_data::silo::INTERNAL_SILO_ID,
-};
-use nexus_types::external_api::views::Utilization;
+use nexus_types::external_api::shared::BfdStatus;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
@@ -81,6 +74,8 @@ use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortSettings;
 use omicron_common::api::external::SwitchPortSettingsView;
+use omicron_common::api::external::TufRepoGetResponse;
+use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
 use omicron_common::bail_unless;
@@ -124,6 +119,10 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // Operator-Accessible IP Pools API
         api.register(ip_pool_list)?;
         api.register(ip_pool_create)?;
+        api.register(ip_pool_silo_list)?;
+        api.register(ip_pool_silo_link)?;
+        api.register(ip_pool_silo_unlink)?;
+        api.register(ip_pool_silo_update)?;
         api.register(ip_pool_view)?;
         api.register(ip_pool_delete)?;
         api.register(ip_pool_update)?;
@@ -143,6 +142,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(floating_ip_create)?;
         api.register(floating_ip_view)?;
         api.register(floating_ip_delete)?;
+        api.register(floating_ip_attach)?;
+        api.register(floating_ip_detach)?;
 
         api.register(disk_list)?;
         api.register(disk_create)?;
@@ -168,6 +169,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_disk_detach)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
+        api.register(instance_ssh_public_key_list)?;
 
         api.register(image_list)?;
         api.register(image_create)?;
@@ -201,6 +203,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_network_interface_delete)?;
 
         api.register(instance_external_ip_list)?;
+        api.register(instance_ephemeral_ip_attach)?;
+        api.register(instance_ephemeral_ip_detach)?;
 
         api.register(vpc_router_list)?;
         api.register(vpc_router_view)?;
@@ -228,7 +232,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(switch_list)?;
         api.register(switch_view)?;
         api.register(sled_list_uninitialized)?;
-        api.register(add_sled_to_initialized_rack)?;
+        api.register(sled_add)?;
 
         api.register(user_builtin_list)?;
         api.register(user_builtin_view)?;
@@ -271,6 +275,10 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
 
+        api.register(networking_bfd_enable)?;
+        api.register(networking_bfd_disable)?;
+        api.register(networking_bfd_status)?;
+
         api.register(utilization_view)?;
 
         // Fleet-wide API operations
@@ -280,6 +288,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(silo_delete)?;
         api.register(silo_policy_view)?;
         api.register(silo_policy_update)?;
+        api.register(silo_ip_pool_list)?;
 
         api.register(silo_utilization_view)?;
         api.register(silo_utilization_list)?;
@@ -305,16 +314,8 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(system_metric)?;
         api.register(silo_metric)?;
 
-        api.register(system_update_refresh)?;
-        api.register(system_version)?;
-        api.register(system_component_version_list)?;
-        api.register(system_update_list)?;
-        api.register(system_update_view)?;
-        api.register(system_update_start)?;
-        api.register(system_update_stop)?;
-        api.register(system_update_components_list)?;
-        api.register(update_deployments_list)?;
-        api.register(update_deployment_view)?;
+        api.register(system_update_put_repository)?;
+        api.register(system_update_get_repository)?;
 
         api.register(user_list)?;
         api.register(silo_user_list)?;
@@ -331,6 +332,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(console_api::login_saml)?;
         api.register(console_api::logout)?;
 
+        api.register(console_api::console_lookup)?;
         api.register(console_api::console_projects)?;
         api.register(console_api::console_projects_new)?;
         api.register(console_api::console_silo_images)?;
@@ -410,7 +412,7 @@ async fn ping(
     Ok(HttpResponseOk(views::Ping { status: views::PingStatus::Ok }))
 }
 
-/// Fetch the top-level IAM policy
+/// Fetch top-level IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/system/policy",
@@ -429,13 +431,7 @@ async fn system_policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Path parameters for `/by-id/` endpoints
-#[derive(Deserialize, JsonSchema)]
-struct ByIdPathParams {
-    id: Uuid,
-}
-
-/// Update the top-level IAM policy
+/// Update top-level IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/system/policy",
@@ -459,7 +455,7 @@ async fn system_policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the current silo's IAM policy
+/// Fetch current silo's IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/policy",
@@ -486,7 +482,7 @@ pub(crate) async fn policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update the current silo's IAM policy
+/// Update current silo's IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/policy",
@@ -518,7 +514,7 @@ async fn policy_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View the resource utilization of the user's current silo
+/// Fetch resource utilization for user's current silo
 #[endpoint {
     method = GET,
     path = "/v1/utilization",
@@ -540,7 +536,7 @@ async fn utilization_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View the current utilization of a given silo
+/// Fetch current utilization for given silo
 #[endpoint {
     method = GET,
     path = "/v1/system/utilization/silos/{silo}",
@@ -633,7 +629,7 @@ async fn system_quotas_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View the resource quotas of a given silo
+/// Fetch resource quotas for silo
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/quotas",
@@ -656,7 +652,7 @@ async fn silo_quotas_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update the resource quotas of a given silo
+/// Update resource quotas for silo
 ///
 /// If a quota value is not specified, it will remain unchanged.
 #[endpoint {
@@ -740,9 +736,9 @@ async fn silo_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a silo
+/// Fetch silo
 ///
-/// Fetch a silo by name.
+/// Fetch silo by name or ID.
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}",
@@ -764,9 +760,55 @@ async fn silo_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// List IP pools linked to silo
+///
+/// Linked IP pools are available to users in the specified silo. A silo can
+/// have at most one default pool. IPs are allocated from the default pool when
+/// users ask for one without specifying a pool.
+#[endpoint {
+    method = GET,
+    path = "/v1/system/silos/{silo}/ip-pools",
+    tags = ["system/silos"],
+}]
+async fn silo_ip_pool_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::SiloPath>,
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+        let pools = nexus
+            .silo_ip_pool_list(&opctx, &silo_lookup, &paginated_by)
+            .await?
+            .iter()
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
+            .collect();
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            pools,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Delete a silo
 ///
-/// Delete a silo by name.
+/// Delete a silo by name or ID.
 #[endpoint {
     method = DELETE,
     path = "/v1/system/silos/{silo}",
@@ -788,7 +830,7 @@ async fn silo_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a silo's IAM policy
+/// Fetch silo IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/system/silos/{silo}/policy",
@@ -810,7 +852,7 @@ async fn silo_policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a silo's IAM policy
+/// Update silo IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/system/silos/{silo}/policy",
@@ -840,7 +882,7 @@ async fn silo_policy_update(
 
 // Silo-specific user endpoints
 
-/// List built-in (system) users in a silo
+/// List built-in (system) users in silo
 #[endpoint {
     method = GET,
     path = "/v1/system/users",
@@ -881,7 +923,7 @@ struct UserParam {
     user_id: Uuid,
 }
 
-/// Fetch a built-in (system) user
+/// Fetch built-in (system) user
 #[endpoint {
     method = GET,
     path = "/v1/system/users/{user_id}",
@@ -945,7 +987,7 @@ async fn silo_identity_provider_list(
 
 // Silo SAML identity providers
 
-/// Create a SAML IdP
+/// Create SAML IdP
 #[endpoint {
     method = POST,
     path = "/v1/system/identity-providers/saml",
@@ -974,7 +1016,7 @@ async fn saml_identity_provider_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a SAML IdP
+/// Fetch SAML IdP
 #[endpoint {
     method = GET,
     path = "/v1/system/identity-providers/saml/{provider}",
@@ -1012,7 +1054,7 @@ async fn saml_identity_provider_view(
 
 // "Local" Identity Provider
 
-/// Create a user
+/// Create user
 ///
 /// Users can only be created in Silos with `provision_type` == `Fixed`.
 /// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
@@ -1045,7 +1087,7 @@ async fn local_idp_user_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a user
+/// Delete user
 #[endpoint {
     method = DELETE,
     path = "/v1/system/identity-providers/local/users/{user_id}",
@@ -1069,7 +1111,7 @@ async fn local_idp_user_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set or invalidate a user's password
+/// Set or invalidate user's password
 ///
 /// Passwords can only be updated for users in Silos with identity mode
 /// `LocalOnly`.
@@ -1137,7 +1179,7 @@ async fn project_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a project
+/// Create project
 #[endpoint {
     method = POST,
     path = "/v1/projects",
@@ -1158,7 +1200,7 @@ async fn project_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a project
+/// Fetch project
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}",
@@ -1182,7 +1224,7 @@ async fn project_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a project
+/// Delete project
 #[endpoint {
     method = DELETE,
     path = "/v1/projects/{project}",
@@ -1239,7 +1281,7 @@ async fn project_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a project's IAM policy
+/// Fetch project's IAM policy
 #[endpoint {
     method = GET,
     path = "/v1/projects/{project}/policy",
@@ -1264,7 +1306,7 @@ async fn project_policy_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a project's IAM policy
+/// Update project's IAM policy
 #[endpoint {
     method = PUT,
     path = "/v1/projects/{project}/policy",
@@ -1294,7 +1336,7 @@ async fn project_policy_update(
 
 // IP Pools
 
-/// List all IP Pools that can be used by a given project.
+/// List all IP pools
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools",
@@ -1302,14 +1344,8 @@ async fn project_policy_update(
 }]
 async fn project_ip_pool_list(
     rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
-) -> Result<HttpResponseOk<ResultsPage<IpPool>>, HttpError> {
-    // Per https://github.com/oxidecomputer/omicron/issues/2148
-    // This is currently the same list as /v1/system/ip-pools, that is to say,
-    // IP pools that are *available to* a given project, those being ones that
-    // are not the internal pools for Oxide service usage. This may change
-    // in the future as the scoping of pools is further developed, but for now,
-    // this is literally a near-duplicate of `ip_pool_list`:
+    query_params: Query<PaginatedByNameOrId>,
+) -> Result<HttpResponseOk<ResultsPage<views::SiloIpPool>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -1318,13 +1354,14 @@ async fn project_ip_pool_list(
         let scan_params = ScanByNameOrId::from_query(&query)?;
         let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let project_lookup =
-            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
         let pools = nexus
-            .project_ip_pools_list(&opctx, &project_lookup, &paginated_by)
+            .current_silo_ip_pool_list(&opctx, &paginated_by)
             .await?
             .into_iter()
-            .map(IpPool::from)
+            .map(|(pool, silo_link)| views::SiloIpPool {
+                identity: pool.identity(),
+                is_default: silo_link.is_default,
+            })
             .collect();
         Ok(HttpResponseOk(ScanByNameOrId::results_page(
             &query,
@@ -1335,7 +1372,7 @@ async fn project_ip_pool_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an IP pool
+/// Fetch IP pool
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools/{pool}",
@@ -1344,29 +1381,18 @@ async fn project_ip_pool_list(
 async fn project_ip_pool_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::IpPoolPath>,
-    project: Query<params::OptionalProjectSelector>,
-) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
+) -> Result<HttpResponseOk<views::SiloIpPool>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
-        let project_lookup = if let Some(project) = project.into_inner().project
-        {
-            Some(nexus.project_lookup(&opctx, ProjectSelector { project })?)
-        } else {
-            None
-        };
-        let (authz_pool, pool) = nexus
-            .project_ip_pool_lookup(&opctx, &pool_selector, &project_lookup)?
-            .fetch()
-            .await?;
-        // TODO(2148): once we've actualy implemented filtering to pools belonging to
-        // the specified project, we can remove this internal check.
-        if pool.silo_id == Some(*INTERNAL_SILO_ID) {
-            return Err(authz_pool.not_found().into());
-        }
-        Ok(HttpResponseOk(IpPool::from(pool)))
+        let (pool, silo_link) =
+            nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
+        Ok(HttpResponseOk(views::SiloIpPool {
+            identity: pool.identity(),
+            is_default: silo_link.is_default,
+        }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1409,7 +1435,7 @@ pub struct IpPoolPathParam {
     pub pool_name: Name,
 }
 
-/// Create an IP pool
+/// Create IP pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools",
@@ -1430,7 +1456,7 @@ async fn ip_pool_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an IP pool
+/// Fetch IP pool
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}",
@@ -1445,6 +1471,8 @@ async fn ip_pool_view(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let nexus = &apictx.nexus;
         let pool_selector = path_params.into_inner().pool;
+        // We do not prevent the service pool from being fetched by name or ID
+        // like we do for update, delete, associate.
         let (.., pool) =
             nexus.ip_pool_lookup(&opctx, &pool_selector)?.fetch().await?;
         Ok(HttpResponseOk(IpPool::from(pool)))
@@ -1452,7 +1480,7 @@ async fn ip_pool_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an IP Pool
+/// Delete IP pool
 #[endpoint {
     method = DELETE,
     path = "/v1/system/ip-pools/{pool}",
@@ -1474,7 +1502,7 @@ async fn ip_pool_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update an IP Pool
+/// Update IP pool
 #[endpoint {
     method = PUT,
     path = "/v1/system/ip-pools/{pool}",
@@ -1498,7 +1526,142 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the IP pool used for Oxide services
+/// List IP pool's linked silos
+#[endpoint {
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}/silos",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_silo_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    // paginating by resource_id because they're unique per pool. most robust
+    // option would be to paginate by a composite key representing the (pool,
+    // resource_type, resource)
+    query_params: Query<PaginatedById>,
+    // TODO: this could just list views::Silo -- it's not like knowing silo_id
+    // and nothing else is particularly useful -- except we also want to say
+    // whether the pool is marked default on each silo. So one option would
+    // be  to do the same as we did with SiloIpPool -- include is_default on
+    // whatever the thing is. Still... all we'd have to do to make this usable
+    // in both places would be to make it { ...IpPool, silo_id, silo_name,
+    // is_default }
+) -> Result<HttpResponseOk<ResultsPage<views::IpPoolSiloLink>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+
+        let path = path_params.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+
+        let assocs = nexus
+            .ip_pool_silo_list(&opctx, &pool_lookup, &pag_params)
+            .await?
+            .into_iter()
+            .map(|assoc| assoc.into())
+            .collect();
+
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            assocs,
+            &|_, x: &views::IpPoolSiloLink| x.silo_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Link IP pool to silo
+///
+/// Users in linked silos can allocate external IPs from this pool for their
+/// instances. A silo can have at most one default pool. IPs are allocated from
+/// the default pool when users ask for one without specifying a pool.
+#[endpoint {
+    method = POST,
+    path = "/v1/system/ip-pools/{pool}/silos",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_silo_link(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+    resource_assoc: TypedBody<params::IpPoolLinkSilo>,
+) -> Result<HttpResponseCreated<views::IpPoolSiloLink>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let resource_assoc = resource_assoc.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let assoc = nexus
+            .ip_pool_link_silo(&opctx, &pool_lookup, &resource_assoc)
+            .await?;
+        Ok(HttpResponseCreated(assoc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Unlink IP pool from silo
+///
+/// Will fail if there are any outstanding IPs allocated in the silo.
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_silo_unlink(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolSiloPath>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+        nexus.ip_pool_unlink_silo(&opctx, &pool_lookup, &silo_lookup).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Make IP pool default for silo
+///
+/// When a user asks for an IP (e.g., at instance create time) without
+/// specifying a pool, the IP comes from the default pool if a default is
+/// configured. When a pool is made the default for a silo, any existing default
+/// will remain linked to the silo, but will no longer be the default.
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_silo_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolSiloPath>,
+    update: TypedBody<params::IpPoolSiloUpdate>,
+) -> Result<HttpResponseOk<views::IpPoolSiloLink>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let update = update.into_inner();
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
+        let silo_lookup = nexus.silo_lookup(&opctx, path.silo)?;
+        let assoc = nexus
+            .ip_pool_silo_update(&opctx, &pool_lookup, &silo_lookup, &update)
+            .await?;
+        Ok(HttpResponseOk(assoc.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch Oxide service IP pool
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service",
@@ -1519,9 +1682,9 @@ async fn ip_pool_service_view(
 
 type IpPoolRangePaginationParams = PaginationParams<EmptyScanParams, IpNetwork>;
 
-/// List ranges for an IP pool
+/// List ranges for IP pool
 ///
-/// List ranges for an IP pool. Ranges are ordered by their first address.
+/// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/ranges",
@@ -1565,7 +1728,7 @@ async fn ip_pool_range_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a range to an IP pool
+/// Add range to IP pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/add",
@@ -1589,7 +1752,7 @@ async fn ip_pool_range_add(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Remove a range from an IP pool
+/// Remove range from IP pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/remove",
@@ -1613,10 +1776,9 @@ async fn ip_pool_range_remove(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List ranges for the IP pool used for Oxide services
+/// List IP ranges for the Oxide service pool
 ///
-/// List ranges for the IP pool used for Oxide services. Ranges are ordered by
-/// their first address.
+/// Ranges are ordered by their first address.
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools-service/ranges",
@@ -1657,7 +1819,7 @@ async fn ip_pool_service_range_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a range to an IP pool used for Oxide services
+/// Add IP range to Oxide service pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
@@ -1678,7 +1840,7 @@ async fn ip_pool_service_range_add(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Remove a range from an IP pool used for Oxide services
+/// Remove IP range from Oxide service pool
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/remove",
@@ -1701,7 +1863,7 @@ async fn ip_pool_service_range_remove(
 
 // Floating IP Addresses
 
-/// List all Floating IPs
+/// List all floating IPs
 #[endpoint {
     method = GET,
     path = "/v1/floating-ips",
@@ -1733,7 +1895,7 @@ async fn floating_ip_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a Floating IP
+/// Create floating IP
 #[endpoint {
     method = POST,
     path = "/v1/floating-ips",
@@ -1759,7 +1921,7 @@ async fn floating_ip_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a Floating IP
+/// Delete floating IP
 #[endpoint {
     method = DELETE,
     path = "/v1/floating-ips/{floating_ip}",
@@ -1789,7 +1951,7 @@ async fn floating_ip_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a floating IP
+/// Fetch floating IP
 #[endpoint {
     method = GET,
     path = "/v1/floating-ips/{floating_ip}",
@@ -1815,6 +1977,73 @@ async fn floating_ip_view(
             .fetch()
             .await?;
         Ok(HttpResponseOk(fip.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Attach floating IP
+///
+/// Attach floating IP to an instance or other resource.
+#[endpoint {
+    method = POST,
+    path = "/v1/floating-ips/{floating_ip}/attach",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_attach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    target: TypedBody<params::FloatingIpAttach>,
+) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let ip = nexus
+            .floating_ip_attach(
+                &opctx,
+                floating_ip_selector,
+                target.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseAccepted(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach floating IP
+///
+// Detach floating IP from instance or other resource.
+#[endpoint {
+    method = POST,
+    path = "/v1/floating-ips/{floating_ip}/detach",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_detach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseAccepted<views::FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let floating_ip_selector = params::FloatingIpSelector {
+            floating_ip: path.floating_ip,
+            project: query.project,
+        };
+        let fip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+        let ip = nexus.floating_ip_detach(&opctx, fip_lookup).await?;
+        Ok(HttpResponseAccepted(ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -1882,7 +2111,7 @@ async fn disk_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a disk
+/// Fetch disk
 #[endpoint {
     method = GET,
     path = "/v1/disks/{disk}",
@@ -1908,7 +2137,7 @@ async fn disk_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a disk
+/// Delete disk
 #[endpoint {
     method = DELETE,
     path = "/v1/disks/{disk}",
@@ -1996,7 +2225,7 @@ async fn disk_metrics_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Start importing blocks into a disk
+/// Start importing blocks into disk
 ///
 /// Start the process of importing blocks into a disk
 #[endpoint {
@@ -2027,7 +2256,7 @@ async fn disk_bulk_write_import_start(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Import blocks into a disk
+/// Import blocks into disk
 #[endpoint {
     method = POST,
     path = "/v1/disks/{disk}/bulk-write",
@@ -2058,7 +2287,7 @@ async fn disk_bulk_write_import(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stop importing blocks into a disk
+/// Stop importing blocks into disk
 ///
 /// Stop the process of importing blocks into a disk
 #[endpoint {
@@ -2156,7 +2385,7 @@ async fn instance_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an instance
+/// Create instance
 #[endpoint {
     method = POST,
     path = "/v1/instances",
@@ -2186,7 +2415,7 @@ async fn instance_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an instance
+/// Fetch instance
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}",
@@ -2220,7 +2449,7 @@ async fn instance_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an instance
+/// Delete instance
 #[endpoint {
     method = DELETE,
     path = "/v1/instances/{instance}",
@@ -2316,7 +2545,7 @@ async fn instance_reboot(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Boot an instance
+/// Boot instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/start",
@@ -2345,7 +2574,7 @@ async fn instance_start(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stop an instance
+/// Stop instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/stop",
@@ -2374,7 +2603,7 @@ async fn instance_stop(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an instance's serial console
+/// Fetch instance serial console
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/serial-console",
@@ -2405,7 +2634,7 @@ async fn instance_serial_console(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stream an instance's serial console
+/// Stream instance serial console
 #[channel {
     protocol = WEBSOCKETS,
     path = "/v1/instances/{instance}/serial-console/stream",
@@ -2457,7 +2686,52 @@ async fn instance_serial_console_stream(
     }
 }
 
-/// List an instance's disks
+/// List SSH public keys for instance
+///
+/// List SSH public keys injected via cloud-init during instance creation. Note
+/// that this list is a snapshot in time and will not reflect updates made after
+/// the instance is created.
+#[endpoint {
+    method = GET,
+    path = "/v1/instances/{instance}/ssh-public-keys",
+    tags = ["instances"],
+}]
+async fn instance_ssh_public_key_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<PaginatedByNameOrId<params::OptionalProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<SshKey>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let instance_selector = params::InstanceSelector {
+            project: scan_params.selector.project.clone(),
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let ssh_keys = nexus
+            .instance_ssh_keys_list(&opctx, &instance_lookup, &paginated_by)
+            .await?
+            .into_iter()
+            .map(|k| k.into())
+            .collect();
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            ssh_keys,
+            &marker_for_name_or_id,
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List disks for instance
 #[endpoint {
     method = GET,
     path = "/v1/instances/{instance}/disks",
@@ -2498,7 +2772,7 @@ async fn instance_disk_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Attach a disk to an instance
+/// Attach disk to instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/disks/attach",
@@ -2530,7 +2804,7 @@ async fn instance_disk_attach(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Detach a disk from an instance
+/// Detach disk from instance
 #[endpoint {
     method = POST,
     path = "/v1/instances/{instance}/disks/detach",
@@ -2601,7 +2875,7 @@ async fn certificate_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new system-wide x.509 certificate
+/// Create new system-wide x.509 certificate
 ///
 /// This certificate is automatically used by the Oxide Control plane to serve
 /// external connections.
@@ -2631,7 +2905,7 @@ struct CertificatePathParam {
     certificate: NameOrId,
 }
 
-/// Fetch a certificate
+/// Fetch certificate
 ///
 /// Returns the details of a specific certificate
 #[endpoint {
@@ -2655,7 +2929,7 @@ async fn certificate_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a certificate
+/// Delete certificate
 ///
 /// Permanently delete a certificate. This operation cannot be undone.
 #[endpoint {
@@ -2683,7 +2957,7 @@ async fn certificate_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an address lot
+/// Create address lot
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/address-lot",
@@ -2709,7 +2983,7 @@ async fn networking_address_lot_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an address lot
+/// Delete address lot
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/address-lot/{address_lot}",
@@ -2766,7 +3040,7 @@ async fn networking_address_lot_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List the blocks in an address lot
+/// List blocks in address lot
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/address-lot/{address_lot}/blocks",
@@ -2802,7 +3076,7 @@ async fn networking_address_lot_block_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a loopback address
+/// Create loopback address
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/loopback-address",
@@ -2843,7 +3117,7 @@ pub struct LoopbackAddressPath {
     pub subnet_mask: u8,
 }
 
-/// Delete a loopback address
+/// Delete loopback address
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
@@ -2990,7 +3264,7 @@ async fn networking_switch_port_settings_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Get information about a switch port
+/// Get information about switch port
 #[endpoint {
     method = GET,
     path = "/v1/system/networking/switch-port-settings/{port}",
@@ -3093,7 +3367,7 @@ async fn networking_switch_port_clear_settings(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new BGP configuration
+/// Create new BGP configuration
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bgp",
@@ -3190,7 +3464,7 @@ async fn networking_bgp_imported_routes_ipv4(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a BGP configuration
+/// Delete BGP configuration
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/bgp",
@@ -3211,7 +3485,7 @@ async fn networking_bgp_config_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a new BGP announce set
+/// Create new BGP announce set
 #[endpoint {
     method = POST,
     path = "/v1/system/networking/bgp-announce",
@@ -3259,7 +3533,7 @@ async fn networking_bgp_announce_set_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a BGP announce set
+/// Delete BGP announce set
 #[endpoint {
     method = DELETE,
     path = "/v1/system/networking/bgp-announce",
@@ -3276,6 +3550,68 @@ async fn networking_bgp_announce_set_delete(
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.bgp_delete_announce_set(&opctx, &sel).await?;
         Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Enable a BFD session
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/bfd-enable",
+    tags = ["system/networking"],
+}]
+async fn networking_bfd_enable(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    session: TypedBody<params::BfdSessionEnable>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        nexus.bfd_enable(&opctx, session.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Disable a BFD session
+#[endpoint {
+    method = POST,
+    path = "/v1/system/networking/bfd-disable",
+    tags = ["system/networking"],
+}]
+async fn networking_bfd_disable(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    session: TypedBody<params::BfdSessionDisable>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        nexus.bfd_disable(&opctx, session.into_inner()).await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get BFD status
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bfd-status",
+    tags = ["system/networking"],
+}]
+async fn networking_bfd_status(
+    rqctx: RequestContext<Arc<ServerContext>>,
+) -> Result<HttpResponseOk<Vec<BfdStatus>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        let status = nexus.bfd_status(&opctx).await?;
+        Ok(HttpResponseOk(status))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -3331,7 +3667,7 @@ async fn image_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an image
+/// Create image
 ///
 /// Create a new image in a project.
 #[endpoint {
@@ -3369,7 +3705,7 @@ async fn image_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an image
+/// Fetch image
 ///
 /// Fetch the details for a specific image in a project.
 #[endpoint {
@@ -3412,7 +3748,7 @@ async fn image_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an image
+/// Delete image
 ///
 /// Permanently delete an image from a project. This operation cannot be undone.
 /// Any instances in the project using the image will continue to run, however
@@ -3448,9 +3784,9 @@ async fn image_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Promote a project image
+/// Promote project image
 ///
-/// Promote a project image to be visible to all projects in the silo
+/// Promote project image to be visible to all projects in the silo
 #[endpoint {
     method = POST,
     path = "/v1/images/{image}/promote",
@@ -3482,9 +3818,9 @@ async fn image_promote(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Demote a silo image
+/// Demote silo image
 ///
-/// Demote a silo image to be visible only to a specified project
+/// Demote silo image to be visible only to a specified project
 #[endpoint {
     method = POST,
     path = "/v1/images/{image}/demote",
@@ -3556,7 +3892,7 @@ async fn instance_network_interface_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a network interface
+/// Create network interface
 #[endpoint {
     method = POST,
     path = "/v1/network-interfaces",
@@ -3585,7 +3921,7 @@ async fn instance_network_interface_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a network interface
+/// Delete network interface
 ///
 /// Note that the primary interface for an instance cannot be deleted if there
 /// are any secondary interfaces. A new primary interface must be designated
@@ -3622,7 +3958,7 @@ async fn instance_network_interface_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a network interface
+/// Fetch network interface
 #[endpoint {
     method = GET,
     path = "/v1/network-interfaces/{interface}",
@@ -3653,7 +3989,7 @@ async fn instance_network_interface_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a network interface
+/// Update network interface
 #[endpoint {
     method = PUT,
     path = "/v1/network-interfaces/{interface}",
@@ -3727,6 +4063,79 @@ async fn instance_external_ip_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Allocate and attach ephemeral IP to instance
+#[endpoint {
+    method = POST,
+    path = "/v1/instances/{instance}/external-ips/ephemeral",
+    tags = ["instances"],
+}]
+async fn instance_ephemeral_ip_attach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    ip_to_create: TypedBody<params::EphemeralIpCreate>,
+) -> Result<HttpResponseAccepted<views::ExternalIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        let ip = nexus
+            .instance_attach_external_ip(
+                &opctx,
+                &instance_lookup,
+                &params::ExternalIpCreate::Ephemeral {
+                    pool: ip_to_create.into_inner().pool,
+                },
+            )
+            .await?;
+        Ok(HttpResponseAccepted(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Detach and deallocate ephemeral IP from instance
+#[endpoint {
+    method = DELETE,
+    path = "/v1/instances/{instance}/external-ips/ephemeral",
+    tags = ["instances"],
+}]
+async fn instance_ephemeral_ip_detach(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let instance_lookup =
+            nexus.instance_lookup(&opctx, instance_selector)?;
+        nexus
+            .instance_detach_external_ip(
+                &opctx,
+                &instance_lookup,
+                &params::ExternalIpDetach::Ephemeral,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Snapshots
 
 /// List snapshots
@@ -3764,7 +4173,7 @@ async fn snapshot_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a snapshot
+/// Create snapshot
 ///
 /// Creates a point-in-time snapshot from a disk.
 #[endpoint {
@@ -3792,7 +4201,7 @@ async fn snapshot_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a snapshot
+/// Fetch snapshot
 #[endpoint {
     method = GET,
     path = "/v1/snapshots/{snapshot}",
@@ -3820,7 +4229,7 @@ async fn snapshot_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a snapshot
+/// Delete snapshot
 #[endpoint {
     method = DELETE,
     path = "/v1/snapshots/{snapshot}",
@@ -3887,7 +4296,7 @@ async fn vpc_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a VPC
+/// Create VPC
 #[endpoint {
     method = POST,
     path = "/v1/vpcs",
@@ -3913,7 +4322,7 @@ async fn vpc_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a VPC
+/// Fetch VPC
 #[endpoint {
     method = GET,
     path = "/v1/vpcs/{vpc}",
@@ -3968,7 +4377,7 @@ async fn vpc_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a VPC
+/// Delete VPC
 #[endpoint {
     method = DELETE,
     path = "/v1/vpcs/{vpc}",
@@ -4029,7 +4438,7 @@ async fn vpc_subnet_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a subnet
+/// Create subnet
 #[endpoint {
     method = POST,
     path = "/v1/vpc-subnets",
@@ -4054,7 +4463,7 @@ async fn vpc_subnet_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a subnet
+/// Fetch subnet
 #[endpoint {
     method = GET,
     path = "/v1/vpc-subnets/{subnet}",
@@ -4083,7 +4492,7 @@ async fn vpc_subnet_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a subnet
+/// Delete subnet
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-subnets/{subnet}",
@@ -4112,7 +4521,7 @@ async fn vpc_subnet_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a subnet
+/// Update subnet
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-subnets/{subnet}",
@@ -4292,7 +4701,7 @@ async fn vpc_router_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a router
+/// Fetch router
 #[endpoint {
     method = GET,
     path = "/v1/vpc-routers/{router}",
@@ -4322,7 +4731,7 @@ async fn vpc_router_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a VPC router
+/// Create VPC router
 #[endpoint {
     method = POST,
     path = "/v1/vpc-routers",
@@ -4354,7 +4763,7 @@ async fn vpc_router_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a router
+/// Delete router
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-routers/{router}",
@@ -4384,7 +4793,7 @@ async fn vpc_router_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a router
+/// Update router
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-routers/{router}",
@@ -4458,7 +4867,7 @@ async fn vpc_router_route_list(
 
 // Vpc Router Routes
 
-/// Fetch a route
+/// Fetch route
 #[endpoint {
     method = GET,
     path = "/v1/vpc-router-routes/{route}",
@@ -4491,7 +4900,7 @@ async fn vpc_router_route_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create a router
+/// Create router
 #[endpoint {
     method = POST,
     path = "/v1/vpc-router-routes",
@@ -4523,7 +4932,7 @@ async fn vpc_router_route_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete a route
+/// Delete route
 #[endpoint {
     method = DELETE,
     path = "/v1/vpc-router-routes/{route}",
@@ -4555,7 +4964,7 @@ async fn vpc_router_route_delete(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a route
+/// Update route
 #[endpoint {
     method = PUT,
     path = "/v1/vpc-router-routes/{route}",
@@ -4630,7 +5039,7 @@ struct RackPathParam {
     rack_id: Uuid,
 }
 
-/// Fetch a rack
+/// Fetch rack
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/racks/{rack_id}",
@@ -4651,7 +5060,7 @@ async fn rack_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List uninitialized sleds in a given rack
+/// List uninitialized sleds
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds-uninitialized",
@@ -4660,7 +5069,7 @@ async fn rack_view(
 async fn sled_list_uninitialized(
     rqctx: RequestContext<Arc<ServerContext>>,
     query: Query<PaginationParams<EmptyScanParams, String>>,
-) -> Result<HttpResponseOk<ResultsPage<UninitializedSled>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<shared::UninitializedSled>>, HttpError> {
     let apictx = rqctx.context();
     // We don't actually support real pagination
     let pag_params = query.into_inner();
@@ -4678,7 +5087,7 @@ async fn sled_list_uninitialized(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Add a sled to an initialized rack
+/// Add sled to initialized rack
 //
 // TODO: In the future this should really be a PUT request, once we resolve
 // https://github.com/oxidecomputer/omicron/issues/4494. It should also
@@ -4689,15 +5098,15 @@ async fn sled_list_uninitialized(
     path = "/v1/system/hardware/sleds/",
     tags = ["system/hardware"]
 }]
-async fn add_sled_to_initialized_rack(
+async fn sled_add(
     rqctx: RequestContext<Arc<ServerContext>>,
-    sled: TypedBody<UninitializedSled>,
+    sled: TypedBody<params::UninitializedSledId>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.add_sled_to_initialized_rack(&opctx, sled.into_inner()).await?;
+        nexus.sled_add(&opctx, sled.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4735,7 +5144,7 @@ async fn sled_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a sled
+/// Fetch sled
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}",
@@ -4757,7 +5166,7 @@ async fn sled_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set the sled's provision state.
+/// Set sled provision state
 #[endpoint {
     method = PUT,
     path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
@@ -4795,7 +5204,7 @@ async fn sled_set_provision_state(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// List instances running on a given sled
+/// List instances running on given sled
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/sleds/{sled_id}/instances",
@@ -4805,7 +5214,7 @@ async fn sled_instance_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SledPath>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<SledInstance>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::SledInstance>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -4826,7 +5235,7 @@ async fn sled_instance_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             sled_instances,
-            &|_, sled_instance: &SledInstance| sled_instance.identity.id,
+            &|_, sled_instance: &views::SledInstance| sled_instance.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -4875,7 +5284,7 @@ async fn physical_disk_list(
 async fn switch_list(
     rqctx: RequestContext<Arc<ServerContext>>,
     query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<Switch>>, HttpError> {
+) -> Result<HttpResponseOk<ResultsPage<views::Switch>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -4890,13 +5299,13 @@ async fn switch_list(
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             switches,
-            &|_, switch: &Switch| switch.identity.id,
+            &|_, switch: &views::Switch| switch.identity.id,
         )?))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a switch
+/// Fetch switch
 #[endpoint {
     method = GET,
     path = "/v1/system/hardware/switches/{switch_id}",
@@ -4905,7 +5314,7 @@ async fn switch_list(
 async fn switch_view(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SwitchPath>,
-) -> Result<HttpResponseOk<Switch>, HttpError> {
+) -> Result<HttpResponseOk<views::Switch>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
@@ -5079,320 +5488,58 @@ async fn silo_metric(
 
 // Updates
 
-/// Refresh update data
+/// Upload TUF repository
 #[endpoint {
-     method = POST,
-     path = "/v1/system/update/refresh",
-     tags = ["system/update"],
-     unpublished = true,
+    method = PUT,
+    path = "/v1/system/update/repository",
+    tags = ["system/update"],
+    unpublished = true,
 }]
-async fn system_update_refresh(
+async fn system_update_put_repository(
     rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    query: Query<params::UpdatesPutRepositoryParams>,
+    body: StreamingBody,
+) -> Result<HttpResponseOk<TufRepoInsertResponse>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.updates_refresh_metadata(&opctx).await?;
-        Ok(HttpResponseUpdatedNoContent())
+        let query = query.into_inner();
+        let body = body.into_stream();
+        let update =
+            nexus.updates_put_repository(&opctx, body, query.file_name).await?;
+        Ok(HttpResponseOk(update))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// View system version and update status
-#[endpoint {
-     method = GET,
-     path = "/v1/system/update/version",
-     tags = ["system/update"],
-     unpublished = true,
-}]
-async fn system_version(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseOk<views::SystemVersion>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
-
-        // The only way we have no latest deployment is if the rack was just set
-        // up and no system updates have ever been run. In this case there is no
-        // update running, so we can fall back to steady.
-        let status = nexus
-            .latest_update_deployment(&opctx)
-            .await
-            .map_or(views::UpdateStatus::Steady, |d| d.status.into());
-
-        // Updateable components, however, are populated at rack setup before
-        // the external API is even started, so if we get here and there are no
-        // components, that's a real issue and the 500 we throw is appropriate.
-        let low = nexus.lowest_component_system_version(&opctx).await?.into();
-        let high = nexus.highest_component_system_version(&opctx).await?.into();
-
-        Ok(HttpResponseOk(views::SystemVersion {
-            version_range: views::VersionRange { low, high },
-            status,
-        }))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// View version and update status of component tree
-#[endpoint {
-     method = GET,
-     path = "/v1/system/update/components",
-     tags = ["system/update"],
-     unpublished = true,
-}]
-async fn system_component_version_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::UpdateableComponent>>, HttpError>
-{
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let components = nexus
-            .updateable_components_list_by_id(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|u| u.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            components,
-            &|_, u: &views::UpdateableComponent| u.identity.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List all updates
-#[endpoint {
-     method = GET,
-     path = "/v1/system/update/updates",
-     tags = ["system/update"],
-     unpublished = true,
-}]
-async fn system_update_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::SystemUpdate>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let updates = nexus
-            .system_updates_list_by_id(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|u| u.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            updates,
-            &|_, u: &views::SystemUpdate| u.identity.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// View system update
-#[endpoint {
-     method = GET,
-     path = "/v1/system/update/updates/{version}",
-     tags = ["system/update"],
-     unpublished = true,
-}]
-async fn system_update_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::SystemUpdatePath>,
-) -> Result<HttpResponseOk<views::SystemUpdate>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let system_update =
-            nexus.system_update_fetch_by_version(&opctx, &path.version).await?;
-        Ok(HttpResponseOk(system_update.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// View system update component tree
+/// Fetch TUF repository description
+///
+/// Fetch description of TUF repository by system version.
 #[endpoint {
     method = GET,
-    path = "/v1/system/update/updates/{version}/components",
+    path = "/v1/system/update/repository/{system_version}",
     tags = ["system/update"],
     unpublished = true,
 }]
-async fn system_update_components_list(
+async fn system_update_get_repository(
     rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<params::SystemUpdatePath>,
-) -> Result<HttpResponseOk<ResultsPage<views::ComponentUpdate>>, HttpError> {
+    path_params: Path<params::UpdatesGetRepositoryParams>,
+) -> Result<HttpResponseOk<TufRepoGetResponse>, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
     let handler = async {
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let components = nexus
-            .system_update_list_components(&opctx, &path.version)
-            .await?
-            .into_iter()
-            .map(|i| i.into())
-            .collect();
-        Ok(HttpResponseOk(ResultsPage { items: components, next_page: None }))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Start system update
-#[endpoint {
-    method = POST,
-    path = "/v1/system/update/start",
-    tags = ["system/update"],
-    unpublished = true,
-}]
-async fn system_update_start(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    // The use of the request body here instead of a path param is deliberate.
-    // Unlike instance start (which uses a path param), update start is about
-    // modifying the state of the system rather than the state of the resource
-    // (instance there, system update here) identified by the param. This
-    // approach also gives us symmetry with the /stop endpoint.
-    update: TypedBody<params::SystemUpdateStart>,
-) -> Result<HttpResponseAccepted<views::UpdateDeployment>, HttpError> {
-    let apictx = rqctx.context();
-    let _nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
-        // inverse situation to stop: we only want to actually start an update
-        // if there isn't one already in progress.
-
-        // 1. check that there is no update in progress
-        //   a. if there is one, this should probably 409
-        // 2. kick off the update start saga, which
-        //   a. tells the update system to get going
-        //   b. creates an update deployment
-
-        // similar question for stop: do we return the deployment directly, or a
-        // special StartUpdateResult that includes a deployment ID iff an update
-        // was actually started
-
-        Ok(HttpResponseAccepted(views::UpdateDeployment {
-            identity: AssetIdentityMetadata {
-                id: Uuid::new_v4(),
-                time_created: Utc::now(),
-                time_modified: Utc::now(),
-            },
-            version: update.into_inner().version,
-            status: views::UpdateStatus::Updating,
+        let params = path_params.into_inner();
+        let description =
+            nexus.updates_get_repository(&opctx, params.system_version).await?;
+        Ok(HttpResponseOk(TufRepoGetResponse {
+            description: description.into_external(),
         }))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Stop system update
-///
-/// If there is no update in progress, do nothing.
-#[endpoint {
-    method = POST,
-    path = "/v1/system/update/stop",
-    tags = ["system/update"],
-    unpublished = true,
-}]
-async fn system_update_stop(
-    rqctx: RequestContext<Arc<ServerContext>>,
-) -> Result<HttpResponseUpdatedNoContent, HttpError> {
-    let apictx = rqctx.context();
-    let _nexus = &apictx.nexus;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-
-        // TODO: Implement stopping an update. Should probably be a saga.
-
-        // Ask update subsystem if it's doing anything. If so, tell it to stop.
-        // This could be done in a single call to the updater if the latter can
-        // respond to a stop command differently depending on whether it did
-        // anything or not.
-
-        // If we did in fact stop a running update, update the status on the
-        // latest update deployment in the DB to `stopped` and respond with that
-        // deployment. If we do nothing, what should we return? Maybe instead of
-        // responding with the deployment, this endpoint gets its own
-        // `StopUpdateResult` response view that says whether it was a noop, and
-        // if it wasn't, includes the ID of the stopped deployment, which allows
-        // the client to fetch it if it actually wants it.
-
-        Ok(HttpResponseUpdatedNoContent())
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// List all update deployments
-#[endpoint {
-     method = GET,
-     path = "/v1/system/update/deployments",
-     tags = ["system/update"],
-     unpublished = true,
-}]
-async fn update_deployments_list(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    query_params: Query<PaginatedById>,
-) -> Result<HttpResponseOk<ResultsPage<views::UpdateDeployment>>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let query = query_params.into_inner();
-    let pagparams = data_page_params_for(&rqctx, &query)?;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let updates = nexus
-            .update_deployments_list_by_id(&opctx, &pagparams)
-            .await?
-            .into_iter()
-            .map(|u| u.into())
-            .collect();
-        Ok(HttpResponseOk(ScanById::results_page(
-            &query,
-            updates,
-            &|_, u: &views::UpdateDeployment| u.identity.id,
-        )?))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Fetch a system update deployment
-#[endpoint {
-     method = GET,
-     path = "/v1/system/update/deployments/{id}",
-     tags = ["system/update"],
-     unpublished = true,
-}]
-async fn update_deployment_view(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ByIdPathParams>,
-) -> Result<HttpResponseOk<views::UpdateDeployment>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let id = &path.id;
-    let handler = async {
-        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let deployment =
-            nexus.update_deployment_fetch_by_id(&opctx, id).await?;
-        Ok(HttpResponseOk(deployment.into()))
-    };
-    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
 // Silo users
 
 /// List users
@@ -5523,7 +5670,7 @@ async fn user_builtin_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a built-in user
+/// Fetch built-in user
 #[endpoint {
     method = GET,
     path = "/v1/system/users-builtin/{user}",
@@ -5605,7 +5752,7 @@ async fn role_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch a built-in role
+/// Fetch built-in role
 #[endpoint {
     method = GET,
     path = "/v1/system/roles/{role_name}",
@@ -5629,7 +5776,7 @@ async fn role_view(
 
 // Current user
 
-/// Fetch the user associated with the current session
+/// Fetch user for current session
 #[endpoint {
    method = GET,
    path = "/v1/me",
@@ -5652,7 +5799,7 @@ pub(crate) async fn current_user_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch the silo groups the current user belongs to
+/// Fetch current user's groups
 #[endpoint {
     method = GET,
     path = "/v1/me/groups",
@@ -5726,7 +5873,7 @@ async fn current_user_ssh_key_list(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Create an SSH public key
+/// Create SSH public key
 ///
 /// Create an SSH public key for the currently authenticated user.
 #[endpoint {
@@ -5754,9 +5901,9 @@ async fn current_user_ssh_key_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch an SSH public key
+/// Fetch SSH public key
 ///
-/// Fetch an SSH public key associated with the currently authenticated user.
+/// Fetch SSH public key associated with the currently authenticated user.
 #[endpoint {
     method = GET,
     path = "/v1/me/ssh-keys/{ssh_key}",
@@ -5788,7 +5935,7 @@ async fn current_user_ssh_key_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Delete an SSH public key
+/// Delete SSH public key
 ///
 /// Delete an SSH public key associated with the currently authenticated user.
 #[endpoint {

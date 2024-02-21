@@ -43,14 +43,10 @@ impl DnsConfigWatcher {
 }
 
 impl BackgroundTask for DnsConfigWatcher {
-    fn activate<'a, 'b, 'c>(
+    fn activate<'a>(
         &'a mut self,
-        opctx: &'b OpContext,
-    ) -> BoxFuture<'c, serde_json::Value>
-    where
-        'a: 'c,
-        'b: 'c,
-    {
+        opctx: &'a OpContext,
+    ) -> BoxFuture<'a, serde_json::Value> {
         async {
             // Set up a logger for this activation that includes metadata about
             // the current generation.
@@ -163,7 +159,6 @@ impl BackgroundTask for DnsConfigWatcher {
 mod test {
     use crate::app::background::common::BackgroundTask;
     use crate::app::background::dns_config::DnsConfigWatcher;
-    use crate::app::background::init::test::read_internal_dns_zone_id;
     use crate::app::background::init::test::write_test_dns_generation;
     use assert_matches::assert_matches;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -201,9 +196,7 @@ mod test {
 
         // Now write generation 2, activate again, and verify that the update
         // was sent to the watcher.
-        let internal_dns_zone_id =
-            read_internal_dns_zone_id(&opctx, &datastore).await;
-        write_test_dns_generation(&datastore, internal_dns_zone_id).await;
+        write_test_dns_generation(&opctx, &datastore).await;
         assert_eq!(watcher.borrow().as_ref().unwrap().generation, 1);
         let value = task.activate(&opctx).await;
         assert_eq!(watcher.borrow().as_ref().unwrap().generation, 2);

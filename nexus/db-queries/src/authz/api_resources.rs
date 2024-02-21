@@ -36,8 +36,7 @@ use crate::authn;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::fixed_data::FLEET_ID;
-use crate::db::model::KnownArtifactKind;
-use crate::db::model::SemverVersion;
+use crate::db::model::{ArtifactId, SemverVersion};
 use crate::db::DataStore;
 use authz_macros::authz_resource;
 use futures::future::BoxFuture;
@@ -249,6 +248,57 @@ impl ApiResourceWithRolesType for Fleet {
 }
 
 // TODO: refactor synthetic resources below
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlueprintConfig;
+
+pub const BLUEPRINT_CONFIG: BlueprintConfig = BlueprintConfig;
+
+impl oso::PolarClass for BlueprintConfig {
+    fn get_polar_class_builder() -> oso::ClassBuilder<Self> {
+        oso::Class::builder()
+            .with_equality_check()
+            .add_attribute_getter("fleet", |_: &BlueprintConfig| FLEET)
+    }
+}
+
+impl AuthorizedResource for BlueprintConfig {
+    fn load_roles<'a, 'b, 'c, 'd, 'e, 'f>(
+        &'a self,
+        opctx: &'b OpContext,
+        datastore: &'c DataStore,
+        authn: &'d authn::Context,
+        roleset: &'e mut RoleSet,
+    ) -> futures::future::BoxFuture<'f, Result<(), Error>>
+    where
+        'a: 'f,
+        'b: 'f,
+        'c: 'f,
+        'd: 'f,
+        'e: 'f,
+    {
+        // There are no roles on the BlueprintConfig, only permissions. But we
+        // still need to load the Fleet-related roles to verify that the actor
+        // has the "admin" role on the Fleet (possibly conferred from a Silo
+        // role).
+        load_roles_for_resource_tree(&FLEET, opctx, datastore, authn, roleset)
+            .boxed()
+    }
+
+    fn on_unauthorized(
+        &self,
+        _: &Authz,
+        error: Error,
+        _: AnyActor,
+        _: Action,
+    ) -> Error {
+        error
+    }
+
+    fn polar_class(&self) -> oso::Class {
+        Self::get_polar_class()
+    }
+}
 
 /// ConsoleSessionList is a synthetic resource used for modeling who has access
 /// to create sessions.
@@ -819,7 +869,7 @@ authz_resource! {
 authz_resource! {
     name = "LoopbackAddress",
     parent = "Fleet",
-    primary_key = Uuid,
+    primary_key = { uuid_kind = LoopbackAddressKind },
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -841,6 +891,14 @@ authz_resource! {
 }
 
 // Miscellaneous resources nested directly below "Fleet"
+
+authz_resource! {
+    name = "Blueprint",
+    parent = "Fleet",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
 
 authz_resource! {
     name = "ConsoleSession",
@@ -1008,9 +1066,18 @@ authz_resource! {
 }
 
 authz_resource! {
-    name = "UpdateArtifact",
+    name = "TufRepo",
     parent = "Fleet",
-    primary_key = (String, SemverVersion, KnownArtifactKind),
+    primary_key = { uuid_kind = TufRepoKind },
+    roles_allowed = false,
+    polar_snippet = FleetChild,
+}
+
+authz_resource! {
+    name = "TufArtifact",
+    parent = "Fleet",
+    primary_key = (String, SemverVersion, String),
+    input_key = ArtifactId,
     roles_allowed = false,
     polar_snippet = FleetChild,
 }
@@ -1021,22 +1088,6 @@ authz_resource! {
     primary_key = Uuid,
     roles_allowed = false,
     polar_snippet = Custom,
-}
-
-authz_resource! {
-    name = "SystemUpdate",
-    parent = "Fleet",
-    primary_key = Uuid,
-    roles_allowed = false,
-    polar_snippet = FleetChild,
-}
-
-authz_resource! {
-    name = "UpdateDeployment",
-    parent = "Fleet",
-    primary_key = Uuid,
-    roles_allowed = false,
-    polar_snippet = FleetChild,
 }
 
 authz_resource! {

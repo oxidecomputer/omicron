@@ -8,11 +8,11 @@ use super::sled_agent::SledAgent;
 use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::bootstrap::params::AddSledRequest;
 use crate::params::{
-    CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
-    InstancePutMigrationIdsBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse, OmicronZonesConfig,
-    SledRole, TimeSync, VpcFirewallRulesEnsureBody, ZoneBundleId,
-    ZoneBundleMetadata, Zpool,
+    BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
+    InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
+    ZoneBundleId, ZoneBundleMetadata, Zpool,
 };
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle;
@@ -53,6 +53,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_issue_disk_snapshot_request)?;
         api.register(instance_put_migration_ids)?;
         api.register(instance_put_state)?;
+        api.register(instance_put_external_ip)?;
+        api.register(instance_delete_external_ip)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
         api.register(omicron_zones_get)?;
@@ -77,11 +79,13 @@ pub fn api() -> SledApiDescription {
         api.register(uplink_ensure)?;
         api.register(read_network_bootstore_config_cache)?;
         api.register(write_network_bootstore_config)?;
-        api.register(add_sled_to_initialized_rack)?;
+        api.register(sled_add)?;
         api.register(metrics_collect)?;
         api.register(host_os_write_start)?;
         api.register(host_os_write_status_get)?;
         api.register(host_os_write_status_delete)?;
+        api.register(inventory)?;
+        api.register(bootstore_status)?;
 
         Ok(())
     }
@@ -466,6 +470,38 @@ async fn instance_put_migration_ids(
     ))
 }
 
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_put_external_ip(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_put_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_delete_external_ip(
+    rqctx: RequestContext<SledAgent>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_delete_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
 /// Path parameters for Disk requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
 struct DiskPathParam {
@@ -713,7 +749,7 @@ async fn write_network_bootstore_config(
     method = PUT,
     path = "/sleds"
 }]
-async fn add_sled_to_initialized_rack(
+async fn sled_add(
     rqctx: RequestContext<SledAgent>,
     body: TypedBody<AddSledRequest>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
@@ -731,7 +767,7 @@ async fn add_sled_to_initialized_rack(
         ));
     }
 
-    crate::sled_agent::add_sled_to_initialized_rack(
+    crate::sled_agent::sled_add(
         sa.logger().clone(),
         request.sled_id,
         request.start_request,
@@ -924,4 +960,36 @@ async fn host_os_write_status_delete(
         .clear_terminal_status(boot_disk, update_id)
         .map_err(|err| HttpError::from(&err))?;
     Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Fetch basic information about this sled
+#[endpoint {
+    method = GET,
+    path = "/inventory",
+}]
+async fn inventory(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<Inventory>, HttpError> {
+    let sa = request_context.context();
+    Ok(HttpResponseOk(sa.inventory()?))
+}
+
+/// Get the internal state of the local bootstore node
+#[endpoint {
+    method = GET,
+    path = "/bootstore/status",
+}]
+async fn bootstore_status(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
+    let sa = request_context.context();
+    let bootstore = sa.bootstore();
+    let status = bootstore
+        .get_status()
+        .await
+        .map_err(|e| {
+            HttpError::from(omicron_common::api::external::Error::from(e))
+        })?
+        .into();
+    Ok(HttpResponseOk(status))
 }

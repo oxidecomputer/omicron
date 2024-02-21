@@ -178,9 +178,9 @@ mod test {
     use nexus_db_queries::{
         authn::saga::Serialized, context::OpContext, db, db::lookup::LookupPath,
     };
+    use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
@@ -199,7 +199,7 @@ mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        populate_ip_pool(&client, "default", None).await;
+        create_default_ip_pool(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
@@ -235,12 +235,13 @@ mod test {
             },
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
-            hostname: String::from("inst"),
+            hostname: "inst".parse().unwrap(),
             user_data: vec![],
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool_name: None,
+                pool: None,
             }],
             disks: vec![params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },

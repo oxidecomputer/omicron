@@ -4,8 +4,6 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use crate::artifacts::ArtifactIdData;
-use crate::artifacts::UpdatePlan;
 use crate::artifacts::WicketdArtifactStore;
 use crate::helpers::sps_to_string;
 use crate::http_entrypoints::ClearUpdateStateResponse;
@@ -20,8 +18,10 @@ use anyhow::bail;
 use anyhow::ensure;
 use anyhow::Context;
 use base64::Engine;
+use bytes::Bytes;
 use display_error_chain::DisplayErrorChain;
 use dropshot::HttpError;
+use futures::Stream;
 use futures::TryFutureExt;
 use gateway_client::types::HostPhase2Progress;
 use gateway_client::types::HostPhase2RecoveryImageId;
@@ -50,7 +50,6 @@ use slog::Logger;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::io;
 use std::net::SocketAddrV6;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -65,6 +64,9 @@ use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::io::StreamReader;
+use update_common::artifacts::ArtifactIdData;
+use update_common::artifacts::ArtifactsWithPlan;
+use update_common::artifacts::UpdatePlan;
 use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
@@ -342,15 +344,21 @@ impl UpdateTracker {
     }
 
     /// Updates the repository stored inside the update tracker.
-    pub(crate) async fn put_repository<T>(
+    pub(crate) async fn put_repository(
         &self,
-        data: T,
-    ) -> Result<(), HttpError>
-    where
-        T: io::Read + io::Seek + Send + 'static,
-    {
+        stream: impl Stream<Item = Result<Bytes, HttpError>> + Send + 'static,
+    ) -> Result<(), HttpError> {
+        // Build the ArtifactsWithPlan from the stream.
+        let artifacts_with_plan = ArtifactsWithPlan::from_stream(
+            stream,
+            // We don't have a good file name here because file contents are
+            // uploaded over stdin, so let ArtifactsWithPlan pick the name.
+            None, &self.log,
+        )
+        .await
+        .map_err(|error| error.to_http_error())?;
         let mut update_data = self.sp_update_data.lock().await;
-        update_data.put_repository(data).await
+        update_data.set_artifacts_with_plan(artifacts_with_plan).await
     }
 
     /// Gets a list of artifacts stored in the update repository.
@@ -725,10 +733,10 @@ impl UpdateTrackerData {
         }
     }
 
-    async fn put_repository<T>(&mut self, data: T) -> Result<(), HttpError>
-    where
-        T: io::Read + io::Seek + Send + 'static,
-    {
+    async fn set_artifacts_with_plan(
+        &mut self,
+        artifacts_with_plan: ArtifactsWithPlan,
+    ) -> Result<(), HttpError> {
         // Are there any updates currently running? If so, then reject the new
         // repository.
         let running_sps = self
@@ -745,8 +753,8 @@ impl UpdateTrackerData {
             ));
         }
 
-        // Put the repository into the artifact store.
-        self.artifact_store.put_repository(data).await?;
+        // Set the new artifacts_with_plan.
+        self.artifact_store.set_artifacts_with_plan(artifacts_with_plan);
 
         // Reset all running data: a new repository means starting afresh.
         self.sp_update_data.clear();

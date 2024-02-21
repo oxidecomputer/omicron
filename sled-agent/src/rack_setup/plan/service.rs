@@ -10,15 +10,15 @@ use crate::rack_setup::config::SetupServiceConfig as Config;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
-use internal_dns::{ServiceName, DNS_ZONE};
+use internal_dns::config::{Host, ZoneVariant};
+use internal_dns::ServiceName;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
     DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, DNS_REDUNDANCY, MAX_DNS_REDUNDANCY,
-    MGD_PORT, MGS_PORT, NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES,
-    SLED_PREFIX,
+    MGD_PORT, MGS_PORT, NEXUS_REDUNDANCY, NTP_PORT, NUM_SOURCE_NAT_PORTS,
+    RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{MacAddr, Vni};
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
 };
@@ -34,7 +34,7 @@ use sled_agent_client::{
 use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::num::Wrapping;
 use thiserror::Error;
@@ -42,9 +42,6 @@ use uuid::Uuid;
 
 // The number of boundary NTP servers to create from RSS.
 const BOUNDARY_NTP_COUNT: usize = 2;
-
-// The number of Nexus instances to create from RSS.
-const NEXUS_COUNT: usize = 3;
 
 // The number of CRDB instances to create from RSS.
 const CRDB_COUNT: usize = 5;
@@ -297,36 +294,17 @@ impl Plan {
                 "No scrimlets observed".to_string(),
             ));
         }
-        for (i, sled) in scrimlets.iter().enumerate() {
+        for sled in scrimlets.iter() {
             let address = get_switch_zone_address(sled.subnet);
-            let zone =
-                dns_builder.host_dendrite(sled.sled_id, address).unwrap();
             dns_builder
-                .service_backend_zone(
-                    ServiceName::Dendrite,
-                    &zone,
+                .host_zone_switch(
+                    sled.sled_id,
+                    address,
                     DENDRITE_PORT,
-                )
-                .unwrap();
-            dns_builder
-                .service_backend_zone(
-                    ServiceName::ManagementGatewayService,
-                    &zone,
                     MGS_PORT,
+                    MGD_PORT,
                 )
                 .unwrap();
-            dns_builder
-                .service_backend_zone(ServiceName::Mgd, &zone, MGD_PORT)
-                .unwrap();
-
-            // TODO only works for single rack
-            let sled_address = get_sled_address(sled.subnet);
-            let switch_location = if i == 0 {
-                SwitchLocation::Switch0
-            } else {
-                SwitchLocation::Switch1
-            };
-            dns_builder.host_scrimlet(switch_location, sled_address).unwrap();
         }
 
         // We'll stripe most services across all available Sleds, round-robin
@@ -356,11 +334,11 @@ impl Plan {
             let dns_address = SocketAddrV6::new(ip, DNS_PORT, 0, 0);
 
             let id = Uuid::new_v4();
-            let zone = dns_builder.host_zone(id, ip).unwrap();
             dns_builder
-                .service_backend_zone(
+                .host_zone_with_one_backend(
+                    id,
+                    ip,
                     ServiceName::InternalDns,
-                    &zone,
                     DNS_HTTP_PORT,
                 )
                 .unwrap();
@@ -393,9 +371,13 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::COCKROACH_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
-            let zone = dns_builder.host_zone(id, ip).unwrap();
             dns_builder
-                .service_backend_zone(ServiceName::Cockroach, &zone, port)
+                .host_zone_with_one_backend(
+                    id,
+                    ip,
+                    ServiceName::Cockroach,
+                    port,
+                )
                 .unwrap();
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::CockroachDb)?;
@@ -429,11 +411,11 @@ impl Plan {
             let internal_ip = sled.addr_alloc.next().expect("Not enough addrs");
             let http_port = omicron_common::address::DNS_HTTP_PORT;
             let http_address = SocketAddrV6::new(internal_ip, http_port, 0, 0);
-            let zone = dns_builder.host_zone(id, internal_ip).unwrap();
             dns_builder
-                .service_backend_zone(
+                .host_zone_with_one_backend(
+                    id,
+                    internal_ip,
                     ServiceName::ExternalDns,
-                    &zone,
                     http_port,
                 )
                 .unwrap();
@@ -457,7 +439,7 @@ impl Plan {
         }
 
         // Provision Nexus zones, continuing to stripe across sleds.
-        for _ in 0..NEXUS_COUNT {
+        for _ in 0..NEXUS_REDUNDANCY {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
@@ -465,11 +447,11 @@ impl Plan {
             };
             let id = Uuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
-            let zone = dns_builder.host_zone(id, address).unwrap();
             dns_builder
-                .service_backend_zone(
+                .host_zone_with_one_backend(
+                    id,
+                    address,
                     ServiceName::Nexus,
-                    &zone,
                     omicron_common::address::NEXUS_INTERNAL_PORT,
                 )
                 .unwrap();
@@ -508,11 +490,11 @@ impl Plan {
             };
             let id = Uuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
-            let zone = dns_builder.host_zone(id, address).unwrap();
             dns_builder
-                .service_backend_zone(
+                .host_zone_with_one_backend(
+                    id,
+                    address,
                     ServiceName::Oximeter,
-                    &zone,
                     omicron_common::address::OXIMETER_PORT,
                 )
                 .unwrap();
@@ -542,9 +524,13 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CLICKHOUSE_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
-            let zone = dns_builder.host_zone(id, ip).unwrap();
             dns_builder
-                .service_backend_zone(ServiceName::Clickhouse, &zone, port)
+                .host_zone_with_one_backend(
+                    id,
+                    ip,
+                    ServiceName::Clickhouse,
+                    port,
+                )
                 .unwrap();
             let dataset_name =
                 sled.alloc_from_u2_zpool(DatasetKind::Clickhouse)?;
@@ -574,11 +560,11 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CLICKHOUSE_KEEPER_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
-            let zone = dns_builder.host_zone(id, ip).unwrap();
             dns_builder
-                .service_backend_zone(
+                .host_zone_with_one_backend(
+                    id,
+                    ip,
                     ServiceName::ClickhouseKeeper,
-                    &zone,
                     port,
                 )
                 .unwrap();
@@ -607,9 +593,13 @@ impl Plan {
             let address = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
             let id = Uuid::new_v4();
-            let zone = dns_builder.host_zone(id, address).unwrap();
             dns_builder
-                .service_backend_zone(ServiceName::CruciblePantry, &zone, port)
+                .host_zone_with_one_backend(
+                    id,
+                    address,
+                    ServiceName::CruciblePantry,
+                    port,
+                )
                 .unwrap();
             sled.request.zones.push(OmicronZoneConfig {
                 id,
@@ -628,11 +618,11 @@ impl Plan {
                 let port = omicron_common::address::CRUCIBLE_PORT;
                 let address = SocketAddrV6::new(ip, port, 0, 0);
                 let id = Uuid::new_v4();
-                let zone = dns_builder.host_zone(id, ip).unwrap();
                 dns_builder
-                    .service_backend_zone(
+                    .host_zone_with_one_backend(
+                        id,
+                        ip,
                         ServiceName::Crucible(id),
-                        &zone,
                         port,
                     )
                     .unwrap();
@@ -655,11 +645,11 @@ impl Plan {
         for (idx, sled) in sled_info.iter_mut().enumerate() {
             let id = Uuid::new_v4();
             let address = sled.addr_alloc.next().expect("Not enough addrs");
-            let zone = dns_builder.host_zone(id, address).unwrap();
             let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
 
             let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
-                boundary_ntp_servers.push(format!("{}.host.{}", id, DNS_ZONE));
+                boundary_ntp_servers
+                    .push(Host::for_zone(id, ZoneVariant::Other).fqdn());
                 let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;
                 (
                     OmicronZoneType::BoundaryNtp {
@@ -684,7 +674,9 @@ impl Plan {
                 )
             };
 
-            dns_builder.service_backend_zone(svcname, &zone, NTP_PORT).unwrap();
+            dns_builder
+                .host_zone_with_one_backend(id, address, svcname, NTP_PORT)
+                .unwrap();
 
             sled.request.zones.push(OmicronZoneConfig {
                 id,
@@ -706,7 +698,7 @@ impl Plan {
         log: &Logger,
         config: &Config,
         storage_manager: &StorageHandle,
-        sleds: &HashMap<SocketAddrV6, StartSledAgentRequest>,
+        sleds: &BTreeMap<SocketAddrV6, StartSledAgentRequest>,
     ) -> Result<Self, PlanError> {
         // Load the information we need about each Sled to be able to allocate
         // components on it.
@@ -1076,6 +1068,7 @@ mod tests {
     use crate::bootstrap::params::BootstrapAddressDiscovery;
     use crate::bootstrap::params::RecoverySiloConfig;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::RackNetworkConfig;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =
@@ -1147,7 +1140,6 @@ mod tests {
             "fd01::103",
         ];
         let config = Config {
-            rack_subnet: Ipv6Addr::LOCALHOST,
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: Vec::new(),
@@ -1171,7 +1163,13 @@ mod tests {
                 user_name: "recovery".parse().unwrap(),
                 user_password_hash: "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY".parse().unwrap(),
             },
-            rack_network_config: None,
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: Ipv6Addr::LOCALHOST.into(),
+                infra_ip_first: Ipv4Addr::LOCALHOST,
+                infra_ip_last: Ipv4Addr::LOCALHOST,
+                ports: Vec::new(),
+                bgp: Vec::new(),
+            },
         };
 
         let mut svp = ServicePortBuilder::new(&config);

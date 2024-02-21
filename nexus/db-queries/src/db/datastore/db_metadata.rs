@@ -210,7 +210,7 @@ impl DataStore {
         // - Look in the schema directory for all the changes, in-order, to
         // migrate from our current version to the desired version.
 
-        info!(log, "Reading schemas from {}", config.schema_dir.display());
+        info!(log, "Reading schemas from {}", config.schema_dir);
         let mut dir = tokio::fs::read_dir(&config.schema_dir)
             .await
             .map_err(|e| format!("Failed to read schema config dir: {e}"))?;
@@ -239,14 +239,14 @@ impl DataStore {
         if !all_versions.contains(&current_version) {
             return Err(format!(
                 "Current DB version {current_version} was not found in {}",
-                config.schema_dir.display()
+                config.schema_dir
             ));
         }
         // TODO: Test this?
         if !all_versions.contains(&desired_version) {
             return Err(format!(
                 "Target DB version {desired_version} was not found in {}",
-                config.schema_dir.display()
+                config.schema_dir
             ));
         }
 
@@ -263,10 +263,7 @@ impl DataStore {
                 "target_version" => target_version.to_string(),
             );
 
-            let target_dir = Utf8PathBuf::from_path_buf(
-                config.schema_dir.join(target_version.to_string()),
-            )
-            .map_err(|e| format!("Invalid schema path: {}", e.display()))?;
+            let target_dir = config.schema_dir.join(target_version.to_string());
 
             let schema_change =
                 all_sql_for_version_migration(&target_dir).await?;
@@ -709,9 +706,8 @@ mod test {
             .await;
 
         // Show that the datastores can be created concurrently.
-        let config = SchemaConfig {
-            schema_dir: config_dir.path().to_path_buf().into_std_path_buf(),
-        };
+        let config =
+            SchemaConfig { schema_dir: config_dir.path().to_path_buf() };
         let _ = futures::future::join_all((0..10).map(|_| {
             let log = log.clone();
             let pool = pool.clone();

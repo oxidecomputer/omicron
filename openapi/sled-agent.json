@@ -136,6 +136,30 @@
         }
       }
     },
+    "/bootstore/status": {
+      "get": {
+        "summary": "Get the internal state of the local bootstore node",
+        "operationId": "bootstore_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstoreStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/cockroachdb": {
       "post": {
         "summary": "Initializes a CockroachDB cluster",
@@ -327,6 +351,78 @@
         }
       }
     },
+    "/instances/{instance_id}/external-ip": {
+      "put": {
+        "operationId": "instance_put_external_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceExternalIpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "instance_delete_external_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceExternalIpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/instances/{instance_id}/migration-ids": {
       "put": {
         "operationId": "instance_put_migration_ids",
@@ -402,6 +498,30 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InstancePutStateResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/inventory": {
+      "get": {
+        "summary": "Fetch basic information about this sled",
+        "operationId": "inventory",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inventory"
                 }
               }
             }
@@ -576,7 +696,7 @@
     "/sleds": {
       "put": {
         "summary": "Add a sled to a rack that was already initialized via RSS",
-        "operationId": "add_sled_to_initialized_rack",
+        "operationId": "sled_add",
         "requestBody": {
           "content": {
             "application/json": {
@@ -1144,7 +1264,7 @@
         "type": "object",
         "properties": {
           "sled_id": {
-            "$ref": "#/components/schemas/Baseboard"
+            "$ref": "#/components/schemas/BaseboardId"
           },
           "start_request": {
             "$ref": "#/components/schemas/StartSledAgentRequest"
@@ -1221,6 +1341,24 @@
               "type"
             ]
           }
+        ]
+      },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem This type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
         ]
       },
       "BgpConfig": {
@@ -2417,6 +2555,60 @@
           }
         ]
       },
+      "BootstoreStatus": {
+        "type": "object",
+        "properties": {
+          "accepted_connections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "established_connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EstablishedConnection"
+            }
+          },
+          "fsm_ledger_generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "fsm_state": {
+            "type": "string"
+          },
+          "negotiating_connections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "network_config_ledger_generation": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "peers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "accepted_connections",
+          "established_connections",
+          "fsm_ledger_generation",
+          "fsm_state",
+          "negotiating_connections",
+          "peers"
+        ]
+      },
       "BundleUtilization": {
         "description": "The portion of a debug dataset used for zone bundles.",
         "type": "object",
@@ -2549,6 +2741,7 @@
         ]
       },
       "CrucibleOpts": {
+        "description": "CrucibleOpts\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"lossy\", \"read_only\", \"target\" ], \"properties\": { \"cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"control\": { \"type\": [ \"string\", \"null\" ] }, \"flush_timeout\": { \"type\": [ \"number\", \"null\" ], \"format\": \"float\" }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"key\": { \"type\": [ \"string\", \"null\" ] }, \"key_pem\": { \"type\": [ \"string\", \"null\" ] }, \"lossy\": { \"type\": \"boolean\" }, \"read_only\": { \"type\": \"boolean\" }, \"root_cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"target\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } } } } ``` </details>",
         "type": "object",
         "properties": {
           "cert_pem": {
@@ -3314,6 +3507,7 @@
         ]
       },
       "DiskRequest": {
+        "description": "DiskRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"device\", \"name\", \"read_only\", \"slot\", \"volume_construction_request\" ], \"properties\": { \"device\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"read_only\": { \"type\": \"boolean\" }, \"slot\": { \"$ref\": \"#/components/schemas/Slot\" }, \"volume_construction_request\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "device": {
@@ -3729,6 +3923,21 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "EstablishedConnection": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          }
+        },
+        "required": [
+          "addr",
+          "baseboard"
         ]
       },
       "Field": {
@@ -4465,6 +4674,14 @@
           "port"
         ]
       },
+      "Hostname": {
+        "title": "An RFC-1035-compliant hostname",
+        "description": "A hostname identifies a host on a network, and is usually a dot-delimited sequence of labels, where each label contains only letters, digits, or the hyphen. See RFCs 1035 and 952 for more details.",
+        "type": "string",
+        "pattern": "^([a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))(\\.[a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))*$",
+        "minLength": 1,
+        "maxLength": 253
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -4515,6 +4732,49 @@
           "propolis_addr",
           "propolis_id",
           "vmm_runtime"
+        ]
+      },
+      "InstanceExternalIpBody": {
+        "description": "Used to dynamically update external IPs attached to an instance.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ephemeral"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "floating"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "InstanceHardware": {
@@ -4643,7 +4903,11 @@
         "properties": {
           "hostname": {
             "description": "RFC1035-compliant hostname for the instance.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Hostname"
+              }
+            ]
           },
           "memory": {
             "$ref": "#/components/schemas/ByteCount"
@@ -4915,6 +5179,45 @@
             ]
           }
         }
+      },
+      "Inventory": {
+        "description": "Identity and basic status information about this sled agent",
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "reservoir_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "sled_agent_address": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sled_role": {
+            "$ref": "#/components/schemas/SledRole"
+          },
+          "usable_hardware_threads": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "usable_physical_ram": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "baseboard",
+          "reservoir_size",
+          "sled_agent_address",
+          "sled_id",
+          "sled_role",
+          "usable_hardware_threads",
+          "usable_physical_ram"
+        ]
       },
       "IpNet": {
         "oneOf": [
@@ -6154,6 +6457,7 @@
         ]
       },
       "SledRole": {
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes the role of the sled within the rack.\\n\\nNote that this may change if the sled is physically moved within the rack.\", \"oneOf\": [ { \"description\": \"The sled is a general compute sled.\", \"type\": \"string\", \"enum\": [ \"gimlet\" ] }, { \"description\": \"The sled is attached to the network switch, and has additional responsibilities.\", \"type\": \"string\", \"enum\": [ \"scrimlet\" ] } ] } ``` </details>",
         "oneOf": [
           {
             "description": "The sled is a general compute sled.",
@@ -6172,7 +6476,7 @@
         ]
       },
       "Slot": {
-        "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.",
+        "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A stable index which is translated by Propolis into a PCI BDF, visible to the guest.\", \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 } ``` </details>",
         "type": "integer",
         "format": "uint8",
         "minimum": 0
@@ -6423,6 +6727,7 @@
         "minimum": 0
       },
       "VolumeConstructionRequest": {
+        "description": "VolumeConstructionRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"sub_volumes\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"read_only_parent\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } ] }, \"sub_volumes\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } }, \"type\": { \"type\": \"string\", \"enum\": [ \"volume\" ] } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"type\", \"url\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"url\" ] }, \"url\": { \"type\": \"string\" } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"blocks_per_extent\", \"extent_count\", \"gen\", \"opts\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"blocks_per_extent\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"extent_count\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"gen\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"opts\": { \"$ref\": \"#/components/schemas/CrucibleOpts\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"region\" ] } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"path\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"path\": { \"type\": \"string\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"file\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",

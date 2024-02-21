@@ -5,9 +5,9 @@ use anyhow::{ensure, Context as _, Result};
 use async_trait::async_trait;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, ExternalIpCreate, InstanceCpuCount,
-    InstanceCreate, InstanceDiskAttachment, InstanceNetworkInterfaceAttachment,
-    SshKeyCreate,
+    ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
+    InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
+    InstanceNetworkInterfaceAttachment, SshKeyCreate,
 };
 use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
@@ -26,10 +26,11 @@ async fn instance_launch() -> Result<()> {
         Arc::new(KeyPair::generate_ed25519().context("key generation failed")?);
     let public_key_str = format!("ssh-ed25519 {}", key.public_key_base64());
     eprintln!("create SSH key: {}", public_key_str);
+    let ssh_key_name = generate_name("key")?;
     ctx.client
         .current_user_ssh_key_create()
         .body(SshKeyCreate {
-            name: generate_name("key")?,
+            name: ssh_key_name.clone(),
             description: String::new(),
             public_key: public_key_str,
         })
@@ -63,15 +64,18 @@ async fn instance_launch() -> Result<()> {
         .body(InstanceCreate {
             name: generate_name("instance")?,
             description: String::new(),
-            hostname: "localshark".into(), // 🦈
+            hostname: "localshark".parse().unwrap(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
             disks: vec![InstanceDiskAttachment::Attach {
                 name: disk_name.clone(),
             }],
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
-            external_ips: vec![ExternalIpCreate::Ephemeral { pool_name: None }],
+            external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
             user_data: String::new(),
+            ssh_public_keys: Some(vec![oxide_client::types::NameOrId::Name(
+                ssh_key_name.clone(),
+            )]),
             start: true,
         })
         .send()
@@ -87,7 +91,10 @@ async fn instance_launch() -> Result<()> {
         .items
         .first()
         .context("no external IPs")?
-        .ip;
+        .clone();
+    let ExternalIp::Ephemeral { ip: ip_addr } = ip_addr else {
+        anyhow::bail!("IP bound to instance was not ephemeral as required.")
+    };
     eprintln!("instance external IP: {}", ip_addr);
 
     // poll serial for login prompt, waiting 5 min max

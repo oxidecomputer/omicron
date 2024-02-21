@@ -72,12 +72,12 @@ async fn main() -> anyhow::Result<()> {
 
     let crdb_cfg = db::Config { url: args.url };
     let pool = Arc::new(db::Pool::new(&log, &crdb_cfg));
-    let schema_config =
-        SchemaConfig { schema_dir: args.schema_directory.into() };
+    let schema_config = SchemaConfig { schema_dir: args.schema_directory };
 
     // We use the unchecked constructor of the datastore because we
     // don't want to block on someone else applying an upgrade.
-    let datastore = DataStore::new_unchecked(pool).map_err(|e| anyhow!(e))?;
+    let datastore =
+        DataStore::new_unchecked(log.clone(), pool).map_err(|e| anyhow!(e))?;
 
     match args.cmd {
         Cmd::List => {

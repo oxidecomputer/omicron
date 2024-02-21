@@ -9,9 +9,10 @@ use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::{
-    create_disk, create_project, create_vpc, object_create, populate_ip_pool,
-    project_get, projects_list, DiskTest,
+    create_default_ip_pool, create_disk, create_project, create_vpc,
+    object_create, project_get, projects_list, DiskTest,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
@@ -134,7 +135,7 @@ async fn test_project_deletion_with_instance(
 ) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
+    create_default_ip_pool(&client).await;
 
     // Create a project that we'll use for testing.
     let name = "springfield-squidport";
@@ -154,8 +155,9 @@ async fn test_project_deletion_with_instance(
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: String::from("the_host"),
+            hostname: "the-host".parse().unwrap(),
             user_data: b"none".to_vec(),
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
@@ -205,6 +207,39 @@ async fn test_project_deletion_with_disk(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("failed to delete disk");
+
+    delete_project(&url, &client).await;
+}
+
+#[nexus_test]
+async fn test_project_deletion_with_floating_ip(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _test = DiskTest::new(&cptestctx).await;
+
+    // Create a project that we'll use for testing.
+    let name = "springfield-squidport";
+    let url = format!("/v1/projects/{}", name);
+
+    create_default_ip_pool(&client).await;
+
+    create_project(&client, &name).await;
+    delete_project_default_subnet(&name, &client).await;
+    delete_project_default_vpc(&name, &client).await;
+    let fip = create_floating_ip(&client, "my-fip", &name, None, None).await;
+    assert_eq!(
+        "project to be deleted contains a floating ip: my-fip",
+        delete_project_expect_fail(&url, &client).await,
+    );
+    let disk_url =
+        super::external_ips::get_floating_ip_by_id_url(&fip.identity.id);
+    NexusRequest::object_delete(&client, &disk_url)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete floating IP");
 
     delete_project(&url, &client).await;
 }

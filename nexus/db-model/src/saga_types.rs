@@ -148,7 +148,7 @@ where
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, SqlType)]
-#[diesel(postgres_type(name = "saga_state"))]
+#[diesel(postgres_type(name = "saga_state", schema = "public"))]
 pub struct SagaCachedStateEnum;
 
 /// Newtype wrapper around [`steno::SagaCachedState`] which implements

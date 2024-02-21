@@ -63,9 +63,9 @@
 use crate::names::{ServiceName, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
-use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::api::external::Generation;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 /// Zones that can be referenced within the internal DNS system.
@@ -83,7 +83,7 @@ pub enum ZoneVariant {
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
-enum Host {
+pub enum Host {
     /// Used to construct an AAAA record for a sled.
     Sled(Uuid),
 
@@ -92,6 +92,10 @@ enum Host {
 }
 
 impl Host {
+    pub fn for_zone(id: Uuid, variant: ZoneVariant) -> Host {
+        Host::Zone { id, variant }
+    }
+
     /// Returns the DNS name for this host, ignoring the zone part of the DNS
     /// name
     pub(crate) fn dns_name(&self) -> String {
@@ -104,6 +108,12 @@ impl Host {
                 format!("{}.host", id)
             }
         }
+    }
+
+    /// Returns the full-qualified DNS name, including the zone name of the
+    /// control plane's internal DNS zone
+    pub fn fqdn(&self) -> String {
+        format!("{}.{}", self.dns_name(), DNS_ZONE)
     }
 }
 
@@ -137,8 +147,6 @@ pub struct DnsConfigBuilder {
     /// network
     sleds: BTreeMap<Sled, Ipv6Addr>,
 
-    scrimlets: BTreeMap<SwitchLocation, SocketAddrV6>,
-
     /// set of hosts of type "zone" that have been configured so far, mapping
     /// each zone's unique uuid to its sole IPv6 address on the control plane
     /// network
@@ -153,6 +161,9 @@ pub struct DnsConfigBuilder {
 
     /// similar to service_instances_zones, but for services that run on sleds
     service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Sled, u16>>,
+
+    /// generation number for this config
+    generation: Generation,
 }
 
 /// Describes a host of type "sled" in the control plane DNS zone
@@ -168,8 +179,12 @@ pub struct Zone {
 }
 
 impl Zone {
+    pub(crate) fn to_host(&self) -> Host {
+        Host::Zone { id: self.id, variant: self.variant }
+    }
+
     pub(crate) fn dns_name(&self) -> String {
-        Host::Zone { id: self.id, variant: self.variant }.dns_name()
+        self.to_host().dns_name()
     }
 }
 
@@ -178,16 +193,17 @@ impl DnsConfigBuilder {
         DnsConfigBuilder {
             sleds: BTreeMap::new(),
             zones: BTreeMap::new(),
-            scrimlets: BTreeMap::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
+            generation: Generation::new(),
         }
     }
 
     /// Add a new host of type "sled" to the configuration
     ///
-    /// Returns a [`Sled`] that can be used with [`Self::service_backend_sled()`] to
-    /// specify that this sled is a backend for some higher-level service.
+    /// Returns a [`Sled`] that can be used with
+    /// [`Self::service_backend_sled()`] to specify that this sled is a backend
+    /// for some higher-level service.
     ///
     /// # Errors
     ///
@@ -209,19 +225,11 @@ impl DnsConfigBuilder {
         }
     }
 
-    pub fn host_scrimlet(
-        &mut self,
-        switch_location: SwitchLocation,
-        addr: SocketAddrV6,
-    ) -> anyhow::Result<()> {
-        self.scrimlets.insert(switch_location, addr);
-        Ok(())
-    }
-
     /// Add a new dendrite host of type "zone" to the configuration
     ///
-    /// Returns a [`Zone`] that can be used with [`Self::service_backend_zone()`] to
-    /// specify that this zone is a backend for some higher-level service.
+    /// Returns a [`Zone`] that can be used with
+    /// [`Self::service_backend_zone()`] to specify that this zone is a backend
+    /// for some higher-level service.
     ///
     /// # Errors
     ///
@@ -237,8 +245,9 @@ impl DnsConfigBuilder {
 
     /// Add a new host of type "zone" to the configuration
     ///
-    /// Returns a [`Zone`] that can be used with [`Self::service_backend_zone()`] to
-    /// specify that this zone is a backend for some higher-level service.
+    /// Returns a [`Zone`] that can be used with
+    /// [`Self::service_backend_zone()`] to specify that this zone is a backend
+    /// for some higher-level service.
     ///
     /// # Errors
     ///
@@ -349,6 +358,52 @@ impl DnsConfigBuilder {
         }
     }
 
+    /// Higher-level shorthand for adding a zone with a single backend service
+    ///
+    /// # Errors
+    ///
+    /// This function fails only if the given zone has already been added to the
+    /// configuration.
+    pub fn host_zone_with_one_backend(
+        &mut self,
+        zone_id: Uuid,
+        addr: Ipv6Addr,
+        service: ServiceName,
+        port: u16,
+    ) -> anyhow::Result<()> {
+        let zone = self.host_zone(zone_id, addr)?;
+        self.service_backend_zone(service, &zone, port)
+    }
+
+    /// Higher-level shorthand for adding a "switch" zone with its usual set of
+    /// backend services
+    ///
+    /// # Errors
+    ///
+    /// This function fails only if the given zone has already been added to the
+    /// configuration.
+    pub fn host_zone_switch(
+        &mut self,
+        sled_id: Uuid,
+        switch_zone_ip: Ipv6Addr,
+        dendrite_port: u16,
+        mgs_port: u16,
+        mgd_port: u16,
+    ) -> anyhow::Result<()> {
+        let zone = self.host_dendrite(sled_id, switch_zone_ip)?;
+        self.service_backend_zone(ServiceName::Dendrite, &zone, dendrite_port)?;
+        self.service_backend_zone(
+            ServiceName::ManagementGatewayService,
+            &zone,
+            mgs_port,
+        )?;
+        self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
+    }
+
+    pub fn generation(&mut self, generation: Generation) {
+        self.generation = generation;
+    }
+
     /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
     /// our DNS servers) for the control plane DNS zone described up to this
     /// point
@@ -364,23 +419,6 @@ impl DnsConfigBuilder {
             (zone.dns_name(), vec![DnsRecord::Aaaa(zone_ip)])
         });
 
-        let scrimlet_srv_records =
-            self.scrimlets.clone().into_iter().map(|(location, addr)| {
-                let srv = DnsRecord::Srv(dns_service_client::types::Srv {
-                    prio: 0,
-                    weight: 0,
-                    port: addr.port(),
-                    target: format!("{location}.scrimlet.{}", DNS_ZONE),
-                });
-                (ServiceName::Scrimlet(location).dns_name(), vec![srv])
-            });
-
-        let scrimlet_aaaa_records =
-            self.scrimlets.into_iter().map(|(location, addr)| {
-                let aaaa = DnsRecord::Aaaa(*addr.ip());
-                (format!("{location}.scrimlet"), vec![aaaa])
-            });
-
         // Assemble the set of SRV records, which implicitly point back at
         // zones' AAAA records.
         let srv_records_zones = self.service_instances_zones.into_iter().map(
@@ -393,7 +431,7 @@ impl DnsConfigBuilder {
                             prio: 0,
                             weight: 0,
                             port,
-                            target: format!("{}.{}", zone.dns_name(), DNS_ZONE),
+                            target: zone.to_host().fqdn(),
                         })
                     })
                     .collect();
@@ -412,11 +450,7 @@ impl DnsConfigBuilder {
                             prio: 0,
                             weight: 0,
                             port,
-                            target: format!(
-                                "{}.{}",
-                                Host::Sled(sled.0).dns_name(),
-                                DNS_ZONE
-                            ),
+                            target: Host::Sled(sled.0).fqdn(),
                         })
                     })
                     .collect();
@@ -429,12 +463,10 @@ impl DnsConfigBuilder {
             .chain(zone_records)
             .chain(srv_records_sleds)
             .chain(srv_records_zones)
-            .chain(scrimlet_aaaa_records)
-            .chain(scrimlet_srv_records)
             .collect();
 
         DnsConfigParams {
-            generation: 1,
+            generation: u64::from(self.generation),
             time_created: chrono::Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: DNS_ZONE.to_owned(),

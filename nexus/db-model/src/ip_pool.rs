@@ -5,8 +5,10 @@
 //! Model types for IP Pools and the CIDR blocks therein.
 
 use crate::collection::DatastoreCollectionConfig;
+use crate::impl_enum_type;
 use crate::schema::ip_pool;
 use crate::schema::ip_pool_range;
+use crate::schema::ip_pool_resource;
 use crate::Name;
 use chrono::DateTime;
 use chrono::Utc;
@@ -35,42 +37,23 @@ pub struct IpPool {
     /// Child resource generation number, for optimistic concurrency control of
     /// the contained ranges.
     pub rcgen: i64,
-
-    /// Silo, if IP pool is associated with a particular silo. One special use
-    /// for this is  associating a pool with the internal silo oxide-internal,
-    /// which is used for internal services. If there is no silo ID, the
-    /// pool is considered a fleet-wide pool and will be used for allocating
-    /// instance IPs in silos that don't have their own pool.
-    pub silo_id: Option<Uuid>,
-
-    pub is_default: bool,
 }
 
 impl IpPool {
-    pub fn new(
-        pool_identity: &external::IdentityMetadataCreateParams,
-        silo_id: Option<Uuid>,
-        is_default: bool,
-    ) -> Self {
+    pub fn new(pool_identity: &external::IdentityMetadataCreateParams) -> Self {
         Self {
             identity: IpPoolIdentity::new(
                 Uuid::new_v4(),
                 pool_identity.clone(),
             ),
             rcgen: 0,
-            silo_id,
-            is_default,
         }
     }
 }
 
 impl From<IpPool> for views::IpPool {
     fn from(pool: IpPool) -> Self {
-        Self {
-            identity: pool.identity(),
-            silo_id: pool.silo_id,
-            is_default: pool.is_default,
-        }
+        Self { identity: pool.identity() }
     }
 }
 
@@ -89,6 +72,37 @@ impl From<params::IpPoolUpdate> for IpPoolUpdate {
             name: params.identity.name.map(|n| n.into()),
             description: params.identity.description,
             time_modified: Utc::now(),
+        }
+    }
+}
+
+impl_enum_type!(
+    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
+    #[diesel(postgres_type(name = "ip_pool_resource_type"))]
+     pub struct IpPoolResourceTypeEnum;
+
+     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]
+     #[diesel(sql_type = IpPoolResourceTypeEnum)]
+     pub enum IpPoolResourceType;
+
+     Silo => b"silo"
+);
+
+#[derive(Queryable, Insertable, Selectable, Clone, Debug)]
+#[diesel(table_name = ip_pool_resource)]
+pub struct IpPoolResource {
+    pub ip_pool_id: Uuid,
+    pub resource_type: IpPoolResourceType,
+    pub resource_id: Uuid,
+    pub is_default: bool,
+}
+
+impl From<IpPoolResource> for views::IpPoolSiloLink {
+    fn from(assoc: IpPoolResource) -> Self {
+        Self {
+            ip_pool_id: assoc.ip_pool_id,
+            silo_id: assoc.resource_id,
+            is_default: assoc.is_default,
         }
     }
 }

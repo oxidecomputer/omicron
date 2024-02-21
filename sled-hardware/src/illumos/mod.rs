@@ -7,6 +7,7 @@ use crate::{
     UnparsedDisk,
 };
 use camino::Utf8PathBuf;
+use gethostname::gethostname;
 use illumos_devinfo::{DevInfo, DevLinkType, DevLinks, Node, Property};
 use omicron_common::disk::DiskIdentity;
 use slog::debug;
@@ -525,7 +526,9 @@ fn poll_device_tree(
 
                         if inner.baseboard.is_none() {
                             let pc_baseboard = Baseboard::new_pc(
-                                Uuid::new_v4().simple().to_string(),
+                                gethostname().into_string().unwrap_or_else(
+                                    |_| Uuid::new_v4().simple().to_string(),
+                                ),
                                 root_node.clone(),
                             );
 

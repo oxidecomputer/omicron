@@ -6,6 +6,7 @@
 
 use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
+use crate::app::sagas::SagaRequest;
 use crate::config;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
@@ -35,8 +36,10 @@ use uuid::Uuid;
 // by resource.
 mod address_lot;
 pub(crate) mod background;
+mod bfd;
 mod bgp;
 mod certificate;
+mod deployment;
 mod device_auth;
 mod disk;
 mod external_dns;
@@ -59,6 +62,7 @@ mod silo;
 mod sled;
 mod sled_instance;
 mod snapshot;
+mod ssh_key;
 mod switch;
 mod switch_interface;
 mod switch_port;
@@ -79,14 +83,16 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
-pub(crate) const MAX_NICS_PER_INSTANCE: usize = 8;
+pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
 //      ephemeral (so bounded in saga by design).
 //      The value here is arbitrary, but we need *a* limit for the instance
 //      create saga to have a bounded DAG. We might want to only enforce
 //      this during instance create (rather than live attach) in future.
-pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize = 32;
+pub(crate) const MAX_EXTERNAL_IPS_PER_INSTANCE: usize =
+    nexus_db_queries::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE
+        as usize;
 pub(crate) const MAX_EPHEMERAL_IPS_PER_INSTANCE: usize = 1;
 
 pub const MAX_VCPU_PER_INSTANCE: u16 = 64;
@@ -96,6 +102,9 @@ pub const MAX_MEMORY_BYTES_PER_INSTANCE: u64 = 256 * (1 << 30); // 256 GiB
 
 pub const MIN_DISK_SIZE_BYTES: u32 = 1 << 30; // 1 GiB
 pub const MAX_DISK_SIZE_BYTES: u64 = 1023 * (1 << 30); // 1023 GiB
+
+/// This value is aribtrary
+pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
@@ -137,6 +146,7 @@ pub struct Nexus {
     timeseries_client: LazyTimeseriesClient,
 
     /// Contents of the trusted root role for the TUF repository.
+    #[allow(dead_code)]
     updates_config: Option<config::UpdatesConfig>,
 
     /// The tunable parameters from a configuration file
@@ -352,13 +362,18 @@ impl Nexus {
             authn::Context::internal_api(),
             Arc::clone(&db_datastore),
         );
+
+        let (saga_request, mut saga_request_recv) = SagaRequest::channel();
+
         let background_tasks = background::BackgroundTasks::start(
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
             &dpd_clients,
+            &mg_clients,
             config.deployment.id,
             resolver.clone(),
+            saga_request,
         );
 
         let external_resolver = {
@@ -473,6 +488,29 @@ impl Nexus {
             }
         });
 
+        // Spawn a task to receive SagaRequests from RPWs, and execute them
+        {
+            let nexus = nexus.clone();
+            tokio::spawn(async move {
+                loop {
+                    match saga_request_recv.recv().await {
+                        None => {
+                            // If this channel is closed, then RPWs will not be
+                            // able to request that sagas be run. This will
+                            // likely only occur when Nexus itself is shutting
+                            // down, so emit an error and exit the task.
+                            error!(&nexus.log, "saga request channel closed!");
+                            break;
+                        }
+
+                        Some(saga_request) => {
+                            nexus.handle_saga_request(saga_request).await;
+                        }
+                    }
+                }
+            });
+        }
+
         Ok(nexus)
     }
 
@@ -512,10 +550,6 @@ impl Nexus {
         }
 
         let mut rustls_cfg = rustls::ServerConfig::builder()
-            .with_safe_default_cipher_suites()
-            .with_safe_default_kx_groups()
-            .with_safe_default_protocol_versions()
-            .unwrap()
             .with_no_client_auth()
             .with_cert_resolver(Arc::new(NexusCertResolver::new(
                 self.log.new(o!("component" => "NexusCertResolver")),
@@ -820,6 +854,17 @@ impl Nexus {
 
     pub(crate) async fn resolver(&self) -> internal_dns::resolver::Resolver {
         self.internal_resolver.clone()
+    }
+
+    /// Reliable persistent workflows can request that sagas be executed by
+    /// sending a SagaRequest to a supplied channel. Execute those here.
+    pub(crate) async fn handle_saga_request(&self, saga_request: SagaRequest) {
+        match saga_request {
+            #[cfg(test)]
+            SagaRequest::TestOnly => {
+                unimplemented!();
+            }
+        }
     }
 }
 

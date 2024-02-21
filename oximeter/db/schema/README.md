@@ -32,7 +32,7 @@ To run this program:
 - Run this tool, pointing it at the desired schema directory, e.g.:
 
 ```bash
-# /opt/oxide/oximeter/bin/clickhouse-schema-updater \
+# /opt/oxide/oximeter-collector/bin/clickhouse-schema-updater \
     --host <ADDR_FROM_ABOVE> \
     --schema-dir /opt/oxide/oximeter/sql
     up VERSION
