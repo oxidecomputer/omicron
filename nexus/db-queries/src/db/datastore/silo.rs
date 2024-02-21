@@ -250,7 +250,7 @@ impl DataStore {
                 .await?;
 
                 if let Some(query) = silo_admin_group_ensure_query {
-                    query.get_result_async(&conn).await?;
+                    query.execute_async(&conn).await?;
                 }
 
                 if let Some(queries) = silo_admin_group_role_assignment_queries
@@ -282,7 +282,8 @@ impl DataStore {
                         .await?;
                 }
 
-                self.dns_update(nexus_opctx, &conn, dns_update).await?;
+                self.dns_update_incremental(nexus_opctx, &conn, dns_update)
+                    .await?;
 
                 self.silo_quotas_create(
                     &conn,
@@ -420,7 +421,7 @@ impl DataStore {
             )
             .await?;
 
-            self.dns_update(dns_opctx, &conn, dns_update).await?;
+            self.dns_update_incremental(dns_opctx, &conn, dns_update).await?;
 
             info!(opctx.log, "deleted silo {}", id);
 

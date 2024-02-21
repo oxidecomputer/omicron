@@ -163,6 +163,7 @@ pub struct ServiceNic {
     pub name: Name,
     pub ip: IpAddr,
     pub mac: MacAddr,
+    pub slot: u8,
 }
 
 /// Describes the purpose of the service.

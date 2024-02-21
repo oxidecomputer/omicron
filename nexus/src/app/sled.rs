@@ -41,7 +41,7 @@ impl super::Nexus {
     // unless the DNS lookups at sled-agent are only for rack-local nexuses.
     pub(crate) async fn upsert_sled(
         &self,
-        opctx: &OpContext,
+        _opctx: &OpContext,
         id: Uuid,
         info: SledAgentStartupInfo,
     ) -> Result<(), Error> {
@@ -70,10 +70,16 @@ impl super::Nexus {
         );
         self.db_datastore.sled_upsert(sled).await?;
 
-        // Make sure any firewall rules for serices that may
-        // be running on this sled get plumbed
-        self.plumb_service_firewall_rules(opctx, &[id]).await?;
+        Ok(())
+    }
 
+    pub(crate) async fn sled_request_firewall_rules(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> Result<(), Error> {
+        info!(self.log, "requesting firewall rules"; "sled_uuid" => id.to_string());
+        self.plumb_service_firewall_rules(opctx, &[id]).await?;
         Ok(())
     }
 

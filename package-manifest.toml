@@ -410,13 +410,28 @@ source.packages = [ "sp-sim.tar.gz" ]
 output.type = "zone"
 output.intermediate_only = true
 
+[package.crucible-zone]
+service_name = "crucible"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "crucible.tar.gz", "zone-network-setup.tar.gz" ]
+output.type = "zone"
+
+
+[package.crucible-pantry-zone]
+service_name = "crucible_pantry"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [ "crucible-pantry.tar.gz", "zone-network-setup.tar.gz" ]
+output.type = "zone"
+
 # Packages not built within Omicron, but which must be imported.
 
 # Refer to
 #   https://github.com/oxidecomputer/crucible/blob/main/package/README.md
 # for instructions on building this manually.
 [package.crucible]
-service_name = "crucible"
+service_name = "crucible_prebuilt"
 only_for_targets.image = "standard"
 # To manually override the package source (for example, to test a change in
 # both Crucible and Omicron simultaneously):
@@ -426,22 +441,24 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "796dce526dd7ed7b52a0429a486ccba4a9da1ce5"
+source.commit = "fe0c5c7909707a0f826025be4fe2bbf5f6e0206f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "8b654627a4250e8d444133cf3130838d224b13e53f3e48cf0d031314d6f05ee0"
+source.sha256 = "5da4f93b16fc7c0f3cc3a67919dbaa3f143cc07b703183a236f5c98b61504d15"
 output.type = "zone"
+output.intermediate_only = true
 
 [package.crucible-pantry]
-service_name = "crucible_pantry"
+service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "796dce526dd7ed7b52a0429a486ccba4a9da1ce5"
+source.commit = "fe0c5c7909707a0f826025be4fe2bbf5f6e0206f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "8602b2d6e7beb0731ae2be481715c94795657306d6013cc6d81fd60c4784a6ed"
+source.sha256 = "ed5027cc37c5ba4f2b9a568528f5bb49deedccaaa60bd770311c7bface6aa02b"
 output.type = "zone"
+output.intermediate_only = true
 
 # Refer to
 #   https://github.com/oxidecomputer/propolis/blob/master/package/README.md
@@ -518,8 +535,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "d58b59b2682183855cdf137ab86a298ecdaaf697"
-source.sha256 = "d48408ac1c12332c0bf95834a9372f20d9ff53efa1d79513ea868f616a91cb97"
+source.commit = "3618dd6017b363c5d34399273453cf50b9c9a43e"
+source.sha256 = "eb98985871f321411f7875ef7751dba85ae0dd3034877b63ccb78cedcb96e6e7"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -543,8 +560,8 @@ only_for_targets.image = "standard"
 # 2. Copy the output zone image from dendrite/out to omicron/out
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "d58b59b2682183855cdf137ab86a298ecdaaf697"
-source.sha256 = "fb1b276c48d320a129376f8d574f61474734de20ed3e6f90408c56a3d205c597"
+source.commit = "3618dd6017b363c5d34399273453cf50b9c9a43e"
+source.sha256 = "cc0429f0d9ce6df94e834cea89cabbdf4d1fbfe623369dd3eb84c5b2677414be"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -561,8 +578,8 @@ only_for_targets.image = "standard"
 # 2. Copy dendrite.tar.gz from dendrite/out to omicron/out/dendrite-softnpu.tar.gz
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "d58b59b2682183855cdf137ab86a298ecdaaf697"
-source.sha256 = "197ed4e1fde14062bf6ae037895c72571b028078ff5691591aec3ad063cad3ea"
+source.commit = "3618dd6017b363c5d34399273453cf50b9c9a43e"
+source.sha256 = "fa25585fb3aa1a888b76133af3060b859cbea8e53287bb1cc64e70889db37679"
 output.type = "zone"
 output.intermediate_only = true
 
