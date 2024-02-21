@@ -228,6 +228,7 @@ impl BackgroundTasks {
         let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
             datastore.clone(),
             rx_blueprint.clone(),
+            nexus_id.to_string(),
         );
         let task_blueprint_executor = driver.register(
             String::from("blueprint_executor"),
@@ -628,7 +629,7 @@ pub mod test {
     ) {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         info!(opctx.log, "writing DNS update...");
-        datastore.dns_update(opctx, &conn, update).await.unwrap();
+        datastore.dns_update_incremental(opctx, &conn, update).await.unwrap();
     }
 
     pub(crate) async fn write_test_dns_generation(

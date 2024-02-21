@@ -3127,7 +3127,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- These fields are for debugging only.
     time_created TIMESTAMPTZ NOT NULL,
     creator TEXT NOT NULL,
-    comment TEXT NOT NULL
+    comment TEXT NOT NULL,
+
+    -- identifies the latest internal DNS version when blueprint planning began
+    internal_dns_version INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -3546,7 +3549,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '35.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '36.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

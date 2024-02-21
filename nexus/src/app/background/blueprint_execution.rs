@@ -19,6 +19,7 @@ use tokio::sync::watch;
 pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
+    nexus_label: String,
 }
 
 impl BlueprintExecutor {
@@ -27,8 +28,9 @@ impl BlueprintExecutor {
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
+        nexus_label: String,
     ) -> BlueprintExecutor {
-        BlueprintExecutor { datastore, rx_blueprint }
+        BlueprintExecutor { datastore, rx_blueprint, nexus_label }
     }
 }
 
@@ -65,6 +67,7 @@ impl BackgroundTask for BlueprintExecutor {
                 opctx,
                 &self.datastore,
                 blueprint,
+                &self.nexus_label,
             )
             .await;
 
@@ -119,6 +122,7 @@ mod test {
 
     fn create_blueprint(
         omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+        internal_dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -132,6 +136,7 @@ mod test {
                 omicron_zones,
                 zones_in_service: BTreeSet::new(),
                 parent_blueprint_id: None,
+                internal_dns_version,
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -186,7 +191,11 @@ mod test {
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
-        let mut task = BlueprintExecutor::new(datastore.clone(), blueprint_rx);
+        let mut task = BlueprintExecutor::new(
+            datastore.clone(),
+            blueprint_rx,
+            String::from("test-suite"),
+        );
 
         // Now we're ready.
         //
@@ -197,7 +206,8 @@ mod test {
 
         // With a target blueprint having no zones, the task should trivially
         // complete and report a successful (empty) summary.
-        let blueprint = Arc::new(create_blueprint(BTreeMap::new()));
+        let generation = Generation::new();
+        let blueprint = Arc::new(create_blueprint(BTreeMap::new(), generation));
         blueprint_tx.send(Some(blueprint)).unwrap();
         let value = task.activate(&opctx).await;
         println!("activating with no zones: {:?}", value);
@@ -205,32 +215,35 @@ mod test {
 
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
-        // reporting success.  We reuse the same `OmicronZonesConfig` in
-        // constructing the blueprint because the details don't matter for this
-        // test.
-        let zones = OmicronZonesConfig {
-            generation: Generation::new(),
-            zones: vec![OmicronZoneConfig {
-                id: Uuid::new_v4(),
-                underlay_address: "::1".parse().unwrap(),
-                zone_type: OmicronZoneType::InternalDns {
-                    dataset: OmicronZoneDataset {
-                        pool_name: format!("oxp_{}", Uuid::new_v4())
-                            .parse()
-                            .unwrap(),
+        // reporting success.
+        fn make_zones() -> OmicronZonesConfig {
+            OmicronZonesConfig {
+                generation: Generation::new(),
+                zones: vec![OmicronZoneConfig {
+                    id: Uuid::new_v4(),
+                    underlay_address: "::1".parse().unwrap(),
+                    zone_type: OmicronZoneType::InternalDns {
+                        dataset: OmicronZoneDataset {
+                            pool_name: format!("oxp_{}", Uuid::new_v4())
+                                .parse()
+                                .unwrap(),
+                        },
+                        dns_address: "oh-hello-internal-dns".into(),
+                        gz_address: "::1".parse().unwrap(),
+                        gz_address_index: 0,
+                        http_address: "some-ipv6-address".into(),
                     },
-                    dns_address: "oh-hello-internal-dns".into(),
-                    gz_address: "::1".parse().unwrap(),
-                    gz_address_index: 0,
-                    http_address: "some-ipv6-address".into(),
-                },
-            }],
-        };
-
-        let mut blueprint = create_blueprint(BTreeMap::from([
-            (sled_id1, zones.clone()),
-            (sled_id2, zones.clone()),
-        ]));
+                }],
+            }
+        }
+        let generation = generation.next();
+        let mut blueprint = create_blueprint(
+            BTreeMap::from([
+                (sled_id1, make_zones()),
+                (sled_id2, make_zones()),
+            ]),
+            generation,
+        );
 
         blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
 
@@ -256,6 +269,8 @@ mod test {
 
         // Now, disable the target and make sure that we _don't_ invoke the sled
         // agent.  It's enough to just not set expectations.
+        blueprint.1.internal_dns_version =
+            blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
         blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
         let value = task.activate(&opctx).await;

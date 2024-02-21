@@ -150,6 +150,10 @@ pub struct Blueprint {
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
 
+    /// internal DNS version when this blueprint was created
+    // See blueprint generation for more on this.
+    pub internal_dns_version: Generation,
+
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
     /// identity of the component that generated the blueprint (for debugging)
@@ -176,8 +180,11 @@ impl Blueprint {
         self.omicron_zones.keys().copied()
     }
 
-    /// Summarize the difference between two blueprints
-    pub fn diff<'a>(&'a self, other: &'a Blueprint) -> OmicronZonesDiff<'a> {
+    /// Summarize the difference between sleds and zones between two blueprints
+    pub fn diff_sleds<'a>(
+        &'a self,
+        other: &'a Blueprint,
+    ) -> OmicronZonesDiff<'a> {
         OmicronZonesDiff {
             before_label: format!("blueprint {}", self.id),
             before_zones: self.omicron_zones.clone(),
@@ -188,14 +195,15 @@ impl Blueprint {
         }
     }
 
-    /// Summarize the difference between a collection and a blueprint
+    /// Summarize the differences in sleds and zones between a collection and a
+    /// blueprint
     ///
     /// This gives an idea about what would change about a running system if one
     /// were to execute the blueprint.
     ///
     /// Note that collections do not currently include information about what
     /// zones are in-service, so the caller must provide that information.
-    pub fn diff_from_collection<'a>(
+    pub fn diff_sleds_from_collection<'a>(
         &'a self,
         collection: &'a Collection,
         before_zones_in_service: &'a BTreeSet<Uuid>,
@@ -227,6 +235,8 @@ pub struct BlueprintMetadata {
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
+    /// internal DNS version when this blueprint was created
+    pub internal_dns_version: Generation,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
