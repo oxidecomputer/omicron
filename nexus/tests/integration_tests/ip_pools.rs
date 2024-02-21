@@ -853,60 +853,9 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     };
     test_bad_ip_ranges(client, &ip_pool_add_range_url, &ipv4_range).await;
 
-    // TODO: put back IPv6 tests when IPv6 ranges are supported again
-    // Test data for IPv6 ranges that should fail due to overlap
-    // let ipv6_range = TestRange {
-    //     base_range: IpRange::V6(
-    //         Ipv6Range::new(
-    //             std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-    //             std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
-    //         )
-    //         .unwrap(),
-    //     ),
-    //     bad_ranges: vec![
-    //         // The exact same range
-    //         IpRange::V6(
-    //             Ipv6Range::new(
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
-    //             )
-    //             .unwrap(),
-    //         ),
-    //         // Overlaps below
-    //         IpRange::V6(
-    //             Ipv6Range::new(
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5),
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 15),
-    //             )
-    //             .unwrap(),
-    //         ),
-    //         // Overlaps above
-    //         IpRange::V6(
-    //             Ipv6Range::new(
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 15),
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 25),
-    //             )
-    //             .unwrap(),
-    //         ),
-    //         // Contains the base range
-    //         IpRange::V6(
-    //             Ipv6Range::new(
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 100),
-    //             )
-    //             .unwrap(),
-    //         ),
-    //         // Contained by the base range
-    //         IpRange::V6(
-    //             Ipv6Range::new(
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 12),
-    //                 std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 13),
-    //             )
-    //             .unwrap(),
-    //         ),
-    //     ],
-    // };
-    // test_bad_ip_ranges(client, &ip_pool_add_range_url, &ipv6_range).await;
+    // IPv6 tests removed along with support for IPv6 ranges in
+    // https://github.com/oxidecomputer/omicron/pull/5107
+    // Put them back when IPv6 ranges are supported again.
 }
 
 async fn test_bad_ip_ranges(
@@ -953,6 +902,9 @@ async fn test_bad_ip_ranges(
     }
 }
 
+// Support for IPv6 ranges removed in
+// https://github.com/oxidecomputer/omicron/pull/5107
+// Delete this test when we support IPv6 again.
 #[nexus_test]
 async fn test_ip_pool_range_rejects_v6(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
