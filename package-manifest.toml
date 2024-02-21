@@ -410,7 +410,7 @@ output.type = "zone"
 #   https://github.com/oxidecomputer/crucible/blob/main/package/README.md
 # for instructions on building this manually.
 [package.crucible]
-service_name = "crucible-prebuilt"
+service_name = "crucible_prebuilt"
 only_for_targets.image = "standard"
 # To manually override the package source (for example, to test a change in
 # both Crucible and Omicron simultaneously):
