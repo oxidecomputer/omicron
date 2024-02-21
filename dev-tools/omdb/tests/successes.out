@@ -432,11 +432,9 @@ task: "service_zone_nat_tracker"
 
 task: "switch_port_config_manager"
   configured period: every 30s
-  currently executing: no
-  last completed activation: iter 2, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
-
+  currently executing: iter 1, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP>, running for <REDACTED DURATION>ms
+  last completed activation: never
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/

@@ -44,6 +44,9 @@ use std::{
 
 const DPD_TAG: Option<&'static str> = Some(OMICRON_DPD_TAG);
 
+// This is more of an implementation detail of the BGP implementation. It
+// defines the maximum time the peering engine will wait for external messages
+// before breaking to check for shutdown conditions.
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
 pub struct SwitchPortSettingsManager {
@@ -436,7 +439,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
             }
 
             //
-            // calculated and apply bootstore changes
+            // calculate and apply bootstore changes
             //
 
             json!({})

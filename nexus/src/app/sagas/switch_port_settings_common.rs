@@ -11,8 +11,6 @@ use dpd_client::types::{
 };
 use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
-use mg_admin_client::types::Prefix4;
-use mg_admin_client::types::{ApplyRequest, BgpPeerConfig};
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -22,23 +20,16 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::internal::shared::{
     ParseSwitchLocationError, SwitchLocation,
 };
+use sled_agent_client::types::BgpPeerConfig as OmicronBgpPeerConfig;
 use sled_agent_client::types::PortConfigV1;
 use sled_agent_client::types::RouteConfig;
 use sled_agent_client::types::{BgpConfig, EarlyNetworkConfig};
-use sled_agent_client::types::{
-    BgpPeerConfig as OmicronBgpPeerConfig, HostPortConfig,
-};
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use steno::ActionError;
 use uuid::Uuid;
-
-// This is more of an implementation detail of the BGP implementation. It
-// defines the maximum time the peering engine will wait for external messages
-// before breaking to check for shutdown conditions.
-const BGP_SESSION_RESOLUTION: u64 = 100;
 
 pub(crate) fn api_to_dpd_port_settings(
     settings: &SwitchPortSettingsCombinedResult,
@@ -255,79 +246,6 @@ pub(crate) async fn bootstore_update(
 /// These SMF properties are used to notify rack networking services which
 /// ports are being used as uplinks, as they required additional configuration
 /// for external connectivity
-pub(crate) async fn ensure_switch_port_uplink(
-    sagactx: NexusActionContext,
-    opctx: &OpContext,
-    skip_self: bool,
-    inject: Option<Uuid>,
-    switch_port_id: Uuid,
-    switch_port_name: String,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
-
-    let switch_port =
-        nexus.get_switch_port(&opctx, switch_port_id).await.map_err(|e| {
-            ActionError::action_failed(format!(
-                "get switch port for uplink: {e}"
-            ))
-        })?;
-
-    let switch_location: SwitchLocation =
-        switch_port.switch_location.parse().map_err(|e| {
-            ActionError::action_failed(format!(
-                "get switch location for uplink: {e:?}",
-            ))
-        })?;
-
-    let mut uplinks: Vec<HostPortConfig> = Vec::new();
-
-    // The sled agent uplinks interface is an all or nothing interface, so we
-    // need to get all the uplink configs for all the ports.
-    let active_ports =
-        nexus.active_port_settings(&opctx).await.map_err(|e| {
-            ActionError::action_failed(format!(
-                "get active switch port settings: {e}"
-            ))
-        })?;
-
-    for (port, info) in &active_ports {
-        // Since we are undoing establishing uplinks for the settings
-        // associated with this port we skip adding this ports uplinks
-        // to the list - effectively removing them.
-        if skip_self && port.id == switch_port.id {
-            continue;
-        }
-        uplinks.push(HostPortConfig {
-            port: port.port_name.clone(),
-            addrs: info.addresses.iter().map(|a| a.address).collect(),
-        })
-    }
-
-    if let Some(id) = inject {
-        let settings = nexus
-            .switch_port_settings_get(&opctx, &id.into())
-            .await
-            .map_err(|e| {
-                ActionError::action_failed(format!(
-                    "get switch port settings for injection: {e}"
-                ))
-            })?;
-        uplinks.push(HostPortConfig {
-            port: switch_port_name.clone(),
-            addrs: settings.addresses.iter().map(|a| a.address).collect(),
-        })
-    }
-
-    let sc = switch_sled_agent(switch_location, &sagactx).await?;
-    sc.uplink_ensure(&sled_agent_client::types::SwitchPorts { uplinks })
-        .await
-        .map_err(|e| {
-            ActionError::action_failed(format!("ensure uplink: {e}"))
-        })?;
-
-    Ok(())
-}
 
 pub(crate) async fn read_bootstore_config(
     sa: &sled_agent_client::Client,
@@ -355,43 +273,6 @@ pub(crate) async fn write_bootstore_config(
     Ok(())
 }
 
-pub(crate) async fn select_mg_client(
-    sagactx: &NexusActionContext,
-    opctx: &OpContext,
-    switch_port_id: Uuid,
-) -> Result<Arc<mg_admin_client::Client>, ActionError> {
-    let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
-
-    let switch_port =
-        nexus.get_switch_port(&opctx, switch_port_id).await.map_err(|e| {
-            ActionError::action_failed(format!(
-                "get switch port for mg client selection: {e}"
-            ))
-        })?;
-
-    let switch_location: SwitchLocation =
-        switch_port.switch_location.parse().map_err(
-            |e: ParseSwitchLocationError| {
-                ActionError::action_failed(format!(
-                    "get switch location for uplink: {e:?}",
-                ))
-            },
-        )?;
-
-    let mg_client: Arc<mg_admin_client::Client> = osagactx
-        .nexus()
-        .mg_clients
-        .get(&switch_location)
-        .ok_or_else(|| {
-            ActionError::action_failed(format!(
-                "requested switch not available: {switch_location}"
-            ))
-        })?
-        .clone();
-    Ok(mg_client)
-}
-
 pub(crate) async fn switch_sled_agent(
     location: SwitchLocation,
     sagactx: &NexusActionContext,
@@ -402,106 +283,6 @@ pub(crate) async fn switch_sled_agent(
         &format!("http://{}", sled_agent_addr),
         sagactx.user_data().log().clone(),
     ))
-}
-
-pub(crate) async fn ensure_switch_port_bgp_settings(
-    sagactx: NexusActionContext,
-    opctx: &OpContext,
-    settings: SwitchPortSettingsCombinedResult,
-    switch_port_name: String,
-    switch_port_id: Uuid,
-) -> Result<(), ActionError> {
-    let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
-    let mg_client: Arc<mg_admin_client::Client> =
-        select_mg_client(&sagactx, opctx, switch_port_id).await.map_err(
-            |e| ActionError::action_failed(format!("select mg client: {e}")),
-        )?;
-
-    let mut bgp_peer_configs = HashMap::<String, Vec<BgpPeerConfig>>::new();
-
-    let mut cfg: Option<nexus_db_model::BgpConfig> = None;
-
-    for peer in settings.bgp_peers {
-        let config = nexus
-            .bgp_config_get(&opctx, peer.bgp_config_id.into())
-            .await
-            .map_err(|e| {
-                ActionError::action_failed(format!("get bgp config: {e}"))
-            })?;
-
-        if let Some(cfg) = &cfg {
-            if config.asn != cfg.asn {
-                return Err(ActionError::action_failed(
-                    "bad request: only one AS allowed per switch".to_string(),
-                ));
-            }
-        } else {
-            cfg = Some(config);
-        }
-
-        let bpc = BgpPeerConfig {
-            name: format!("{}", peer.addr.ip()), //TODO user defined name?
-            host: format!("{}:179", peer.addr.ip()),
-            hold_time: peer.hold_time.0.into(),
-            idle_hold_time: peer.idle_hold_time.0.into(),
-            delay_open: peer.delay_open.0.into(),
-            connect_retry: peer.connect_retry.0.into(),
-            keepalive: peer.keepalive.0.into(),
-            resolution: BGP_SESSION_RESOLUTION,
-            passive: false,
-        };
-
-        match bgp_peer_configs.get_mut(&switch_port_name) {
-            Some(peers) => {
-                peers.push(bpc);
-            }
-            None => {
-                bgp_peer_configs.insert(switch_port_name.clone(), vec![bpc]);
-            }
-        }
-    }
-
-    if let Some(cfg) = &cfg {
-        let announcements = nexus
-            .bgp_announce_list(
-                &opctx,
-                &params::BgpAnnounceSetSelector {
-                    name_or_id: NameOrId::Id(cfg.bgp_announce_set_id),
-                },
-            )
-            .await
-            .map_err(|e| {
-                ActionError::action_failed(format!(
-                    "get bgp announcements: {e}"
-                ))
-            })?;
-
-        let mut prefixes = Vec::new();
-        for a in &announcements {
-            let value = match a.network.ip() {
-                IpAddr::V4(value) => Ok(value),
-                IpAddr::V6(_) => Err(ActionError::action_failed(
-                    "bad request: IPv6 announcement not yet supported"
-                        .to_string(),
-                )),
-            }?;
-            prefixes.push(Prefix4 { value, length: a.network.prefix() });
-        }
-        mg_client
-            .inner
-            .bgp_apply(&ApplyRequest {
-                asn: cfg.asn.0,
-                peers: bgp_peer_configs,
-                originate: prefixes,
-            })
-            .await
-            .map_err(|e| {
-                ActionError::action_failed(format!("apply bgp settings: {e}"))
-            })?;
-    }
-
-    Ok(())
 }
 
 pub(crate) async fn get_scrimlet_address(
@@ -570,41 +351,4 @@ pub(crate) struct BootstoreNetworkPortChange {
 pub struct EarlyNetworkPortUpdate {
     port: PortConfigV1,
     bgp_configs: Vec<BgpConfig>,
-}
-
-pub(crate) async fn select_dendrite_client(
-    sagactx: &NexusActionContext,
-    opctx: &OpContext,
-    switch_port_id: Uuid,
-) -> Result<Arc<dpd_client::Client>, ActionError> {
-    let osagactx = sagactx.user_data();
-    let nexus = osagactx.nexus();
-
-    let switch_port =
-        nexus.get_switch_port(&opctx, switch_port_id).await.map_err(|e| {
-            ActionError::action_failed(format!(
-                "get switch port for dendrite client selection {e}"
-            ))
-        })?;
-
-    let switch_location: SwitchLocation =
-        switch_port.switch_location.parse().map_err(
-            |e: ParseSwitchLocationError| {
-                ActionError::action_failed(format!(
-                    "get switch location for uplink: {e:?}",
-                ))
-            },
-        )?;
-
-    let dpd_client: Arc<dpd_client::Client> = osagactx
-        .nexus()
-        .dpd_clients
-        .get(&switch_location)
-        .ok_or_else(|| {
-            ActionError::action_failed(format!(
-                "requested switch not available: {switch_location}"
-            ))
-        })?
-        .clone();
-    Ok(dpd_client)
 }
