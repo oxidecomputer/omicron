@@ -607,8 +607,9 @@ opt-level = 3
 #
 # Local client generation during development.
 #
-#[patch."https://github.com/oxidecomputer/progenitor"]
-#progenitor = { path = "../progenitor/progenitor" }
+[patch."https://github.com/oxidecomputer/progenitor"]
+progenitor = { path = "../progenitor/progenitor" }
+progenitor-client = { path = "../progenitor/progenitor-client" }
 #[patch."https://github.com/oxidecomputer/typify"]
 #typify = { path = "../typify/typify" }
 

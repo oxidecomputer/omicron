@@ -26,23 +26,35 @@ enum Cmds {
     /// workspace
     CheckWorkspaceDeps,
     /// Run configured clippy checks
-    Clippy,
+    Clippy(ClippyArgs),
+}
+
+#[derive(Parser)]
+struct ClippyArgs {
+    /// Automatically apply lint suggestions.
+    #[clap(long)]
+    fix: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
-        Cmds::Clippy => cmd_clippy(),
+        Cmds::Clippy(args) => cmd_clippy(args),
         Cmds::CheckWorkspaceDeps => cmd_check_workspace_deps(),
     }
 }
 
-fn cmd_clippy() -> Result<()> {
+fn cmd_clippy(args: ClippyArgs) -> Result<()> {
     let cargo =
         std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
     let mut command = Command::new(&cargo);
+    command.arg("clippy");
+
+    if args.fix {
+        command.arg("--fix");
+    }
+
     command
-        .arg("clippy")
         // Make sure we check everything.
         .arg("--all-targets")
         .arg("--")
