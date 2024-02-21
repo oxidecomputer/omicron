@@ -616,7 +616,7 @@ impl DbArgs {
             }) => {
                 cmd_db_regions_list(
                     &datastore,
-                    self.fetch_limit,
+                    &self.fetch_opts,
                     region_list_args,
                 )
                 .await
@@ -626,7 +626,7 @@ impl DbArgs {
             }) => {
                 cmd_db_regions_used_by(
                     &datastore,
-                    self.fetch_limit,
+                    &self.fetch_opts,
                     region_used_by_args,
                 )
                 .await
@@ -637,30 +637,30 @@ impl DbArgs {
             DbCommands::Sagas(SagaArgs {
                 command: SagaCommands::List(saga_list_args),
             }) => {
-                cmd_db_sagas_list(&datastore, self.fetch_limit, saga_list_args)
+                cmd_db_sagas_list(&datastore, &self.fetch_opts, saga_list_args)
                     .await
             }
             DbCommands::Sagas(SagaArgs { command: SagaCommands::Stuck }) => {
-                cmd_db_sagas_list_stuck(&datastore, self.fetch_limit).await
+                cmd_db_sagas_list_stuck(&datastore, &self.fetch_opts).await
             }
             DbCommands::Sagas(SagaArgs {
                 command: SagaCommands::Show(saga_show_args),
             }) => {
-                cmd_db_sagas_show(&datastore, self.fetch_limit, saga_show_args)
+                cmd_db_sagas_show(&datastore, &self.fetch_opts, saga_show_args)
                     .await
             }
             DbCommands::Sagas(SagaArgs { command: SagaCommands::Unwound }) => {
-                cmd_db_sagas_list_unwound(&datastore, self.fetch_limit).await
+                cmd_db_sagas_list_unwound(&datastore, &self.fetch_opts).await
             }
             DbCommands::Sagas(SagaArgs { command: SagaCommands::Failing }) => {
-                cmd_db_sagas_list_failing(&datastore, self.fetch_limit).await
+                cmd_db_sagas_list_failing(&datastore, &self.fetch_opts).await
             }
             DbCommands::Sagas(SagaArgs {
                 command: SagaCommands::Overlapping(saga_overlapping_args),
             }) => {
                 cmd_db_sagas_list_overlapping(
                     &datastore,
-                    self.fetch_limit,
+                    &self.fetch_opts,
                     saga_overlapping_args,
                 )
                 .await
@@ -670,7 +670,7 @@ impl DbArgs {
             }) => {
                 cmd_db_sagas_list_interleave(
                     &datastore,
-                    self.fetch_limit,
+                    &self.fetch_opts,
                     saga_interleave_args,
                 )
                 .await
@@ -2706,7 +2706,7 @@ fn print_saga_nodes(saga: Option<Saga>, saga_nodes: Vec<SagaNodeEvent>) {
 /// List all sagas
 async fn cmd_db_sagas_list(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &SagaListArgs,
 ) -> Result<(), anyhow::Error> {
     let sagas = datastore
@@ -2725,14 +2725,16 @@ async fn cmd_db_sagas_list(
             db::paginated(
                 dsl::saga,
                 dsl::time_created,
-                &first_page::<dsl::time_created>(limit),
+                &first_page::<dsl::time_created>(fetch_opts.fetch_limit),
             )
             .load_async(&conn)
             .await
         })
         .await?;
 
-    check_limit(&sagas, limit, || String::from("listing sagas"));
+    check_limit(&sagas, fetch_opts.fetch_limit, || {
+        String::from("listing sagas")
+    });
 
     print_sagas(sagas, args.show_params);
 
@@ -2742,7 +2744,7 @@ async fn cmd_db_sagas_list(
 /// List all stuck sagas
 async fn cmd_db_sagas_list_stuck(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
     let sagas = datastore
         .pool_connection_for_tests()
@@ -2760,7 +2762,7 @@ async fn cmd_db_sagas_list_stuck(
             let stuck_sagas: Vec<SagaId> = db::paginated(
                 dsl::saga_node_event,
                 dsl::event_time,
-                &first_page::<dsl::event_time>(limit),
+                &first_page::<dsl::event_time>(fetch_opts.fetch_limit),
             )
             .filter(dsl::event_type.eq(String::from("undo_failed")))
             .select(dsl::saga_id)
@@ -2773,7 +2775,7 @@ async fn cmd_db_sagas_list_stuck(
             db::paginated(
                 saga_dsl::saga,
                 saga_dsl::time_created,
-                &first_page::<saga_dsl::time_created>(limit),
+                &first_page::<saga_dsl::time_created>(fetch_opts.fetch_limit),
             )
             .filter(saga_dsl::id.eq_any(stuck_sagas))
             .load_async(&conn)
@@ -2781,7 +2783,9 @@ async fn cmd_db_sagas_list_stuck(
         })
         .await?;
 
-    check_limit(&sagas, limit, || String::from("listing stuck sagas"));
+    check_limit(&sagas, fetch_opts.fetch_limit, || {
+        String::from("listing stuck sagas")
+    });
 
     print_sagas(sagas, false);
 
@@ -2805,7 +2809,7 @@ async fn get_saga(
 /// Show the execution of a saga
 async fn cmd_db_sagas_show(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &SagaShowArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::saga_node_event::dsl;
@@ -2813,7 +2817,7 @@ async fn cmd_db_sagas_show(
     let saga_nodes = db::paginated(
         dsl::saga_node_event,
         dsl::event_time,
-        &first_page::<dsl::event_time>(limit),
+        &first_page::<dsl::event_time>(fetch_opts.fetch_limit),
     )
     .filter(dsl::saga_id.eq(args.saga_id))
     .order_by(dsl::event_time)
@@ -2831,7 +2835,7 @@ async fn cmd_db_sagas_show(
 /// List all sagas that unwound sucessfully
 async fn cmd_db_sagas_list_unwound(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
     let sagas = datastore
         .pool_connection_for_tests()
@@ -2849,7 +2853,7 @@ async fn cmd_db_sagas_list_unwound(
             let undo_failed_sagas: HashSet<SagaId> = db::paginated(
                 dsl::saga_node_event,
                 dsl::event_time,
-                &first_page::<dsl::event_time>(limit),
+                &first_page::<dsl::event_time>(fetch_opts.fetch_limit),
             )
             .filter(dsl::event_type.eq(String::from("undo_failed")))
             .select(dsl::saga_id)
@@ -2862,7 +2866,7 @@ async fn cmd_db_sagas_list_unwound(
             let undo_started_sagas: HashSet<SagaId> = db::paginated(
                 dsl::saga_node_event,
                 dsl::event_time,
-                &first_page::<dsl::event_time>(limit),
+                &first_page::<dsl::event_time>(fetch_opts.fetch_limit),
             )
             .filter(dsl::event_type.eq(String::from("undo_started")))
             .select(dsl::saga_id)
@@ -2884,7 +2888,7 @@ async fn cmd_db_sagas_list_unwound(
             db::paginated(
                 saga_dsl::saga,
                 saga_dsl::time_created,
-                &first_page::<saga_dsl::time_created>(limit),
+                &first_page::<saga_dsl::time_created>(fetch_opts.fetch_limit),
             )
             .filter(saga_dsl::id.eq_any(sagas))
             .load_async(&conn)
@@ -2892,7 +2896,7 @@ async fn cmd_db_sagas_list_unwound(
         })
         .await?;
 
-    check_limit(&sagas, limit, || {
+    check_limit(&sagas, fetch_opts.fetch_limit, || {
         String::from("listing sagas that successfully unwound")
     });
 
@@ -2904,7 +2908,7 @@ async fn cmd_db_sagas_list_unwound(
 /// Show any failing nodes
 async fn cmd_db_sagas_list_failing(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
 ) -> Result<(), anyhow::Error> {
     let saga_nodes = datastore
         .pool_connection_for_tests()
@@ -2922,7 +2926,7 @@ async fn cmd_db_sagas_list_failing(
             db::paginated(
                 dsl::saga_node_event,
                 dsl::event_time,
-                &first_page::<dsl::event_time>(limit),
+                &first_page::<dsl::event_time>(fetch_opts.fetch_limit),
             )
             .filter(dsl::event_type.eq(String::from("failed")))
             .order_by(dsl::event_time)
@@ -2931,7 +2935,7 @@ async fn cmd_db_sagas_list_failing(
         })
         .await?;
 
-    check_limit(&saga_nodes, limit, || {
+    check_limit(&saga_nodes, fetch_opts.fetch_limit, || {
         String::from("listing failing saga nodes")
     });
 
@@ -2943,7 +2947,7 @@ async fn cmd_db_sagas_list_failing(
 /// List any sagas which overlap execution with this one
 async fn cmd_db_sagas_list_overlapping(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &SagaOverlappingArgs,
 ) -> Result<(), anyhow::Error> {
     // First, get the saga nodes for this saga
@@ -2953,14 +2957,16 @@ async fn cmd_db_sagas_list_overlapping(
         let saga_nodes = db::paginated(
             dsl::saga_node_event,
             dsl::event_time,
-            &first_page::<dsl::event_time>(limit),
+            &first_page::<dsl::event_time>(fetch_opts.fetch_limit),
         )
         .filter(dsl::saga_id.eq(args.saga_id))
         .order_by(dsl::event_time)
         .load_async(&*datastore.pool_connection_for_tests().await?)
         .await?;
 
-        check_limit(&saga_nodes, limit, || String::from("listing saga nodes"));
+        check_limit(&saga_nodes, fetch_opts.fetch_limit, || {
+            String::from("listing saga nodes")
+        });
 
         saga_nodes
     };
@@ -2986,7 +2992,7 @@ async fn cmd_db_sagas_list_overlapping(
             let saga_ids: Vec<SagaId> = db::paginated(
                 dsl::saga_node_event,
                 dsl::saga_id,
-                &first_page::<dsl::saga_id>(limit),
+                &first_page::<dsl::saga_id>(fetch_opts.fetch_limit),
             )
             .filter(dsl::event_time.le(end).and(dsl::event_time.ge(start)))
             .select(dsl::saga_id)
@@ -2998,7 +3004,7 @@ async fn cmd_db_sagas_list_overlapping(
             db::paginated(
                 saga_dsl::saga,
                 saga_dsl::time_created,
-                &first_page::<saga_dsl::time_created>(limit),
+                &first_page::<saga_dsl::time_created>(fetch_opts.fetch_limit),
             )
             .filter(saga_dsl::id.eq_any(saga_ids))
             .load_async(&conn)
@@ -3006,7 +3012,9 @@ async fn cmd_db_sagas_list_overlapping(
         })
         .await?;
 
-    check_limit(&sagas, limit, || String::from("listing overlapping sagas"));
+    check_limit(&sagas, fetch_opts.fetch_limit, || {
+        String::from("listing overlapping sagas")
+    });
 
     if args.id_only {
         for saga in sagas {
@@ -3022,7 +3030,7 @@ async fn cmd_db_sagas_list_overlapping(
 /// Show multiple saga executions along a timeline
 async fn cmd_db_sagas_list_interleave(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &SagaInterleaveArgs,
 ) -> Result<(), anyhow::Error> {
     // Print the sagas first
@@ -3032,14 +3040,20 @@ async fn cmd_db_sagas_list_interleave(
         .transaction_async(|conn| async move {
             use db::schema::saga::dsl;
 
-            db::paginated(dsl::saga, dsl::id, &first_page::<dsl::id>(limit))
-                .filter(dsl::id.eq_any(args.saga_id.clone()))
-                .load_async(&conn)
-                .await
+            db::paginated(
+                dsl::saga,
+                dsl::id,
+                &first_page::<dsl::id>(fetch_opts.fetch_limit),
+            )
+            .filter(dsl::id.eq_any(args.saga_id.clone()))
+            .load_async(&conn)
+            .await
         })
         .await?;
 
-    check_limit(&sagas, limit, || String::from("listing sagas"));
+    check_limit(&sagas, fetch_opts.fetch_limit, || {
+        String::from("listing sagas")
+    });
 
     // When listing interleaved sagas, we want to know if there are sagas with
     // duplicate start params.
@@ -3052,14 +3066,16 @@ async fn cmd_db_sagas_list_interleave(
     let saga_nodes: Vec<SagaNodeEvent> = db::paginated(
         dsl::saga_node_event,
         dsl::event_time,
-        &first_page::<dsl::event_time>(limit),
+        &first_page::<dsl::event_time>(fetch_opts.fetch_limit),
     )
     .filter(dsl::saga_id.eq_any(args.saga_id.clone()))
     .order_by(dsl::event_time)
     .load_async(&*datastore.pool_connection_for_tests().await?)
     .await?;
 
-    check_limit(&saga_nodes, limit, || String::from("listing saga nodes"));
+    check_limit(&saga_nodes, fetch_opts.fetch_limit, || {
+        String::from("listing saga nodes")
+    });
 
     let mut rows: Vec<Vec<String>> = Vec::with_capacity(saga_nodes.len());
     let saga_id_to_column: BTreeMap<Uuid, usize> = args
@@ -3173,18 +3189,23 @@ async fn cmd_db_sagas_list_interleave(
 /// List all regions
 async fn cmd_db_regions_list(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &RegionListArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::region::dsl;
 
-    let regions: Vec<Region> =
-        db::paginated(dsl::region, dsl::id, &first_page::<dsl::id>(limit))
-            .select(Region::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
-            .await?;
+    let regions: Vec<Region> = db::paginated(
+        dsl::region,
+        dsl::id,
+        &first_page::<dsl::id>(fetch_opts.fetch_limit),
+    )
+    .select(Region::as_select())
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
 
-    check_limit(&regions, limit, || String::from("listing regions"));
+    check_limit(&regions, fetch_opts.fetch_limit, || {
+        String::from("listing regions")
+    });
 
     if args.id_only {
         for region in regions {
@@ -3226,19 +3247,24 @@ async fn cmd_db_regions_list(
 /// Find what is using a region
 async fn cmd_db_regions_used_by(
     datastore: &DataStore,
-    limit: NonZeroU32,
+    fetch_opts: &DbFetchOptions,
     args: &RegionUsedByArgs,
 ) -> Result<(), anyhow::Error> {
     use db::schema::region::dsl;
 
-    let regions: Vec<Region> =
-        db::paginated(dsl::region, dsl::id, &first_page::<dsl::id>(limit))
-            .filter(dsl::id.eq_any(args.region_id.clone()))
-            .select(Region::as_select())
-            .load_async(&*datastore.pool_connection_for_tests().await?)
-            .await?;
+    let regions: Vec<Region> = db::paginated(
+        dsl::region,
+        dsl::id,
+        &first_page::<dsl::id>(fetch_opts.fetch_limit),
+    )
+    .filter(dsl::id.eq_any(args.region_id.clone()))
+    .select(Region::as_select())
+    .load_async(&*datastore.pool_connection_for_tests().await?)
+    .await?;
 
-    check_limit(&regions, limit, || String::from("listing regions"));
+    check_limit(&regions, fetch_opts.fetch_limit, || {
+        String::from("listing regions")
+    });
 
     let volumes: Vec<Uuid> = regions.iter().map(|x| x.volume_id()).collect();
 
@@ -3255,16 +3281,22 @@ async fn cmd_db_regions_used_by(
                 )
                 .await?;
 
-                db::paginated(dsl::disk, dsl::id, &first_page::<dsl::id>(limit))
-                    .filter(dsl::volume_id.eq_any(volumes))
-                    .select(Disk::as_select())
-                    .load_async(&conn)
-                    .await
+                db::paginated(
+                    dsl::disk,
+                    dsl::id,
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
+                )
+                .filter(dsl::volume_id.eq_any(volumes))
+                .select(Disk::as_select())
+                .load_async(&conn)
+                .await
             })
             .await?
     };
 
-    check_limit(&disks_used, limit, || String::from("listing disks used"));
+    check_limit(&disks_used, fetch_opts.fetch_limit, || {
+        String::from("listing disks used")
+    });
 
     let snapshots_used: Vec<Snapshot> = {
         let volumes = volumes.clone();
@@ -3282,7 +3314,7 @@ async fn cmd_db_regions_used_by(
                 db::paginated(
                     dsl::snapshot,
                     dsl::id,
-                    &first_page::<dsl::id>(limit),
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
                 )
                 .filter(
                     dsl::volume_id
@@ -3296,7 +3328,7 @@ async fn cmd_db_regions_used_by(
             .await?
     };
 
-    check_limit(&snapshots_used, limit, || {
+    check_limit(&snapshots_used, fetch_opts.fetch_limit, || {
         String::from("listing snapshots used")
     });
 
@@ -3316,7 +3348,7 @@ async fn cmd_db_regions_used_by(
                 db::paginated(
                     dsl::image,
                     dsl::id,
-                    &first_page::<dsl::id>(limit),
+                    &first_page::<dsl::id>(fetch_opts.fetch_limit),
                 )
                 .filter(dsl::volume_id.eq_any(volumes))
                 .select(Image::as_select())
@@ -3326,7 +3358,9 @@ async fn cmd_db_regions_used_by(
             .await?
     };
 
-    check_limit(&images_used, limit, || String::from("listing images used"));
+    check_limit(&images_used, fetch_opts.fetch_limit, || {
+        String::from("listing images used")
+    });
 
     #[derive(Tabled)]
     struct RegionRow {
