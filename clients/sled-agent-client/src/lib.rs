@@ -51,6 +51,10 @@ impl Eq for types::OmicronZoneType {}
 impl Eq for types::OmicronZoneDataset {}
 
 impl types::ZpoolName {
+    pub fn new_external(id: Uuid) -> Self {
+        format!("oxp_{id}").parse().unwrap()
+    }
+
     pub fn external(&self) -> bool {
         self.as_str().starts_with("oxp_")
     }

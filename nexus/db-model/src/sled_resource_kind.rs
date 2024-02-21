@@ -20,3 +20,12 @@ impl_enum_type!(
     Instance => b"instance"
     Reserved => b"reserved"
 );
+
+impl SledResourceKind {
+    pub fn wants_zpool_allocation(&self) -> bool {
+        match *self {
+            Self::Instance => true,
+            _ => false,
+        }
+    }
+}

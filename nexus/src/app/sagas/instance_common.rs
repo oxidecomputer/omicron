@@ -78,6 +78,16 @@ pub async fn reserve_vmm_resources(
     Ok(resource)
 }
 
+/// Arguments to [create_and_insert_vmm_record].
+pub struct VmmRecordArgs {
+    pub instance_id: Uuid,
+    pub zpool_id: Uuid,
+    pub propolis_id: Uuid,
+    pub sled_id: Uuid,
+    pub propolis_ip: Ipv6Addr,
+    pub initial_state: nexus_db_model::VmmInitialState,
+}
+
 /// Creates a new VMM record from the supplied IDs and stores it in the supplied
 /// datastore.
 ///
@@ -87,15 +97,19 @@ pub async fn reserve_vmm_resources(
 pub async fn create_and_insert_vmm_record(
     datastore: &DataStore,
     opctx: &OpContext,
-    instance_id: Uuid,
-    propolis_id: Uuid,
-    sled_id: Uuid,
-    propolis_ip: Ipv6Addr,
-    initial_state: nexus_db_model::VmmInitialState,
+    VmmRecordArgs {
+        instance_id,
+        zpool_id,
+        propolis_id,
+        sled_id,
+        propolis_ip,
+        initial_state,
+    }: VmmRecordArgs,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
         instance_id,
+        zpool_id,
         sled_id,
         IpAddr::V6(propolis_ip).into(),
         initial_state,

@@ -55,6 +55,7 @@ use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
+use sled_agent_client::types::ZpoolName;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -1226,7 +1227,9 @@ impl super::Nexus {
                         PROPOLIS_PORT,
                     )
                     .to_string(),
-                    filesystem_pool,
+                    filesystem_pool: ZpoolName::new_external(
+                        initial_vmm.zpool_id,
+                    ),
                 },
             )
             .await

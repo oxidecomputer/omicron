@@ -209,6 +209,8 @@ async fn test_console_pages(cptestctx: &ControlPlaneTestContext) {
         "/images",
         "/utilization",
         "/access",
+        "/lookup/",
+        "/lookup/abc",
     ];
 
     for path in console_paths {

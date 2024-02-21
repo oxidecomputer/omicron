@@ -143,21 +143,23 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
 
 -- Accounting for programs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
+    -- Metadata about the resource consumer
+
     -- Should match the UUID of the corresponding service
     id UUID PRIMARY KEY,
-
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
-
     -- Identifies the type of the resource
     kind omicron.public.sled_resource_kind NOT NULL,
 
+    -- Data about the resources being consumed
+
+    -- The zpool being used, if any
+    zpool_id UUID,
     -- The maximum number of hardware threads usable by this resource
     hardware_threads INT8 NOT NULL,
-
     -- The maximum amount of RSS RAM provisioned to this resource
     rss_ram INT8 NOT NULL,
-
     -- The maximum amount of Reservoir RAM provisioned to this resource
     reservoir_ram INT8 NOT NULL
 );
@@ -168,6 +170,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled
     id
 );
 
+-- Allow looking up all resources which use a particular zpool
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_zpool ON omicron.public.sled_resource (
+    zpool_id,
+    id
+) WHERE zpool_id IS NOT NULL;
 
 -- Table of all sled subnets allocated for sleds added to an already initialized
 -- rack. The sleds in this table and their allocated subnets are created before
@@ -1459,6 +1466,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_name_kind_key ON o
     kind
 )
 STORING (vpc_id, subnet_id, is_primary)
+WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index used to verify that all interfaces for a resource (e.g. Instance,
+ * Service) have unique slots.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_slot_key ON omicron.public.network_interface (
+    parent_id,
+    slot
+)
 WHERE
     time_deleted IS NULL;
 
@@ -3271,11 +3289,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     time_created TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     instance_id UUID NOT NULL,
+    zpool_id UUID NOT NULL,
     state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     sled_id UUID NOT NULL,
     propolis_ip INET NOT NULL
+);
+
+-- Allow looking up all vmms which use a particular zpool
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_by_zpool ON omicron.public.vmm (
+    zpool_id,
+    id
 );
 
 /*
@@ -3516,7 +3541,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '33.0.1', NULL)
+    ( TRUE, NOW(), NOW(), '35.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

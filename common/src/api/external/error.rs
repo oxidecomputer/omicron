@@ -9,6 +9,7 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
+use omicron_uuid_kinds::GenericUuid;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt::Display;
@@ -152,6 +153,11 @@ pub enum LookupType {
 }
 
 impl LookupType {
+    /// Constructs a `ById` lookup type from a typed or untyped UUID.
+    pub fn by_id<T: GenericUuid>(id: T) -> Self {
+        LookupType::ById(id.into_untyped_uuid())
+    }
+
     /// Returns an ObjectNotFound error appropriate for the case where this
     /// lookup failed
     pub fn into_not_found(self, type_name: ResourceType) -> Error {
@@ -496,7 +502,8 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
             )
             | progenitor::progenitor_client::Error::UnexpectedResponse(_)
             | progenitor::progenitor_client::Error::InvalidUpgrade(_)
-            | progenitor::progenitor_client::Error::ResponseBodyError(_) => {
+            | progenitor::progenitor_client::Error::ResponseBodyError(_)
+            | progenitor::progenitor_client::Error::PreHookError(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.

@@ -254,8 +254,9 @@ Print information about the network
 Usage: omdb db network [OPTIONS] <COMMAND>
 
 Commands:
-  list-eips  List external IPs
-  help       Print this message or the help of the given subcommand(s)
+  list-eips   List external IPs
+  list-vnics  List virtual network interfaces
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --verbose  Print out raw data structures from the data store
@@ -331,9 +332,10 @@ Debug a specific Sled
 Usage: omdb sled-agent [OPTIONS] <COMMAND>
 
 Commands:
-  zones   print information about zones
-  zpools  print information about zpools
-  help    Print this message or the help of the given subcommand(s)
+  zones      print information about zones
+  zpools     print information about zpools
+  bootstore  print information about the local bootstore node
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
       --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]

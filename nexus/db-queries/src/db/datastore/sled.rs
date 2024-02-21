@@ -19,6 +19,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::PhysicalDiskKind;
 use omicron_common::api::external;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -99,7 +100,7 @@ impl DataStore {
                 // Clone variables into retryable function
                 let err = err.clone();
                 let constraints = constraints.clone();
-                let resources = resources.clone();
+                let mut resources = resources.clone();
 
                 async move {
                     use db::schema::sled_resource::dsl as resource_dsl;
@@ -195,12 +196,47 @@ impl DataStore {
                     if sled_targets.is_empty() {
                         return Err(err.bail(SledReservationError::NotFound));
                     }
+                    let sled_id = sled_targets[0];
+
+                    // If we need to allocate a zpool for this reservation, do
+                    // so now that we've picked the target sled.
+                    resources.zpool_id = if resource_kind
+                        .wants_zpool_allocation()
+                    {
+                        use db::schema::physical_disk::dsl as physical_disk_dsl;
+                        use db::schema::zpool::dsl as zpool_dsl;
+
+                        let zpool_id = zpool_dsl::zpool
+                            // Consider only zpools (and their disks) belonging to this sled
+                            .inner_join(
+                                sled_dsl::sled
+                                    .on(zpool_dsl::sled_id.eq(sled_dsl::id)),
+                            )
+                            .inner_join(physical_disk_dsl::physical_disk.on(
+                                physical_disk_dsl::sled_id.eq(sled_dsl::id),
+                            ))
+                            // Filter out all non-U.2 disks
+                            .filter(
+                                physical_disk_dsl::variant
+                                    .eq(PhysicalDiskKind::U2),
+                            )
+                            // TODO(https://github.com/oxidecomputer/omicron/issues/4719):
+                            // Only provision to disks which we consider "in-service".
+                            .select(zpool_dsl::id)
+                            .order(random())
+                            .limit(1)
+                            .get_result_async::<Uuid>(&conn)
+                            .await?;
+                        Some(zpool_id)
+                    } else {
+                        None
+                    };
 
                     // Create a SledResource record, associate it with the target
                     // sled.
                     let resource = SledResource::new(
                         resource_id,
-                        sled_targets[0],
+                        sled_id,
                         resource_kind,
                         resources,
                     );

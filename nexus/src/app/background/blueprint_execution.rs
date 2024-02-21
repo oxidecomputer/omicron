@@ -207,8 +207,7 @@ mod test {
         // reporting success.  We reuse the same `OmicronZonesConfig` in
         // constructing the blueprint because the details don't matter for this
         // test.
-        let pool_name: ZpoolName =
-            format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
+        let pool_name = ZpoolName::new_external(Uuid::new_v4());
         let zones = OmicronZonesConfig {
             generation: Generation::new(),
             zones: vec![OmicronZoneConfig {

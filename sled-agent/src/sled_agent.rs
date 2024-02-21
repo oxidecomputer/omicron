@@ -11,16 +11,17 @@ use crate::bootstrap::early_networking::{
 };
 use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
-use crate::instance_manager::{InstanceManager, ReservoirMode};
+use crate::instance_manager::{
+    InstanceManager, RegistrationRequest, ReservoirMode,
+};
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
-    ZoneBundleMetadata, Zpool,
+    DiskStateRequested, InstanceExternalIpBody, InstanceMigrationSourceParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
+    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
@@ -40,16 +41,13 @@ use illumos_utils::opte::params::{
 use illumos_utils::opte::PortManager;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use illumos_utils::zone::ZONE_PREFIX;
-use illumos_utils::zpool::ZpoolName;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
-use omicron_common::api::internal::nexus::{
-    SledInstanceState, VmmRuntimeState,
-};
+use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
 };
@@ -66,7 +64,7 @@ use sled_hardware::{underlay, Baseboard, HardwareManager};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -105,6 +103,9 @@ pub enum Error {
 
     #[error("Failed to operate on underlay device: {0}")]
     Underlay(#[from] underlay::Error),
+
+    #[error("Failed to request firewall rules")]
+    FirewallRequest(#[source] nexus_client::Error<nexus_client::types::Error>),
 
     #[error(transparent)]
     Services(#[from] crate::services::Error),
@@ -603,11 +604,24 @@ impl SledAgent {
         retry_notify(
             retry_policy_internal_service_aggressive(),
             || async {
-                self.inner
-                    .services
-                    .load_services()
+                // Load as many services as we can, and don't exit immediately
+                // upon failure...
+                let load_services_result =
+                    self.inner.services.load_services().await.map_err(|err| {
+                        BackoffError::transient(Error::from(err))
+                    });
+
+                // ... and request firewall rule updates for as many services as
+                // we can. Note that we still make this request even if we only
+                // partially load some services.
+                let firewall_result = self
+                    .request_firewall_update()
                     .await
-                    .map_err(|err| BackoffError::transient(err))
+                    .map_err(|err| BackoffError::transient(err));
+
+                // Only complete if we have loaded all services and firewall
+                // rules successfully.
+                load_services_result.and(firewall_result)
             },
             |err, delay| {
                 warn!(
@@ -619,10 +633,6 @@ impl SledAgent {
         )
         .await
         .unwrap(); // we retry forever, so this can't fail
-
-        // Now that we've initialized the sled services, notify nexus again
-        // at which point it'll plumb any necessary firewall rules back to us.
-        self.notify_nexus_about_self(&self.log);
     }
 
     pub(crate) fn switch_zone_underlay_info(
@@ -643,7 +653,26 @@ impl SledAgent {
         &self.inner.start_request
     }
 
-    // Sends a request to Nexus informing it that the current sled exists.
+    /// Requests firewall rules from Nexus.
+    ///
+    /// Does not retry upon failure.
+    async fn request_firewall_update(&self) -> Result<(), Error> {
+        let sled_id = self.inner.id;
+
+        self.inner
+            .nexus_client
+            .client()
+            .sled_firewall_rules_request(&sled_id)
+            .await
+            .map_err(|err| Error::FirewallRequest(err))?;
+        Ok(())
+    }
+
+    /// Sends a request to Nexus informing it that the current sled exists,
+    /// with information abou the existing set of hardware.
+    ///
+    /// Does not block until Nexus is available -- the future created by this
+    /// function is retried in a queue that is polled in the background.
     pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
         let sled_id = self.inner.id;
         let nexus_client = self.inner.nexus_client.clone();
@@ -659,7 +688,7 @@ impl SledAgent {
         let log = log.clone();
         let fut = async move {
             // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with an randomized, capped
+            // until it succeeds. We retry with a randomized, capped
             // exponential backoff.
             //
             // TODO-robustness if this returns a 400 error, we probably want to
@@ -913,25 +942,11 @@ impl SledAgent {
     /// [`Self::instance_ensure_state`].
     pub async fn instance_ensure_registered(
         &self,
-        instance_id: Uuid,
-        propolis_id: Uuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
-        filesystem_pool: ZpoolName,
+        request: RegistrationRequest,
     ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
-            .ensure_registered(
-                instance_id,
-                propolis_id,
-                hardware,
-                instance_runtime,
-                vmm_runtime,
-                propolis_addr,
-                filesystem_pool,
-            )
+            .ensure_registered(request)
             .await
             .map_err(|e| Error::Instance(e))
     }

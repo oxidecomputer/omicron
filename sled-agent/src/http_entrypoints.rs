@@ -7,8 +7,9 @@
 use super::sled_agent::SledAgent;
 use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::bootstrap::params::AddSledRequest;
+use crate::instance_manager::RegistrationRequest;
 use crate::params::{
-    CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
+    BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
     InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
     OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRulesEnsureBody,
@@ -85,6 +86,7 @@ pub fn api() -> SledApiDescription {
         api.register(host_os_write_status_get)?;
         api.register(host_os_write_status_delete)?;
         api.register(inventory)?;
+        api.register(bootstore_status)?;
 
         Ok(())
     }
@@ -405,15 +407,15 @@ async fn instance_register(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure_registered(
+        sa.instance_ensure_registered(RegistrationRequest {
             instance_id,
-            body_args.propolis_id,
-            body_args.hardware,
-            body_args.instance_runtime,
-            body_args.vmm_runtime,
-            body_args.propolis_addr,
-            body_args.filesystem_pool,
-        )
+            propolis_id: body_args.propolis_id,
+            hardware: body_args.hardware,
+            instance_runtime: body_args.instance_runtime,
+            vmm_runtime: body_args.vmm_runtime,
+            propolis_addr: body_args.propolis_addr,
+            filesystem_pool: body_args.filesystem_pool,
+        })
         .await?,
     ))
 }
@@ -972,4 +974,24 @@ async fn inventory(
 ) -> Result<HttpResponseOk<Inventory>, HttpError> {
     let sa = request_context.context();
     Ok(HttpResponseOk(sa.inventory()?))
+}
+
+/// Get the internal state of the local bootstore node
+#[endpoint {
+    method = GET,
+    path = "/bootstore/status",
+}]
+async fn bootstore_status(
+    request_context: RequestContext<SledAgent>,
+) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
+    let sa = request_context.context();
+    let bootstore = sa.bootstore();
+    let status = bootstore
+        .get_status()
+        .await
+        .map_err(|e| {
+            HttpError::from(omicron_common::api::external::Error::from(e))
+        })?
+        .into();
+    Ok(HttpResponseOk(status))
 }

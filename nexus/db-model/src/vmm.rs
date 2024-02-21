@@ -37,6 +37,10 @@ pub struct Vmm {
     /// The ID of the `Instance` that owns this VMM.
     pub instance_id: Uuid,
 
+    /// The ID of the Zpool where this VMM's zone root filesystem will be
+    /// placed.
+    pub zpool_id: Uuid,
+
     /// The sled assigned to the care and feeding of this VMM.
     pub sled_id: Uuid,
 
@@ -59,6 +63,7 @@ impl Vmm {
     pub fn new(
         id: Uuid,
         instance_id: Uuid,
+        zpool_id: Uuid,
         sled_id: Uuid,
         propolis_ip: ipnetwork::IpNetwork,
         initial_state: VmmInitialState,
@@ -76,6 +81,7 @@ impl Vmm {
             time_created: now,
             time_deleted: None,
             instance_id,
+            zpool_id,
             sled_id,
             propolis_ip,
             runtime: VmmRuntimeState {

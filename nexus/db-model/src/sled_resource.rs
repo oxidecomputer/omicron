@@ -9,6 +9,7 @@ use uuid::Uuid;
 #[derive(Clone, Selectable, Queryable, Insertable, Debug)]
 #[diesel(table_name = sled_resource)]
 pub struct Resources {
+    pub zpool_id: Option<Uuid>,
     pub hardware_threads: SqlU32,
     pub rss_ram: ByteCount,
     pub reservoir_ram: ByteCount,
@@ -20,7 +21,12 @@ impl Resources {
         rss_ram: ByteCount,
         reservoir_ram: ByteCount,
     ) -> Self {
-        Self { hardware_threads: SqlU32(threads), rss_ram, reservoir_ram }
+        Self {
+            zpool_id: None,
+            hardware_threads: SqlU32(threads),
+            rss_ram,
+            reservoir_ram,
+        }
     }
 }
 

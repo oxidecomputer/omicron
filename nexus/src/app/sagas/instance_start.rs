@@ -34,7 +34,7 @@ pub(crate) struct Params {
 declare_saga_actions! {
     instance_start;
 
-    ALLOC_SERVER -> "sled_id" {
+    ALLOC_SERVER -> "sled_and_zpool_ids" {
         + sis_alloc_server
         - sis_alloc_server_undo
     }
@@ -121,7 +121,7 @@ impl NexusSaga for SagaInstanceStart {
 
 async fn sis_alloc_server(
     sagactx: NexusActionContext,
-) -> Result<Uuid, ActionError> {
+) -> Result<(Uuid, Uuid), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let hardware_threads = params.db_instance.ncpus.0;
@@ -137,7 +137,10 @@ async fn sis_alloc_server(
     )
     .await?;
 
-    Ok(resource.sled_id)
+    Ok((
+        resource.sled_id,
+        resource.resources.zpool_id.expect("Need a zpool ID"),
+    ))
 }
 
 async fn sis_alloc_server_undo(
@@ -158,8 +161,9 @@ async fn sis_alloc_propolis_ip(
         &sagactx,
         &params.serialized_authn,
     );
-    let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
-    allocate_vmm_ipv6(&opctx, sagactx.user_data().datastore(), sled_uuid).await
+    let (sled_id, _zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("sled_and_zpool_ids")?;
+    allocate_vmm_ipv6(&opctx, sagactx.user_data().datastore(), sled_id).await
 }
 
 async fn sis_create_vmm_record(
@@ -173,17 +177,21 @@ async fn sis_create_vmm_record(
     );
     let instance_id = params.db_instance.id();
     let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let (sled_id, zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("sled_and_zpool_ids")?;
     let propolis_ip = sagactx.lookup::<Ipv6Addr>("propolis_ip")?;
 
     super::instance_common::create_and_insert_vmm_record(
         osagactx.datastore(),
         &opctx,
-        instance_id,
-        propolis_id,
-        sled_id,
-        propolis_ip,
-        nexus_db_model::VmmInitialState::Starting,
+        super::instance_common::VmmRecordArgs {
+            instance_id,
+            zpool_id,
+            propolis_id,
+            sled_id,
+            propolis_ip,
+            initial_state: nexus_db_model::VmmInitialState::Starting,
+        },
     )
     .await
 }
@@ -398,9 +406,10 @@ async fn sis_dpd_ensure(
 
     // Querying sleds requires fleet access; use the instance allocator context
     // for this.
-    let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
+    let (sled_id, _zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("sled_and_zpool_ids")?;
     let (.., sled) = LookupPath::new(&osagactx.nexus().opctx_alloc, &datastore)
-        .sled_id(sled_uuid)
+        .sled_id(sled_id)
         .fetch()
         .await
         .map_err(ActionError::action_failed)?;
@@ -458,10 +467,11 @@ async fn sis_v2p_ensure(
         &params.serialized_authn,
     );
 
-    let sled_uuid = sagactx.lookup::<Uuid>("sled_id")?;
+    let (sled_id, _zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("sled_and_zpool_ids")?;
     osagactx
         .nexus()
-        .create_instance_v2p_mappings(&opctx, instance_id, sled_uuid)
+        .create_instance_v2p_mappings(&opctx, instance_id, sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -474,7 +484,8 @@ async fn sis_v2p_ensure_undo(
     let params = sagactx.saga_params::<Params>()?;
     let osagactx = sagactx.user_data();
     let instance_id = params.db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let (sled_id, _zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("sled_and_zpool_ids")?;
     info!(osagactx.log(), "start saga: undoing v2p configuration";
           "instance_id" => %instance_id,
           "sled_id" => %sled_id);
@@ -505,7 +516,8 @@ async fn sis_ensure_registered(
     let db_instance =
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let instance_id = db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let (sled_id, _zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("sled_and_zpool_ids")?;
     let vmm_record = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
     let propolis_id = sagactx.lookup::<Uuid>("propolis_id")?;
 
@@ -541,7 +553,8 @@ async fn sis_ensure_registered_undo(
     let params = sagactx.saga_params::<Params>()?;
     let datastore = osagactx.datastore();
     let instance_id = params.db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let (sled_id, _zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("sled_and_zpool_ids")?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &params.serialized_authn,
@@ -657,7 +670,8 @@ async fn sis_ensure_running(
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let db_vmm = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
     let instance_id = params.db_instance.id();
-    let sled_id = sagactx.lookup::<Uuid>("sled_id")?;
+    let (sled_id, _zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("sled_and_zpool_ids")?;
     info!(osagactx.log(), "start saga: ensuring instance is running";
           "instance_id" => %instance_id,
           "sled_id" => %sled_id);
