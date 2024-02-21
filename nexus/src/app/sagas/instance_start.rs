@@ -725,7 +725,7 @@ mod test {
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project, object_create,
+        create_default_ip_pool, create_project, object_create, DiskTest,
     };
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
@@ -921,6 +921,7 @@ mod test {
     /// ensure-running node.
     #[nexus_test(server = crate::Server)]
     async fn test_ensure_running_unwind(cptestctx: &ControlPlaneTestContext) {
+        let _test = DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
         let nexus = &cptestctx.server.apictx().nexus;
         let _project_id = setup_test_project(&client).await;

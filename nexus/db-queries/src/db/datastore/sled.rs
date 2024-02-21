@@ -206,22 +206,22 @@ impl DataStore {
                         use db::schema::physical_disk::dsl as physical_disk_dsl;
                         use db::schema::zpool::dsl as zpool_dsl;
 
-                        let zpool_id = zpool_dsl::zpool
-                            // Consider only zpools (and their disks) belonging to this sled
-                            .inner_join(
-                                sled_dsl::sled
-                                    .on(zpool_dsl::sled_id.eq(sled_dsl::id)),
-                            )
-                            .inner_join(physical_disk_dsl::physical_disk.on(
-                                physical_disk_dsl::sled_id.eq(sled_dsl::id),
-                            ))
-                            // Filter out all non-U.2 disks
+                        let zpool_id = physical_disk_dsl::physical_disk
+                            // Only consider active U.2 disks from this sled
+                            .filter(physical_disk_dsl::time_deleted.is_null())
                             .filter(
                                 physical_disk_dsl::variant
                                     .eq(PhysicalDiskKind::U2),
                             )
+                            .filter(physical_disk_dsl::sled_id.eq(sled_id))
                             // TODO(https://github.com/oxidecomputer/omicron/issues/4719):
                             // Only provision to disks which we consider "in-service".
+                            .inner_join(
+                                zpool_dsl::zpool
+                                    .on(zpool_dsl::physical_disk_id
+                                        .eq(physical_disk_dsl::id)),
+                            )
+                            .filter(zpool_dsl::time_deleted.is_null())
                             .select(zpool_dsl::id)
                             .order(random())
                             .limit(1)
