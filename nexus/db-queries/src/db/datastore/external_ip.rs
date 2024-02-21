@@ -167,6 +167,23 @@ impl DataStore {
         }
     }
 
+    /// Fetch all external IP addresses of any kind for the provided service.
+    pub async fn service_lookup_external_ips(
+        &self,
+        opctx: &OpContext,
+        service_id: Uuid,
+    ) -> LookupResult<Vec<ExternalIp>> {
+        use db::schema::external_ip::dsl;
+        dsl::external_ip
+            .filter(dsl::is_service.eq(true))
+            .filter(dsl::parent_id.eq(service_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(ExternalIp::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Allocates an IP address for internal service usage.
     pub async fn allocate_service_ip(
         &self,
@@ -337,7 +354,8 @@ impl DataStore {
         service_id: Uuid,
         ip: IpAddr,
     ) -> CreateResult<ExternalIp> {
-        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
         let data = IncompleteExternalIp::for_service_explicit(
             ip_id,
             name,
@@ -361,7 +379,8 @@ impl DataStore {
         ip: IpAddr,
         port_range: (u16, u16),
     ) -> CreateResult<ExternalIp> {
-        let (.., pool) = self.ip_pools_service_lookup(opctx).await?;
+        let (authz_pool, pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::CreateChild, &authz_pool).await?;
         let data = IncompleteExternalIp::for_service_explicit_snat(
             ip_id,
             service_id,
