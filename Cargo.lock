@@ -1887,6 +1887,7 @@ dependencies = [
 name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "http 0.2.11",
  "omicron-workspace-hack",
@@ -4267,21 +4268,28 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "dns-service-client",
  "futures",
  "httptest",
+ "internal-dns",
+ "ipnet",
  "nexus-db-model",
  "nexus-db-queries",
+ "nexus-deployment",
+ "nexus-inventory",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
  "omicron-nexus",
  "omicron-rpaths",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "pq-sys",
  "reqwest",
  "sled-agent-client",
  "slog",
+ "slog-error-chain",
  "tokio",
  "uuid",
 ]

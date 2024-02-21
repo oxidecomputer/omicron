@@ -2124,6 +2124,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "internal_dns_version": {
+            "description": "internal DNS version when this blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "omicron_zones": {
             "description": "mapping: sled id -> zones deployed on each sled A sled is considered part of the control plane cluster iff it has an entry in this map.",
             "type": "object",
@@ -2156,6 +2164,7 @@
           "comment",
           "creator",
           "id",
+          "internal_dns_version",
           "omicron_zones",
           "time_created",
           "zones_in_service"
@@ -2178,6 +2187,14 @@
             "type": "string",
             "format": "uuid"
           },
+          "internal_dns_version": {
+            "description": "internal DNS version when this blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
@@ -2194,6 +2211,7 @@
           "comment",
           "creator",
           "id",
+          "internal_dns_version",
           "time_created"
         ]
       },
