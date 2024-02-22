@@ -314,20 +314,26 @@ impl Node {
     }
 
     // TODO: Logging?
-    fn handle_prepare_ack(&self, from: BaseboardId, epoch: Epoch) {
-        // We only handle this message if we are coordinating for `epoch`
-        if let Some(coordinator_state) = &mut self.coordinator_state {
-            if coordinator_state.reconfigure.epoch == epoch {
-                coordinator_state.prepares.remove(&from);
-                if coordinator_state.prepares.is_empty() {
-                    // We are done. Inform nexus of the success.
-                    self.reply_to_nexus(
-                        coordinator_state.nexus_request_id,
-                        NexusRspKind::Prepared(epoch),
-                    );
-                }
+    // We only handle this message if we are coordinating for `epoch`
+    fn handle_prepare_ack(&mut self, from: BaseboardId, epoch: Epoch) {
+        let Some(mut coordinator_state) = self.coordinator_state.take() else {
+            // Stale ack.
+            return;
+        };
+        if coordinator_state.reconfigure.epoch == epoch {
+            coordinator_state.prepares.remove(&from);
+            if coordinator_state.prepares.is_empty() {
+                // We are done. Inform nexus of the success.
+                self.reply_to_nexus(
+                    coordinator_state.nexus_request_id,
+                    NexusRspKind::Prepared(epoch),
+                );
+                // Do not put the coordinator_state back. We are done.
+                return;
             }
         }
+
+        self.coordinator_state = Some(coordinator_state);
     }
 
     /// Generate a new rack secret for the given epoch, encrypt the old one with
