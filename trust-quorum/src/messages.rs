@@ -81,6 +81,8 @@ pub enum NexusRspKind {
     LrtqShareDigest(ShareDigest),
     UpgradeFromLrtqAck { upgrade_id: Uuid },
     CancelUpgradeFromLrtqAck { upgrade_id: Uuid },
+    // A `PrepareMsg` was sent from the coordinator and all nodes ack'd
+    Prepared(Epoch),
     Committed(CommittedMsg),
     Error(NexusRspError),
     Timeout,
@@ -169,11 +171,11 @@ pub struct CancelUpgradeFromLrtqMsg {
 }
 
 #[derive(
-    Debug, Clone, From, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub enum PeerMsg {
     Prepare(PrepareMsg),
-    PrepareAck,
+    PrepareAck(Epoch),
     Commit(CommitMsg),
     Committed(CommittedMsg),
 

@@ -295,7 +295,14 @@ impl Node {
         from: BaseboardId,
         msg: PeerMsg,
     ) -> impl Iterator<Item = Output> + '_ {
-        // TODO: Everything else
+        match msg {
+            PeerMsg::Prepare(_) => todo!(),
+            PeerMsg::PrepareAck(epoch) => self.handle_prepare_ack(from, epoch),
+            PeerMsg::Commit(_) => todo!(),
+            PeerMsg::Committed(_) => todo!(),
+            PeerMsg::GetShare(_) => todo!(),
+            PeerMsg::Share { .. } => todo!(),
+        }
         self.outgoing.drain(..)
     }
 
@@ -304,6 +311,23 @@ impl Node {
 
         // TODO: Everything else
         self.outgoing.drain(..)
+    }
+
+    // TODO: Logging?
+    fn handle_prepare_ack(&self, from: BaseboardId, epoch: Epoch) {
+        // We only handle this message if we are coordinating for `epoch`
+        if let Some(coordinator_state) = &mut self.coordinator_state {
+            if coordinator_state.reconfigure.epoch == epoch {
+                coordinator_state.prepares.remove(&from);
+                if coordinator_state.prepares.is_empty() {
+                    // We are done. Inform nexus of the success.
+                    self.reply_to_nexus(
+                        coordinator_state.nexus_request_id,
+                        NexusRspKind::Prepared(epoch),
+                    );
+                }
+            }
+        }
     }
 
     /// Generate a new rack secret for the given epoch, encrypt the old one with
@@ -440,7 +464,10 @@ impl Node {
             self.collect_shares_as_coordinator(coordinator_state);
         } else {
             for (node, prepare) in &coordinator_state.prepares {
-                self.send_to_peer(node.clone(), prepare.clone().into());
+                self.send_to_peer(
+                    node.clone(),
+                    PeerMsg::Prepare(prepare.clone()),
+                );
             }
         }
 
