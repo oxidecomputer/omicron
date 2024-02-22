@@ -728,7 +728,6 @@ pub struct InvOmicronZone {
     pub primary_service_port: SqlU16,
     pub second_service_ip: Option<IpNetwork>,
     pub second_service_port: Option<SqlU16>,
-    pub filesystem_zpool_name: Option<String>,
     pub dataset_zpool_name: Option<String>,
     pub nic_id: Option<Uuid>,
     pub dns_gz_address: Option<ipv6::Ipv6Addr>,
@@ -741,6 +740,7 @@ pub struct InvOmicronZone {
     pub snat_ip: Option<IpNetwork>,
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
+    pub filesystem_zpool_name: Option<String>,
 }
 
 impl InvOmicronZone {
@@ -760,7 +760,6 @@ impl InvOmicronZone {
             primary_service_port: zone.primary_service_port,
             second_service_ip: zone.second_service_ip,
             second_service_port: zone.second_service_port,
-            filesystem_zpool_name: zone.filesystem_zpool_name,
             dataset_zpool_name: zone.dataset_zpool_name,
             nic_id: zone.nic_id,
             dns_gz_address: zone.dns_gz_address,
@@ -773,6 +772,7 @@ impl InvOmicronZone {
             snat_ip: zone.snat_ip,
             snat_first_port: zone.snat_first_port,
             snat_last_port: zone.snat_last_port,
+            filesystem_zpool_name: zone.filesystem_zpool_name,
         })
     }
 
@@ -789,7 +789,6 @@ impl InvOmicronZone {
             primary_service_port: self.primary_service_port,
             second_service_ip: self.second_service_ip,
             second_service_port: self.second_service_port,
-            filesystem_zpool_name: self.filesystem_zpool_name,
             dataset_zpool_name: self.dataset_zpool_name,
             nic_id: self.nic_id,
             dns_gz_address: self.dns_gz_address,
@@ -802,6 +801,7 @@ impl InvOmicronZone {
             snat_ip: self.snat_ip,
             snat_first_port: self.snat_first_port,
             snat_last_port: self.snat_last_port,
+            filesystem_zpool_name: self.filesystem_zpool_name,
         };
         zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))
     }

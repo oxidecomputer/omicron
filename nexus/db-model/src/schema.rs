@@ -378,12 +378,12 @@ table! {
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         instance_id -> Uuid,
-        zpool_id -> Nullable<Uuid>,
         sled_id -> Uuid,
         propolis_ip -> Inet,
         state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
+        zpool_id -> Nullable<Uuid>,
     }
 }
 
@@ -834,10 +834,10 @@ table! {
         id -> Uuid,
         sled_id -> Uuid,
         kind -> crate::SledResourceKindEnum,
-        zpool_id -> Nullable<Uuid>,
         hardware_threads -> Int8,
         rss_ram -> Int8,
         reservoir_ram -> Int8,
+        zpool_id -> Nullable<Uuid>,
     }
 }
 
@@ -1383,7 +1383,6 @@ table! {
         primary_service_port -> Int4,
         second_service_ip -> Nullable<Inet>,
         second_service_port -> Nullable<Int4>,
-        filesystem_zpool_name -> Nullable<Text>,
         dataset_zpool_name -> Nullable<Text>,
         nic_id -> Nullable<Uuid>,
         dns_gz_address -> Nullable<Inet>,
@@ -1396,6 +1395,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_zpool_name -> Nullable<Text>,
     }
 }
 
@@ -1460,7 +1460,6 @@ table! {
         primary_service_port -> Int4,
         second_service_ip -> Nullable<Inet>,
         second_service_port -> Nullable<Int4>,
-        filesystem_zpool_name -> Nullable<Text>,
         dataset_zpool_name -> Nullable<Text>,
         bp_nic_id -> Nullable<Uuid>,
         dns_gz_address -> Nullable<Inet>,
@@ -1473,6 +1472,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_zpool_name -> Nullable<Text>,
     }
 }
 

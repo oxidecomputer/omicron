@@ -462,9 +462,9 @@ mod test {
                     constraints,
                 )
                 .await
-                .expect(&format!(
-                    "Should have succeeded allocating resource {i} / 4"
-                ));
+                .unwrap_or_else(|_| {
+                    panic!("Should have succeeded allocating resource {i} / 4")
+                });
             assert_eq!(
                 resource.sled_id, provisionable_sled_id,
                 "resource is always allocated to the sled with a disk"
