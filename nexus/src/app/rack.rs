@@ -885,8 +885,11 @@ impl super::Nexus {
             },
         };
 
-        let sa_url = self.get_any_sled_agent_url(opctx).await?;
+        // This timeout value is fairly arbitrary (as they usually are).  As of
+        // this writing, this operation is known to take close to two minutes on
+        // production hardware.
         let dur = std::time::Duration::from_secs(300);
+        let sa_url = self.get_any_sled_agent_url(opctx).await?;
         let reqwest_client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
             .timeout(dur)
