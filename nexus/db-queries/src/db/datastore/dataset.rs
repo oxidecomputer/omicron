@@ -53,11 +53,12 @@ impl DataStore {
     ) -> CreateResult<Dataset> {
         use db::schema::dataset::dsl;
 
+        let dataset_id = dataset.id();
         let zpool_id = dataset.pool_id;
         Zpool::insert_resource(
             zpool_id,
             diesel::insert_into(dsl::dataset)
-                .values(dataset.clone())
+                .values(dataset)
                 .on_conflict(dsl::id)
                 .do_update()
                 .set((
@@ -81,7 +82,46 @@ impl DataStore {
                 e,
                 ErrorHandler::Conflict(
                     ResourceType::Dataset,
-                    &dataset.id().to_string(),
+                    &dataset_id.to_string(),
+                ),
+            ),
+        })
+    }
+
+    /// Stores a new dataset in the database, but only if a dataset with the
+    /// given `id` does not already exist
+    ///
+    /// Does not update existing rows. If a dataset with the given ID already
+    /// exists, returns `Ok(None)`.
+    pub async fn dataset_insert_if_not_exists(
+        &self,
+        dataset: Dataset,
+    ) -> CreateResult<Option<Dataset>> {
+        use db::schema::dataset::dsl;
+
+        let dataset_id = dataset.id();
+        let zpool_id = dataset.pool_id;
+        Zpool::insert_resource(
+            zpool_id,
+            diesel::insert_into(dsl::dataset)
+                .values(dataset)
+                .on_conflict(dsl::id)
+                .do_nothing(),
+        )
+        .insert_and_get_optional_result_async(
+            &*self.pool_connection_unauthorized().await?,
+        )
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::Zpool,
+                lookup_type: LookupType::ById(zpool_id),
+            },
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::Dataset,
+                    &dataset_id.to_string(),
                 ),
             ),
         })
@@ -143,5 +183,132 @@ impl DataStore {
         }
 
         Ok(all_datasets)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::datastore::datastore_test;
+    use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledSystemHardware;
+    use nexus_db_model::SledUpdate;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_insert_if_not_exists() {
+        let logctx = dev::test_setup_log("inventory_insert");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let opctx = &opctx;
+
+        // There should be no datasets initially.
+        assert_eq!(
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            []
+        );
+
+        // Create a fake sled that holds our fake zpool.
+        let sled_id = Uuid::new_v4();
+        let sled = SledUpdate::new(
+            sled_id,
+            "[::1]:0".parse().unwrap(),
+            SledBaseboard {
+                serial_number: "test-sn".to_string(),
+                part_number: "test-pn".to_string(),
+                revision: 0,
+            },
+            SledSystemHardware {
+                is_scrimlet: false,
+                usable_hardware_threads: 128,
+                usable_physical_ram: (64 << 30).try_into().unwrap(),
+                reservoir_size: (16 << 30).try_into().unwrap(),
+            },
+            Uuid::new_v4(),
+        );
+        datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+
+        // Create a fake zpool that backs our fake datasets.
+        let zpool_id = Uuid::new_v4();
+        let zpool = Zpool::new(
+            zpool_id,
+            sled_id,
+            Uuid::new_v4(),
+            (1 << 30).try_into().unwrap(),
+        );
+        datastore.zpool_upsert(zpool).await.expect("failed to upsert zpool");
+
+        // Inserting a new dataset should succeed.
+        let dataset1 = datastore
+            .dataset_insert_if_not_exists(Dataset::new(
+                Uuid::new_v4(),
+                zpool_id,
+                "[::1]:0".parse().unwrap(),
+                DatasetKind::Crucible,
+            ))
+            .await
+            .expect("failed to insert dataset")
+            .expect("insert found unexpected existing dataset");
+        let mut expected_datasets = vec![dataset1.clone()];
+        assert_eq!(
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            expected_datasets,
+        );
+
+        // Attempting to insert another dataset with the same ID should succeed
+        // without updating the existing record. We'll check this by passing a
+        // different socket address and kind.
+        let insert_again_result = datastore
+            .dataset_insert_if_not_exists(Dataset::new(
+                dataset1.id(),
+                zpool_id,
+                "[::1]:12345".parse().unwrap(),
+                DatasetKind::Cockroach,
+            ))
+            .await
+            .expect("failed to do-nothing insert dataset");
+        assert_eq!(insert_again_result, None);
+        assert_eq!(
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            expected_datasets,
+        );
+
+        // We can can also upsert a different dataset...
+        let dataset2 = datastore
+            .dataset_upsert(Dataset::new(
+                Uuid::new_v4(),
+                zpool_id,
+                "[::1]:0".parse().unwrap(),
+                DatasetKind::Crucible,
+            ))
+            .await
+            .expect("failed to upsert dataset");
+        expected_datasets.push(dataset2.clone());
+        expected_datasets.sort_by_key(|d| d.id());
+        assert_eq!(
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            expected_datasets,
+        );
+
+        // ... and trying to `insert_if_not_exists` should similarly return
+        // `None`.
+        let insert_again_result = datastore
+            .dataset_insert_if_not_exists(Dataset::new(
+                dataset1.id(),
+                zpool_id,
+                "[::1]:12345".parse().unwrap(),
+                DatasetKind::Cockroach,
+            ))
+            .await
+            .expect("failed to do-nothing insert dataset");
+        assert_eq!(insert_again_result, None);
+        assert_eq!(
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            expected_datasets,
+        );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
