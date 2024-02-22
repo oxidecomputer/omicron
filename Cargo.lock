@@ -4271,6 +4271,7 @@ dependencies = [
  "dns-service-client",
  "futures",
  "httptest",
+ "illumos-utils",
  "internal-dns",
  "ipnet",
  "nexus-db-model",
