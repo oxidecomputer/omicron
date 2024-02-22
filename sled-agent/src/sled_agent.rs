@@ -11,7 +11,7 @@ use crate::bootstrap::early_networking::{
 };
 use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
-use crate::instance_manager::{InstanceManager, ReservoirMode};
+use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
@@ -25,6 +25,7 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
 use crate::updates::{ConfigUpdates, UpdateManager};
+use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
@@ -413,6 +414,19 @@ impl SledAgent {
             .map_err(|_| ())
             .expect("Failed to send to StorageMonitor");
 
+        // Configure the VMM reservoir as either a percentage of DRAM or as an
+        // exact size in MiB.
+        let reservoir_mode = ReservoirMode::from_config(
+            config.vmm_reservoir_percentage,
+            config.vmm_reservoir_size_mb,
+        );
+
+        let vmm_reservoir_manager = VmmReservoirManager::spawn(
+            &log,
+            long_running_task_handles.hardware_manager.clone(),
+            reservoir_mode,
+        );
+
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
@@ -421,40 +435,8 @@ impl SledAgent {
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
             ZoneBuilderFactory::default(),
+            vmm_reservoir_manager,
         )?;
-
-        // Configure the VMM reservoir as either a percentage of DRAM or as an
-        // exact size in MiB.
-        let reservoir_mode = match (
-            config.vmm_reservoir_percentage,
-            config.vmm_reservoir_size_mb,
-        ) {
-            (None, None) => ReservoirMode::None,
-            (Some(p), None) => ReservoirMode::Percentage(p),
-            (None, Some(mb)) => ReservoirMode::Size(mb),
-            (Some(_), Some(_)) => panic!(
-                "only one of vmm_reservoir_percentage and \
-                vmm_reservoir_size_mb is allowed"
-            ),
-        };
-
-        match reservoir_mode {
-            ReservoirMode::None => warn!(log, "Not using VMM reservoir"),
-            ReservoirMode::Size(0) | ReservoirMode::Percentage(0) => {
-                warn!(log, "Not using VMM reservoir (size 0 bytes requested)")
-            }
-            _ => {
-                instances
-                    .set_reservoir_size(
-                        &long_running_task_handles.hardware_manager,
-                        reservoir_mode,
-                    )
-                    .map_err(|e| {
-                        error!(log, "Failed to setup VMM reservoir: {e}");
-                        e
-                    })?;
-            }
-        }
 
         let update_config = ConfigUpdates {
             zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),

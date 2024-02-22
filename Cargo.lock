@@ -5239,6 +5239,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "flate2",
+ "flume",
  "futures",
  "gateway-client",
  "glob",

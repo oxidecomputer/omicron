@@ -13,16 +13,16 @@ use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse,
 };
+use crate::vmm_reservoir::VmmReservoirManagerHandle;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
+use omicron_common::api::external::ByteCount;
 
 use anyhow::anyhow;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
-use illumos_utils::vmm_reservoir;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
@@ -30,7 +30,7 @@ use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -47,12 +47,6 @@ pub enum Error {
 
     #[error("OPTE port management error: {0}")]
     Opte(#[from] illumos_utils::opte::Error),
-
-    #[error("Failed to create reservoir: {0}")]
-    Reservoir(#[from] vmm_reservoir::Error),
-
-    #[error("Invalid reservoir configuration: {0}")]
-    ReservoirConfig(String),
 
     #[error("Cannot find data link: {0}")]
     Underlay(#[from] sled_hardware::underlay::Error),
@@ -72,12 +66,6 @@ pub enum Error {
     RequestDropped(#[from] oneshot::error::RecvError),
 }
 
-pub enum ReservoirMode {
-    None,
-    Size(u32),
-    Percentage(u8),
-}
-
 pub(crate) struct InstanceManagerServices {
     pub nexus_client: NexusClientWithResolver,
     pub vnic_allocator: VnicAllocator<Etherstub>,
@@ -90,14 +78,8 @@ pub(crate) struct InstanceManagerServices {
 // Describes the internals of the "InstanceManager", though most of the
 // instance manager's state exists within the "InstanceManagerRunner" structure.
 struct InstanceManagerInternal {
-    log: Logger,
     tx: mpsc::Sender<InstanceManagerRequest>,
-    // NOTE: Arguably, this field could be "owned" by the InstanceManagerRunner.
-    // It was not moved there, and the reservoir functions were not converted to
-    // use the message-passing interface (see: "InstanceManagerRequest") because
-    // callers of "get/set reservoir size" are not async, and (in the case of
-    // getting the size) they also do not expect a "Result" type.
-    reservoir_size: Mutex<ByteCount>,
+    vmm_reservoir_manager: VmmReservoirManagerHandle,
 
     #[allow(dead_code)]
     runner_handle: tokio::task::JoinHandle<()>,
@@ -110,6 +92,7 @@ pub struct InstanceManager {
 
 impl InstanceManager {
     /// Initializes a new [`InstanceManager`] object.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         log: Logger,
         nexus_client: NexusClientWithResolver,
@@ -118,6 +101,7 @@ impl InstanceManager {
         storage: StorageHandle,
         zone_bundler: ZoneBundler,
         zone_builder_factory: ZoneBuilderFactory,
+        vmm_reservoir_manager: VmmReservoirManagerHandle,
     ) -> Result<InstanceManager, Error> {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (terminate_tx, terminate_rx) = mpsc::unbounded_channel();
@@ -142,89 +126,11 @@ impl InstanceManager {
 
         Ok(Self {
             inner: Arc::new(InstanceManagerInternal {
-                log,
                 tx,
-                // no reservoir size set on startup
-                reservoir_size: Mutex::new(ByteCount::from_kibibytes_u32(0)),
+                vmm_reservoir_manager,
                 runner_handle,
             }),
         })
-    }
-
-    /// Sets the VMM reservoir to the requested percentage of usable physical
-    /// RAM or to a size in MiB. Either mode will round down to the nearest
-    /// aligned size required by the control plane.
-    pub fn set_reservoir_size(
-        &self,
-        hardware: &sled_hardware::HardwareManager,
-        mode: ReservoirMode,
-    ) -> Result<(), Error> {
-        let hardware_physical_ram_bytes = hardware.usable_physical_ram_bytes();
-        let req_bytes = match mode {
-            ReservoirMode::None => return Ok(()),
-            ReservoirMode::Size(mb) => {
-                let bytes = ByteCount::from_mebibytes_u32(mb).to_bytes();
-                if bytes > hardware_physical_ram_bytes {
-                    return Err(Error::ReservoirConfig(format!(
-                        "cannot specify a reservoir of {bytes} bytes when \
-                        physical memory is {hardware_physical_ram_bytes} bytes",
-                    )));
-                }
-                bytes
-            }
-            ReservoirMode::Percentage(percent) => {
-                if !matches!(percent, 1..=99) {
-                    return Err(Error::ReservoirConfig(format!(
-                        "VMM reservoir percentage of {} must be between 0 and \
-                        100",
-                        percent
-                    )));
-                };
-                (hardware_physical_ram_bytes as f64 * (percent as f64 / 100.0))
-                    .floor() as u64
-            }
-        };
-
-        let req_bytes_aligned = vmm_reservoir::align_reservoir_size(req_bytes);
-
-        if req_bytes_aligned == 0 {
-            warn!(
-                self.inner.log,
-                "Requested reservoir size of {} bytes < minimum aligned size \
-                of {} bytes",
-                req_bytes,
-                vmm_reservoir::RESERVOIR_SZ_ALIGN
-            );
-            return Ok(());
-        }
-
-        // The max ByteCount value is i64::MAX, which is ~8 million TiB.
-        // As this value is either a percentage of DRAM or a size in MiB
-        // represented as a u32, constructing this should always work.
-        let reservoir_size = ByteCount::try_from(req_bytes_aligned).unwrap();
-        if let ReservoirMode::Percentage(percent) = mode {
-            info!(
-                self.inner.log,
-                "{}% of {} physical ram = {} bytes)",
-                percent,
-                hardware_physical_ram_bytes,
-                req_bytes,
-            );
-        }
-        info!(
-            self.inner.log,
-            "Setting reservoir size to {reservoir_size} bytes"
-        );
-        vmm_reservoir::ReservoirControl::set(reservoir_size)?;
-
-        *self.inner.reservoir_size.lock().unwrap() = reservoir_size;
-
-        Ok(())
-    }
-
-    /// Returns the last-set size of the reservoir
-    pub fn reservoir_size(&self) -> ByteCount {
-        *self.inner.reservoir_size.lock().unwrap()
     }
 
     pub async fn ensure_registered(
@@ -378,6 +284,10 @@ impl InstanceManager {
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
+    }
+
+    pub fn reservoir_size(&self) -> ByteCount {
+        self.inner.vmm_reservoir_manager.reservoir_size()
     }
 }
 
