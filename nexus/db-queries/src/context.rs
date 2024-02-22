@@ -303,10 +303,17 @@ impl OpContext {
     ///   either.  Clients and proxies often don't expect long requests and
     ///   apply aggressive timeouts.  Depending on the HTTP version, a
     ///   long-running request can tie up the TCP connection.
+    ///
+    /// We shouldn't allow these in either internal or external API handlers,
+    /// but we currently have some internal APIs for exercising some expensive
+    /// blueprint operations and so we allow these cases here.
     pub fn check_complex_operations_allowed(&self) -> Result<(), Error> {
         let api_handler = match self.kind {
-            OpKind::ExternalApiRequest | OpKind::InternalApiRequest => true,
-            OpKind::Saga | OpKind::Background | OpKind::Test => false,
+            OpKind::ExternalApiRequest => true,
+            OpKind::InternalApiRequest
+            | OpKind::Saga
+            | OpKind::Background
+            | OpKind::Test => false,
         };
         if api_handler {
             Err(Error::internal_error(
