@@ -282,7 +282,8 @@ impl DataStore {
                         .await?;
                 }
 
-                self.dns_update(nexus_opctx, &conn, dns_update).await?;
+                self.dns_update_incremental(nexus_opctx, &conn, dns_update)
+                    .await?;
 
                 self.silo_quotas_create(
                     &conn,
@@ -420,7 +421,7 @@ impl DataStore {
             )
             .await?;
 
-            self.dns_update(dns_opctx, &conn, dns_update).await?;
+            self.dns_update_incremental(dns_opctx, &conn, dns_update).await?;
 
             info!(opctx.log, "deleted silo {}", id);
 

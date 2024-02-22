@@ -1424,6 +1424,8 @@ table! {
         time_created -> Timestamptz,
         creator -> Text,
         comment -> Text,
+
+        internal_dns_version -> Int8,
     }
 }
 

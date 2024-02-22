@@ -23,6 +23,7 @@ use uuid::Uuid;
 pub struct Blueprint {
     pub id: Uuid,
     pub parent_blueprint_id: Option<Uuid>,
+    pub internal_dns_version: Generation,
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
@@ -33,6 +34,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
         Self {
             id: bp.id,
             parent_blueprint_id: bp.parent_blueprint_id,
+            internal_dns_version: Generation(bp.internal_dns_version),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
@@ -45,6 +47,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
         Self {
             id: value.id,
             parent_blueprint_id: value.parent_blueprint_id,
+            internal_dns_version: *value.internal_dns_version,
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,
