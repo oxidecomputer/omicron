@@ -3289,7 +3289,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     time_created TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ,
     instance_id UUID NOT NULL,
-    zpool_id UUID NOT NULL,
+    zpool_id UUID,
     state omicron.public.instance_state NOT NULL,
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
