@@ -3301,7 +3301,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_by_zpool ON omicron.public.vmm (
     zpool_id,
     id
-);
+) WHERE time_deleted IS NULL;
 
 /*
  * A special view of an instance provided to operators for insights into what's

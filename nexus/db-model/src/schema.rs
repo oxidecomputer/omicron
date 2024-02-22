@@ -378,7 +378,7 @@ table! {
         time_created -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
         instance_id -> Uuid,
-        zpool_id -> Uuid,
+        zpool_id -> Nullable<Uuid>,
         sled_id -> Uuid,
         propolis_ip -> Inet,
         state -> crate::InstanceStateEnum,

@@ -1214,6 +1214,12 @@ impl super::Nexus {
         };
 
         let sa = self.sled_client(&initial_vmm.sled_id).await?;
+
+        let zpool_id = initial_vmm.zpool_id.ok_or_else(|| {
+            Error::internal_error(
+                "Registering instances requires a Nexus-supplied zpool",
+            )
+        })?;
         let instance_register_result = sa
             .instance_register(
                 &db_instance.id(),
@@ -1227,9 +1233,7 @@ impl super::Nexus {
                         PROPOLIS_PORT,
                     )
                     .to_string(),
-                    filesystem_pool: ZpoolName::new_external(
-                        initial_vmm.zpool_id,
-                    ),
+                    filesystem_pool: ZpoolName::new_external(zpool_id),
                 },
             )
             .await
