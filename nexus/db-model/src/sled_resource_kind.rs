@@ -24,8 +24,8 @@ impl_enum_type!(
 impl SledResourceKind {
     pub fn wants_zpool_allocation(&self) -> bool {
         match *self {
-            Self::Instance => true,
-            _ => false,
+            Self::Instance | Self::Service => true,
+            Self::Dataset | Self::Reserved => false,
         }
     }
 }

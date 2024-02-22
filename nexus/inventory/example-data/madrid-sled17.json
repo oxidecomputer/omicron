@@ -139,7 +139,8 @@
       "id": "8fe2fb59-5a89-4d40-b47a-6d5fcfb66ddd",
       "underlay_address": "fd00:1122:3344:103::3",
       "filesystem_pool": "oxp_d130514f-6532-4c02-ac9f-c4958052c669",
-      "zone_type": { "type": "cockroach_db",
+      "zone_type": {
+        "type": "cockroach_db",
         "address": "[fd00:1122:3344:103::3]:32221",
         "dataset": {
           "pool_name": "oxp_d130514f-6532-4c02-ac9f-c4958052c669"

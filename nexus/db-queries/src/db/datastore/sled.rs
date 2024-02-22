@@ -98,6 +98,7 @@ impl DataStore {
             "resource_id" => resource_id.to_string(),
             "resource_kind" => format!("{:?}", resource_kind),
         ));
+        info!(log, "sled_reservation_create");
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
@@ -165,13 +166,6 @@ impl DataStore {
                         ) + resources.reservoir_ram)
                             .le(sled_dsl::reservoir_size);
 
-                    // Generate a query describing all of the sleds that have space
-                    // for this reservation.
-                    let has_any_valid_u2s = physical_disk_dsl::physical_disk
-                        .filter(physical_disk_dsl::time_deleted.is_null())
-                        .filter(physical_disk_dsl::sled_id.eq(sled_dsl::id))
-                        .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2));
-
                     let mut sled_targets =
                         sled_dsl::sled
                             .left_join(
@@ -183,8 +177,6 @@ impl DataStore {
                             .filter(sled_dsl::provision_state.eq(
                                 db::model::SledProvisionState::Provisionable,
                             ))
-                            // Only consider sleds with a valid U.2
-                            .filter(diesel::dsl::exists(has_any_valid_u2s))
                             .group_by(sled_dsl::id)
                             .having(
                                 sled_has_space_for_threads
@@ -193,6 +185,18 @@ impl DataStore {
                             )
                             .select(sled_dsl::id)
                             .into_boxed();
+
+                    if resource_kind.wants_zpool_allocation() {
+                        // Generate a query describing all of the sleds that have space
+                        // for this reservation.
+                        let has_any_valid_u2s = physical_disk_dsl::physical_disk
+                            .filter(physical_disk_dsl::time_deleted.is_null())
+                            .filter(physical_disk_dsl::sled_id.eq(sled_dsl::id))
+                            .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2));
+
+                        sled_targets = sled_targets
+                            .filter(diesel::dsl::exists(has_any_valid_u2s));
+                    }
 
                     // Further constrain the sled IDs according to any caller-
                     // supplied constraints.
@@ -566,7 +570,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let (sled_update, _pool_id) =
+        let (sled_update, non_provisionable_pool_id) =
             add_new_sled_with_disk_and_zpool(&datastore, &opctx).await;
         let non_provisionable_sled_id = sled_update.id();
 
@@ -619,7 +623,9 @@ mod test {
             .sled_list(&opctx, &first_page(NonZeroU32::new(10).unwrap()))
             .await
             .unwrap();
-        println!("sleds: {:?}", sleds);
+        println!("sleds: {:#?}", sleds);
+        println!("provisionable pool: {:?}", pool_id);
+        println!("non-provisionable pool: {:?}", non_provisionable_pool_id);
 
         // Try a few times to ensure that resources never get allocated to the
         // non-provisionable sled.
@@ -684,7 +690,7 @@ mod test {
         let pool_id = Uuid::new_v4();
         let physical_disk = crate::db::model::PhysicalDisk::new(
             "vendor".to_string(),
-            "serial".to_string(),
+            format!("serial-{pool_id}"),
             "model".to_string(),
             PhysicalDiskKind::U2,
             sled_update.id(),
