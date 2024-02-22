@@ -88,22 +88,31 @@ impl DataStore {
     ) -> CreateResult<db::model::SledResource> {
         #[derive(Debug)]
         enum SledReservationError {
-            NotFound,
+            NoSledsFound,
+            NoZpoolsFound,
         }
 
         let err = OptionalError::new();
+
+        let log = self.log.new(o!(
+            "resource_id" => resource_id.to_string(),
+            "resource_kind" => format!("{:?}", resource_kind),
+        ));
 
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.transaction_retry_wrapper("sled_reservation_create")
             .transaction(&conn, |conn| {
                 // Clone variables into retryable function
+                let log = log.clone();
                 let err = err.clone();
                 let constraints = constraints.clone();
                 let mut resources = resources.clone();
 
                 async move {
                     use db::schema::sled_resource::dsl as resource_dsl;
+                    use db::schema::physical_disk::dsl as physical_disk_dsl;
+
                     // Check if resource ID already exists - if so, return it.
                     let old_resource = resource_dsl::sled_resource
                         .filter(resource_dsl::id.eq(resource_id))
@@ -113,8 +122,10 @@ impl DataStore {
                         .await?;
 
                     if !old_resource.is_empty() {
+                        info!(log, "Reservation already exists"; "sled_id" => %old_resource[0].sled_id);
                         return Ok(old_resource[0].clone());
                     }
+                    info!(log, "Reservation does not exist yet");
 
                     // If it doesn't already exist, find a sled with enough space
                     // for the resources we're requesting.
@@ -156,23 +167,30 @@ impl DataStore {
 
                     // Generate a query describing all of the sleds that have space
                     // for this reservation.
+                    let has_any_valid_u2s = physical_disk_dsl::physical_disk
+                        .filter(physical_disk_dsl::time_deleted.is_null())
+                        .filter(physical_disk_dsl::sled_id.eq(sled_dsl::id))
+                        .filter(physical_disk_dsl::variant.eq(PhysicalDiskKind::U2));
+
                     let mut sled_targets =
                         sled_dsl::sled
                             .left_join(
                                 resource_dsl::sled_resource
                                     .on(resource_dsl::sled_id.eq(sled_dsl::id)),
                             )
+                            .filter(sled_dsl::time_deleted.is_null())
+                            // Filter out sleds that are not provisionable.
+                            .filter(sled_dsl::provision_state.eq(
+                                db::model::SledProvisionState::Provisionable,
+                            ))
+                            // Only consider sleds with a valid U.2
+                            .filter(diesel::dsl::exists(has_any_valid_u2s))
                             .group_by(sled_dsl::id)
                             .having(
                                 sled_has_space_for_threads
                                     .and(sled_has_space_for_rss)
                                     .and(sled_has_space_in_reservoir),
                             )
-                            .filter(sled_dsl::time_deleted.is_null())
-                            // Filter out sleds that are not provisionable.
-                            .filter(sled_dsl::provision_state.eq(
-                                db::model::SledProvisionState::Provisionable,
-                            ))
                             .select(sled_dsl::id)
                             .into_boxed();
 
@@ -181,6 +199,7 @@ impl DataStore {
                     if let Some(must_select_from) =
                         constraints.must_select_from()
                     {
+                        info!(log, "Constraining sleds to the following targets"; "sleds" => ?must_select_from);
                         sled_targets = sled_targets.filter(
                             sled_dsl::id.eq_any(must_select_from.to_vec()),
                         );
@@ -194,16 +213,18 @@ impl DataStore {
                         .await?;
 
                     if sled_targets.is_empty() {
-                        return Err(err.bail(SledReservationError::NotFound));
+                        warn!(log, "No target sleds found");
+                        return Err(err.bail(SledReservationError::NoSledsFound));
                     }
                     let sled_id = sled_targets[0];
+                    info!(log, "Found sled for reservation"; "sled_id" => ?sled_id);
 
                     // If we need to allocate a zpool for this reservation, do
                     // so now that we've picked the target sled.
                     resources.zpool_id = if resource_kind
                         .wants_zpool_allocation()
                     {
-                        use db::schema::physical_disk::dsl as physical_disk_dsl;
+                        info!(log, "Reservation needs zpool");
                         use db::schema::zpool::dsl as zpool_dsl;
 
                         let zpool_id = physical_disk_dsl::physical_disk
@@ -226,7 +247,21 @@ impl DataStore {
                             .order(random())
                             .limit(1)
                             .get_result_async::<Uuid>(&conn)
-                            .await?;
+                            .await
+                            .map_err(|e| {
+                                warn!(log, "Reservation failed to allocate zpool");
+                                match e {
+                                    // We should avoid propagating this error to
+                                    // users - the check above to query for
+                                    // valid sleds should only return sleds with
+                                    // valid physical disks - but this acts as a
+                                    // fail-safe.
+                                    diesel::result::Error::NotFound => err.bail(SledReservationError::NoZpoolsFound),
+                                    _ => e,
+                                }
+                            })?;
+
+                        info!(log, "Reservation found zpool"; "zpool_id" => ?zpool_id);
                         Some(zpool_id)
                     } else {
                         None
@@ -252,13 +287,21 @@ impl DataStore {
             .map_err(|e| {
                 if let Some(err) = err.take() {
                     match err {
-                        SledReservationError::NotFound => {
+                        SledReservationError::NoSledsFound => {
                             return external::Error::insufficient_capacity(
                                 "No sleds can fit the requested instance",
                                 "No sled targets found that had enough \
                                  capacity to fit the requested instance.",
                             );
-                        }
+                        },
+                        SledReservationError::NoZpoolsFound => {
+                            return external::Error::insufficient_capacity(
+                                "Target sled for instance allocation missing storage",
+                                "Although we found a sled which could fit this instance, \
+                                it does not have any valid zpools.",
+                            );
+                        },
+
                     }
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)
@@ -322,7 +365,6 @@ mod test {
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use nexus_test_utils::db::test_setup_database;
-    use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use std::net::{Ipv6Addr, SocketAddrV6};
@@ -387,6 +429,135 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    #[tokio::test]
+    async fn sled_reservation_multiple_provisions_one_sled() {
+        let logctx = dev::test_setup_log(
+            "sled_reservation_multiple_provisions_one_sled",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let resources = db::model::Resources::new(
+            1,
+            // Just require the bare non-zero amount of RAM.
+            ByteCount::try_from(1024).unwrap(),
+            ByteCount::try_from(1024).unwrap(),
+        );
+
+        // Create one sled that we expect to be a target for future sled
+        // reservations.
+        let (sled_update, pool_id) =
+            add_new_sled_with_disk_and_zpool(&datastore, &opctx).await;
+        let provisionable_sled_id = sled_update.id();
+
+        // Create several reservations on this sled without removing them.
+        for i in 0..4 {
+            let constraints = db::model::SledReservationConstraints::none();
+            let resource = datastore
+                .sled_reservation_create(
+                    &opctx,
+                    Uuid::new_v4(),
+                    db::model::SledResourceKind::Instance,
+                    resources.clone(),
+                    constraints,
+                )
+                .await
+                .expect(&format!(
+                    "Should have succeeded allocating resource {i} / 4"
+                ));
+            assert_eq!(
+                resource.sled_id, provisionable_sled_id,
+                "resource is always allocated to the sled with a disk"
+            );
+            assert_eq!(
+                resource.resources.zpool_id.unwrap(),
+                pool_id,
+                "unexpected zpool allocation",
+            );
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn sled_reservation_around_diskless_sleds_still_picks_one_with_disk()
+    {
+        let logctx = dev::test_setup_log(
+            "sled_reservation_around_diskless_sleds_still_picks_one_with_disk",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create some sleds which do not have physical disks.
+        //
+        // These should not be selected as allocation targets, as we would
+        // not be able to place their root filesystems on a disk.
+        for _ in 0..5 {
+            let sled_update = test_new_sled_update();
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        }
+
+        // This should be an error since there are no sleds with disks.
+        let resources = db::model::Resources::new(
+            1,
+            // Just require the bare non-zero amount of RAM.
+            ByteCount::try_from(1024).unwrap(),
+            ByteCount::try_from(1024).unwrap(),
+        );
+        let constraints = db::model::SledReservationConstraints::none();
+        let error = datastore
+            .sled_reservation_create(
+                &opctx,
+                Uuid::new_v4(),
+                db::model::SledResourceKind::Instance,
+                resources.clone(),
+                constraints,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, external::Error::InsufficientCapacity { .. }));
+
+        // Create one sled that we expect to be a target for future sled
+        // reservations.
+        let (sled_update, pool_id) =
+            add_new_sled_with_disk_and_zpool(&datastore, &opctx).await;
+        let provisionable_sled_id = sled_update.id();
+
+        // Create a bunch of reservations -- they should all land on the one
+        // sled that has a physical disk.
+        for _ in 0..10 {
+            let constraints = db::model::SledReservationConstraints::none();
+            let resource = datastore
+                .sled_reservation_create(
+                    &opctx,
+                    Uuid::new_v4(),
+                    db::model::SledResourceKind::Instance,
+                    resources.clone(),
+                    constraints,
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resource.sled_id, provisionable_sled_id,
+                "resource is always allocated to the sled with a disk"
+            );
+            assert_eq!(
+                resource.resources.zpool_id.unwrap(),
+                pool_id,
+                "unexpected zpool allocation",
+            );
+
+            datastore
+                .sled_reservation_delete(&opctx, resource.id)
+                .await
+                .unwrap();
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
     /// Test that new reservations aren't created on non-provisionable sleds.
     #[tokio::test]
     async fn sled_reservation_create_non_provisionable() {
@@ -395,12 +566,12 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        let sled_update = test_new_sled_update();
-        let non_provisionable_sled =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let (sled_update, _pool_id) =
+            add_new_sled_with_disk_and_zpool(&datastore, &opctx).await;
+        let non_provisionable_sled_id = sled_update.id();
 
         let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
-            .sled_id(non_provisionable_sled.id())
+            .sled_id(non_provisionable_sled_id)
             .fetch_for(authz::Action::Modify)
             .await
             .unwrap();
@@ -440,9 +611,9 @@ mod test {
         assert!(matches!(error, external::Error::InsufficientCapacity { .. }));
 
         // Now add a provisionable sled and try again.
-        let sled_update = test_new_sled_update();
-        let provisionable_sled =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+        let (sled_update, pool_id) =
+            add_new_sled_with_disk_and_zpool(&datastore, &opctx).await;
+        let provisionable_sled_id = sled_update.id();
 
         let sleds = datastore
             .sled_list(&opctx, &first_page(NonZeroU32::new(10).unwrap()))
@@ -465,9 +636,13 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(
-                resource.sled_id,
-                provisionable_sled.id(),
+                resource.sled_id, provisionable_sled_id,
                 "resource is always allocated to the provisionable sled"
+            );
+            assert_eq!(
+                resource.resources.zpool_id.unwrap(),
+                pool_id,
+                "unexpected zpool allocation",
             );
 
             datastore
@@ -490,6 +665,46 @@ mod test {
             sled_system_hardware_for_test(),
             rack_id(),
         )
+    }
+
+    // This helper creates:
+    // - A new Sled
+    // - ... With one physical disk (a U.2)
+    // - ... And a Zpool within that disk
+    //
+    // All within the database. This should be sufficient for a simple sled
+    // reservation request to succeed.
+    async fn add_new_sled_with_disk_and_zpool(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> (SledUpdate, Uuid) {
+        let sled_update = test_new_sled_update();
+        let _sled = datastore.sled_upsert(sled_update.clone()).await.unwrap();
+
+        let pool_id = Uuid::new_v4();
+        let physical_disk = crate::db::model::PhysicalDisk::new(
+            "vendor".to_string(),
+            "serial".to_string(),
+            "model".to_string(),
+            PhysicalDiskKind::U2,
+            sled_update.id(),
+        );
+
+        datastore
+            .physical_disk_upsert(&opctx, physical_disk.clone())
+            .await
+            .unwrap();
+        datastore
+            .zpool_upsert(crate::db::model::Zpool::new(
+                pool_id,
+                sled_update.id(),
+                physical_disk.uuid(),
+                ByteCount::try_from(1 << 30).unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        (sled_update, pool_id)
     }
 
     /// Returns pagination parameters to fetch the first page of results for a
