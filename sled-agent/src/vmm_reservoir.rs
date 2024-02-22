@@ -239,7 +239,7 @@ impl VmmReservoirManager {
         let log = log.new(o!("component" => "VmmReservoirManager"));
         // We use a rendevous channel to only allow one request at a time.
         // Resizing a reservoir may block the thread for up to two minutes, so
-        // we want to ensure, it is complete before allowing another call.
+        // we want to ensure it is complete before allowing another call.
         let (tx, rx) = flume::bounded(0);
         let reservoir_size = Arc::new(AtomicU64::new(0));
         let manager = VmmReservoirManager {
@@ -247,7 +247,6 @@ impl VmmReservoirManager {
             rx,
             log,
         };
-
         let _manager_handle = thread::spawn(move || {
             manager.run(hardware_manager, reservoir_mode)
         });

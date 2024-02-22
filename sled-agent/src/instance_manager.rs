@@ -286,6 +286,7 @@ impl InstanceManager {
         rx.await?
     }
 
+    /// Returns the last-set size of the reservoir
     pub fn reservoir_size(&self) -> ByteCount {
         self.inner.vmm_reservoir_manager.reservoir_size()
     }
