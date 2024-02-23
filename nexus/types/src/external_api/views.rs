@@ -470,7 +470,7 @@ impl SledProvisionPolicy {
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
 )]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum SledPolicy {
     /// The operator has indicated that the sled is in-service.
     InService {
