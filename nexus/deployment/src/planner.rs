@@ -12,7 +12,7 @@ use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
-use nexus_types::external_api::views::SledProvisionState;
+use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use slog::{info, warn, Logger};
@@ -84,6 +84,17 @@ impl<'a> Planner<'a> {
         let mut sleds_ineligible_for_services = BTreeSet::new();
 
         for (sled_id, sled_info) in &self.policy.sleds {
+            // Decommissioned sleds don't get any services. (This is an
+            // explicit match so that when more states are added, this fails to
+            // compile.)
+            match sled_info.state {
+                SledState::Decommissioned => {
+                    sleds_ineligible_for_services.insert(*sled_id);
+                    continue;
+                }
+                SledState::Active => {}
+            }
+
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
             // for that to succeed and synchronize the clock before we can
@@ -175,10 +186,8 @@ impl<'a> Planner<'a> {
         // assumption that there is something amiss with them.
         sleds_ineligible_for_services.extend(
             self.policy.sleds.iter().filter_map(|(sled_id, sled_info)| {
-                match sled_info.provision_state {
-                    SledProvisionState::Provisionable => None,
-                    SledProvisionState::NonProvisionable => Some(*sled_id),
-                }
+                (!sled_info.is_eligible_for_discretionary_services())
+                    .then_some(*sled_id)
             }),
         );
 
@@ -311,9 +320,12 @@ mod test {
     use crate::blueprint_builder::test::example;
     use crate::blueprint_builder::test::policy_add_sled;
     use crate::blueprint_builder::test::verify_blueprint;
+    use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
     use nexus_inventory::now_db_precision;
-    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledProvisionPolicy;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZoneType;
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
@@ -328,7 +340,7 @@ mod test {
         let internal_dns_version = Generation::new();
 
         // Use our example inventory collection.
-        let (mut collection, mut policy) = example();
+        let (mut collection, mut policy) = example(DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.  We don't bother verifying it here
         // because there's a separate test for that.
@@ -509,7 +521,7 @@ mod test {
         // Use our example inventory collection as a starting point, but strip
         // it down to just one sled.
         let (sled_id, collection, mut policy) = {
-            let (mut collection, mut policy) = example();
+            let (mut collection, mut policy) = example(DEFAULT_N_SLEDS);
 
             // Pick one sled ID to keep and remove the rest.
             let keep_sled_id =
@@ -593,7 +605,7 @@ mod test {
         );
 
         // Use our example inventory collection as a starting point.
-        let (collection, mut policy) = example();
+        let (collection, mut policy) = example(DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
@@ -674,7 +686,12 @@ mod test {
         );
 
         // Use our example inventory collection as a starting point.
-        let (collection, mut policy) = example();
+        //
+        // Request two extra sleds here so we test non-provisionable, expunged,
+        // and decommissioned sleds. (When we add more kinds of
+        // non-provisionable states in the future, we'll have to add more
+        // sleds.)
+        let (collection, mut policy) = example(5);
 
         // Build the initial blueprint.
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
@@ -685,8 +702,8 @@ mod test {
         )
         .expect("failed to create initial blueprint");
 
-        // This blueprint should only have 3 Nexus zones: one on each sled.
-        assert_eq!(blueprint1.omicron_zones.len(), 3);
+        // This blueprint should only have 5 Nexus zones: one on each sled.
+        assert_eq!(blueprint1.omicron_zones.len(), 5);
         for sled_config in blueprint1.omicron_zones.values() {
             assert_eq!(
                 sled_config
@@ -698,16 +715,39 @@ mod test {
             );
         }
 
-        // Arbitrarily choose one of the sleds and mark it non-provisionable.
+        // Arbitrarily choose some of the sleds and mark them non-provisionable
+        // in various ways.
+        let mut sleds_iter = policy.sleds.iter_mut();
+
         let nonprovisionable_sled_id = {
-            let (sled_id, resources) =
-                policy.sleds.iter_mut().next().expect("no sleds");
-            resources.provision_state = SledProvisionState::NonProvisionable;
+            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
+            resources.policy = SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            };
+            *sled_id
+        };
+        let expunged_sled_id = {
+            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
+            resources.policy = SledPolicy::Expunged;
+            *sled_id
+        };
+        let decommissioned_sled_id = {
+            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
+            resources.state = SledState::Decommissioned;
             *sled_id
         };
 
-        // Now run the planner with a high number of target Nexus zones.
-        policy.target_nexus_zone_count = 14;
+        // Now run the planner with a high number of target Nexus zones. The
+        // number (16) is chosen such that:
+        //
+        // * we start with 5 sleds
+        // * we need to add 11 Nexus zones
+        // * there are two sleds eligible for provisioning
+        // * => 5 or 6 new Nexus zones per sled
+        //
+        // When the planner gets smarter about removing zones from expunged
+        // and/or removed sleds, we'll have to adjust this number.
+        policy.target_nexus_zone_count = 16;
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
@@ -727,13 +767,15 @@ mod test {
         let sleds = diff.sleds_changed().collect::<Vec<_>>();
 
         // Only 2 of the 3 sleds should get additional Nexus zones. We expect a
-        // total of 11 new Nexus zones, which should be spread evenly across the
+        // total of 12 new Nexus zones, which should be spread evenly across the
         // two sleds (one gets 6 and the other gets 5), while the
         // non-provisionable sled should be unchanged.
         assert_eq!(sleds.len(), 2);
         let mut total_new_nexus_zones = 0;
         for (sled_id, sled_changes) in sleds {
             assert!(sled_id != nonprovisionable_sled_id);
+            assert!(sled_id != expunged_sled_id);
+            assert!(sled_id != decommissioned_sled_id);
             assert_eq!(sled_changes.zones_removed().count(), 0);
             assert_eq!(sled_changes.zones_changed().count(), 0);
             let zones = sled_changes.zones_added().collect::<Vec<_>>();

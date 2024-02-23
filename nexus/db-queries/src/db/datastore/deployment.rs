@@ -1054,14 +1054,15 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_deployment::blueprint_builder::BlueprintBuilder;
     use nexus_deployment::blueprint_builder::Ensure;
     use nexus_inventory::now_db_precision;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
-    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
@@ -1126,7 +1127,8 @@ mod tests {
             .collect();
         let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
         SledResources {
-            provision_state: SledProvisionState::Provisionable,
+            policy: SledPolicy::provisionable(),
+            state: SledState::Active,
             zpools,
             subnet: Ipv6Subnet::new(ip),
         }

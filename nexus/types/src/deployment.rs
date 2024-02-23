@@ -11,7 +11,8 @@
 //! nexus/deployment does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
-use crate::external_api::views::SledProvisionState;
+use crate::external_api::views::SledPolicy;
+use crate::external_api::views::SledState;
 use crate::inventory::Collection;
 pub use crate::inventory::NetworkInterface;
 pub use crate::inventory::NetworkInterfaceKind;
@@ -64,8 +65,11 @@ pub struct Policy {
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone)]
 pub struct SledResources {
-    /// provision state of this sled
-    pub provision_state: SledProvisionState,
+    /// current sled policy
+    pub policy: SledPolicy,
+
+    /// current sled state
+    pub state: SledState,
 
     /// zpools on this sled
     ///
@@ -78,6 +82,17 @@ pub struct SledResources {
     /// (implicitly specifies the whole range of addresses that the planner can
     /// use for control plane components)
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
+}
+
+impl SledResources {
+    /// Returns true if the sled can have services provisioned on it that
+    /// aren't required to be on every sled.
+    ///
+    /// For example, NTP must exist on every sled, but Nexus does not have to.
+    pub fn is_eligible_for_discretionary_services(&self) -> bool {
+        self.policy.is_provisionable()
+            && self.state.is_eligible_for_discretionary_services()
+    }
 }
 
 /// Describes a complete set of software and configuration for the system
@@ -266,6 +281,7 @@ pub struct OmicronZonesDiff<'a> {
 }
 
 /// Describes a sled that appeared on both sides of a diff (possibly changed)
+#[derive(Debug)]
 pub struct DiffSledCommon<'a> {
     /// id of the sled
     pub sled_id: Uuid,

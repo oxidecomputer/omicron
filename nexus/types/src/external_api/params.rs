@@ -96,21 +96,21 @@ pub struct SledSelector {
     pub sled: Uuid,
 }
 
-/// Parameters for `sled_set_provision_state`.
+/// Parameters for `sled_set_provision_policy`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SledProvisionStateParams {
+pub struct SledProvisionPolicyParams {
     /// The provision state.
-    pub state: super::views::SledProvisionState,
+    pub state: super::views::SledProvisionPolicy,
 }
 
-/// Response to `sled_set_provision_state`.
+/// Response to `sled_set_provision_policy`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SledProvisionStateResponse {
+pub struct SledProvisionPolicyResponse {
     /// The old provision state.
-    pub old_state: super::views::SledProvisionState,
+    pub old_state: super::views::SledProvisionPolicy,
 
     /// The new provision state.
-    pub new_state: super::views::SledProvisionState,
+    pub new_state: super::views::SledProvisionPolicy,
 }
 
 pub struct SwitchSelector {

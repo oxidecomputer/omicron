@@ -22,6 +22,7 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -45,14 +46,12 @@ pub const HARDWARE_UNINITIALIZED_SLEDS: &'static str =
     "/v1/system/hardware/sleds-uninitialized";
 pub static HARDWARE_SLED_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID));
-pub static HARDWARE_SLED_PROVISION_STATE_URL: Lazy<String> = Lazy::new(|| {
-    format!("/v1/system/hardware/sleds/{}/provision-state", SLED_AGENT_UUID)
+pub static HARDWARE_SLED_PROVISION_POLICY_URL: Lazy<String> = Lazy::new(|| {
+    format!("/v1/system/hardware/sleds/{}/provision-policy", SLED_AGENT_UUID)
 });
-pub static DEMO_SLED_PROVISION_STATE: Lazy<params::SledProvisionStateParams> =
-    Lazy::new(|| {
-        params::SledProvisionStateParams {
-            state: nexus_types::external_api::views::SledProvisionState::NonProvisionable,
-        }
+pub static DEMO_SLED_PROVISION_POLICY: Lazy<params::SledProvisionPolicyParams> =
+    Lazy::new(|| params::SledProvisionPolicyParams {
+        state: SledProvisionPolicy::NonProvisionable,
     });
 
 pub static HARDWARE_SWITCH_URL: Lazy<String> =
@@ -1911,11 +1910,11 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &HARDWARE_SLED_PROVISION_STATE_URL,
+            url: &HARDWARE_SLED_PROVISION_POLICY_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Put(
-                serde_json::to_value(&*DEMO_SLED_PROVISION_STATE).unwrap()
+                serde_json::to_value(&*DEMO_SLED_PROVISION_POLICY).unwrap()
             )],
         },
 

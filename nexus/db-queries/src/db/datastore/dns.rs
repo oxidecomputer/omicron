@@ -688,7 +688,7 @@ impl DnsVersionUpdateBuilder {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::DnsVersionUpdateBuilder;
     use crate::db::DataStore;
     use crate::db::TransactionError;

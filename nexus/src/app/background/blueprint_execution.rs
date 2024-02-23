@@ -186,7 +186,8 @@ mod test {
             datastore
                 .sled_upsert(update)
                 .await
-                .expect("Failed to insert sled to db");
+                .expect("Failed to insert sled to db")
+                .unwrap();
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
