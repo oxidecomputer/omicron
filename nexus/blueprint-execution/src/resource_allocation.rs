@@ -490,6 +490,7 @@ mod tests {
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneDataset;
     use nexus_types::identity::Resource;
+    use nexus_types::inventory::ZpoolName;
     use omicron_common::address::IpRange;
     use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -607,6 +608,8 @@ mod tests {
         // with an arbitrary sled_id.
         let mut zones = BTreeMap::new();
         let sled_id = Uuid::new_v4();
+        let filesystem_pool: ZpoolName =
+            format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
         zones.insert(
             sled_id,
             OmicronZonesConfig {
@@ -615,6 +618,7 @@ mod tests {
                     OmicronZoneConfig {
                         id: nexus_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: filesystem_pool.clone(),
                         zone_type: OmicronZoneType::Nexus {
                             internal_address: Ipv6Addr::LOCALHOST.to_string(),
                             external_ip: nexus_external_ip,
@@ -626,11 +630,10 @@ mod tests {
                     OmicronZoneConfig {
                         id: dns_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: filesystem_pool.clone(),
                         zone_type: OmicronZoneType::ExternalDns {
                             dataset: OmicronZoneDataset {
-                                pool_name: format!("oxp_{}", Uuid::new_v4())
-                                    .parse()
-                                    .expect("bad name"),
+                                pool_name: filesystem_pool.clone(),
                             },
                             http_address: SocketAddrV6::new(
                                 Ipv6Addr::LOCALHOST,
@@ -647,6 +650,7 @@ mod tests {
                     OmicronZoneConfig {
                         id: ntp_id,
                         underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: filesystem_pool.clone(),
                         zone_type: OmicronZoneType::BoundaryNtp {
                             address: SocketAddr::new(dns_external_ip, 0)
                                 .to_string(),

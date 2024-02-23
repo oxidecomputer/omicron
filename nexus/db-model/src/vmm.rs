@@ -46,6 +46,13 @@ pub struct Vmm {
     /// Runtime state for the VMM.
     #[diesel(embed)]
     pub runtime: VmmRuntimeState,
+
+    /// The ID of the Zpool where this VMM's zone root filesystem will be
+    /// placed.
+    ///
+    /// NOTE: This should eventually become required (non-optional), but
+    /// is currently optional for backwards compatibility.
+    pub zpool_id: Option<Uuid>,
 }
 
 /// The set of states that a VMM can have when it is created.
@@ -59,6 +66,7 @@ impl Vmm {
     pub fn new(
         id: Uuid,
         instance_id: Uuid,
+        zpool_id: Uuid,
         sled_id: Uuid,
         propolis_ip: ipnetwork::IpNetwork,
         initial_state: VmmInitialState,
@@ -83,6 +91,7 @@ impl Vmm {
                 time_state_updated: now,
                 gen: Generation::new(),
             },
+            zpool_id: Some(zpool_id),
         }
     }
 }

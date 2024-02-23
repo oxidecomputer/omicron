@@ -1,24 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "OmicronZonesConfigLocal",
-  "description": "Combines the Nexus-provided `OmicronZonesConfig` (which describes what Nexus wants for all of its zones) with the locally-determined configuration for these zones.",
+  "title": "OmicronZonesConfig",
+  "description": "Describes the set of Omicron-managed zones running on a sled",
   "type": "object",
   "required": [
-    "ledger_generation",
-    "omicron_generation",
+    "generation",
     "zones"
   ],
   "properties": {
-    "ledger_generation": {
-      "description": "ledger-managed generation number\n\nThis generation is managed by the ledger facility itself.  It's bumped whenever we write a new ledger.  In practice, we don't currently have any reason to bump this _for a given Omicron generation_ so it's somewhat redundant.  In principle, if we needed to modify the ledgered configuration due to some event that doesn't change the Omicron config (e.g., if we wanted to move the root filesystem to a different path), we could do that by bumping this generation.",
-      "allOf": [
-        {
-          "$ref": "#/definitions/Generation"
-        }
-      ]
-    },
-    "omicron_generation": {
-      "description": "generation of the Omicron-provided part of the configuration\n\nThis generation number is outside of Sled Agent's control.  We store exactly what we were given and use this number to decide when to fail requests to establish an outdated configuration.\n\nYou can think of this as a major version number, with `ledger_generation` being a minor version number.  See `is_newer_than()`.",
+    "generation": {
+      "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
       "allOf": [
         {
           "$ref": "#/definitions/Generation"
@@ -26,9 +17,10 @@
       ]
     },
     "zones": {
+      "description": "list of running zones",
       "type": "array",
       "items": {
-        "$ref": "#/definitions/OmicronZoneConfigLocal"
+        "$ref": "#/definitions/OmicronZoneConfig"
       }
     }
   },
@@ -193,11 +185,20 @@
       "description": "Describes one Omicron-managed zone running on a sled",
       "type": "object",
       "required": [
+        "filesystem_pool",
         "id",
         "underlay_address",
         "zone_type"
       ],
       "properties": {
+        "filesystem_pool": {
+          "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ZpoolName"
+            }
+          ]
+        },
         "id": {
           "type": "string",
           "format": "uuid"
@@ -208,22 +209,6 @@
         },
         "zone_type": {
           "$ref": "#/definitions/OmicronZoneType"
-        }
-      }
-    },
-    "OmicronZoneConfigLocal": {
-      "description": "Combines the Nexus-provided `OmicronZoneConfig` (which describes what Nexus wants for this zone) with any locally-determined configuration (like the path to the root filesystem)",
-      "type": "object",
-      "required": [
-        "root",
-        "zone"
-      ],
-      "properties": {
-        "root": {
-          "type": "string"
-        },
-        "zone": {
-          "$ref": "#/definitions/OmicronZoneConfig"
         }
       }
     },

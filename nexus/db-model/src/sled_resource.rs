@@ -12,6 +12,7 @@ pub struct Resources {
     pub hardware_threads: SqlU32,
     pub rss_ram: ByteCount,
     pub reservoir_ram: ByteCount,
+    pub zpool_id: Option<Uuid>,
 }
 
 impl Resources {
@@ -20,7 +21,12 @@ impl Resources {
         rss_ram: ByteCount,
         reservoir_ram: ByteCount,
     ) -> Self {
-        Self { hardware_threads: SqlU32(threads), rss_ram, reservoir_ram }
+        Self {
+            hardware_threads: SqlU32(threads),
+            rss_ram,
+            reservoir_ram,
+            zpool_id: None,
+        }
     }
 }
 

@@ -30,6 +30,7 @@ pub(crate) struct OmicronZone {
     pub(crate) primary_service_port: SqlU16,
     pub(crate) second_service_ip: Option<IpNetwork>,
     pub(crate) second_service_port: Option<SqlU16>,
+    pub(crate) filesystem_zpool_name: Option<String>,
     pub(crate) dataset_zpool_name: Option<String>,
     pub(crate) nic_id: Option<Uuid>,
     pub(crate) dns_gz_address: Option<ipv6::Ipv6Addr>,
@@ -169,6 +170,7 @@ impl OmicronZone {
             }
         };
 
+        let filesystem_zpool_name = Some(zone.filesystem_pool.to_string());
         let dataset_zpool_name =
             dataset.map(|d| d.pool_name.as_str().to_string());
         let primary_service_sockaddr = primary_service_sockaddr_str
@@ -193,6 +195,7 @@ impl OmicronZone {
             primary_service_port,
             second_service_ip: second_service_ip.map(IpNetwork::from),
             second_service_port,
+            filesystem_zpool_name,
             dataset_zpool_name,
             nic_id,
             dns_gz_address,
@@ -252,6 +255,16 @@ impl OmicronZone {
             (Some(_), None) => bail!("caller provided no NIC"),
             (None, Some(_)) => bail!("caller unexpectedly provided a NIC"),
         };
+
+        let filesystem_pool = self
+            .filesystem_zpool_name
+            .map(|pool| -> Result<_, anyhow::Error> {
+                Ok(nexus_types::inventory::ZpoolName::try_from(pool)?)
+            })
+            .transpose()?
+            .ok_or_else(|| {
+                anyhow!("expected filesystem pool name, found none")
+            })?;
 
         // Similarly, assemble a value that we can use to extract the dataset,
         // if necessary.  We only return this error if code below tries to use
@@ -379,6 +392,7 @@ impl OmicronZone {
         Ok(nexus_types::inventory::OmicronZoneConfig {
             id: self.id,
             underlay_address: std::net::Ipv6Addr::from(self.underlay_address),
+            filesystem_pool,
             zone_type,
         })
     }

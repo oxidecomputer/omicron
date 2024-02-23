@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(36, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(37, 0, 0);
 
 table! {
     disk (id) {
@@ -383,6 +383,7 @@ table! {
         state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
+        zpool_id -> Nullable<Uuid>,
     }
 }
 
@@ -836,6 +837,7 @@ table! {
         hardware_threads -> Int8,
         rss_ram -> Int8,
         reservoir_ram -> Int8,
+        zpool_id -> Nullable<Uuid>,
     }
 }
 
@@ -1393,6 +1395,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_zpool_name -> Nullable<Text>,
     }
 }
 
@@ -1471,6 +1474,7 @@ table! {
         snat_ip -> Nullable<Inet>,
         snat_first_port -> Nullable<Int4>,
         snat_last_port -> Nullable<Int4>,
+        filesystem_zpool_name -> Nullable<Text>,
     }
 }
 
@@ -1558,6 +1562,7 @@ allow_tables_to_appear_in_same_query!(
     instance_network_interface,
     service_network_interface,
     oximeter,
+    physical_disk,
     project,
     rack,
     region,

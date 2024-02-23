@@ -7,6 +7,7 @@
 use super::sled_agent::SledAgent;
 use crate::bootstrap::early_networking::EarlyNetworkConfig;
 use crate::bootstrap::params::AddSledRequest;
+use crate::instance_manager::RegistrationRequest;
 use crate::params::{
     BootstoreStatus, CleanupContextUpdate, DiskEnsureBody, InstanceEnsureBody,
     InstanceExternalIpBody, InstancePutMigrationIdsBody, InstancePutStateBody,
@@ -406,14 +407,15 @@ async fn instance_register(
     let instance_id = path_params.into_inner().instance_id;
     let body_args = body.into_inner();
     Ok(HttpResponseOk(
-        sa.instance_ensure_registered(
+        sa.instance_ensure_registered(RegistrationRequest {
             instance_id,
-            body_args.propolis_id,
-            body_args.hardware,
-            body_args.instance_runtime,
-            body_args.vmm_runtime,
-            body_args.propolis_addr,
-        )
+            propolis_id: body_args.propolis_id,
+            hardware: body_args.hardware,
+            instance_runtime: body_args.instance_runtime,
+            vmm_runtime: body_args.vmm_runtime,
+            propolis_addr: body_args.propolis_addr,
+            filesystem_pool: body_args.filesystem_pool,
+        })
         .await?,
     ))
 }

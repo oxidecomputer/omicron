@@ -740,6 +740,7 @@ pub struct InvOmicronZone {
     pub snat_ip: Option<IpNetwork>,
     pub snat_first_port: Option<SqlU16>,
     pub snat_last_port: Option<SqlU16>,
+    pub filesystem_zpool_name: Option<String>,
 }
 
 impl InvOmicronZone {
@@ -771,6 +772,7 @@ impl InvOmicronZone {
             snat_ip: zone.snat_ip,
             snat_first_port: zone.snat_first_port,
             snat_last_port: zone.snat_last_port,
+            filesystem_zpool_name: zone.filesystem_zpool_name,
         })
     }
 
@@ -799,6 +801,7 @@ impl InvOmicronZone {
             snat_ip: self.snat_ip,
             snat_first_port: self.snat_first_port,
             snat_last_port: self.snat_last_port,
+            filesystem_zpool_name: self.filesystem_zpool_name,
         };
         zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))
     }

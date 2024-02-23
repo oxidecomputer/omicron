@@ -1,131 +1,43 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Plan",
+  "title": "OmicronZonesConfigLocal",
+  "description": "Combines the Nexus-provided `OmicronZonesConfig` (which describes what Nexus wants for all of its zones) with the locally-determined configuration for these zones.",
   "type": "object",
   "required": [
-    "dns_config",
-    "services"
+    "ledger_generation",
+    "omicron_generation",
+    "zones"
   ],
   "properties": {
-    "dns_config": {
-      "$ref": "#/definitions/DnsConfigParams"
+    "ledger_generation": {
+      "description": "ledger-managed generation number\n\nThis generation is managed by the ledger facility itself.  It's bumped whenever we write a new ledger.  In practice, we don't currently have any reason to bump this _for a given Omicron generation_ so it's somewhat redundant.  In principle, if we needed to modify the ledgered configuration due to some event that doesn't change the Omicron config (e.g., if we wanted to move the root filesystem to a different path), we could do that by bumping this generation.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Generation"
+        }
+      ]
     },
-    "services": {
-      "type": "object",
-      "additionalProperties": {
-        "$ref": "#/definitions/SledConfig"
+    "omicron_generation": {
+      "description": "generation of the Omicron-provided part of the configuration\n\nThis generation number is outside of Sled Agent's control.  We store exactly what we were given and use this number to decide when to fail requests to establish an outdated configuration.\n\nYou can think of this as a major version number, with `ledger_generation` being a minor version number.  See `is_newer_than()`.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Generation"
+        }
+      ]
+    },
+    "zones": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/OmicronZoneConfigLocal"
       }
     }
   },
   "definitions": {
-    "DnsConfigParams": {
-      "description": "DnsConfigParams\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"generation\", \"time_created\", \"zones\" ], \"properties\": { \"generation\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"time_created\": { \"type\": \"string\", \"format\": \"date-time\" }, \"zones\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsConfigZone\" } } } } ``` </details>",
-      "type": "object",
-      "required": [
-        "generation",
-        "time_created",
-        "zones"
-      ],
-      "properties": {
-        "generation": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "time_created": {
-          "type": "string",
-          "format": "date-time"
-        },
-        "zones": {
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/DnsConfigZone"
-          }
-        }
-      }
-    },
-    "DnsConfigZone": {
-      "description": "DnsConfigZone\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"records\", \"zone_name\" ], \"properties\": { \"records\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsRecord\" } } }, \"zone_name\": { \"type\": \"string\" } } } ``` </details>",
-      "type": "object",
-      "required": [
-        "records",
-        "zone_name"
-      ],
-      "properties": {
-        "records": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "$ref": "#/definitions/DnsRecord"
-            }
-          }
-        },
-        "zone_name": {
-          "type": "string"
-        }
-      }
-    },
-    "DnsRecord": {
-      "description": "DnsRecord\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv4\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"A\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"AAAA\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"$ref\": \"#/components/schemas/Srv\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"SRV\" ] } } } ] } ``` </details>",
-      "oneOf": [
-        {
-          "type": "object",
-          "required": [
-            "data",
-            "type"
-          ],
-          "properties": {
-            "data": {
-              "type": "string",
-              "format": "ipv4"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "A"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "data",
-            "type"
-          ],
-          "properties": {
-            "data": {
-              "type": "string",
-              "format": "ipv6"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "AAAA"
-              ]
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "data",
-            "type"
-          ],
-          "properties": {
-            "data": {
-              "$ref": "#/definitions/Srv"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "SRV"
-              ]
-            }
-          }
-        }
-      ]
+    "Generation": {
+      "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
     },
     "IpNet": {
       "oneOf": [
@@ -281,20 +193,11 @@
       "description": "Describes one Omicron-managed zone running on a sled",
       "type": "object",
       "required": [
-        "filesystem_pool",
         "id",
         "underlay_address",
         "zone_type"
       ],
       "properties": {
-        "filesystem_pool": {
-          "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ZpoolName"
-            }
-          ]
-        },
         "id": {
           "type": "string",
           "format": "uuid"
@@ -305,6 +208,22 @@
         },
         "zone_type": {
           "$ref": "#/definitions/OmicronZoneType"
+        }
+      }
+    },
+    "OmicronZoneConfigLocal": {
+      "description": "Combines the Nexus-provided `OmicronZoneConfig` (which describes what Nexus wants for this zone) with any locally-determined configuration (like the path to the root filesystem)",
+      "type": "object",
+      "required": [
+        "root",
+        "zone"
+      ],
+      "properties": {
+        "root": {
+          "type": "string"
+        },
+        "zone": {
+          "$ref": "#/definitions/OmicronZoneConfig"
         }
       }
     },
@@ -669,21 +588,6 @@
         }
       ]
     },
-    "SledConfig": {
-      "type": "object",
-      "required": [
-        "zones"
-      ],
-      "properties": {
-        "zones": {
-          "description": "zones configured for this sled",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/OmicronZoneConfig"
-          }
-        }
-      }
-    },
     "SourceNatConfig": {
       "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
       "type": "object",
@@ -706,36 +610,6 @@
         },
         "last_port": {
           "description": "The last port used for source NAT, also inclusive.",
-          "type": "integer",
-          "format": "uint16",
-          "minimum": 0.0
-        }
-      }
-    },
-    "Srv": {
-      "description": "Srv\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"port\", \"prio\", \"target\", \"weight\" ], \"properties\": { \"port\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"prio\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"target\": { \"type\": \"string\" }, \"weight\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 } } } ``` </details>",
-      "type": "object",
-      "required": [
-        "port",
-        "prio",
-        "target",
-        "weight"
-      ],
-      "properties": {
-        "port": {
-          "type": "integer",
-          "format": "uint16",
-          "minimum": 0.0
-        },
-        "prio": {
-          "type": "integer",
-          "format": "uint16",
-          "minimum": 0.0
-        },
-        "target": {
-          "type": "string"
-        },
-        "weight": {
           "type": "integer",
           "format": "uint16",
           "minimum": 0.0

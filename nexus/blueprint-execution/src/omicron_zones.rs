@@ -96,7 +96,7 @@ mod test {
     use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::deployment::{Blueprint, BlueprintTarget};
     use nexus_types::inventory::{
-        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
+        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, ZpoolName,
     };
     use omicron_common::api::external::Generation;
     use std::collections::BTreeMap;
@@ -173,17 +173,18 @@ mod test {
         // the full set of zones that must be running.
         // See `rack_setup::service::ServiceInner::run` for more details.
         fn make_zones() -> OmicronZonesConfig {
+            let pool_name: ZpoolName =
+                format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
+            let dataset = OmicronZoneDataset { pool_name: pool_name.clone() };
+
             OmicronZonesConfig {
                 generation: Generation::new(),
                 zones: vec![OmicronZoneConfig {
                     id: Uuid::new_v4(),
                     underlay_address: "::1".parse().unwrap(),
+                    filesystem_pool: pool_name,
                     zone_type: OmicronZoneType::InternalDns {
-                        dataset: OmicronZoneDataset {
-                            pool_name: format!("oxp_{}", Uuid::new_v4())
-                                .parse()
-                                .unwrap(),
-                        },
+                        dataset,
                         dns_address: "oh-hello-internal-dns".into(),
                         gz_address: "::1".parse().unwrap(),
                         gz_address_index: 0,
@@ -275,10 +276,12 @@ mod test {
 
         // Add an `InternalNtp` zone for our next update
         fn append_zone(zones: &mut OmicronZonesConfig) {
+            let pool_name = format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
             zones.generation = zones.generation.next();
             zones.zones.push(OmicronZoneConfig {
                 id: Uuid::new_v4(),
                 underlay_address: "::1".parse().unwrap(),
+                filesystem_pool: pool_name,
                 zone_type: OmicronZoneType::InternalNtp {
                     address: "::1".into(),
                     dns_servers: vec!["::1".parse().unwrap()],

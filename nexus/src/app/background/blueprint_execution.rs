@@ -105,7 +105,7 @@ mod test {
     use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::deployment::{Blueprint, BlueprintTarget};
     use nexus_types::inventory::{
-        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
+        OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, ZpoolName,
     };
     use omicron_common::api::external::Generation;
     use serde::Deserialize;
@@ -216,17 +216,15 @@ mod test {
         // the task correctly winds up making requests to both of them and
         // reporting success.
         fn make_zones() -> OmicronZonesConfig {
+            let pool_name = ZpoolName::new_external(Uuid::new_v4());
             OmicronZonesConfig {
                 generation: Generation::new(),
                 zones: vec![OmicronZoneConfig {
                     id: Uuid::new_v4(),
                     underlay_address: "::1".parse().unwrap(),
+                    filesystem_pool: pool_name.clone(),
                     zone_type: OmicronZoneType::InternalDns {
-                        dataset: OmicronZoneDataset {
-                            pool_name: format!("oxp_{}", Uuid::new_v4())
-                                .parse()
-                                .unwrap(),
-                        },
+                        dataset: OmicronZoneDataset { pool_name },
                         dns_address: "oh-hello-internal-dns".into(),
                         gz_address: "::1".parse().unwrap(),
                         gz_address_index: 0,

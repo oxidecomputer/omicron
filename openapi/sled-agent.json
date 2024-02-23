@@ -4692,6 +4692,14 @@
         "description": "The body of a request to ensure that a instance and VMM are known to a sled agent.",
         "type": "object",
         "properties": {
+          "filesystem_pool": {
+            "description": "The zpool which will hold this propolis zone's filesystem.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
+              }
+            ]
+          },
           "hardware": {
             "description": "A description of the instance's virtual hardware and the initial runtime state this sled agent should store for this incarnation of the instance.",
             "allOf": [
@@ -4727,6 +4735,7 @@
           }
         },
         "required": [
+          "filesystem_pool",
           "hardware",
           "instance_runtime",
           "propolis_addr",
@@ -5650,6 +5659,14 @@
         "description": "Describes one Omicron-managed zone running on a sled",
         "type": "object",
         "properties": {
+          "filesystem_pool": {
+            "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
+              }
+            ]
+          },
           "id": {
             "type": "string",
             "format": "uuid"
@@ -5663,6 +5680,7 @@
           }
         },
         "required": [
+          "filesystem_pool",
           "id",
           "underlay_address",
           "zone_type"

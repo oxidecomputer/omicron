@@ -441,10 +441,13 @@ mod test {
         // not currently in service.
         let out_of_service_id = Uuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
+        let filesystem_pool: ZpoolName =
+            format!("oxp_{}", Uuid::new_v4()).parse().unwrap();
         blueprint.omicron_zones.values_mut().next().unwrap().zones.push(
             OmicronZoneConfig {
                 id: out_of_service_id,
                 underlay_address: out_of_service_addr,
+                filesystem_pool,
                 zone_type: OmicronZoneType::Oximeter {
                     address: SocketAddrV6::new(
                         out_of_service_addr,

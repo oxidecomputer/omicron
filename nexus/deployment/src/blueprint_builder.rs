@@ -35,6 +35,7 @@ use omicron_common::api::external::IpNet;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use rand::seq::IteratorRandom;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -50,6 +51,8 @@ use uuid::Uuid;
 pub enum Error {
     #[error("sled {sled_id}: ran out of available addresses for sled")]
     OutOfAddresses { sled_id: Uuid },
+    #[error("sled {sled_id}: does not have any external disks remaining")]
+    OutOfDisks { sled_id: Uuid },
     #[error("no Nexus zones exist in parent blueprint")]
     NoNexusZonesInParentBlueprint,
     #[error("no external service IP addresses are available")]
@@ -374,16 +377,20 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             })
             .collect();
+        let zone_type = OmicronZoneType::InternalNtp {
+            address: ntp_address.to_string(),
+            ntp_servers,
+            dns_servers,
+            domain: None,
+        };
+        let filesystem_pool =
+            self.sled_select_filesystem_pool(sled_id, &zone_type)?;
 
         let zone = OmicronZoneConfig {
             id: Uuid::new_v4(),
             underlay_address: ip,
-            zone_type: OmicronZoneType::InternalNtp {
-                address: ntp_address.to_string(),
-                ntp_servers,
-                dns_servers,
-                domain: None,
-            },
+            filesystem_pool,
+            zone_type,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -421,13 +428,18 @@ impl<'a> BlueprintBuilder<'a> {
         let ip = self.sled_alloc_ip(sled_id)?;
         let port = omicron_common::address::CRUCIBLE_PORT;
         let address = SocketAddrV6::new(ip, port, 0, 0).to_string();
+        let zone_type = OmicronZoneType::Crucible {
+            address,
+            dataset: OmicronZoneDataset { pool_name },
+        };
+        let filesystem_pool =
+            self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+
         let zone = OmicronZoneConfig {
             id: Uuid::new_v4(),
             underlay_address: ip,
-            zone_type: OmicronZoneType::Crucible {
-                address,
-                dataset: OmicronZoneDataset { pool_name },
-            },
+            filesystem_pool,
+            zone_type,
         };
         self.sled_add_zone(sled_id, zone)?;
         Ok(Ensure::Added)
@@ -537,21 +549,55 @@ impl<'a> BlueprintBuilder<'a> {
             let port = omicron_common::address::NEXUS_INTERNAL_PORT;
             let internal_address =
                 SocketAddrV6::new(ip, port, 0, 0).to_string();
+            let zone_type = OmicronZoneType::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers: external_dns_servers.clone(),
+            };
+            let filesystem_pool =
+                self.sled_select_filesystem_pool(sled_id, &zone_type)?;
+
             let zone = OmicronZoneConfig {
                 id: nexus_id,
                 underlay_address: ip,
-                zone_type: OmicronZoneType::Nexus {
-                    internal_address,
-                    external_ip,
-                    nic,
-                    external_tls,
-                    external_dns_servers: external_dns_servers.clone(),
-                },
+                filesystem_pool,
+                zone_type,
             };
             self.sled_add_zone(sled_id, zone)?;
         }
 
         Ok(EnsureMultiple::Added(num_nexus_to_add))
+    }
+
+    // Selects a filesystem zpool for this zone type.
+    //
+    // For zones containing durable datasets, the filesystem pools are
+    // co-located, and determistic.
+    //
+    // For zones without durable datasets, the filesystem pools are randomly
+    // selected. This random choice makes this function not idempotent.
+    fn sled_select_filesystem_pool(
+        &self,
+        sled_id: Uuid,
+        zone_type: &OmicronZoneType,
+    ) -> Result<ZpoolName, Error> {
+        let resources = self.sled_resources(sled_id)?;
+
+        // Transient filesystem is co-located with durable dataset.
+        if let Some(dataset) = zone_type.durable_dataset() {
+            return Ok(dataset.pool_name.clone());
+        }
+
+        // No durable dataset exists; pick one randomly.
+        resources
+            .zpools
+            .iter()
+            .filter(|pool| pool.external())
+            .choose(&mut rand::thread_rng())
+            .map(|pool| pool.clone())
+            .ok_or_else(|| Error::OutOfDisks { sled_id })
     }
 
     fn sled_add_zone(
@@ -808,6 +854,10 @@ pub mod test {
                 OmicronZoneConfig {
                     id: Uuid::new_v4(),
                     underlay_address: ip,
+                    filesystem_pool: zpools
+                        .first()
+                        .cloned()
+                        .expect("No zpools"),
                     zone_type: OmicronZoneType::InternalNtp {
                         address: SocketAddrV6::new(ip, 12345, 0, 0).to_string(),
                         dns_servers: vec![],
@@ -826,6 +876,10 @@ pub mod test {
                 OmicronZoneConfig {
                     id,
                     underlay_address: ip,
+                    filesystem_pool: zpools
+                        .first()
+                        .cloned()
+                        .expect("No zpools"),
                     zone_type: OmicronZoneType::Nexus {
                         internal_address: SocketAddrV6::new(ip, 12346, 0, 0)
                             .to_string(),
@@ -853,6 +907,7 @@ pub mod test {
                 OmicronZoneConfig {
                     id: Uuid::new_v4(),
                     underlay_address: ip,
+                    filesystem_pool: zpool_name.clone(),
                     zone_type: OmicronZoneType::Crucible {
                         address: String::from("[::1]:12345"),
                         dataset: OmicronZoneDataset {

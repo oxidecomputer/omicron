@@ -46,6 +46,12 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
 
+        info!(
+            self.log,
+            "Upserting physical disk";
+            "physical_disk_id" => ?disk.uuid(), "physical_disk" => ?disk.id(), "sled_id" => ?disk.sled_id,
+        );
+
         let now = Utc::now();
         let sled_id = disk.sled_id;
         let disk_in_db = Sled::insert_resource(

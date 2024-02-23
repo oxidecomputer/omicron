@@ -11,16 +11,17 @@ use crate::bootstrap::early_networking::{
 };
 use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
-use crate::instance_manager::{InstanceManager, ReservoirMode};
+use crate::instance_manager::{
+    InstanceManager, RegistrationRequest, ReservoirMode,
+};
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
 use crate::params::{
-    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
-    ZoneBundleMetadata, Zpool,
+    DiskStateRequested, InstanceExternalIpBody, InstanceMigrationSourceParams,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse, Inventory, OmicronZonesConfig, SledRole,
+    TimeSync, VpcFirewallRule, ZoneBundleMetadata, Zpool,
 };
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
@@ -46,9 +47,7 @@ use omicron_common::address::{
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
-use omicron_common::api::internal::nexus::{
-    SledInstanceState, VmmRuntimeState,
-};
+use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig,
 };
@@ -65,7 +64,7 @@ use sled_hardware::{underlay, Baseboard, HardwareManager};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -943,23 +942,11 @@ impl SledAgent {
     /// [`Self::instance_ensure_state`].
     pub async fn instance_ensure_registered(
         &self,
-        instance_id: Uuid,
-        propolis_id: Uuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
+        request: RegistrationRequest,
     ) -> Result<SledInstanceState, Error> {
         self.inner
             .instances
-            .ensure_registered(
-                instance_id,
-                propolis_id,
-                hardware,
-                instance_runtime,
-                vmm_runtime,
-                propolis_addr,
-            )
+            .ensure_registered(request)
             .await
             .map_err(|e| Error::Instance(e))
     }

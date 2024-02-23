@@ -34,6 +34,8 @@ impl DataStore {
     pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
         use db::schema::zpool::dsl;
 
+        info!(self.log, "Upserting zpool"; "zpool_id" => ?zpool.id(), "sled_id" => ?zpool.sled_id);
+
         let sled_id = zpool.sled_id;
         Sled::insert_resource(
             sled_id,

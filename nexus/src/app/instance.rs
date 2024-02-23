@@ -55,6 +55,7 @@ use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::InstancePutMigrationIdsBody;
 use sled_agent_client::types::InstancePutStateBody;
+use sled_agent_client::types::ZpoolName;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -1213,6 +1214,12 @@ impl super::Nexus {
         };
 
         let sa = self.sled_client(&initial_vmm.sled_id).await?;
+
+        let zpool_id = initial_vmm.zpool_id.ok_or_else(|| {
+            Error::internal_error(
+                "Registering instances requires a Nexus-supplied zpool",
+            )
+        })?;
         let instance_register_result = sa
             .instance_register(
                 &db_instance.id(),
@@ -1226,6 +1233,7 @@ impl super::Nexus {
                         PROPOLIS_PORT,
                     )
                     .to_string(),
+                    filesystem_pool: ZpoolName::new_external(zpool_id),
                 },
             )
             .await

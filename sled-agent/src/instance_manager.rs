@@ -22,6 +22,7 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use illumos_utils::vmm_reservoir;
+use illumos_utils::zpool::ZpoolName;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledInstanceState;
@@ -229,25 +230,12 @@ impl InstanceManager {
 
     pub async fn ensure_registered(
         &self,
-        instance_id: Uuid,
-        propolis_id: Uuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
+        request: RegistrationRequest,
     ) -> Result<SledInstanceState, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
-            .send(InstanceManagerRequest::EnsureRegistered {
-                instance_id,
-                propolis_id,
-                hardware,
-                instance_runtime,
-                vmm_runtime,
-                propolis_addr,
-                tx,
-            })
+            .send(InstanceManagerRequest::EnsureRegistered { request, tx })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
         rx.await?
@@ -381,6 +369,17 @@ impl InstanceManager {
     }
 }
 
+/// Arguments to [InstanceManager::ensure_registered].
+pub struct RegistrationRequest {
+    pub instance_id: Uuid,
+    pub propolis_id: Uuid,
+    pub hardware: InstanceHardware,
+    pub instance_runtime: InstanceRuntimeState,
+    pub vmm_runtime: VmmRuntimeState,
+    pub propolis_addr: SocketAddr,
+    pub filesystem_pool: ZpoolName,
+}
+
 // Most requests that can be sent to the "InstanceManagerRunner" task.
 //
 // These messages are sent by "InstanceManager"'s interface, and processed by
@@ -390,12 +389,7 @@ impl InstanceManager {
 #[derive(strum::Display)]
 enum InstanceManagerRequest {
     EnsureRegistered {
-        instance_id: Uuid,
-        propolis_id: Uuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
+        request: RegistrationRequest,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
     EnsureUnregistered {
@@ -503,15 +497,10 @@ impl InstanceManagerRunner {
                     let request_variant = request.as_ref().map(|r| r.to_string());
                     let result = match request {
                         Some(EnsureRegistered {
-                            instance_id,
-                            propolis_id,
-                            hardware,
-                            instance_runtime,
-                            vmm_runtime,
-                            propolis_addr,
+                            request,
                             tx,
                         }) => {
-                            tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr).await).map_err(|_| Error::FailedSendClientClosed)
+                            tx.send(self.ensure_registered(request).await).map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(EnsureUnregistered { instance_id, tx }) => {
                             self.ensure_unregistered(tx, instance_id).await
@@ -576,12 +565,15 @@ impl InstanceManagerRunner {
     /// caller supplied.
     async fn ensure_registered(
         &mut self,
-        instance_id: Uuid,
-        propolis_id: Uuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
+        RegistrationRequest {
+            instance_id,
+            propolis_id,
+            hardware,
+            instance_runtime,
+            vmm_runtime,
+            propolis_addr,
+            filesystem_pool,
+        }: RegistrationRequest,
     ) -> Result<SledInstanceState, Error> {
         info!(
             &self.log,
@@ -592,6 +584,7 @@ impl InstanceManagerRunner {
             "instance_runtime" => ?instance_runtime,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
+            "filesystem_pool" => ?filesystem_pool,
         );
 
         let instance = {
@@ -637,6 +630,7 @@ impl InstanceManagerRunner {
                     instance_runtime,
                     vmm_runtime,
                     propolis_addr,
+                    filesystem_pool,
                 };
 
                 let instance = Instance::new(

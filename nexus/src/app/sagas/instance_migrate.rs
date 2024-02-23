@@ -139,7 +139,7 @@ impl NexusSaga for SagaInstanceMigrate {
 /// Reserves resources for the destination on the specified target sled.
 async fn sim_reserve_sled_resources(
     sagactx: NexusActionContext,
-) -> Result<Uuid, ActionError> {
+) -> Result<(Uuid, Uuid), ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let propolis_id = sagactx.lookup::<Uuid>("dst_propolis_id")?;
@@ -159,7 +159,10 @@ async fn sim_reserve_sled_resources(
     )
     .await?;
 
-    Ok(resource.sled_id)
+    Ok((
+        resource.sled_id,
+        resource.resources.zpool_id.expect("Need a zpool ID"),
+    ))
 }
 
 async fn sim_release_sled_resources(
@@ -201,7 +204,7 @@ async fn sim_create_vmm_record(
 
     let instance_id = params.instance.id();
     let propolis_id = sagactx.lookup::<Uuid>("dst_propolis_id")?;
-    let sled_id = sagactx.lookup::<Uuid>("dst_sled_id")?;
+    let (sled_id, zpool_id) = sagactx.lookup::<(Uuid, Uuid)>("dst_sled_id")?;
     let propolis_ip = sagactx.lookup::<Ipv6Addr>("dst_propolis_ip")?;
 
     info!(osagactx.log(), "creating vmm record for migration destination";
@@ -212,11 +215,14 @@ async fn sim_create_vmm_record(
     super::instance_common::create_and_insert_vmm_record(
         osagactx.datastore(),
         &opctx,
-        instance_id,
-        propolis_id,
-        sled_id,
-        propolis_ip,
-        nexus_db_model::VmmInitialState::Migrating,
+        super::instance_common::VmmRecordArgs {
+            instance_id,
+            zpool_id,
+            propolis_id,
+            sled_id,
+            propolis_ip,
+            initial_state: nexus_db_model::VmmInitialState::Migrating,
+        },
     )
     .await
 }
@@ -374,7 +380,8 @@ async fn sim_ensure_destination_propolis_undo(
         &params.serialized_authn,
     );
 
-    let dst_sled_id = sagactx.lookup::<Uuid>("dst_sled_id")?;
+    let (dst_sled_id, _zpool_id) =
+        sagactx.lookup::<(Uuid, Uuid)>("dst_sled_id")?;
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
     let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())

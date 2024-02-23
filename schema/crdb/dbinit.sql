@@ -143,23 +143,25 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
 
 -- Accounting for programs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
+    -- Metadata about the resource consumer
+
     -- Should match the UUID of the corresponding service
     id UUID PRIMARY KEY,
-
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
-
     -- Identifies the type of the resource
     kind omicron.public.sled_resource_kind NOT NULL,
 
+    -- Data about the resources being consumed
+
     -- The maximum number of hardware threads usable by this resource
     hardware_threads INT8 NOT NULL,
-
     -- The maximum amount of RSS RAM provisioned to this resource
     rss_ram INT8 NOT NULL,
-
     -- The maximum amount of Reservoir RAM provisioned to this resource
-    reservoir_ram INT8 NOT NULL
+    reservoir_ram INT8 NOT NULL,
+    -- The zpool being used, if any
+    zpool_id UUID
 );
 
 -- Allow looking up all resources which reside on a sled
@@ -168,6 +170,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_sled ON omicron.public.sled
     id
 );
 
+-- Allow looking up all resources which use a particular zpool
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_resource_by_zpool ON omicron.public.sled_resource (
+    zpool_id,
+    id
+) WHERE zpool_id IS NOT NULL;
 
 -- Table of all sled subnets allocated for sleds added to an already initialized
 -- rack. The sleds in this table and their allocated subnets are created before
@@ -3024,6 +3031,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
+    -- Zones always have a zpool backing their filesystem. They're currently always
+    -- on a U.2.
+    --
+    -- This considered "non-durable" data, compared with the "dataset_zpool_name",
+    -- but it prevents zone filesystems from consuming arbitrary system RAM.
+    filesystem_zpool_name TEXT,
+
     PRIMARY KEY (inv_collection_id, id)
 );
 
@@ -3207,6 +3221,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     snat_last_port INT4
         CHECK (snat_last_port IS NULL OR snat_last_port BETWEEN 0 AND 65535),
 
+    -- Zones always have an associated transient filesystem. They're currently always
+    -- on a U.2. Unlike the "dataset_zpool_name", these datasets may be destroyed
+    -- by the Sled Agent between zone reboots.
+    filesystem_zpool_name TEXT,
+
     PRIMARY KEY (blueprint_id, id)
 );
 
@@ -3277,8 +3296,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     sled_id UUID NOT NULL,
-    propolis_ip INET NOT NULL
+    propolis_ip INET NOT NULL,
+    zpool_id UUID
 );
+
+-- Allow looking up all vmms which use a particular zpool
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_vmm_by_zpool ON omicron.public.vmm (
+    zpool_id,
+    id
+) WHERE time_deleted IS NULL;
 
 /*
  * A special view of an instance provided to operators for insights into what's
@@ -3518,7 +3544,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '36.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '37.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
