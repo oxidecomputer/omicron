@@ -87,6 +87,18 @@ id_path_param!(GroupPath, group_id, "group");
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
+id_path_param!(PhysicalDiskPath, disk_id, "physical_disk");
+
+/// Updateable properties of a `PhysicalDisk`.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskUpdate {
+    /// Prevents the disk from being used for future provisioning.
+    ///
+    /// This does not immediately cause services to be evacuated from using
+    /// the underlying disk, that process may happen asynchronously.
+    Disable,
+}
 
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");

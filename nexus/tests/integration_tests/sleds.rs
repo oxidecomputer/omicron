@@ -12,13 +12,15 @@ use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_physical_disk;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::delete_physical_disk;
+use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::PhysicalDiskKind;
-use nexus_types::external_api::views::SledInstance;
-use nexus_types::external_api::views::{PhysicalDisk, Sled};
+use nexus_types::external_api::params::{PhysicalDiskKind, PhysicalDiskUpdate};
+use nexus_types::external_api::views::{
+    PhysicalDisk, PhysicalDiskState, Sled, SledInstance,
+};
 use omicron_sled_agent::sim;
 use std::str::FromStr;
 use uuid::Uuid;
@@ -35,6 +37,14 @@ async fn physical_disks_list(
     url: &str,
 ) -> Vec<PhysicalDisk> {
     objects_list_page_authz::<PhysicalDisk>(client, url).await.items
+}
+
+async fn physical_disks_update(
+    client: &ClientTestContext,
+    url: &str,
+    state: &PhysicalDiskUpdate,
+) -> PhysicalDisk {
+    object_put::<PhysicalDiskUpdate, PhysicalDisk>(client, url, state).await
 }
 
 async fn sled_instance_list(
@@ -91,7 +101,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_physical_disk_create_list_delete(
+async fn test_physical_disk_create_list_disable_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let external_client = &cptestctx.external_client;
@@ -119,7 +129,7 @@ async fn test_physical_disk_create_list_delete(
     .await;
     let disks = physical_disks_list(&external_client, &disks_url).await;
     assert_eq!(disks.len(), disks_initial.len() + 1);
-    let _new_disk = disks
+    let new_disk = disks
         .iter()
         .find(|found_disk| {
             found_disk.vendor == "v"
@@ -127,6 +137,32 @@ async fn test_physical_disk_create_list_delete(
                 && found_disk.model == "m"
         })
         .expect("did not find the new disk");
+    assert_eq!(new_disk.state, PhysicalDiskState::Active);
+
+    // Disable the disk, marking it as "not-for-use".
+    let disk_url =
+        format!("/v1/system/hardware/disks/{}", new_disk.identity.id);
+    let disk = physical_disks_update(
+        &external_client,
+        &disk_url,
+        &PhysicalDiskUpdate::Disable,
+    )
+    .await;
+    assert_eq!(disk.state, PhysicalDiskState::Draining);
+
+    // Confirm that listing the disks again shows this new state too
+    let disks = physical_disks_list(&external_client, &disks_url).await;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, PhysicalDiskState::Draining);
+    let new_disk = disks
+        .iter()
+        .find(|found_disk| {
+            found_disk.vendor == "v"
+                && found_disk.serial == "s"
+                && found_disk.model == "m"
+        })
+        .expect("did not find the new disk");
+    assert_eq!(new_disk.state, PhysicalDiskState::Draining);
 
     // Delete that disk using the internal API, observe it in the external API
     delete_physical_disk(&internal_client, "v", "s", "m", sled_id).await;

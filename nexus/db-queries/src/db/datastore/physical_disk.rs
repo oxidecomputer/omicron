@@ -13,6 +13,8 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskKind;
+use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -26,9 +28,44 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use uuid::Uuid;
 
 impl DataStore {
+    /// - Sled Agents like to look up physical disks by "Vendor, Serial, Model"
+    /// - The external API likes to look up physical disks by UUID
+    /// - LookupPath objects are opinionated about how they perform lookups. They
+    /// support "primary keys" or "names", but they're opinionated about the
+    /// name objects being a single string.
+    ///
+    /// This function bridges that gap, by allowing the external API to
+    /// translate "UUID" type into a "Vendor, Serial, Model" type which can
+    /// be used internally.
+    pub async fn physical_disk_id_to_name_no_auth(
+        &self,
+        id: Uuid,
+    ) -> Result<(String, String, String), Error> {
+        use db::schema::physical_disk::dsl;
+
+        let conn = self.pool_connection_unauthorized().await?;
+
+        dsl::physical_disk
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(id))
+            .select((dsl::vendor, dsl::serial, dsl::model))
+            .get_result_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::PhysicalDisk,
+                        LookupType::ById(id),
+                    ),
+                )
+            })
+    }
+
     /// Stores a new physical disk in the database.
     ///
     /// - If the Vendor, Serial, and Model fields are the same as an existing
@@ -109,6 +146,37 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    pub async fn physical_disk_deactivate(
+        &self,
+        opctx: &OpContext,
+        authz_physical_disk: &authz::PhysicalDisk,
+    ) -> UpdateResult<PhysicalDisk> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl;
+
+        let (vendor, serial, model) = authz_physical_disk.id();
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        diesel::update(dsl::physical_disk)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::vendor.eq(vendor))
+            .filter(dsl::serial.eq(serial))
+            .filter(dsl::model.eq(model))
+            .filter(dsl::variant.eq(PhysicalDiskKind::U2))
+            .filter(dsl::state.eq(PhysicalDiskState::Active))
+            .set(dsl::state.eq(PhysicalDiskState::Draining))
+            .returning(PhysicalDisk::as_returning())
+            .get_result_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_physical_disk),
+                )
+            })
+    }
+
     /// Deletes a disk from the database.
     pub async fn physical_disk_delete(
         &self,
@@ -174,12 +242,10 @@ mod test {
     }
 
     // Only checking some fields:
-    // - The UUID of the disk may actually not be the same as the upserted one;
-    // the "vendor/serial/model" value is the more critical unique identifier.
-    // NOTE: Could we derive a UUID from the VSM values?
     // - The 'time' field precision can be modified slightly when inserted into
     // the DB.
-    fn assert_disks_equal_ignore_uuid(lhs: &PhysicalDisk, rhs: &PhysicalDisk) {
+    fn assert_disks_equal_ignore_time(lhs: &PhysicalDisk, rhs: &PhysicalDisk) {
+        assert_eq!(lhs.uuid(), rhs.uuid());
         assert_eq!(lhs.time_deleted().is_some(), rhs.time_deleted().is_some());
         assert_eq!(lhs.vendor, rhs.vendor);
         assert_eq!(lhs.serial, rhs.serial);
@@ -189,9 +255,9 @@ mod test {
     }
 
     #[tokio::test]
-    async fn physical_disk_upsert_different_uuid_idempotent() {
+    async fn physical_disk_upsert_uuid_generation_deterministic() {
         let logctx = dev::test_setup_log(
-            "physical_disk_upsert_different_uuid_idempotent",
+            "physical_disk_upsert_uuid_generation_deterministic",
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
@@ -212,7 +278,7 @@ mod test {
             .await
             .expect("Failed first attempt at upserting disk");
         assert_eq!(disk.uuid(), first_observed_disk.uuid());
-        assert_disks_equal_ignore_uuid(&disk, &first_observed_disk);
+        assert_disks_equal_ignore_time(&disk, &first_observed_disk);
 
         // Observe the inserted disk
         let pagparams = list_disk_params();
@@ -222,9 +288,12 @@ mod test {
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
         assert_eq!(disk.uuid(), disks[0].uuid());
-        assert_disks_equal_ignore_uuid(&disk, &disks[0]);
+        assert_disks_equal_ignore_time(&disk, &disks[0]);
 
-        // Insert the same disk, with a different UUID primary key
+        // Insert the same disk, but don't re-state the UUID.
+        //
+        // The rest of this test relies on the UUID derivation being
+        // deterministic.
         let disk_again = PhysicalDisk::new(
             String::from("Oxide"),
             String::from("123"),
@@ -232,15 +301,14 @@ mod test {
             PhysicalDiskKind::U2,
             sled_id,
         );
+        // With the same input parameters, the UUID should be deterministic.
+        assert_eq!(disk.uuid(), disk_again.uuid());
+
         let second_observed_disk = datastore
             .physical_disk_upsert(&opctx, disk_again.clone())
             .await
             .expect("Failed second upsert of physical disk");
-        // This check is pretty important - note that we return the original
-        // UUID, not the new one.
-        assert_ne!(disk_again.uuid(), second_observed_disk.uuid());
-        assert_eq!(disk_again.id(), second_observed_disk.id());
-        assert_disks_equal_ignore_uuid(&disk_again, &second_observed_disk);
+        assert_disks_equal_ignore_time(&disk_again, &second_observed_disk);
         assert!(
             first_observed_disk.time_modified()
                 <= second_observed_disk.time_modified()
@@ -250,13 +318,9 @@ mod test {
             .sled_list_physical_disks(&opctx, sled_id, &pagparams)
             .await
             .expect("Failed to re-list physical disks");
-
-        // We'll use the old primary key
         assert_eq!(disks.len(), 1);
-        assert_eq!(disk.uuid(), disks[0].uuid());
-        assert_ne!(disk_again.uuid(), disks[0].uuid());
-        assert_disks_equal_ignore_uuid(&disk, &disks[0]);
-        assert_disks_equal_ignore_uuid(&disk_again, &disks[0]);
+        assert_disks_equal_ignore_time(&disk, &disks[0]);
+        assert_disks_equal_ignore_time(&disk_again, &disks[0]);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -296,7 +360,7 @@ mod test {
             first_observed_disk.time_modified()
                 <= second_observed_disk.time_modified()
         );
-        assert_disks_equal_ignore_uuid(
+        assert_disks_equal_ignore_time(
             &first_observed_disk,
             &second_observed_disk,
         );

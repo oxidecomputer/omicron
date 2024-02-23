@@ -473,6 +473,18 @@ pub struct Switch {
 
 // PHYSICAL DISKS
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskState {
+    /// The disk is actively in-use.
+    Active,
+    /// The disk has been marked for removal, and is transitioning
+    /// to the Inactive state.
+    Draining,
+    /// The disk is not in-use by the system.
+    Inactive,
+}
+
 /// View of a Physical Disk
 ///
 /// Physical disks reside in a particular sled and are used to store both
@@ -488,8 +500,9 @@ pub struct PhysicalDisk {
     pub vendor: String,
     pub serial: String,
     pub model: String,
-
     pub form_factor: PhysicalDiskKind,
+
+    pub state: PhysicalDiskState,
 }
 
 // SILO USERS

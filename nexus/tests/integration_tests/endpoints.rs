@@ -15,6 +15,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Resource;
 use nexus_test_utils::resource_helpers::DiskTest;
+use nexus_test_utils::PHYSICAL_DISK_UUID;
 use nexus_test_utils::RACK_UUID;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils::SWITCH_UUID;
@@ -57,7 +58,9 @@ pub static DEMO_SLED_PROVISION_STATE: Lazy<params::SledProvisionStateParams> =
 
 pub static HARDWARE_SWITCH_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/switches/{}", SWITCH_UUID));
-pub const HARDWARE_DISK_URL: &'static str = "/v1/system/hardware/disks";
+pub const HARDWARE_DISKS_URL: &'static str = "/v1/system/hardware/disks";
+pub static HARDWARE_DISK_URL: Lazy<String> =
+    Lazy::new(|| format!("/v1/system/hardware/disks/{}", PHYSICAL_DISK_UUID));
 pub static HARDWARE_SLED_DISK_URL: Lazy<String> = Lazy::new(|| {
     format!("/v1/system/hardware/sleds/{}/disks", SLED_AGENT_UUID)
 });
@@ -1935,10 +1938,24 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &HARDWARE_DISK_URL,
+            url: &HARDWARE_DISKS_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
+        },
+
+        VerifyEndpoint {
+            url: &HARDWARE_DISK_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(
+                        params::PhysicalDiskUpdate::Disable,
+                    ).unwrap()
+                )
+            ],
         },
 
         VerifyEndpoint {

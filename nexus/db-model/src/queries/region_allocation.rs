@@ -23,6 +23,7 @@
 // a CTE (where we want the alias name to come first).
 
 use crate::schema::dataset;
+use crate::schema::physical_disk;
 use crate::schema::sled;
 use crate::schema::zpool;
 
@@ -151,7 +152,9 @@ diesel::allow_tables_to_appear_in_same_query!(
 diesel::allow_tables_to_appear_in_same_query!(
     do_insert,
     candidate_regions,
+    candidate_zpools,
     dataset,
+    physical_disk,
     zpool,
 );
 
@@ -170,8 +173,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     updated_datasets,
 );
 
-diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, dataset,);
-diesel::allow_tables_to_appear_in_same_query!(candidate_zpools, zpool,);
 diesel::allow_tables_to_appear_in_same_query!(candidate_datasets, dataset);
 
 // == Needed for random region allocation ==

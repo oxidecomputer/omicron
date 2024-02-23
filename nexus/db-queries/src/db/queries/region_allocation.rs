@@ -7,7 +7,7 @@
 use crate::db::alias::ExpressionAlias;
 use crate::db::cast_uuid_as_bytea::CastUuidToBytea;
 use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
-use crate::db::model::{Dataset, DatasetKind, Region};
+use crate::db::model::{Dataset, DatasetKind, PhysicalDiskState, Region};
 use crate::db::pool::DbConnection;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
 use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
@@ -107,6 +107,8 @@ struct CandidateDatasets {
 impl CandidateDatasets {
     fn new(candidate_zpools: &CandidateZpools, seed: u128) -> Self {
         use crate::db::schema::dataset::dsl as dataset_dsl;
+        use crate::db::schema::physical_disk::dsl as physical_disk_dsl;
+        use crate::db::schema::zpool::dsl as zpool_dsl;
         use candidate_zpools::dsl as candidate_zpool_dsl;
 
         let seed_bytes = seed.to_le_bytes();
@@ -114,12 +116,26 @@ impl CandidateDatasets {
         let query: Box<dyn CteQuery<SqlType = candidate_datasets::SqlType>> =
             Box::new(
                 dataset_dsl::dataset
-                    .inner_join(candidate_zpools.query_source().on(
-                        dataset_dsl::pool_id.eq(candidate_zpool_dsl::pool_id),
-                    ))
+                    // Access non-deleted datasets for Crucible
                     .filter(dataset_dsl::time_deleted.is_null())
                     .filter(dataset_dsl::size_used.is_not_null())
                     .filter(dataset_dsl::kind.eq(DatasetKind::Crucible))
+                    // Access datasets from disks that are "Active"
+                    .inner_join(
+                        zpool_dsl::zpool
+                            .on(zpool_dsl::id.eq(dataset_dsl::pool_id)),
+                    )
+                    .inner_join(physical_disk_dsl::physical_disk.on(
+                        physical_disk_dsl::id.eq(zpool_dsl::physical_disk_id),
+                    ))
+                    .filter(
+                        physical_disk_dsl::state.eq(PhysicalDiskState::Active),
+                    )
+                    // Only consider datasets from distinct zpools (and
+                    // therefore, distinct disks).
+                    .inner_join(candidate_zpools.query_source().on(
+                        dataset_dsl::pool_id.eq(candidate_zpool_dsl::pool_id),
+                    ))
                     .distinct_on(dataset_dsl::pool_id)
                     .order_by((
                         dataset_dsl::pool_id,

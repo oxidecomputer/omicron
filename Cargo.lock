@@ -3208,7 +3208,9 @@ dependencies = [
  "futures-util",
  "http 0.2.11",
  "hyper 0.14.27",
+ "log",
  "rustls 0.21.9",
+ "rustls-native-certs 0.6.3",
  "tokio",
  "tokio-rustls 0.24.1",
 ]
@@ -3225,7 +3227,7 @@ dependencies = [
  "hyper-util",
  "log",
  "rustls 0.22.2",
- "rustls-native-certs",
+ "rustls-native-certs 0.7.0",
  "rustls-pki-types",
  "tokio",
  "tokio-rustls 0.25.0",
@@ -5351,7 +5353,6 @@ name = "omicron-workspace-hack"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "aho-corasick",
  "anyhow",
  "base16ct",
  "bit-set",
@@ -5370,14 +5371,13 @@ dependencies = [
  "const-oid",
  "crossbeam-epoch",
  "crossbeam-utils",
- "crossterm",
  "crypto-common",
  "der",
  "diesel",
  "digest",
- "dof 0.3.0",
  "either",
  "elliptic-curve",
+ "errno",
  "ff",
  "flate2",
  "futures",
@@ -5391,10 +5391,11 @@ dependencies = [
  "generic-array",
  "getrandom 0.2.10",
  "group",
- "hashbrown 0.14.3",
+ "hashbrown 0.13.2",
  "hex",
  "hmac",
  "hyper 0.14.27",
+ "hyper-rustls 0.24.2",
  "indexmap 2.2.3",
  "inout",
  "ipnetwork",
@@ -5434,10 +5435,9 @@ dependencies = [
  "sha2",
  "similar",
  "slog",
- "socket2 0.5.5",
+ "snafu",
  "spin 0.9.8",
  "string_cache",
- "strum 0.25.0",
  "subtle",
  "syn 1.0.109",
  "syn 2.0.48",
@@ -5450,13 +5450,12 @@ dependencies = [
  "toml 0.7.8",
  "toml_datetime",
  "toml_edit 0.19.15",
- "toml_edit 0.22.6",
+ "toml_edit 0.21.1",
  "tracing",
  "trust-dns-proto",
  "unicode-bidi",
  "unicode-normalization",
  "usdt 0.3.5",
- "usdt-impl 0.5.0",
  "uuid",
  "yasna",
  "zerocopy 0.7.32",
@@ -7477,6 +7476,18 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
+dependencies = [
+ "openssl-probe",
+ "rustls-pemfile 1.0.3",
+ "schannel",
+ "security-framework",
+]
+
+[[package]]
+name = "rustls-native-certs"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f1fb85efa936c42c6d5fc28d2629bb51e4b2f4b8a5211e297d599cc5a093792"
@@ -8011,6 +8022,12 @@ dependencies = [
  "cpufeatures",
  "digest",
 ]
+
+[[package]]
+name = "sha1_smol"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae1a47186c03a32177042e55dbc5fd5aee900b8e0069a8d70fba96a9375cd012"
 
 [[package]]
 name = "sha2"
@@ -9389,6 +9406,19 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
+version = "0.21.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
+dependencies = [
+ "indexmap 2.2.3",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "winnow 0.5.15",
+]
+
+[[package]]
+name = "toml_edit"
 version = "0.22.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c1b5fd4128cc8d3e0cb74d4ed9a9cc7c7284becd4df68f5f940e1ad123606f6"
@@ -10089,6 +10119,7 @@ checksum = "f00cc9702ca12d3c81455259621e676d0f7251cec66a21e98fe2e9a37db93b2a"
 dependencies = [
  "getrandom 0.2.10",
  "serde",
+ "sha1_smol",
 ]
 
 [[package]]

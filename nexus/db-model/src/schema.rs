@@ -892,6 +892,7 @@ table! {
 
         variant -> crate::PhysicalDiskKindEnum,
         sled_id -> Uuid,
+        state -> crate::PhysicalDiskStateEnum,
     }
 }
 
@@ -959,11 +960,6 @@ table! {
 
         total_size -> Int8,
     }
-}
-
-allow_tables_to_appear_in_same_query! {
-    zpool,
-    physical_disk
 }
 
 table! {

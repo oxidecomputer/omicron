@@ -3859,6 +3859,92 @@
         }
       }
     },
+    "/v1/system/hardware/disks/{disk_id}": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Get a physical disk",
+        "operationId": "physical_disk_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "description": "ID of the physical_disk",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDisk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Update a physical disk's state",
+        "operationId": "physical_disk_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "description": "ID of the physical_disk",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhysicalDiskUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDisk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/racks": {
       "get": {
         "tags": [
@@ -13872,6 +13958,9 @@
             "type": "string",
             "format": "uuid"
           },
+          "state": {
+            "$ref": "#/components/schemas/PhysicalDiskState"
+          },
           "time_created": {
             "description": "timestamp when this resource was created",
             "type": "string",
@@ -13891,6 +13980,7 @@
           "id",
           "model",
           "serial",
+          "state",
           "time_created",
           "time_modified",
           "vendor"
@@ -13923,6 +14013,43 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "PhysicalDiskState": {
+        "oneOf": [
+          {
+            "description": "The disk is actively in-use.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "The disk has been marked for removal, and is transitioning to the Inactive state.",
+            "type": "string",
+            "enum": [
+              "draining"
+            ]
+          },
+          {
+            "description": "The disk is not in-use by the system.",
+            "type": "string",
+            "enum": [
+              "inactive"
+            ]
+          }
+        ]
+      },
+      "PhysicalDiskUpdate": {
+        "description": "Updateable properties of a `PhysicalDisk`.",
+        "oneOf": [
+          {
+            "description": "Prevents the disk from being used for future provisioning.\n\nThis does not immediately cause services to be evacuated from using the underlying disk, that process may happen asynchronously.",
+            "type": "string",
+            "enum": [
+              "disable"
+            ]
+          }
         ]
       },
       "Ping": {
