@@ -184,7 +184,7 @@ mod test {
                     underlay_address: "::1".parse().unwrap(),
                     filesystem_pool: pool_name,
                     zone_type: OmicronZoneType::InternalDns {
-                        dataset: OmicronZoneDataset { pool_name },
+                        dataset,
                         dns_address: "oh-hello-internal-dns".into(),
                         gz_address: "::1".parse().unwrap(),
                         gz_address_index: 0,

@@ -215,8 +215,8 @@ mod test {
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
         // reporting success.
-        let pool_name = ZpoolName::new_external(Uuid::new_v4());
         fn make_zones() -> OmicronZonesConfig {
+            let pool_name = ZpoolName::new_external(Uuid::new_v4());
             OmicronZonesConfig {
                 generation: Generation::new(),
                 zones: vec![OmicronZoneConfig {
