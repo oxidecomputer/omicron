@@ -21,6 +21,7 @@ members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
+    "dev-tools/reconfigurator",
     "dev-tools/xtask",
     "dns-server",
     "end-to-end-tests",
@@ -97,6 +98,7 @@ default-members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
+    "dev-tools/reconfigurator",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
@@ -324,6 +326,7 @@ ratatui = "0.26.1"
 rayon = "1.8"
 rcgen = "0.12.1"
 reedline = "0.29.0"
+reedline-repl-rs = "1.0.7"
 ref-cast = "1.0"
 regex = "1.10.3"
 regress = "0.8.0"
