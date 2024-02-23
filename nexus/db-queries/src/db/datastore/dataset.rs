@@ -141,7 +141,8 @@ impl DataStore {
         opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
         use db::schema::dataset::dsl;
 
-        let mut query = paginated(dsl::dataset, dsl::id, pagparams);
+        let mut query = paginated(dsl::dataset, dsl::id, pagparams)
+            .filter(dsl::time_deleted.is_null());
 
         if let Some(kind) = filter_kind {
             query = query.filter(dsl::kind.eq(kind));
@@ -255,6 +256,20 @@ mod test {
             datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
             expected_datasets,
         );
+        assert_eq!(
+            datastore
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
+                .await
+                .unwrap(),
+            expected_datasets,
+        );
+        assert_eq!(
+            datastore
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Cockroach))
+                .await
+                .unwrap(),
+            [],
+        );
 
         // Attempting to insert another dataset with the same ID should succeed
         // without updating the existing record. We'll check this by passing a
@@ -280,7 +295,7 @@ mod test {
                 Uuid::new_v4(),
                 zpool_id,
                 "[::1]:0".parse().unwrap(),
-                DatasetKind::Crucible,
+                DatasetKind::Cockroach,
             ))
             .await
             .expect("failed to upsert dataset");
@@ -289,6 +304,20 @@ mod test {
         assert_eq!(
             datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
             expected_datasets,
+        );
+        assert_eq!(
+            datastore
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
+                .await
+                .unwrap(),
+            [dataset1.clone()],
+        );
+        assert_eq!(
+            datastore
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Cockroach))
+                .await
+                .unwrap(),
+            [dataset2.clone()],
         );
 
         // ... and trying to `insert_if_not_exists` should similarly return
