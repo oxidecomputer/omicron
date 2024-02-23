@@ -12,7 +12,11 @@ use crate::app::{
 
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
-use nexus_db_model::BgpConfig;
+use ipnetwork::IpNetwork;
+use nexus_db_model::{
+    BgpConfig, SwitchLinkFec, SwitchLinkSpeed, SwitchPortBgpPeerConfig,
+    NETWORK_KEY,
+};
 use uuid::Uuid;
 
 use super::common::BackgroundTask;
@@ -34,7 +38,11 @@ use omicron_common::{
     api::external::{DataPageParams, SwitchLocation},
 };
 use serde_json::json;
-use sled_agent_client::types::HostPortConfig;
+use sled_agent_client::types::{
+    BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, Ipv4Network,
+    PortConfigV1, RackNetworkConfigV1, RouteConfig as SledRouteConfig,
+};
 use std::{
     collections::{hash_map::Entry, HashMap},
     net::{IpAddr, Ipv4Addr, SocketAddrV6},
@@ -166,282 +174,476 @@ impl BackgroundTask for SwitchPortSettingsManager {
         &'a mut self,
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
-        async {
+        async move {
             let log = &opctx.log;
 
-            // lookup switch zones via DNS
-            let switch_zone_addresses = match self
-                .resolver
-                .lookup_all_ipv6(ServiceName::Dendrite)
-                .await
-            {
-                Ok(addrs) => addrs,
-                Err(_) => todo!("handle error"),
+            let racks = match self.datastore.rack_list(opctx, &DataPageParams::max_page()).await {
+                Ok(racks) => racks,
+                Err(e) => {
+                    error!(log, "en to retrieve racks from database"; "error" => ?e);
+                    return json!({})
+                },
             };
 
-            let mappings =
-                map_switch_zone_addrs(log, switch_zone_addresses).await;
+            // TODO: correctness (multi-rack)
+            // Here we're iterating over racks because that's technically the correct thing to do,
+            // but our logic for pulling switch ports and their related configurations
+            // *isn't* per-rack, so that's something we'll need to revisit in the future.
+            for rack in &racks {
 
-            // build sled agent clients
-            let sled_agent_clients = build_sled_agent_clients(&mappings, log);
-
-            // build dpd clients
-            let dpd_clients = build_dpd_clients(&mappings, log);
-
-            // build mgd clients
-            let mgd_clients = build_mgd_clients(mappings, log);
-
-            let port_list = match self.switch_ports(opctx, log).await {
-                Ok(value) => value,
-                Err(_) => todo!("handle error"),
-            };
-
-            //
-            // calculate and apply switch port changes
-            //
-
-            let changes = match self.changes(port_list, opctx, log).await {
-                Ok(value) => value,
-                Err(_) => todo!("handle error"),
-            };
-
-            apply_switch_port_changes(dpd_clients, &changes, log).await;
-
-            //
-            // calculate and apply routing changes
-            //
-
-            // get the static routes on each switch
-            let downstream_static_routes =
-                downstream_static_routes(&mgd_clients, log).await;
-
-            // generate the complete set of static routes that should be on a given switch
-            let upstream_static_routes = upstream_static_routes(&changes);
-
-            // diff the downstream and upstream routes. Add what is missing from downstream, remove what is not present in upstream.
-            let routes_to_add = static_routes_to_add(
-                &upstream_static_routes,
-                &downstream_static_routes,
-                log,
-            );
-
-            let routes_to_del = static_routes_to_del(
-                downstream_static_routes,
-                upstream_static_routes,
-            );
-
-            // delete the unneeded routes first, just in case there is a conflicting route for one we need to add
-            delete_static_routes(&mgd_clients, routes_to_del, log).await;
-
-            // add the new routes
-            add_static_routes(&mgd_clients, routes_to_add, log).await;
-
-            //
-            // calculate and apply switch zone SMF changes
-            //
-            let uplinks = uplinks(&changes);
-
-            // yeet the messages
-            for (location, config) in &uplinks {
-                let client: &sled_agent_client::Client =
-                    match sled_agent_clients.get(location) {
-                        Some(client) => client,
-                        None => todo!("handle missing client"),
-                    };
-
-                if let Err(_) = client
-                    .uplink_ensure(&sled_agent_client::types::SwitchPorts {
-                        uplinks: config.clone(),
-                    })
+                // lookup switch zones via DNS
+                // TODO in the future this will need to be need to be done per rack
+                let switch_zone_addresses = match self
+                    .resolver
+                    .lookup_all_ipv6(ServiceName::Dendrite)
                     .await
                 {
-                    todo!("handle error")
-                }
-            }
-
-            //
-            // calculate and apply BGP changes
-            //
-
-            // build a list of desired settings for each switch
-            let mut desired_bgp_configs: HashMap<
-                SwitchLocation,
-                Vec<ApplyRequest>,
-            > = HashMap::new();
-
-            // we currently only support one bgp config per switch
-            let mut switch_bgp_config: HashMap<SwitchLocation, (Uuid, BgpConfig)> = HashMap::new();
-
-            // Prefixes are associated to BgpConfig via the config id
-            let mut bgp_announce_set: HashMap<Uuid, Vec<Prefix4>> = HashMap::new();
-
-            for (location, port, change) in &changes {
-                let PortSettingsChange::Apply(settings) = change else {
-                    continue;
+                    Ok(addrs) => addrs,
+                    Err(_) => todo!("handle error"),
                 };
 
-                // desired peer configurations for a given switch port
-                let mut peers: HashMap<String, Vec<BgpPeerConfig>> = HashMap::new();
+                // TODO in the future this will need to be need to be done per rack
+                let mappings =
+                    map_switch_zone_addrs(log, switch_zone_addresses).await;
 
-                for peer in &settings.bgp_peers {
-                    let bgp_config_id = peer.bgp_config_id;
+                // TODO in the future this will need to be need to be done per rack
+                // build sled agent clients
+                let sled_agent_clients = build_sled_agent_clients(&mappings, log);
 
-                    // since we only have one bgp config per switch, we only need to fetch it once
-                    let bgp_config = match switch_bgp_config.entry(*location) {
-                        Entry::Occupied(occupied_entry) => {
-                            let (existing_id, existing_config) = occupied_entry.get().clone();
-                            // verify peers don't have differing configs
-                            if existing_id != bgp_config_id {
-                                // should we flag the switch and not do *any* updates to it?
-                                // with the logic as-is, it will skip the config for this port and move on
-                                 error!(
-                                    log,
-                                    "peers do not have matching asn (only one asn allowed per switch)";
-                                    "switch" => ?location,
-                                    "first_config_id" => ?existing_id,
-                                    "second_config_id" => ?bgp_config_id,
-                                );
-                                break;
-                            }
-                            existing_config
-                        },
-                        Entry::Vacant(vacant_entry) => {
-                            // get the bgp config for this peer
-                            let config = match self
+                // TODO in the future this will need to be need to be done per rack
+                // build dpd clients
+                let dpd_clients = build_dpd_clients(&mappings, log);
+
+                // TODO in the future this will need to be need to be done per rack
+                // build mgd clients
+                let mgd_clients = build_mgd_clients(mappings, log);
+
+                let port_list = match self.switch_ports(opctx, log).await {
+                    Ok(value) => value,
+                    Err(_) => todo!("handle error"),
+                };
+
+                //
+                // calculate and apply switch port changes
+                //
+
+                let changes = match self.changes(port_list, opctx, log).await {
+                    Ok(value) => value,
+                    Err(_) => todo!("handle error"),
+                };
+
+                apply_switch_port_changes(dpd_clients, &changes, log).await;
+
+                //
+                // calculate and apply routing changes
+                //
+
+                // get the static routes on each switch
+                let downstream_static_routes =
+                    downstream_static_routes(&mgd_clients, log).await;
+
+                // generate the complete set of static routes that should be on a given switch
+                let upstream_static_routes = upstream_static_routes(&changes);
+
+                // diff the downstream and upstream routes. Add what is missing from downstream, remove what is not present in upstream.
+                let routes_to_add = static_routes_to_add(
+                    &upstream_static_routes,
+                    &downstream_static_routes,
+                    log,
+                );
+
+                let routes_to_del = static_routes_to_del(
+                    downstream_static_routes,
+                    upstream_static_routes,
+                );
+
+                // delete the unneeded routes first, just in case there is a conflicting route for one we need to add
+                delete_static_routes(&mgd_clients, routes_to_del, log).await;
+
+                // add the new routes
+                add_static_routes(&mgd_clients, routes_to_add, log).await;
+
+                //
+                // calculate and apply switch zone SMF changes
+                //
+                let uplinks = uplinks(&changes);
+
+                // yeet the messages
+                for (location, config) in &uplinks {
+                    let client: &sled_agent_client::Client =
+                        match sled_agent_clients.get(location) {
+                            Some(client) => client,
+                            None => todo!("handle missing client"),
+                        };
+
+                    if let Err(_) = client
+                        .uplink_ensure(&sled_agent_client::types::SwitchPorts {
+                            uplinks: config.clone(),
+                        })
+                        .await
+                    {
+                        todo!("handle error")
+                    }
+                }
+
+                //
+                // calculate and apply BGP changes
+                //
+
+                // build a list of desired settings for each switch
+                let mut desired_bgp_configs: HashMap<
+                    SwitchLocation,
+                    Vec<ApplyRequest>,
+                > = HashMap::new();
+
+                // we currently only support one bgp config per switch
+                let mut switch_bgp_config: HashMap<SwitchLocation, (Uuid, BgpConfig)> = HashMap::new();
+
+                // Prefixes are associated to BgpConfig via the config id
+                let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix4>> = HashMap::new();
+
+                let mut bootstore_bgp_peer_info: Vec<(SwitchPortBgpPeerConfig, u32, Ipv4Addr)> = vec![];
+
+                for (location, port, change) in &changes {
+                    let PortSettingsChange::Apply(settings) = change else {
+                        continue;
+                    };
+
+                    // desired peer configurations for a given switch port
+                    let mut peers: HashMap<String, Vec<BgpPeerConfig>> = HashMap::new();
+
+                    for peer in &settings.bgp_peers {
+                        let bgp_config_id = peer.bgp_config_id;
+
+                        // since we only have one bgp config per switch, we only need to fetch it once
+                        let bgp_config = match switch_bgp_config.entry(*location) {
+                            Entry::Occupied(occupied_entry) => {
+                                let (existing_id, existing_config) = occupied_entry.get().clone();
+                                // verify peers don't have differing configs
+                                if existing_id != bgp_config_id {
+                                    // should we flag the switch and not do *any* updates to it?
+                                    // with the logic as-is, it will skip the config for this port and move on
+                                    error!(
+                                        log,
+                                        "peers do not have matching asn (only one asn allowed per switch)";
+                                        "switch" => ?location,
+                                        "first_config_id" => ?existing_id,
+                                        "second_config_id" => ?bgp_config_id,
+                                    );
+                                    break;
+                                }
+                                existing_config
+                            },
+                            Entry::Vacant(vacant_entry) => {
+                                // get the bgp config for this peer
+                                let config = match self
+                                    .datastore
+                                    .bgp_config_get(opctx, &bgp_config_id.into())
+                                    .await
+                                {
+                                    Ok(config) => config,
+                                    Err(_) => todo!(),
+                                };
+                                vacant_entry.insert((bgp_config_id, config.clone()));
+                                config
+                            },
+                        };
+
+                        //
+                        // build a list of prefixes from the announcements in the bgp config
+                        //
+
+                        // Same thing as above, check to see if we've already built the announce set,
+                        // if so we'll skip this step
+                        if bgp_announce_prefixes.get(&bgp_config.bgp_announce_set_id).is_none() {
+                            let announcements = match self
                                 .datastore
-                                .bgp_config_get(opctx, &bgp_config_id.into())
+                                .bgp_announce_list(
+                                    opctx,
+                                    &params::BgpAnnounceSetSelector {
+                                        name_or_id: bgp_config
+                                            .bgp_announce_set_id
+                                            .into(),
+                                    },
+                                )
                                 .await
                             {
-                                Ok(config) => config,
+                                Ok(a) => a,
                                 Err(_) => todo!(),
                             };
-                            vacant_entry.insert((bgp_config_id, config.clone()));
-                            config
+
+                            let mut prefixes: Vec<Prefix4> = vec![];
+
+                            for announcement in &announcements {
+                                let value = match announcement.network.ip() {
+                                    IpAddr::V4(value) => value,
+                                    IpAddr::V6(a) => {
+                                        error!(log, "bad request, only ipv4 supported at this time"; "requested_address" => ?a);
+                                        continue;
+                                    },
+                                };
+                                prefixes.push(Prefix4 { value, length: announcement.network.prefix() });
+                            }
+                            bgp_announce_prefixes.insert(bgp_config.bgp_announce_set_id, prefixes);
+                        }
+
+                        // now that the peer passes the above validations, add it to the list for configuration
+                        let peer_config = BgpPeerConfig {
+                            name: format!("{}", peer.addr.ip()),
+                            host: format!("{}:179", peer.addr.ip()),
+                            hold_time: peer.hold_time.0.into(),
+                            idle_hold_time: peer.idle_hold_time.0.into(),
+                            delay_open: peer.delay_open.0.into(),
+                            connect_retry: peer.connect_retry.0.into(),
+                            keepalive: peer.keepalive.0.into(),
+                            resolution: BGP_SESSION_RESOLUTION,
+                            passive: false,
+                        };
+
+                        // add it to data for the bootstore
+                        // only ipv4 is supported now
+                        match peer.addr {
+                            ipnetwork::IpNetwork::V4(addr) => {
+                                bootstore_bgp_peer_info.push((peer.clone(), bgp_config.asn.0, addr.ip()));
+                            },
+                            ipnetwork::IpNetwork::V6(_) => continue, //TODO v6
+                        };
+
+                        // update the stored vec if it exists, create a new on if it doesn't exist
+                        match peers.entry(port.port_name.clone()) {
+                            Entry::Occupied(mut occupied_entry) => {
+                                occupied_entry.get_mut().push(peer_config);
+                            },
+                            Entry::Vacant(vacant_entry) => {
+                                vacant_entry.insert(vec![peer_config]);
+                            },
+                        }
+                    }
+
+                    let (config_id, request_bgp_config) = match switch_bgp_config.get(location) {
+                        Some(config) => config,
+                        None => {
+                            info!(log, "no bgp config found for switch, skipping."; "switch" => ?location);
+                            continue;
                         },
                     };
 
-                    //
-                    // build a list of prefixes from the announcements in the bgp config
-                    //
+                    let request_prefixes = match bgp_announce_prefixes.get(&request_bgp_config.bgp_announce_set_id) {
+                        Some(prefixes) => prefixes,
+                        None => {
+                            error!(
+                                log,
+                                "no prefixes to announce found for bgp config";
+                                "switch" => ?location,
+                                "announce_set_id" => ?request_bgp_config.bgp_announce_set_id,
+                                "bgp_config_id" => ?config_id,
+                            );
+                            continue;
+                        },
+                    };
 
-                    // Same thing as above, check to see if we've already built the announce set,
-                    // if so we'll skip this step
-                    if bgp_announce_set.get(&bgp_config.bgp_announce_set_id).is_none() {
-                        let announcements = match self
-                            .datastore
-                            .bgp_announce_list(
-                                opctx,
-                                &params::BgpAnnounceSetSelector {
-                                    name_or_id: bgp_config
-                                        .bgp_announce_set_id
-                                        .into(),
-                                },
-                            )
-                            .await
-                        {
-                            Ok(a) => a,
+                    let request = ApplyRequest {
+                        asn: *request_bgp_config.asn,
+                        peers,
+                        originate: request_prefixes.clone(),
+                    };
+
+                    match desired_bgp_configs.entry(*location) {
+                        Entry::Occupied(mut occupied_entry) => {
+                            occupied_entry.get_mut().push(request);
+                        }
+                        Entry::Vacant(vacant_entry) => {
+                            vacant_entry.insert(vec![request]);
+                        }
+                    }
+                }
+
+                for (location, configs) in &desired_bgp_configs {
+                    let client = match mgd_clients.get(location) {
+                        Some(client) => client,
+                        None => {
+                            error!(log, "no mgd client found for switch"; "switch_location" => ?location);
+                            continue;
+                        },
+                    };
+                    for config in configs {
+                        if let Err(e) = client.inner.bgp_apply(config).await {
+                            error!(log, "error while applying bgp configuration"; "error" => ?e);
+                        }
+                    }
+                }
+
+                //
+                // calculate and apply bootstore changes
+                //
+
+                // check downstream bootstore version
+                let mut downstream_config: Option<EarlyNetworkConfig> = None;
+
+                // Since we update the first scrimlet we can reach (we failover to the second one
+                // if updating the first one fails) we need to check them both.
+                for (_location, client) in &sled_agent_clients {
+                    let scrimlet_cfg  = match client.read_network_bootstore_config_cache().await {
+                        Ok(config) => config,
+                        Err(e) => {
+                            error!(log, "unable to read bootstore config from scrimlet"; "error" => ?e);
+                            continue;
+                        }
+                    };
+                    if let Some(other_config) = downstream_config.as_mut() {
+                        if other_config.generation < scrimlet_cfg.generation {
+                            *other_config = scrimlet_cfg.clone();
+                        }
+                    } else {
+                        downstream_config = Some(scrimlet_cfg.clone());
+                    }
+                }
+
+                // Move on to the next rack if neither scrimlet is reachable.
+                // if both scrimlets are unreachable we probably have bigger problems on this rack
+                if downstream_config.is_none() {
+                    error!(log, "both scrimlets are unreachable, cannot update bootstore");
+                    continue;
+                }
+
+                // get the upstream version
+
+                let subnet = match rack.rack_subnet {
+                    Some(IpNetwork::V6(subnet)) => subnet,
+                    Some(IpNetwork::V4(_)) => {
+                        error!(log, "rack subnet must be ipv6"; "rack" => ?rack);
+                        continue;
+                    },
+                    None => {
+                        error!(log, "rack subnet not set"; "rack" => ?rack);
+                        continue;
+                    }
+                };
+
+                // TODO: @rcgoodfellow is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
+                let bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
+                    let announcements: Vec<Ipv4Network> = bgp_announce_prefixes
+                        .get(&config.bgp_announce_set_id)
+                        .expect("bgp config is present but announce set is not populated")
+                        .iter()
+                        .map(|prefix| {
+                            ipnetwork::Ipv4Network::new(prefix.value, prefix.length)
+                                .expect("Prefix4 and Ipv4Network's value types have diverged")
+                                .into()
+                        }).collect();
+
+                    SledBgpConfig {
+                        asn: config.asn.0,
+                        originate: announcements,
+                    }
+                }).collect();
+
+                // TODO: This is what is remaining to build the message
+                let mut ports: Vec<PortConfigV1> = vec![];
+
+                for (location, port, change) in &changes {
+                    let PortSettingsChange::Apply(info) = change else {
+                        continue;
+                    };
+
+                    // do stuff
+                    let port_config = PortConfigV1 {
+                        addresses: info.addresses.iter().map(|a| a.address).collect(),
+                        autoneg: info
+                            .links
+                            .get(0) //TODO breakout support
+                            .map(|l| l.autoneg)
+                            .unwrap_or(false),
+                        bgp_peers: bootstore_bgp_peer_info
+                            .iter()
+                            .map(|(p, asn, addr)| SledBgpPeerConfig {
+                                addr: *addr,
+                                asn: *asn,
+                                port: port.port_name.clone(),
+                                hold_time: Some(p.hold_time.0.into()),
+                                connect_retry: Some(p.connect_retry.0.into()),
+                                delay_open: Some(p.delay_open.0.into()),
+                                idle_hold_time: Some(p.idle_hold_time.0.into()),
+                                keepalive: Some(p.keepalive.0.into()),
+                            })
+                            .collect(),
+                        port: port.port_name.clone(),
+                        routes: info
+                            .routes
+                            .iter()
+                            .map(|r| SledRouteConfig {
+                                destination: r.dst,
+                                nexthop: r.gw.ip(),
+                            })
+                            .collect(),
+                        switch: *location,
+                        uplink_port_fec: info
+                            .links
+                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            .map(|l| l.fec)
+                            .unwrap_or(SwitchLinkFec::None)
+                            .into(),
+                        uplink_port_speed: info
+                            .links
+                            .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+                            .map(|l| l.speed)
+                            .unwrap_or(SwitchLinkSpeed::Speed100G)
+                            .into(),
+                    };
+                    ports.push(port_config);
+                }
+
+                let mut upstream_config = EarlyNetworkConfig {
+                    generation: 0,
+                    schema_version: 1,
+                    body: EarlyNetworkConfigBody {
+                        ntp_servers: Vec::new(), //TODO
+                        rack_network_config: Some(RackNetworkConfigV1 {
+                            rack_subnet: subnet,
+                            //TODO(ry) you are here. We need to remove these too. They are
+                            // inconsistent with a generic set of addresses on ports.
+                            infra_ip_first: Ipv4Addr::UNSPECIFIED,
+                            infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                            ports,
+                            bgp,
+                        }),
+                    },
+                };
+
+                // check to see if our config is different(?)
+                // we currently are not caching the last sent bootstore config, so we have to build
+                // it every time and compare.
+
+                let bootstore_needs_update = {
+                    match downstream_config {
+                        Some(existing_config) => {
+                            existing_config.schema_version != upstream_config.schema_version ||
+                            existing_config.body.ntp_servers != upstream_config.body.ntp_servers ||
+                            existing_config.body.rack_network_config != upstream_config.body.rack_network_config
+                        },
+                        _ => true,
+                    }
+                };
+
+                if bootstore_needs_update {
+                    let generation = match self.datastore
+                        .bump_bootstore_generation(opctx, NETWORK_KEY.into())
+                        .await {
+                        Ok(value) => value,
                             Err(_) => todo!(),
                         };
 
-                        let mut prefixes: Vec<Prefix4> = vec![];
+                    upstream_config.generation = generation as u64;
 
-                        for announcement in &announcements {
-                            let value = match announcement.network.ip() {
-                                IpAddr::V4(value) => value,
-                                IpAddr::V6(a) => {
-                                    error!(log, "bad request, only ipv4 supported at this time"; "requested_address" => ?a);
-                                    continue;
-                                },
-                            };
-                            prefixes.push(Prefix4 { value, length: announcement.network.prefix() });
+                    // push the updates to both scrimlets
+                    // if both scrimlets are down, bootstore updates aren't happening anyway
+                    for (_location, client) in &sled_agent_clients {
+                        if let Err(_) = client.write_network_bootstore_config(&upstream_config).await {
+                            todo!()
                         }
-                        bgp_announce_set.insert(bgp_config.bgp_announce_set_id, prefixes);
-                    }
-
-
-                    // now that the peer passes the above validations, add it to the list for configuration
-                    let peer_config = BgpPeerConfig {
-                        name: format!("{}", peer.addr.ip()),
-                        host: format!("{}:179", peer.addr.ip()),
-                        hold_time: peer.hold_time.0.into(),
-                        idle_hold_time: peer.idle_hold_time.0.into(),
-                        delay_open: peer.delay_open.0.into(),
-                        connect_retry: peer.connect_retry.0.into(),
-                        keepalive: peer.keepalive.0.into(),
-                        resolution: BGP_SESSION_RESOLUTION,
-                        passive: false,
-                    };
-
-                    // update the stored vec if it exists, create a new on if it doesn't exist
-                    match peers.entry(port.port_name.clone()) {
-                        Entry::Occupied(mut occupied_entry) => {
-                            occupied_entry.get_mut().push(peer_config);
-                        },
-                        Entry::Vacant(vacant_entry) => {
-                            vacant_entry.insert(vec![peer_config]);
-                        },
-                    }
-                }
-
-                let (config_id, request_bgp_config) = match switch_bgp_config.get(location) {
-                    Some(config) => config,
-                    None => {
-                        info!(log, "no bgp config found for switch, skipping."; "switch" => ?location);
-                        continue;
-                    },
-                };
-
-                let request_prefixes = match bgp_announce_set.get(&request_bgp_config.bgp_announce_set_id) {
-                    Some(prefixes) => prefixes,
-                    None => {
-                        error!(
-                            log,
-                            "no prefixes to announce found for bgp config";
-                            "switch" => ?location,
-                            "announce_set_id" => ?request_bgp_config.bgp_announce_set_id,
-                            "bgp_config_id" => ?config_id,
-                        );
-                        continue;
-                    },
-                };
-
-                let request = ApplyRequest {
-                    asn: *request_bgp_config.asn,
-                    peers,
-                    originate: request_prefixes.clone(),
-                };
-
-                match desired_bgp_configs.entry(*location) {
-                    Entry::Occupied(mut occupied_entry) => {
-                        occupied_entry.get_mut().push(request);
-                    }
-                    Entry::Vacant(vacant_entry) => {
-                        vacant_entry.insert(vec![request]);
                     }
                 }
             }
-
-            // verify that each switch's peer group are all using the same asn
-            // if they are not, reject the set of peers
-            for (location, configs) in &desired_bgp_configs {
-                let client = match mgd_clients.get(location) {
-                    Some(client) => client,
-                    None => {
-                        error!(log, "no mgd client found for switch"; "switch_location" => ?location);
-                        continue;
-                    },
-                };
-                for config in configs {
-                    if let Err(e) = client.inner.bgp_apply(config).await {
-                        error!(log, "error while applying bgp configuration"; "error" => ?e);
-                    }
-                }
-            }
-
-            //
-            // calculate and apply bootstore changes
-            //
-
             json!({})
         }
         .boxed()
