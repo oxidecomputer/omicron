@@ -23,6 +23,7 @@ use nexus_types::inventory::ZpoolName;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
@@ -45,6 +46,8 @@ pub struct SyntheticSystemBuilder {
     sled_subnets: Box<dyn SubnetIterator>,
     available_non_scrimlet_slots: BTreeSet<u32>,
     available_scrimlet_slots: BTreeSet<u32>,
+    target_nexus_zone_count: usize,
+    service_ip_pool_ranges: Vec<IpRange>,
 }
 
 impl SyntheticSystemBuilder {
@@ -87,12 +90,24 @@ impl SyntheticSystemBuilder {
                 .skip(1)
                 .map(|s| Ipv6Subnet::new(s.network())),
         );
+
+        // Policy defaults
+        let target_nexus_zone_count = NEXUS_REDUNDANCY;
+        // IPs from TEST-NET-1 (RFC 5737)
+        let service_ip_pool_ranges = vec![IpRange::try_from((
+            "192.0.2.2".parse::<Ipv4Addr>().unwrap(),
+            "192.0.2.20".parse::<Ipv4Addr>().unwrap(),
+        ))
+        .unwrap()];
+
         SyntheticSystemBuilder {
             sleds: Vec::new(),
             collector: None,
             sled_subnets,
             available_non_scrimlet_slots,
             available_scrimlet_slots,
+            target_nexus_zone_count,
+            service_ip_pool_ranges,
         }
     }
 
@@ -110,7 +125,7 @@ impl SyntheticSystemBuilder {
         for slot_number in 1..32 {
             let mut sled = SledBuilder::new();
             if slot_number == 14 || slot_number == 16 {
-                sled.sled_role(SledRole::Scrimlet);
+                sled = sled.sled_role(SledRole::Scrimlet);
             }
             builder.sled(sled)?;
         }
@@ -122,6 +137,19 @@ impl SyntheticSystemBuilder {
         String: From<S>,
     {
         self.collector = Some(String::from(collector_label));
+        self
+    }
+
+    pub fn target_nexus_zone_count(&mut self, count: usize) -> &mut Self {
+        self.target_nexus_zone_count = count;
+        self
+    }
+
+    pub fn service_ip_pool_ranges(
+        &mut self,
+        ranges: Vec<IpRange>,
+    ) -> &mut Self {
+        self.service_ip_pool_ranges = ranges;
         self
     }
 
@@ -196,14 +224,6 @@ impl SyntheticSystemBuilder {
     }
 
     pub fn to_policy(&self) -> anyhow::Result<Policy> {
-        // XXX-dap configurable?
-        let service_ip_pool_ranges = vec![IpRange::try_from((
-            "192.168.1.20".parse::<Ipv4Addr>().unwrap(),
-            "192.168.1.29".parse::<Ipv4Addr>().unwrap(),
-        ))
-        .unwrap()];
-        // XXX-dap configurable?
-        let target_nexus_zone_count = 3;
         let sleds = self
             .sleds
             .iter()
@@ -219,8 +239,8 @@ impl SyntheticSystemBuilder {
 
         Ok(Policy {
             sleds,
-            service_ip_pool_ranges: service_ip_pool_ranges,
-            target_nexus_zone_count: target_nexus_zone_count,
+            service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
+            target_nexus_zone_count: self.target_nexus_zone_count,
         })
     }
 
@@ -264,12 +284,12 @@ impl SledBuilder {
         }
     }
 
-    pub fn id(&mut self, id: Uuid) -> &mut Self {
+    pub fn id(mut self, id: Uuid) -> Self {
         self.id = Some(id);
         self
     }
 
-    pub fn unique<S>(&mut self, unique: S) -> &mut Self
+    pub fn unique<S>(mut self, unique: S) -> Self
     where
         String: From<S>,
     {
@@ -277,22 +297,22 @@ impl SledBuilder {
         self
     }
 
-    pub fn npools(&mut self, npools: u8) -> &mut Self {
+    pub fn npools(mut self, npools: u8) -> Self {
         self.npools = npools;
         self
     }
 
-    pub fn hardware(&mut self, hardware: SledHardware) -> &mut Self {
+    pub fn hardware(mut self, hardware: SledHardware) -> Self {
         self.hardware = hardware;
         self
     }
 
-    pub fn hardware_slot(&mut self, hardware_slot: u32) -> &mut Self {
+    pub fn hardware_slot(mut self, hardware_slot: u32) -> Self {
         self.hardware_slot = Some(hardware_slot);
         self
     }
 
-    pub fn sled_role(&mut self, sled_role: SledRole) -> &mut Self {
+    pub fn sled_role(mut self, sled_role: SledRole) -> Self {
         self.sled_role = sled_role;
         self
     }
