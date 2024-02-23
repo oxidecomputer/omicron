@@ -6,10 +6,13 @@
 
 use super::DataStore;
 use crate::db;
+use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
+use crate::db::model::LiveRepairNotification;
+use crate::db::model::LiveRepairNotificationType;
 use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
 use crate::db::model::Volume;
@@ -807,6 +810,101 @@ impl DataStore {
                     return Error::internal_error(&format!("Transaction error: {}", err));
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)
+            })
+    }
+
+    // An Upstairs is created as part of a Volume hierarchy if the Volume
+    // Construction Request includes a "Region" variant. This may be at any
+    // layer of the Volume, and some notifications will come from an Upstairs
+    // instead of the top level of the Volume. The following functions have an
+    // Upstairs ID instead of a Volume ID for this reason.
+
+    /// Record when an Upstairs notifies us about a live repair. If that record
+    /// (uniquely identified by the four IDs passed in plus the notification
+    /// type) exists already, do nothing.
+    pub async fn live_repair_notification(
+        &self,
+        opctx: &OpContext,
+        record: LiveRepairNotification,
+    ) -> Result<(), Error> {
+        use db::schema::live_repair_notification::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("live_repair_notification")
+            .transaction(&conn, |conn| {
+                let record = record.clone();
+                let err = err.clone();
+
+                async move {
+                    match &record.notification_type {
+                        LiveRepairNotificationType::Started => {
+                            // Proceed - the insertion can succeed or fail below
+                            // based on the table's primary key
+                        }
+
+                        LiveRepairNotificationType::Succeeded
+                        | LiveRepairNotificationType::Failed => {
+                            // However, Nexus must accept only one "finished"
+                            // status - an Upstairs cannot change this and must
+                            // instead perform another repair with a new repair
+                            // ID.
+                            let maybe_existing_finish_record: Option<
+                                LiveRepairNotification,
+                            > = dsl::live_repair_notification
+                                .filter(dsl::repair_id.eq(record.repair_id))
+                                .filter(dsl::upstairs_id.eq(record.upstairs_id))
+                                .filter(dsl::session_id.eq(record.session_id))
+                                .filter(dsl::region_id.eq(record.region_id))
+                                .filter(dsl::notification_type.eq_any(vec![
+                                    LiveRepairNotificationType::Succeeded,
+                                    LiveRepairNotificationType::Failed,
+                                ]))
+                                .get_result_async(&conn)
+                                .await
+                                .optional()?;
+
+                            if let Some(existing_finish_record) =
+                                maybe_existing_finish_record
+                            {
+                                if existing_finish_record.notification_type
+                                    != record.notification_type
+                                {
+                                    return Err(err.bail(Error::conflict(
+                                        "existing finish record does not match",
+                                    )));
+                                } else {
+                                    // inserting the same record, bypass
+                                    return Ok(());
+                                }
+                            }
+                        }
+                    }
+
+                    diesel::insert_into(dsl::live_repair_notification)
+                        .values(record)
+                        .on_conflict((
+                            dsl::repair_id,
+                            dsl::upstairs_id,
+                            dsl::session_id,
+                            dsl::region_id,
+                            dsl::notification_type,
+                        ))
+                        .do_nothing()
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
             })
     }
 }

@@ -5045,6 +5045,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-sled-agent",
  "omicron-test-utils",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
  "openapi-lint",

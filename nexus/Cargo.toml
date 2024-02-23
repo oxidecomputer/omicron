@@ -76,7 +76,6 @@ tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
 tough.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
-
 nexus-blueprint-execution.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
@@ -93,6 +92,7 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 update-common.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true

@@ -5,9 +5,15 @@
 //! Volumes
 
 use crate::app::sagas;
+use nexus_db_model::LiveRepairNotification;
+use nexus_db_model::LiveRepairNotificationType;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::internal::nexus::RepairFinishInfo;
+use omicron_common::api::internal::nexus::RepairStartInfo;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsKind;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -27,6 +33,80 @@ impl super::Nexus {
             saga_params,
         )
         .await?;
+
+        Ok(())
+    }
+
+    /// An Upstairs is telling us when a live repair is starting.
+    pub(crate) async fn live_repair_start(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        repair_start_info: RepairStartInfo,
+    ) -> DeleteResult {
+        info!(
+            self.log,
+            "received live_repair_start from upstairs {upstairs_id}: {:?}",
+            repair_start_info,
+        );
+
+        for repaired_downstairs in repair_start_info.repairs {
+            self.db_datastore
+                .live_repair_notification(
+                    opctx,
+                    LiveRepairNotification::new(
+                        repair_start_info.repair_id,
+                        upstairs_id,
+                        repair_start_info.session_id,
+                        repaired_downstairs.region_uuid,
+                        repaired_downstairs.target_addr,
+                        LiveRepairNotificationType::Started,
+                    ),
+                )
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    /// An Upstairs is telling us when a live repair is finished, and the result.
+    pub(crate) async fn live_repair_finish(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        repair_finish_info: RepairFinishInfo,
+    ) -> DeleteResult {
+        info!(
+            self.log,
+            "received live_repair_finish from upstairs {upstairs_id}: {:?}",
+            repair_finish_info,
+        );
+
+        for repaired_downstairs in repair_finish_info.repairs {
+            self.db_datastore
+                .live_repair_notification(
+                    opctx,
+                    LiveRepairNotification::new(
+                        repair_finish_info.repair_id,
+                        upstairs_id,
+                        repair_finish_info.session_id,
+                        repaired_downstairs.region_uuid,
+                        repaired_downstairs.target_addr,
+                        if repair_finish_info.aborted {
+                            LiveRepairNotificationType::Failed
+                        } else {
+                            LiveRepairNotificationType::Succeeded
+                        },
+                    ),
+                )
+                .await?;
+
+            if !repair_finish_info.aborted {
+                // TODO-followup if there's an active region replacement
+                // occurring, a successfully completed live repair can trigger a
+                // saga to destroy the original region.
+            }
+        }
 
         Ok(())
     }

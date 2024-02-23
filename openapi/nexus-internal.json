@@ -962,6 +962,80 @@
         }
       }
     },
+    "/upstairs/{upstairs_id}/live-repair-finish": {
+      "post": {
+        "summary": "An Upstairs will notify this endpoint when a live repair finishes.",
+        "operationId": "cpapi_live_repair_finish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairFinishInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/upstairs/{upstairs_id}/live-repair-start": {
+      "post": {
+        "summary": "An Upstairs will notify this endpoint when a live repair starts",
+        "operationId": "cpapi_live_repair_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairStartInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/volume/{volume_id}/remove-read-only-parent": {
       "post": {
         "summary": "Request removal of a read_only_parent from a volume",
@@ -3409,6 +3483,21 @@
           }
         ]
       },
+      "DownstairsUnderRepair": {
+        "type": "object",
+        "properties": {
+          "region_uuid": {
+            "$ref": "#/components/schemas/TypedUuidForDownstairsRegionKind"
+          },
+          "target_addr": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "region_uuid",
+          "target_addr"
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -5759,6 +5848,54 @@
           "user_password_hash"
         ]
       },
+      "RepairFinishInfo": {
+        "type": "object",
+        "properties": {
+          "aborted": {
+            "type": "boolean"
+          },
+          "repair_id": {
+            "$ref": "#/components/schemas/TypedUuidForLiveRepairKind"
+          },
+          "repairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownstairsUnderRepair"
+            }
+          },
+          "session_id": {
+            "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+          }
+        },
+        "required": [
+          "aborted",
+          "repair_id",
+          "repairs",
+          "session_id"
+        ]
+      },
+      "RepairStartInfo": {
+        "type": "object",
+        "properties": {
+          "repair_id": {
+            "$ref": "#/components/schemas/TypedUuidForLiveRepairKind"
+          },
+          "repairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownstairsUnderRepair"
+            }
+          },
+          "session_id": {
+            "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+          }
+        },
+        "required": [
+          "repair_id",
+          "repairs",
+          "session_id"
+        ]
+      },
       "RouteConfig": {
         "type": "object",
         "properties": {
@@ -6546,6 +6683,18 @@
       "SwitchPutResponse": {
         "type": "object"
       },
+      "TypedUuidForDownstairsRegionKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForLiveRepairKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForUpstairsSessionKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "UserId": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
@@ -6643,6 +6792,10 @@
             ]
           }
         ]
+      },
+      "TypedUuidForUpstairsKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {

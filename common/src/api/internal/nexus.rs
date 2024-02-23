@@ -9,6 +9,10 @@ use crate::api::external::{
     InstanceState, IpNet, SemverVersion, Vni,
 };
 use chrono::{DateTime, Utc};
+use omicron_uuid_kinds::DownstairsRegionKind;
+use omicron_uuid_kinds::LiveRepairKind;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsSessionKind;
 use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -250,4 +254,25 @@ mod tests {
 pub enum HostIdentifier {
     Ip(IpNet),
     Vpc(Vni),
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct DownstairsUnderRepair {
+    pub region_uuid: TypedUuid<DownstairsRegionKind>,
+    pub target_addr: std::net::SocketAddrV6,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct RepairStartInfo {
+    pub session_id: TypedUuid<UpstairsSessionKind>,
+    pub repair_id: TypedUuid<LiveRepairKind>,
+    pub repairs: Vec<DownstairsUnderRepair>,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct RepairFinishInfo {
+    pub session_id: TypedUuid<UpstairsSessionKind>,
+    pub repair_id: TypedUuid<LiveRepairKind>,
+    pub repairs: Vec<DownstairsUnderRepair>,
+    pub aborted: bool,
 }

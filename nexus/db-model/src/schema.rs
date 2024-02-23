@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(36, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(37, 0, 0);
 
 table! {
     disk (id) {
@@ -1514,6 +1514,22 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    live_repair_notification (repair_id, upstairs_id, session_id, region_id, notification_type) {
+        time -> Timestamptz,
+
+        repair_id -> Uuid,
+        upstairs_id -> Uuid,
+        session_id -> Uuid,
+
+        region_id -> Uuid,
+        target_ip -> Inet,
+        target_port -> Int4,
+
+        notification_type -> crate::LiveRepairNotificationTypeEnum,
     }
 }
 
