@@ -46,9 +46,8 @@ fn parse_partition_types<const N: usize>(
         return Err(PooledDiskError::BadPartitionLayout {
             path: path.to_path_buf(),
             why: format!(
-                "Expected {} partitions, only saw {}",
+                "Expected {N} partitions, only saw {}",
                 partitions.len(),
-                N
             ),
         });
     }
