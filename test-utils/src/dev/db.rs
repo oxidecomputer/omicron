@@ -640,8 +640,13 @@ impl Drop for CockroachInstance {
                 // Do NOT clean up the temporary directory in this case.
                 let path = temp_dir.into_path();
                 eprintln!(
-                    "WARN: temporary directory leaked: {}",
-                    path.display()
+                    "WARN: temporary directory leaked: {path:?}\n\
+                     \tIf you would like to access the database for debugging, run the following:\n\
+                     \t# Run the database\n\
+                     \tcockroach start-single-node --insecure --store=attrs=ssd,path={data_path:?}\n\
+                     \t# Access the database\n\
+                     \tcockroach sql --host=localhost --insecure",
+                     data_path = path.join("data"),
                 );
             }
         }
