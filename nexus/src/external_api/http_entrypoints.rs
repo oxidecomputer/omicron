@@ -225,7 +225,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
-        api.register(sled_set_provision_state)?;
+        api.register(sled_set_provision_policy)?;
         api.register(sled_instance_list)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
@@ -5166,13 +5166,13 @@ async fn sled_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set sled provision state
+/// Set sled provision policy
 #[endpoint {
     method = PUT,
-    path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
+    path = "/v1/system/hardware/sleds/{sled_id}/provision-policy",
     tags = ["system/hardware"],
 }]
-async fn sled_set_provision_state(
+async fn sled_set_provision_policy(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SledPath>,
     new_provision_state: TypedBody<params::SledProvisionPolicyParams>,

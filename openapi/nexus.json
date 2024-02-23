@@ -4221,13 +4221,13 @@
         }
       }
     },
-    "/v1/system/hardware/sleds/{sled_id}/provision-state": {
+    "/v1/system/hardware/sleds/{sled_id}/provision-policy": {
       "put": {
         "tags": [
           "system/hardware"
         ],
-        "summary": "Set sled provision state",
-        "operationId": "sled_set_provision_state",
+        "summary": "Set sled provision policy",
+        "operationId": "sled_set_provision_policy",
         "parameters": [
           {
             "in": "path",
@@ -15044,7 +15044,7 @@
         ]
       },
       "SledProvisionPolicyParams": {
-        "description": "Parameters for `sled_set_provision_state`.",
+        "description": "Parameters for `sled_set_provision_policy`.",
         "type": "object",
         "properties": {
           "state": {
@@ -15061,7 +15061,7 @@
         ]
       },
       "SledProvisionPolicyResponse": {
-        "description": "Response to `sled_set_provision_state`.",
+        "description": "Response to `sled_set_provision_policy`.",
         "type": "object",
         "properties": {
           "new_state": {
