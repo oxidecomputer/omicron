@@ -83,9 +83,6 @@ impl<'a> Planner<'a> {
         // is fine.
         let mut sleds_ineligible_for_services = BTreeSet::new();
 
-        // TODO: this code will also need to _remove_ services from expunged
-        // (and decommissioned?) sleds.
-
         for (sled_id, sled_info) in &self.policy.sleds {
             // Decommissioned sleds don't get any services. (This is an
             // explicit match so that when more states are added, this fails to

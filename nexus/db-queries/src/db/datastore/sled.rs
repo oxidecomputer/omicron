@@ -137,22 +137,6 @@ impl DataStore {
         Ok(all_sleds)
     }
 
-    #[cfg(test)]
-    async fn sled_fetch_by_id(
-        &self,
-        opctx: &OpContext,
-        sled_id: Uuid,
-    ) -> Result<Sled, external::Error> {
-        use db::schema::sled::dsl;
-        dsl::sled
-            .filter(dsl::id.eq(sled_id))
-            .select(Sled::as_select())
-            .limit(1)
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
     pub async fn sled_reservation_create(
         &self,
         opctx: &OpContext,
@@ -715,6 +699,7 @@ mod test {
         datastore_test, sled_set_policy, sled_set_state, Expected,
         IneligibleSleds,
     };
+    use crate::db::lookup::LookupPath;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
     use anyhow::{Context, Result};
@@ -847,8 +832,9 @@ mod test {
         );
 
         // The sled should not have been updated.
-        let observed_sled_2 = datastore
-            .sled_fetch_by_id(&opctx, observed_sled.id())
+        let (_, observed_sled_2) = LookupPath::new(&opctx, &datastore)
+            .sled_id(observed_sled.id())
+            .fetch_for(authz::Action::Modify)
             .await
             .unwrap();
         assert_eq!(
