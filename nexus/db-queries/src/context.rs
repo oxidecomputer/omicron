@@ -350,7 +350,8 @@ mod test {
         let logctx = dev::test_setup_log("test_background_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -382,7 +383,8 @@ mod test {
         let logctx = dev::test_setup_log("test_background_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore);
 
         // Like in test_background_context(), this is essentially a test of the
@@ -403,7 +405,8 @@ mod test {
         let logctx = dev::test_setup_log("test_child_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),

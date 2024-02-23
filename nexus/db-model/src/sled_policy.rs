@@ -2,6 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! Database representation of a sled's operator-defined policy.
+//!
+//! This is related to, but different from `SledState`: a sled's **policy** is
+//! what the operator has specified, while its **state** refers to what's
+//! currently on it, as determined by Nexus.
+//!
+//! For example, a sled might be in the `Active` state, but have a policy of
+//! `Expunged` -- this would mean that Nexus knows about resources currently
+//! provisioned on the sled, but the operator has said that it should be marked
+//! as gone.
+
 use super::impl_enum_type;
 use nexus_types::external_api::views::{SledPolicy, SledProvisionPolicy};
 use serde::{Deserialize, Serialize};

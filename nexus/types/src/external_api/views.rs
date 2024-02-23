@@ -619,6 +619,15 @@ impl SledState {
     }
 }
 
+impl fmt::Display for SledState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledState::Active => write!(f, "active"),
+            SledState::Decommissioned => write!(f, "decommissioned"),
+        }
+    }
+}
+
 /// An operator's view of an instance running on a given sled
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SledInstance {

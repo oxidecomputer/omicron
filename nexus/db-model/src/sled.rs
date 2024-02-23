@@ -212,10 +212,7 @@ impl SledUpdate {
             revision: self.revision,
             // By default, sleds start in-service.
             policy: DbSledPolicy::InService,
-            // By default, sleds start in the "active" state.
-            //
-            // XXX In the future there probably needs to be an "uninitialized"
-            // state here.
+            // Currently, new sleds start in the "active" state.
             state: SledState::Active,
             usable_hardware_threads: self.usable_hardware_threads,
             usable_physical_ram: self.usable_physical_ram,

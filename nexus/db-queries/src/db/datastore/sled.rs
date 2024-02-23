@@ -9,6 +9,7 @@ use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::ValidateTransition;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::to_db_sled_policy;
@@ -32,6 +33,7 @@ use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
 use uuid::Uuid;
@@ -39,7 +41,9 @@ use uuid::Uuid;
 impl DataStore {
     /// Stores a new sled in the database.
     ///
-    /// Produces `None` if the sled is decommissioned.
+    /// Produces `SledUpsertOutput::Decommissioned` if the sled is
+    /// decommissioned. This is not an error, because `sled_upsert`'s only
+    /// caller (sled-agent) is not expected to receive this error.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
@@ -338,16 +342,8 @@ impl DataStore {
         {
             Ok(old_policy) => Ok(old_policy
                 .provision_policy()
-                .expect("only valid policy was in-servie")),
-            Err(TransitionError::InvalidTransition(sled)) => {
-                Err(external::Error::conflict(format!(
-                    "the sled has policy \"{}\" and state \"{:?}\",
-                    and its provision policy cannot be changed",
-                    sled.policy(),
-                    sled.state(),
-                )))
-            }
-            Err(TransitionError::External(e)) => Err(e),
+                .expect("only valid policy was in-service")),
+            Err(error) => Err(error.into_external_error()),
         }
     }
 
@@ -372,20 +368,10 @@ impl DataStore {
             ValidateTransition::Yes,
         )
         .await
-        .map_err(|error| match error {
-            TransitionError::InvalidTransition(sled) => {
-                external::Error::conflict(format!(
-                    "the sled has policy \"{}\" and state \"{:?}\",
-                        and it cannot be set to expunged",
-                    sled.policy(),
-                    sled.state(),
-                ))
-            }
-            TransitionError::External(e) => e,
-        })
+        .map_err(|error| error.into_external_error())
     }
 
-    async fn sled_set_policy_impl(
+    pub(super) async fn sled_set_policy_impl(
         &self,
         opctx: &OpContext,
         authz_sled: &authz::Sled,
@@ -401,7 +387,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(sled_id));
 
-        let t = Transition::Policy(new_policy);
+        let t = SledTransition::Policy(new_policy);
         let valid_old_policies = t.valid_old_policies();
         let valid_old_states = t.valid_old_states();
 
@@ -447,7 +433,10 @@ impl DataStore {
                 {
                     Ok(result.found.policy())
                 } else {
-                    Err(TransitionError::InvalidTransition(result.found))
+                    Err(TransitionError::InvalidTransition {
+                        current: result.found,
+                        transition: SledTransition::Policy(new_policy),
+                    })
                 }
             }
             #[cfg(test)]
@@ -479,20 +468,10 @@ impl DataStore {
             ValidateTransition::Yes,
         )
         .await
-        .map_err(|error| match error {
-            TransitionError::InvalidTransition(sled) => {
-                external::Error::conflict(format!(
-                    "the sled has policy \"{}\" and state \"{:?}\",
-                    and it cannot be set to decommissioned",
-                    sled.policy(),
-                    sled.state(),
-                ))
-            }
-            TransitionError::External(e) => e,
-        })
+        .map_err(|error| error.into_external_error())
     }
 
-    async fn sled_set_state_impl(
+    pub(super) async fn sled_set_state_impl(
         &self,
         opctx: &OpContext,
         authz_sled: &authz::Sled,
@@ -508,7 +487,7 @@ impl DataStore {
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(sled_id));
 
-        let t = Transition::State(new_state);
+        let t = SledTransition::State(new_state);
         let valid_old_policies = t.valid_old_policies();
         let valid_old_states = t.valid_old_states();
 
@@ -551,7 +530,10 @@ impl DataStore {
                 {
                     Ok(result.found.state())
                 } else {
-                    Err(TransitionError::InvalidTransition(result.found))
+                    Err(TransitionError::InvalidTransition {
+                        current: result.found,
+                        transition: SledTransition::State(new_state),
+                    })
                 }
             }
             #[cfg(test)]
@@ -582,32 +564,6 @@ impl SledUpsertOutput {
     }
 }
 
-/// An error that occurred while setting a policy or state.
-#[derive(Debug, Error)]
-#[must_use]
-enum TransitionError {
-    /// The state transition check failed.
-    ///
-    /// The sled is returned.
-    #[error("invalid transition: old sled: {0:?}")]
-    InvalidTransition(Sled),
-
-    /// Some other kind of error occurred.
-    #[error("database error")]
-    External(#[from] external::Error),
-}
-
-impl TransitionError {
-    #[cfg(test)]
-    fn ensure_invalid_transition(self) -> anyhow::Result<()> {
-        match self {
-            TransitionError::InvalidTransition(_) => Ok(()),
-            TransitionError::External(e) => Err(anyhow::anyhow!(e)
-                .context("expected invalid transition, got other error")),
-        }
-    }
-}
-
 // ---
 // State transition validators
 // ---
@@ -616,12 +572,12 @@ impl TransitionError {
 // valid for a new policy or state, except idempotent transitions.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Transition {
+pub(super) enum SledTransition {
     Policy(SledPolicy),
     State(SledState),
 }
 
-impl Transition {
+impl SledTransition {
     /// Returns the list of valid old policies, other than the provided one
     /// (which is always considered valid).
     ///
@@ -633,7 +589,7 @@ impl Transition {
         use SledState::*;
 
         match self {
-            Transition::Policy(new_policy) => match new_policy {
+            SledTransition::Policy(new_policy) => match new_policy {
                 InService { provision_policy: Provisionable } => {
                     vec![InService { provision_policy: NonProvisionable }]
                 }
@@ -644,7 +600,7 @@ impl Transition {
                     .map(|provision_policy| InService { provision_policy })
                     .collect(),
             },
-            Transition::State(state) => {
+            SledTransition::State(state) => {
                 match state {
                     Active => {
                         // Any policy is valid for the active state.
@@ -667,13 +623,13 @@ impl Transition {
         use SledState::*;
 
         match self {
-            Transition::Policy(_) => {
+            SledTransition::Policy(_) => {
                 // Policies can only be transitioned in the active state. (In
                 // the future, this will include other non-decommissioned
                 // states.)
                 vec![Active]
             }
-            Transition::State(state) => match state {
+            SledTransition::State(state) => match state {
                 Active => vec![],
                 Decommissioned => vec![Active],
             },
@@ -681,40 +637,90 @@ impl Transition {
     }
 }
 
-impl IntoEnumIterator for Transition {
+impl fmt::Display for SledTransition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledTransition::Policy(policy) => {
+                write!(f, "policy \"{}\"", policy)
+            }
+            SledTransition::State(state) => write!(f, "state \"{}\"", state),
+        }
+    }
+}
+
+impl IntoEnumIterator for SledTransition {
     type Iterator = std::vec::IntoIter<Self>;
 
     fn iter() -> Self::Iterator {
         let v: Vec<_> = SledPolicy::iter()
-            .map(Transition::Policy)
-            .chain(SledState::iter().map(Transition::State))
+            .map(SledTransition::Policy)
+            .chain(SledState::iter().map(SledTransition::State))
             .collect();
         v.into_iter()
     }
 }
 
-/// A private enum to see whether state transitions should be checked while
-/// setting a new policy and/or state. Intended only for testing around illegal
-/// states.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+/// An error that occurred while setting a policy or state.
+#[derive(Debug, Error)]
 #[must_use]
-enum ValidateTransition {
-    Yes,
+pub(super) enum TransitionError {
+    /// The state transition check failed.
+    ///
+    /// The sled is returned.
+    #[error(
+        "sled id {} has current policy \"{}\" and state \"{}\" \
+        and the transition to {} is not permitted",
+        .current.id(),
+        .current.policy(),
+        .current.state(),
+        .transition,
+    )]
+    InvalidTransition {
+        /// The current sled as fetched from the database.
+        current: Sled,
+
+        /// The new policy or state that was attempted.
+        transition: SledTransition,
+    },
+
+    /// Some other kind of error occurred.
+    #[error("database error")]
+    External(#[from] external::Error),
+}
+
+impl TransitionError {
+    fn into_external_error(self) -> external::Error {
+        match self {
+            TransitionError::InvalidTransition { .. } => {
+                external::Error::conflict(self.to_string())
+            }
+            TransitionError::External(e) => e.clone(),
+        }
+    }
+
     #[cfg(test)]
-    No,
+    pub(super) fn ensure_invalid_transition(self) -> anyhow::Result<()> {
+        match self {
+            TransitionError::InvalidTransition { .. } => Ok(()),
+            TransitionError::External(e) => Err(anyhow::anyhow!(e)
+                .context("expected invalid transition, got other error")),
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::datastore_test;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
-    use crate::db::lookup::LookupPath;
+    use crate::db::datastore::test_utils::{
+        datastore_test, sled_set_policy, sled_set_state, Expected,
+        IneligibleSleds,
+    };
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
-    use anyhow::{bail, ensure, Context, Result};
+    use anyhow::{Context, Result};
     use itertools::Itertools;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
@@ -805,7 +811,7 @@ mod test {
 
         // Set the sled to decommissioned (this is not a legal transition, but
         // we don't care about sled policy in sled_upsert, just the state.)
-        set_state(
+        sled_set_state(
             &opctx,
             &datastore,
             observed_sled.id(),
@@ -881,82 +887,29 @@ mod test {
             .await
             .unwrap()
             .unwrap();
-        set_policy(
-            &opctx,
-            &datastore,
-            non_provisionable_sled.id(),
-            SledPolicy::InService {
-                provision_policy: SledProvisionPolicy::NonProvisionable,
-            },
-            ValidateTransition::Yes,
-            Expected::Ok(SledPolicy::provisionable()),
-        )
-        .await
-        .unwrap();
-
         let expunged_sled = datastore
             .sled_upsert(test_new_sled_update())
             .await
             .unwrap()
             .unwrap();
-        set_policy(
-            &opctx,
-            &datastore,
-            expunged_sled.id(),
-            SledPolicy::Expunged,
-            ValidateTransition::Yes,
-            Expected::Ok(SledPolicy::provisionable()),
-        )
-        .await
-        .unwrap();
-
         let decommissioned_sled = datastore
             .sled_upsert(test_new_sled_update())
             .await
             .unwrap()
             .unwrap();
-        // Legally, we must set the policy to expunged before setting the state
-        // to decommissioned. (In the future, we'll want to test graceful
-        // removal as well.)
-        set_policy(
-            &opctx,
-            &datastore,
-            decommissioned_sled.id(),
-            SledPolicy::Expunged,
-            ValidateTransition::Yes,
-            Expected::Ok(SledPolicy::provisionable()),
-        )
-        .await
-        .unwrap();
-        set_state(
-            &opctx,
-            &datastore,
-            decommissioned_sled.id(),
-            SledState::Decommissioned,
-            ValidateTransition::Yes,
-            Expected::Ok(SledState::Active),
-        )
-        .await
-        .unwrap();
-
-        // This is _not_ a legal state, BUT we test it out to ensure that if
-        // the system somehow enters this state anyway, we don't try and
-        // provision resources on it.
         let illegal_decommissioned_sled = datastore
             .sled_upsert(test_new_sled_update())
             .await
             .unwrap()
             .unwrap();
-        set_state(
-            &opctx,
-            &datastore,
-            illegal_decommissioned_sled.id(),
-            SledState::Decommissioned,
-            ValidateTransition::No,
-            Expected::Ok(SledState::Active),
-        )
-        .await
-        .unwrap();
+
+        let ineligible_sleds = IneligibleSleds {
+            non_provisionable: non_provisionable_sled.id(),
+            expunged: expunged_sled.id(),
+            decommissioned: decommissioned_sled.id(),
+            illegal_decommissioned: illegal_decommissioned_sled.id(),
+        };
+        ineligible_sleds.setup(&opctx, &datastore).await.unwrap();
 
         // This should be an error since there are no provisionable sleds.
         let resources = db::model::Resources::new(
@@ -1035,7 +988,7 @@ mod test {
                     predicate::in_iter(SledPolicy::all_in_service()),
                     predicate::eq(SledState::Active),
                 ),
-                Transition::Policy(SledPolicy::Expunged),
+                SledTransition::Policy(SledPolicy::Expunged),
             ),
             (
                 // The provision policy of in-service sleds can be changed, or
@@ -1044,7 +997,7 @@ mod test {
                     predicate::in_iter(SledPolicy::all_in_service()),
                     predicate::eq(SledState::Active),
                 ),
-                Transition::Policy(SledPolicy::InService {
+                SledTransition::Policy(SledPolicy::InService {
                     provision_policy: SledProvisionPolicy::Provisionable,
                 }),
             ),
@@ -1054,7 +1007,7 @@ mod test {
                     predicate::in_iter(SledPolicy::all_in_service()),
                     predicate::eq(SledState::Active),
                 ),
-                Transition::Policy(SledPolicy::InService {
+                SledTransition::Policy(SledPolicy::InService {
                     provision_policy: SledProvisionPolicy::NonProvisionable,
                 }),
             ),
@@ -1065,7 +1018,7 @@ mod test {
                     predicate::always(),
                     predicate::eq(SledState::Active),
                 ),
-                Transition::State(SledState::Active),
+                SledTransition::State(SledState::Active),
             ),
             (
                 // Expunged sleds can be marked as decommissioned.
@@ -1073,7 +1026,7 @@ mod test {
                     predicate::eq(SledPolicy::Expunged),
                     predicate::eq(SledState::Active),
                 ),
-                Transition::State(SledState::Decommissioned),
+                SledTransition::State(SledState::Decommissioned),
             ),
             (
                 // Expunged sleds can always be marked as expunged again, as
@@ -1083,7 +1036,7 @@ mod test {
                     predicate::eq(SledPolicy::Expunged),
                     predicate::ne(SledState::Decommissioned),
                 ),
-                Transition::Policy(SledPolicy::Expunged),
+                SledTransition::Policy(SledPolicy::Expunged),
             ),
             (
                 // Decommissioned sleds can always be marked as decommissioned
@@ -1092,14 +1045,14 @@ mod test {
                     predicate::in_iter(SledPolicy::all_decommissionable()),
                     predicate::eq(SledState::Decommissioned),
                 ),
-                Transition::State(SledState::Decommissioned),
+                SledTransition::State(SledState::Decommissioned),
             ),
         ];
 
         // Generate all possible transitions.
         let all_transitions = SledPolicy::iter()
             .cartesian_product(SledState::iter())
-            .cartesian_product(Transition::iter())
+            .cartesian_product(SledTransition::iter())
             .enumerate();
 
         // Set up a sled to test against.
@@ -1140,8 +1093,8 @@ mod test {
         sled_id: Uuid,
         before_policy: SledPolicy,
         before_state: SledState,
-        after: Transition,
-        valid_transitions: &[(Before, Transition)],
+        after: SledTransition,
+        valid_transitions: &[(Before, SledTransition)],
     ) -> Result<()> {
         // Is this a valid transition?
         let is_valid = valid_transitions.iter().any(
@@ -1154,7 +1107,7 @@ mod test {
 
         // Set the sled to the initial policy and state, ignoring state
         // transition errors (this is just to set up the initial state).
-        set_policy(
+        sled_set_policy(
             opctx,
             datastore,
             sled_id,
@@ -1164,7 +1117,7 @@ mod test {
         )
         .await?;
 
-        set_state(
+        sled_set_state(
             opctx,
             datastore,
             sled_id,
@@ -1176,14 +1129,14 @@ mod test {
 
         // Now perform the transition to the new policy or state.
         match after {
-            Transition::Policy(new_policy) => {
+            SledTransition::Policy(new_policy) => {
                 let expected = if is_valid {
                     Expected::Ok(before_policy)
                 } else {
                     Expected::Invalid
                 };
 
-                set_policy(
+                sled_set_policy(
                     opctx,
                     datastore,
                     sled_id,
@@ -1193,14 +1146,14 @@ mod test {
                 )
                 .await?;
             }
-            Transition::State(new_state) => {
+            SledTransition::State(new_state) => {
                 let expected = if is_valid {
                     Expected::Ok(before_state)
                 } else {
                     Expected::Invalid
                 };
 
-                set_state(
+                sled_set_state(
                     opctx,
                     datastore,
                     sled_id,
@@ -1236,13 +1189,11 @@ mod test {
     struct Before(BoxPredicate<SledPolicy>, BoxPredicate<SledState>);
 
     impl Before {
-        fn new<
+        fn new<P, S>(policy: P, state: S) -> Self
+        where
             P: Predicate<SledPolicy> + Send + Sync + 'static,
-            Q: Predicate<SledState> + Send + Sync + 'static,
-        >(
-            policy: P,
-            state: Q,
-        ) -> Self {
+            S: Predicate<SledState> + Send + Sync + 'static,
+        {
             Before(policy.boxed(), state.boxed())
         }
     }
@@ -1295,115 +1246,5 @@ mod test {
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
-    }
-
-    async fn set_policy(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        sled_id: Uuid,
-        new_policy: SledPolicy,
-        check: ValidateTransition,
-        expected_old_policy: Expected<SledPolicy>,
-    ) -> Result<()> {
-        let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
-            .sled_id(sled_id)
-            .fetch_for(authz::Action::Modify)
-            .await
-            .unwrap();
-
-        let res = datastore
-            .sled_set_policy_impl(opctx, &authz_sled, new_policy, check)
-            .await;
-        match expected_old_policy {
-            Expected::Ok(expected) => {
-                let actual = res.context(
-                    "failed transition that was expected to be successful",
-                )?;
-                ensure!(
-                    actual == expected,
-                    "actual old policy ({actual}) is not \
-                     the same as expected ({expected})"
-                );
-            }
-            Expected::Invalid => match res {
-                Ok(old_policy) => {
-                    bail!(
-                        "expected an invalid state transition error, \
-                         but transition was accepted with old policy: \
-                         {old_policy}"
-                    )
-                }
-                Err(error) => {
-                    error.ensure_invalid_transition()?;
-                }
-            },
-            Expected::Ignore => {
-                // The return value is ignored.
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn set_state(
-        opctx: &OpContext,
-        datastore: &DataStore,
-        sled_id: Uuid,
-        new_state: SledState,
-        check: ValidateTransition,
-        expected_old_state: Expected<SledState>,
-    ) -> Result<()> {
-        let (authz_sled, _) = LookupPath::new(&opctx, &datastore)
-            .sled_id(sled_id)
-            .fetch_for(authz::Action::Modify)
-            .await
-            .unwrap();
-
-        let res = datastore
-            .sled_set_state_impl(&opctx, &authz_sled, new_state, check)
-            .await;
-        match expected_old_state {
-            Expected::Ok(expected) => {
-                let actual = res.context(
-                    "failed transition that was expected to be successful",
-                )?;
-                ensure!(
-                    actual == expected,
-                    "actual old state ({actual:?}) \
-                     is not the same as expected ({expected:?})"
-                );
-            }
-            Expected::Invalid => match res {
-                Ok(old_state) => {
-                    bail!(
-                        "expected an invalid state transition error, \
-                        but transition was accepted with old state: \
-                        {old_state:?}"
-                    )
-                }
-                Err(error) => {
-                    error.ensure_invalid_transition()?;
-                }
-            },
-            Expected::Ignore => {
-                // The return value is ignored.
-            }
-        }
-
-        Ok(())
-    }
-
-    /// For a policy/state transition, describes the expected value of the old
-    /// state.
-    enum Expected<T> {
-        /// The transition is expected to successful, with the provided old
-        /// value.
-        Ok(T),
-
-        /// The transition is expected to be invalid.
-        Invalid,
-
-        /// The return value is ignored.
-        Ignore,
     }
 }

@@ -1054,7 +1054,7 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_deployment::blueprint_builder::BlueprintBuilder;
     use nexus_deployment::blueprint_builder::Ensure;
     use nexus_inventory::now_db_precision;

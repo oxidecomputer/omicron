@@ -853,10 +853,10 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::datastore_test;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
+    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::Discoverability;
     use crate::db::lookup::LookupPath;
     use crate::db::model::ExternalIp;
