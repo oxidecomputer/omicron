@@ -724,8 +724,8 @@ impl<'a> BlueprintZones<'a> {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use crate::synthetic::SledBuilder;
-    use crate::synthetic::SyntheticSystemBuilder;
+    use crate::system::SledBuilder;
+    use crate::system::SystemDescription;
     use nexus_types::external_api::views::SledProvisionState;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
@@ -735,9 +735,9 @@ pub mod test {
 
     /// Returns a collection and policy describing a small but non-trivial
     /// system
-    pub fn example_system() -> SyntheticSystemBuilder {
+    pub fn example_system() -> SystemDescription {
         // First, build a system that just has some sleds in it.
-        let mut system_builder = SyntheticSystemBuilder::new();
+        let mut system_builder = SystemDescription::new();
         for _ in 0..3 {
             let _ = system_builder.sled(SledBuilder::new()).unwrap();
         }

@@ -5,7 +5,7 @@
 use anyhow::{anyhow, Context};
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
-use nexus_deployment::synthetic::{SledBuilder, SyntheticSystemBuilder};
+use nexus_deployment::system::{SledBuilder, SystemDescription};
 use nexus_types::deployment::Blueprint;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
@@ -21,13 +21,13 @@ use uuid::Uuid;
 // - I think it's finally time to switch to using the derive version of clap +
 //   reedline directly.  This is in my way right now because I'm getting back
 //   errors that I cannot see.  See item below.
-// - in a bit of a dead end in the demo flow because SyntheticSystemBuilder does
+// - in a bit of a dead end in the demo flow because SystemDescription does
 //   not put any zones onto anything, and build-blueprint-from-inventory
 //   requires that there are zones.  options here include:
 //   - create a function to create an initial Blueprint from a *blank* inventory
 //     (or maybe a SystemBuilder? since RSS won't have an inventory) that does
 //     what RSS would do (maybe even have RSS use this?)
-//   - add support to SyntheticSystemBuilder for putting zones onto things
+//   - add support to SystemDescription for putting zones onto things
 //     (not sure this is worth doing)
 //   - build support for loading *saved* stuff from existing systems and only
 //     support that (nope)
@@ -52,14 +52,21 @@ use uuid::Uuid;
 // - call the real deployment code against simulated stuff
 //   (sled agents + database)
 //   This is appealing but in the limit may require quite a lot of Nexus to
-//   work.  Can you even create a fake datastore outside the nexus-db-queries
-//   crate?  If so, how much does this stuff assume stuff has been set up by a
-//   real Nexus?
+//   work.  But can you even create a fake datastore outside the
+//   nexus-db-queries crate?  If so, how much does this stuff assume stuff has
+//   been set up by a real Nexus?  I'm fairly sure that DNS does assume this.
+//   Plus, the sled info is stored in the database, so that means the sled
+//   addresses would need to all be "localhost" instead of the more
+//   realistic-looking addresses.
 // - implement dry-run deployment code
 //   - we have a basic idea how this might work
+//     - dns: can directly report what it would do
+//     - zones: can report what requests it would make
+//     - external IP/NIC stuff: ??
 //   - but then we also need a way to fake up an inventory from the result
 //   - seems like this would require the alternate approach of implementing
-//     methods on SystemBuilder to specify zones
+//     methods on SystemBuilder to specify zones?  or would we use an
+//     InventoryBuilder directly?
 //
 // With this in place, though, the demo could proceed:
 //
@@ -74,6 +81,15 @@ use uuid::Uuid;
 // blueprint but by starting with an inventory that has zones in it.  (We might
 // _get_ that through the above simulation.)
 //
+// At some point we can add:
+//
+// - save to file (sleds, collections, blueprints)
+// - load from file (ditto)
+// - omdb: read from database, save to same format of file
+//
+// Then we can see what would happen when we make changes to a production system
+// by saving its state and loading it here.
+//
 // XXX-dap reedline-repl-rs nits
 // - cannot turn off the date banner
 // - cannot use structopt version of command definitions
@@ -84,7 +100,7 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 struct ReconfiguratorSim {
-    system: SyntheticSystemBuilder,
+    system: SystemDescription,
     collections: Vec<Collection>,
     blueprints: Vec<Blueprint>,
     log: slog::Logger,
@@ -97,7 +113,7 @@ fn main() -> anyhow::Result<()> {
     .to_logger("reconfigurator-sim")
     .context("creating logger")?;
     let sim = ReconfiguratorSim {
-        system: SyntheticSystemBuilder::new(),
+        system: SystemDescription::new(),
         collections: vec![],
         blueprints: vec![],
         log,

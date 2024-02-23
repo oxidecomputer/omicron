@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Builders for constructing inventory collections and blueprints for synthetic
-//! systems
+//! Builders for constructing descriptions of systems (real or synthetic) and
+//! associated inventory collections and blueprints
 
 use crate::blueprint_builder::BlueprintBuilder;
 use anyhow::{anyhow, bail, Context};
@@ -41,7 +41,7 @@ impl<T> SubnetIterator for T where
 }
 
 #[derive(Debug)]
-pub struct SyntheticSystemBuilder {
+pub struct SystemDescription {
     collector: Option<String>,
     sleds: Vec<Sled>,
     sled_subnets: Box<dyn SubnetIterator>,
@@ -51,7 +51,7 @@ pub struct SyntheticSystemBuilder {
     service_ip_pool_ranges: Vec<IpRange>,
 }
 
-impl SyntheticSystemBuilder {
+impl SystemDescription {
     pub fn new() -> Self {
         // Prepare sets of available slots (cubby numbers) for (1) all
         // non-Scrimlet sleds, and (2) Scrimlets in particular.  These do not
@@ -101,7 +101,7 @@ impl SyntheticSystemBuilder {
         ))
         .unwrap()];
 
-        SyntheticSystemBuilder {
+        SystemDescription {
             sleds: Vec::new(),
             collector: None,
             sled_subnets,
@@ -114,7 +114,7 @@ impl SyntheticSystemBuilder {
 
     /// Returns a complete system deployed on a single Sled
     pub fn single_sled() -> anyhow::Result<Self> {
-        let mut builder = SyntheticSystemBuilder::new();
+        let mut builder = SystemDescription::new();
         let sled = SledBuilder::new();
         builder.sled(sled)?;
         Ok(builder)
@@ -122,7 +122,7 @@ impl SyntheticSystemBuilder {
 
     /// Returns a complete system resembling a full rack
     pub fn full_rack() -> anyhow::Result<Self> {
-        let mut builder = SyntheticSystemBuilder::new();
+        let mut builder = SystemDescription::new();
         for slot_number in 1..32 {
             let mut sled = SledBuilder::new();
             if slot_number == 14 || slot_number == 16 {
