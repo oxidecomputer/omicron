@@ -43,6 +43,9 @@ pub struct Vmm {
     /// The IP address at which this VMM is serving the Propolis server API.
     pub propolis_ip: ipnetwork::IpNetwork,
 
+    /// The socket port on which this VMM is serving the Propolis server API.
+    pub propolis_port: i32,
+
     /// Runtime state for the VMM.
     #[diesel(embed)]
     pub runtime: VmmRuntimeState,
@@ -61,6 +64,7 @@ impl Vmm {
         instance_id: Uuid,
         sled_id: Uuid,
         propolis_ip: ipnetwork::IpNetwork,
+        propolis_port: u16,
         initial_state: VmmInitialState,
     ) -> Self {
         use omicron_common::api::external::InstanceState as ApiInstanceState;
@@ -78,6 +82,7 @@ impl Vmm {
             instance_id,
             sled_id,
             propolis_ip,
+            propolis_port: propolis_port as i32,
             runtime: VmmRuntimeState {
                 state: InstanceState::new(api_state),
                 time_state_updated: now,
