@@ -4,9 +4,9 @@
 
 //! Database representation of a sled's state as understood by Nexus.
 //!
-//! This is related to, but different from `SledPolicy`: a sled's **policy** is
-//! what the operator has specified, while its **state** refers to what's
-//! currently on it, as determined by Nexus.
+//! This is related to, but different from `SledState`: a sled's **policy** is
+//! its disposition as specified by the operator, while its **state** refers to
+//! what's currently on it, as determined by Nexus.
 //!
 //! For example, a sled might be in the `Active` state, but have a policy of
 //! `Expunged` -- this would mean that Nexus knows about resources currently

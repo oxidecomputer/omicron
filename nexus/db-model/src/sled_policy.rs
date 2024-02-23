@@ -5,8 +5,8 @@
 //! Database representation of a sled's operator-defined policy.
 //!
 //! This is related to, but different from `SledState`: a sled's **policy** is
-//! what the operator has specified, while its **state** refers to what's
-//! currently on it, as determined by Nexus.
+//! its disposition as specified by the operator, while its **state** refers to
+//! what's currently on it, as determined by Nexus.
 //!
 //! For example, a sled might be in the `Active` state, but have a policy of
 //! `Expunged` -- this would mean that Nexus knows about resources currently
@@ -25,6 +25,10 @@ impl_enum_type!(
     /// This type is not actually public, because [`SledPolicy`] has a somewhat
     /// different, friendlier shape while being equivalent -- external code
     /// should always use [`SledPolicy`].
+    ///
+    /// However, it must be marked `pub` to avoid errors like `crate-private
+    /// type `DbSledPolicy` in public interface`. Marking this type `pub`,
+    /// without actually making it public, tricks rustc in a desirable way.
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[diesel(sql_type = SledPolicyEnum)]
     pub enum DbSledPolicy;

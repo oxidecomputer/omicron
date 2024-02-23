@@ -353,9 +353,6 @@ impl DataStore {
     /// sufficient warning to the operator.
     ///
     /// This is idempotent, and it returns the old policy of the sled.
-    ///
-    /// XXX: This, or the code that's calling it, needs to kick off the
-    /// blueprint planner.
     pub async fn sled_set_policy_to_expunged(
         &self,
         opctx: &OpContext,

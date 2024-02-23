@@ -744,7 +744,7 @@ mod test {
         // number (16) is chosen such that:
         //
         // * we start with 5 sleds
-        // * we need to add 12 Nexus zones
+        // * we need to add 11 Nexus zones
         // * there are two sleds eligible for provisioning
         // * => 5 or 6 new Nexus zones per sled
         //

@@ -91,8 +91,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.sled_policy AS ENUM (
 --
 -- Nexus's goal is to match the sled's state with the operator-indicated
 -- policy. For example, if the sled_policy is "expunged" and the sled_state is
--- "active", Nexus will start removing zones from the sled, reallocating them
--- elsewhere, etc. Once that is done, Nexus will mark it as decommissioned.
+-- "active", Nexus will assume that the sled is gone. Based on that, Nexus will
+-- reallocate resources currently on the expunged sled to other sleds, etc.
+-- Once the expunged sled no longer has any resources attached to it, Nexus
+-- will mark it as decommissioned.
 CREATE TYPE IF NOT EXISTS omicron.public.sled_state AS ENUM (
     -- The sled has resources of any kind allocated on it, or, is available for
     -- new resources.
