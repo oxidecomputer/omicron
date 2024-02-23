@@ -10,41 +10,43 @@ use super::disk::SimDisk;
 use super::instance::SimInstance;
 use super::storage::CrucibleData;
 use super::storage::Storage;
-
 use crate::nexus::NexusClient;
 use crate::params::{
-    DiskStateRequested, InstanceHardware, InstanceMigrationSourceParams,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
+    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
+    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, SledRole,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
+use anyhow::bail;
+use anyhow::Context;
+use dropshot::HttpServer;
 use futures::lock::Mutex;
-use omicron_common::api::external::{DiskState, Error, ResourceType};
+use illumos_utils::opte::params::{
+    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
+};
+use nexus_client::types::PhysicalDiskKind;
+use omicron_common::address::PROPOLIS_PORT;
+use omicron_common::api::external::{
+    ByteCount, DiskState, Error, Generation, ResourceType,
+};
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledInstanceState,
 };
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
-use slog::Logger;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
-use uuid::Uuid;
-
-use std::collections::HashMap;
-use std::str::FromStr;
-
-use dropshot::HttpServer;
-use illumos_utils::opte::params::{
-    DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
-};
-use nexus_client::types::PhysicalDiskKind;
-use omicron_common::address::PROPOLIS_PORT;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use slog::Logger;
+use std::collections::{HashMap, HashSet};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::str::FromStr;
+use std::sync::Arc;
+use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled
 ///
@@ -68,7 +70,10 @@ pub struct SledAgent {
     pub v2p_mappings: Mutex<HashMap<Uuid, Vec<SetVirtualNetworkInterfaceHost>>>,
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
-
+    /// lists of external IPs assigned to instances
+    pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
+    config: Config,
+    fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
 }
 
@@ -160,7 +165,13 @@ impl SledAgent {
             nexus_client,
             disk_id_to_region_ids: Mutex::new(HashMap::new()),
             v2p_mappings: Mutex::new(HashMap::new()),
+            external_ips: Mutex::new(HashMap::new()),
             mock_propolis: Mutex::new(None),
+            config: config.clone(),
+            fake_zones: Mutex::new(OmicronZonesConfig {
+                generation: Generation::new(),
+                zones: vec![],
+            }),
             instance_ensure_state_error: Mutex::new(None),
         })
     }
@@ -276,7 +287,7 @@ impl SledAgent {
             if !self.instances.contains_key(&instance_id).await {
                 let properties = propolis_client::types::InstanceProperties {
                     id: propolis_id,
-                    name: hardware.properties.hostname.clone(),
+                    name: hardware.properties.hostname.to_string(),
                     description: "sled-agent-sim created instance".to_string(),
                     image_id: Uuid::default(),
                     bootrom_id: Uuid::default(),
@@ -620,6 +631,58 @@ impl SledAgent {
         Ok(())
     }
 
+    pub async fn instance_put_external_ip(
+        &self,
+        instance_id: Uuid,
+        body_args: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        if !self.instances.contains_key(&instance_id).await {
+            return Err(Error::internal_error(
+                "can't alter IP state for nonexistent instance",
+            ));
+        }
+
+        let mut eips = self.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+
+        // High-level behaviour: this should always succeed UNLESS
+        // trying to add a double ephemeral.
+        if let InstanceExternalIpBody::Ephemeral(curr_ip) = &body_args {
+            if my_eips.iter().any(|v| {
+                if let InstanceExternalIpBody::Ephemeral(other_ip) = v {
+                    curr_ip != other_ip
+                } else {
+                    false
+                }
+            }) {
+                return Err(Error::invalid_request("cannot replace existing ephemeral IP without explicit removal"));
+            }
+        }
+
+        my_eips.insert(*body_args);
+
+        Ok(())
+    }
+
+    pub async fn instance_delete_external_ip(
+        &self,
+        instance_id: Uuid,
+        body_args: &InstanceExternalIpBody,
+    ) -> Result<(), Error> {
+        if !self.instances.contains_key(&instance_id).await {
+            return Err(Error::internal_error(
+                "can't alter IP state for nonexistent instance",
+            ));
+        }
+
+        let mut eips = self.external_ips.lock().await;
+        let my_eips = eips.entry(instance_id).or_default();
+
+        my_eips.remove(&body_args);
+
+        Ok(())
+    }
+
     /// Used for integration tests that require a component to talk to a
     /// mocked propolis-server API.
     // TODO: fix schemas so propolis-server's port isn't hardcoded in nexus
@@ -664,5 +727,40 @@ impl SledAgent {
         ));
         *mock_lock = Some((srv, client));
         Ok(())
+    }
+
+    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+        let sled_agent_address = match addr {
+            SocketAddr::V4(_) => {
+                bail!("sled_agent_ip must be v6 for inventory")
+            }
+            SocketAddr::V6(v6) => v6,
+        };
+        Ok(Inventory {
+            sled_id: self.id,
+            sled_agent_address,
+            sled_role: SledRole::Gimlet,
+            baseboard: self.config.hardware.baseboard.clone(),
+            usable_hardware_threads: self.config.hardware.hardware_threads,
+            usable_physical_ram: ByteCount::try_from(
+                self.config.hardware.physical_ram,
+            )
+            .context("usable_physical_ram")?,
+            reservoir_size: ByteCount::try_from(
+                self.config.hardware.reservoir_ram,
+            )
+            .context("reservoir_size")?,
+        })
+    }
+
+    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
+        self.fake_zones.lock().await.clone()
+    }
+
+    pub async fn omicron_zones_ensure(
+        &self,
+        requested_zones: OmicronZonesConfig,
+    ) {
+        *self.fake_zones.lock().await = requested_zones;
     }
 }

@@ -13,8 +13,10 @@ assert_matches.workspace = true
 async-trait.workspace = true
 base64.workspace = true
 buf-list.workspace = true
+bytes.workspace = true
 cancel-safe-futures.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 clap.workspace = true
 chrono.workspace = true
 crucible-agent-client.workspace = true
@@ -30,6 +32,7 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
+illumos-utils.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
@@ -63,6 +66,7 @@ sled-agent-client.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
+slog-error-chain.workspace = true
 slog-term.workspace = true
 steno.workspace = true
 tempfile.workspace = true
@@ -73,9 +77,11 @@ tough.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
 
+nexus-blueprint-execution.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-deployment.workspace = true
 nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
@@ -84,10 +90,13 @@ oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
 rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+update-common.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
+camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
@@ -115,6 +124,8 @@ rustls = { workspace = true }
 subprocess.workspace = true
 term.workspace = true
 trust-dns-resolver.workspace = true
+tufaceous.workspace = true
+tufaceous-lib.workspace = true
 httptest.workspace = true
 strum.workspace = true
 

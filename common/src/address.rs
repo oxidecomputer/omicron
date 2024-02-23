@@ -18,6 +18,18 @@ pub const AZ_PREFIX: u8 = 48;
 pub const RACK_PREFIX: u8 = 56;
 pub const SLED_PREFIX: u8 = 64;
 
+/// maximum possible value for a tcp or udp port
+pub const MAX_PORT: u16 = u16::MAX;
+
+/// minimum possible value for a tcp or udp port
+pub const MIN_PORT: u16 = u16::MIN;
+
+/// The amount of redundancy for Nexus services.
+///
+/// This is used by both RSS (to distribute the initial set of services) and the
+/// Reconfigurator (to know whether to add new Nexus zones)
+pub const NEXUS_REDUNDANCY: usize = 3;
+
 /// The amount of redundancy for internal DNS servers.
 ///
 /// Must be less than or equal to MAX_DNS_REDUNDANCY.
@@ -165,6 +177,18 @@ const GZ_ADDRESS_INDEX: usize = 2;
 /// The maximum number of addresses per sled reserved for RSS.
 pub const RSS_RESERVED_ADDRESSES: u16 = 32;
 
+// The maximum number of addresses per sled reserved for control plane services.
+pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
+
+// Number of addresses reserved (by the Nexus deployment planner) for allocation
+// by the sled itself.  This is currently used for the first two addresses of
+// the sled subnet, which are used for the sled global zone and the switch zone,
+// if any.  Note that RSS does not honor this yet (in fact, per the above
+// RSS_RESERVED_ADDRESSES, it will _only_ choose from this range).  And
+// historically, systems did not have this reservation at all.  So it's not safe
+// to assume that addresses in this subnet are available.
+pub const SLED_RESERVED_ADDRESSES: u16 = 32;
+
 /// Wraps an [`Ipv6Network`] with a compile-time prefix length.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
 #[schemars(rename = "Ipv6Subnet")]
@@ -274,6 +298,19 @@ impl ReservedRackSubnet {
             })
             .collect()
     }
+}
+
+/// Return the list of DNS servers for the rack, given any address in the AZ
+/// subnet
+pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
+    let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(addr);
+    let reserved_rack_subnet = ReservedRackSubnet::new(az_subnet);
+    let dns_subnets =
+        &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
+    dns_subnets
+        .iter()
+        .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address().ip()))
+        .collect()
 }
 
 const SLED_AGENT_ADDRESS_INDEX: usize = 1;
@@ -423,6 +460,18 @@ impl TryFrom<(Ipv6Addr, Ipv6Addr)> for IpRange {
 
     fn try_from(pair: (Ipv6Addr, Ipv6Addr)) -> Result<Self, Self::Error> {
         Ipv6Range::new(pair.0, pair.1).map(IpRange::V6)
+    }
+}
+
+impl From<Ipv4Range> for IpRange {
+    fn from(value: Ipv4Range) -> Self {
+        Self::V4(value)
+    }
+}
+
+impl From<Ipv6Range> for IpRange {
+    fn from(value: Ipv6Range) -> Self {
+        Self::V6(value)
     }
 }
 

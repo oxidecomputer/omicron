@@ -2,9 +2,10 @@
 #:
 #: name = "helios / deploy"
 #: variety = "basic"
-#: target = "lab-2.0-opte-0.27"
+#: target = "lab-2.0-opte-0.28"
 #: output_rules = [
 #:  "%/var/svc/log/oxide-sled-agent:default.log*",
+#:  "%/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/oxide-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_*/root/var/svc/log/system-illumos-*.log*",
 #:  "%/pool/ext/*/crypt/zone/oxz_ntp_*/root/var/log/chrony/*.log*",
@@ -33,6 +34,9 @@ _exit_trap() {
 	local status=$?
 	[[ $status -eq 0 ]] && exit 0
 
+    # XXX paranoia
+    pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
+
 	set +o errexit
 	set -o xtrace
 	banner evidence
@@ -50,6 +54,7 @@ _exit_trap() {
 		standalone \
 		dump-state
 	pfexec /opt/oxide/opte/bin/opteadm list-ports
+	pfexec /opt/oxide/opte/bin/opteadm dump-v2b
 	z_swadm link ls
 	z_swadm addr list
 	z_swadm route list
@@ -96,6 +101,19 @@ z_swadm () {
 	echo "== swadm $@"
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
+
+# XXX remove. This is just to test against a development branch of OPTE in CI.
+set +x
+OPTE_COMMIT="73d4669ea213d0b7aca35c4babb6fd09ed51d29e"
+curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
+pfexec rem_drv xde || true
+pfexec mv xde /kernel/drv/amd64/xde
+pfexec add_drv xde || true
+curl -sSfOL https://buildomat.eng.oxide.computer/wg/0/artefact/01HM09S4M15WNXB2B2MX8R1GBT/yLalJU5vT4S4IEpwSeY4hPuspxw3JcINokZmlfNU14npHkzG/01HM09SJ2RQSFGW7MVKC9JKZ8D/01HM0A58D888AJ7YP6N1Q6T6ZD/opteadm
+chmod +x opteadm
+cp opteadm /tmp/opteadm
+pfexec mv opteadm /opt/oxide/opte/bin/opteadm
+set -x
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
@@ -236,7 +254,7 @@ infra_ip_last = \"$UPLINK_IP\"
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
 		/^addresses/c\\
-addresses = \\[\"$UPLINK_IP/32\"\\]
+addresses = \\[\"$UPLINK_IP/24\"\\]
 	}
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true

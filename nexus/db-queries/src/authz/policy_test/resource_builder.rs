@@ -92,7 +92,7 @@ impl<'a> ResourceBuilder<'a> {
                 // (e.g., "fleet").
                 resource.resource_type().to_string().to_lowercase()
             }
-            LookupType::BySessionToken(_) | LookupType::ByCompositeId(_) => {
+            LookupType::ByCompositeId(_) | LookupType::ByOther(_) => {
                 panic!("test resources must be given names");
             }
         };
@@ -212,7 +212,7 @@ where
             LookupType::ByName(name) => format!("{:?}", name),
             LookupType::ById(id) => format!("id {:?}", id.to_string()),
             LookupType::ByCompositeId(id) => format!("id {:?}", id),
-            LookupType::BySessionToken(_) => {
+            LookupType::ByOther(_) => {
                 unimplemented!()
             }
         };
@@ -243,6 +243,7 @@ macro_rules! impl_dyn_authorized_resource_for_global {
 }
 
 impl_dyn_authorized_resource_for_global!(authz::oso_generic::Database);
+impl_dyn_authorized_resource_for_global!(authz::BlueprintConfig);
 impl_dyn_authorized_resource_for_global!(authz::ConsoleSessionList);
 impl_dyn_authorized_resource_for_global!(authz::DeviceAuthRequestList);
 impl_dyn_authorized_resource_for_global!(authz::DnsConfig);

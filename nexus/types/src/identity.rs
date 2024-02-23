@@ -9,6 +9,7 @@
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::IdentityMetadata;
 use omicron_common::api::external::Name;
+use omicron_uuid_kinds::GenericUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -23,7 +24,9 @@ use uuid::Uuid;
 ///
 /// May be derived from [`macro@db-macros::Resource`].
 pub trait Resource {
-    fn id(&self) -> Uuid;
+    type IdType: GenericUuid;
+
+    fn id(&self) -> Self::IdType;
     fn name(&self) -> &Name;
     fn description(&self) -> &str;
     fn time_created(&self) -> DateTime<Utc>;
@@ -32,7 +35,7 @@ pub trait Resource {
 
     fn identity(&self) -> IdentityMetadata {
         IdentityMetadata {
-            id: self.id(),
+            id: self.id().into_untyped_uuid(),
             name: self.name().clone(),
             description: self.description().to_string(),
             time_created: self.time_created(),
@@ -43,7 +46,7 @@ pub trait Resource {
 
 /// Identity-related metadata that's included in "asset" public API objects
 /// (which generally have no name or description)
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, JsonSchema)]
 pub struct AssetIdentityMetadata {
     /// unique, immutable, system-controlled identifier for each resource
     pub id: Uuid,
@@ -60,13 +63,15 @@ pub struct AssetIdentityMetadata {
 ///
 /// May be derived from [`macro@db-macros::Asset`].
 pub trait Asset {
-    fn id(&self) -> Uuid;
+    type IdType: GenericUuid;
+
+    fn id(&self) -> Self::IdType;
     fn time_created(&self) -> DateTime<Utc>;
     fn time_modified(&self) -> DateTime<Utc>;
 
     fn identity(&self) -> AssetIdentityMetadata {
         AssetIdentityMetadata {
-            id: self.id(),
+            id: self.id().into_untyped_uuid(),
             time_created: self.time_created(),
             time_modified: self.time_modified(),
         }

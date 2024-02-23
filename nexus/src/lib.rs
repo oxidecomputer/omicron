@@ -20,7 +20,6 @@ pub mod external_api; // Public for testing
 mod internal_api;
 mod populate;
 mod saga_interface;
-mod updates; // public for testing
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
@@ -48,7 +47,7 @@ extern crate slog;
 /// to stdout.
 pub fn run_openapi_external() -> Result<(), String> {
     external_api()
-        .openapi("Oxide Region API", "0.0.1")
+        .openapi("Oxide Region API", "0.0.6")
         .description("API for interacting with the Oxide control plane")
         .contact_url("https://oxide.computer")
         .contact_email("api@oxide.computer")
@@ -289,13 +288,15 @@ impl nexus_test_interface::NexusServer for Server {
                             vec!["qsfp0".parse().unwrap()],
                         )]),
                     ),
-                    rack_network_config: Some(RackNetworkConfig {
-                        rack_subnet: "fd00:1122:3344:01::/56".parse().unwrap(),
+                    rack_network_config: RackNetworkConfig {
+                        rack_subnet: "fd00:1122:3344:0100::/56"
+                            .parse()
+                            .unwrap(),
                         infra_ip_first: Ipv4Addr::UNSPECIFIED,
                         infra_ip_last: Ipv4Addr::UNSPECIFIED,
                         ports: Vec::new(),
                         bgp: Vec::new(),
-                    }),
+                    },
                 },
             )
             .await

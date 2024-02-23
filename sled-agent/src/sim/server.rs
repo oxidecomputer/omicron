@@ -26,6 +26,8 @@ use omicron_common::FileKv;
 use slog::{info, Drain, Logger};
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
@@ -50,6 +52,7 @@ impl Server {
     pub async fn start(
         config: &Config,
         log: &Logger,
+        wait_for_nexus: bool,
     ) -> Result<Server, anyhow::Error> {
         info!(log, "setting up sled agent server");
 
@@ -87,49 +90,61 @@ impl Server {
         // TODO-robustness if this returns a 400 error, we probably want to
         // return a permanent error from the `notify_nexus` closure.
         let sa_address = http_server.local_addr();
-        let notify_nexus = || async {
-            debug!(log, "contacting server nexus");
-            nexus_client
-                .sled_agent_put(
-                    &config.id,
-                    &NexusTypes::SledAgentStartupInfo {
-                        sa_address: sa_address.to_string(),
-                        role: NexusTypes::SledRole::Scrimlet,
-                        baseboard: NexusTypes::Baseboard {
-                            serial_number: format!(
-                                "sim-{}",
-                                &config.id.to_string()[0..8]
-                            ),
-                            part_number: String::from("Unknown"),
-                            revision: 0,
+        let config_clone = config.clone();
+        let log_clone = log.clone();
+        let task = tokio::spawn(async move {
+            let config = config_clone;
+            let log = log_clone;
+            let nexus_client = nexus_client.clone();
+            let notify_nexus = || async {
+                debug!(log, "contacting server nexus");
+                nexus_client
+                    .sled_agent_put(
+                        &config.id,
+                        &NexusTypes::SledAgentStartupInfo {
+                            sa_address: sa_address.to_string(),
+                            role: NexusTypes::SledRole::Scrimlet,
+                            baseboard: NexusTypes::Baseboard {
+                                serial_number: format!(
+                                    "sim-{}",
+                                    &config.id.to_string()[0..8]
+                                ),
+                                part_number: String::from("Unknown"),
+                                revision: 0,
+                            },
+                            usable_hardware_threads: config
+                                .hardware
+                                .hardware_threads,
+                            usable_physical_ram:
+                                NexusTypes::ByteCount::try_from(
+                                    config.hardware.physical_ram,
+                                )
+                                .unwrap(),
+                            reservoir_size: NexusTypes::ByteCount::try_from(
+                                config.hardware.reservoir_ram,
+                            )
+                            .unwrap(),
                         },
-                        usable_hardware_threads: config
-                            .hardware
-                            .hardware_threads,
-                        usable_physical_ram: NexusTypes::ByteCount::try_from(
-                            config.hardware.physical_ram,
-                        )
-                        .unwrap(),
-                        reservoir_size: NexusTypes::ByteCount::try_from(
-                            config.hardware.reservoir_ram,
-                        )
-                        .unwrap(),
-                    },
-                )
-                .await
-                .map_err(BackoffError::transient)
-        };
-        let log_notification_failure = |error, delay| {
-            warn!(log, "failed to contact nexus, will retry in {:?}", delay;
-                "error" => ?error);
-        };
-        retry_notify(
-            retry_policy_internal_service_aggressive(),
-            notify_nexus,
-            log_notification_failure,
-        )
-        .await
-        .expect("Expected an infinite retry loop contacting Nexus");
+                    )
+                    .await
+                    .map_err(BackoffError::transient)
+            };
+            let log_notification_failure = |error, delay| {
+                warn!(log, "failed to contact nexus, will retry in {:?}", delay;
+                    "error" => ?error);
+            };
+            retry_notify(
+                retry_policy_internal_service_aggressive(),
+                notify_nexus,
+                log_notification_failure,
+            )
+            .await
+            .expect("Expected an infinite retry loop contacting Nexus");
+        });
+
+        if wait_for_nexus {
+            task.await.unwrap();
+        }
 
         let mut datasets = vec![];
         // Create all the Zpools requested by the config, and allocate a single
@@ -262,11 +277,11 @@ pub struct RssArgs {
 /// - Performs handoff to Nexus
 pub async fn run_standalone_server(
     config: &Config,
+    logging: &dropshot::ConfigLogging,
     rss_args: &RssArgs,
 ) -> Result<(), anyhow::Error> {
     let (drain, registration) = slog_dtrace::with_drain(
-        config
-            .log
+        logging
             .to_logger("sled-agent")
             .map_err(|message| anyhow!("initializing logger: {}", message))?,
     );
@@ -280,7 +295,7 @@ pub async fn run_standalone_server(
     }
 
     // Start the sled agent
-    let mut server = Server::start(config, &log).await?;
+    let mut server = Server::start(config, &log, true).await?;
     info!(log, "sled agent started successfully");
 
     // Start the Internal DNS server
@@ -348,6 +363,7 @@ pub async fn run_standalone_server(
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
+                    slot: 0,
                 },
             },
             service_id: Uuid::new_v4(),
@@ -381,6 +397,7 @@ pub async fn run_standalone_server(
                         .unwrap()
                         .into(),
                     mac: macs.next().unwrap(),
+                    slot: 0,
                 },
             },
             service_id: Uuid::new_v4(),
@@ -442,7 +459,13 @@ pub async fn run_standalone_server(
         external_port_count: NexusTypes::ExternalPortDiscovery::Static(
             HashMap::new(),
         ),
-        rack_network_config: None,
+        rack_network_config: NexusTypes::RackNetworkConfigV1 {
+            rack_subnet: Ipv6Addr::LOCALHOST.into(),
+            infra_ip_first: Ipv4Addr::LOCALHOST,
+            infra_ip_last: Ipv4Addr::LOCALHOST,
+            ports: Vec::new(),
+            bgp: Vec::new(),
+        },
     };
 
     handoff_to_nexus(&log, &config, &rack_init_request).await?;

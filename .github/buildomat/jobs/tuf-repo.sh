@@ -71,7 +71,7 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
-ALL_BOARDS=(gimlet-{c..e} psc-{b..c} sidecar-{b..c})
+ALL_BOARDS=(gimlet-{c..f} psc-{b..c} sidecar-{b..c})
 
 TOP=$PWD
 VERSION=$(< /input/package/work/version.txt)
@@ -278,8 +278,8 @@ EOF
     done
 }
 # usage:              SERIES           ROT_DIR      ROT_VERSION              BOARDS...
-add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.4  "${ALL_BOARDS[@]}"
-add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.4     "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.6  "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.6     "${ALL_BOARDS[@]}"
 
 for series in "${SERIES_LIST[@]}"; do
     /work/tufaceous assemble --no-generate-key /work/manifest-"$series".toml /work/repo-"$series".zip

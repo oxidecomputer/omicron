@@ -11,7 +11,7 @@ use std::io::Write;
 
 impl_enum_wrapper!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "instance_state"))]
+    #[diesel(postgres_type(name = "instance_state", schema = "public"))]
     pub struct InstanceStateEnum;
 
     #[derive(Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
@@ -63,5 +63,11 @@ impl From<InstanceState> for sled_agent_client::types::InstanceState {
             Failed => Output::Failed,
             Destroyed => Output::Destroyed,
         }
+    }
+}
+
+impl From<external::InstanceState> for InstanceState {
+    fn from(state: external::InstanceState) -> Self {
+        Self::new(state)
     }
 }

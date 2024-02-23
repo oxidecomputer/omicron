@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
     #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "physical_disk_kind"))]
+    #[diesel(postgres_type(name = "physical_disk_kind", schema = "public"))]
     pub struct PhysicalDiskKindEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]

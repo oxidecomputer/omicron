@@ -5,6 +5,7 @@ edition = "2021"
 license = "MPL-2.0"
 
 [dependencies]
+anyhow.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 omicron-common.workspace = true
@@ -15,6 +16,5 @@ reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
-sled-storage.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true

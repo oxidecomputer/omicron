@@ -90,6 +90,7 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  rack       Print information about the rack
   disks      Print information about disks
   dns        Print information about internal and external DNS
   inventory  Print information about collected hardware/software inventory
@@ -105,6 +106,8 @@ Options:
       --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
       --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
                                    OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
   -h, --help                       Print help
 =============================================
 EXECUTING COMMAND: omdb ["db", "--help"]
@@ -116,6 +119,7 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
+  rack       Print information about the rack
   disks      Print information about disks
   dns        Print information about internal and external DNS
   inventory  Print information about collected hardware/software inventory
@@ -131,6 +135,8 @@ Options:
       --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
       --fetch-limit <FETCH_LIMIT>  limit to apply to queries that fetch rows [env:
                                    OMDB_FETCH_LIMIT=] [default: 500]
+      --include-deleted            whether to include soft-deleted records when enumerating objects
+                                   that can be soft-deleted
   -h, --help                       Print help
 ---------------------------------------------
 stderr:
@@ -248,8 +254,9 @@ Print information about the network
 Usage: omdb db network [OPTIONS] <COMMAND>
 
 Commands:
-  list-eips  List external IPs
-  help       Print this message or the help of the given subcommand(s)
+  list-eips   List external IPs
+  list-vnics  List virtual network interfaces
+  help        Print this message or the help of the given subcommand(s)
 
 Options:
       --verbose  Print out raw data structures from the data store
@@ -266,7 +273,9 @@ Debug a specific Management Gateway Service instance
 Usage: omdb mgs [OPTIONS] <COMMAND>
 
 Commands:
+  dashboard  Dashboard of SPs
   inventory  Show information about devices and components visible to MGS
+  sensors    Show information about sensors, as gleaned by MGS
   help       Print this message or the help of the given subcommand(s)
 
 Options:
@@ -285,6 +294,7 @@ Usage: omdb nexus [OPTIONS] <COMMAND>
 
 Commands:
   background-tasks  print information about background tasks
+  blueprints        print information about blueprints
   help              Print this message or the help of the given subcommand(s)
 
 Options:
@@ -322,9 +332,10 @@ Debug a specific Sled
 Usage: omdb sled-agent [OPTIONS] <COMMAND>
 
 Commands:
-  zones   print information about zones
-  zpools  print information about zpools
-  help    Print this message or the help of the given subcommand(s)
+  zones      print information about zones
+  zpools     print information about zpools
+  bootstore  print information about the local bootstore node
+  help       Print this message or the help of the given subcommand(s)
 
 Options:
       --sled-agent-url <SLED_AGENT_URL>  URL of the Sled internal API [env: OMDB_SLED_AGENT_URL=]

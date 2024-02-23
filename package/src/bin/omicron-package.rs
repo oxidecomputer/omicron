@@ -5,6 +5,7 @@
 //! Utility for bundling target binaries as tarfiles.
 
 use anyhow::{anyhow, bail, Context, Result};
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::{Parser, Subcommand};
 use futures::stream::{self, StreamExt, TryStreamExt};
 use illumos_utils::{zfs, zone};
@@ -26,7 +27,6 @@ use slog::{info, warn};
 use std::env;
 use std::fs::create_dir_all;
 use std::io::Write;
-use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::Arc;
 use swrite::{swrite, SWrite};
@@ -60,7 +60,7 @@ struct Args {
         help = "Path to package manifest toml file",
         action
     )]
-    manifest: PathBuf,
+    manifest: Utf8PathBuf,
 
     #[clap(
         short,
@@ -72,7 +72,7 @@ struct Args {
 
     /// The output directory, where artifacts should be built and staged
     #[clap(long = "artifacts", default_value = "out/")]
-    artifact_dir: PathBuf,
+    artifact_dir: Utf8PathBuf,
 
     #[clap(
         short,
@@ -145,6 +145,7 @@ async fn do_for_all_rust_packages(
     let (release_pkgs, debug_pkgs): (Vec<_>, _) = config
         .package_config
         .packages_to_build(&config.target)
+        .0
         .into_iter()
         .filter_map(|(name, pkg)| match &pkg.source {
             PackageSource::Local { rust: Some(rust_pkg), .. } => {
@@ -202,13 +203,13 @@ async fn do_dot(config: &Config) -> Result<()> {
 const ACTIVE: &str = "active";
 
 async fn do_target(
-    artifact_dir: &Path,
+    artifact_dir: &Utf8Path,
     name: &str,
     subcommand: &TargetCommand,
 ) -> Result<()> {
     let target_dir = artifact_dir.join("target");
     tokio::fs::create_dir_all(&target_dir).await.with_context(|| {
-        format!("failed to create directory {}", target_dir.display())
+        format!("failed to create directory {}", target_dir)
     })?;
     match subcommand {
         TargetCommand::Create { image, machine, switch, rack_topology } => {
@@ -223,7 +224,7 @@ async fn do_target(
             tokio::fs::write(&path, Target::from(target).to_string())
                 .await
                 .with_context(|| {
-                    format!("failed to write target to {}", path.display())
+                    format!("failed to write target to {}", path)
                 })?;
 
             replace_active_link(&name, &target_dir).await?;
@@ -232,7 +233,7 @@ async fn do_target(
         }
         TargetCommand::List => {
             let active = tokio::fs::read_link(target_dir.join(ACTIVE)).await?;
-            let active = active.to_string_lossy();
+            let active = Utf8PathBuf::try_from(active)?;
             for entry in walkdir::WalkDir::new(&target_dir)
                 .max_depth(1)
                 .sort_by_file_name()
@@ -267,9 +268,9 @@ async fn do_target(
 }
 
 async fn get_single_target(
-    target_dir: impl AsRef<Path>,
+    target_dir: impl AsRef<Utf8Path>,
     name: &str,
-) -> Result<PathBuf> {
+) -> Result<Utf8PathBuf> {
     if name == ACTIVE {
         bail!(
             "The name '{name}' is reserved, please try another (e.g. 'default')\n\
@@ -281,29 +282,25 @@ async fn get_single_target(
 }
 
 async fn replace_active_link(
-    src: impl AsRef<Path>,
-    target_dir: impl AsRef<Path>,
+    src: impl AsRef<Utf8Path>,
+    target_dir: impl AsRef<Utf8Path>,
 ) -> Result<()> {
     let src = src.as_ref();
     let target_dir = target_dir.as_ref();
 
     let dst = target_dir.join(ACTIVE);
     if !target_dir.join(src).exists() {
-        bail!("Target file {} does not exist", src.display());
+        bail!("Target file {} does not exist", src);
     }
     let _ = tokio::fs::remove_file(&dst).await;
     tokio::fs::symlink(src, &dst).await.with_context(|| {
-        format!(
-            "failed creating symlink to {} at {}",
-            src.display(),
-            dst.display()
-        )
+        format!("failed creating symlink to {} at {}", src, dst)
     })?;
     Ok(())
 }
 
 // Calculates the SHA256 digest for a file.
-async fn get_sha256_digest(path: &PathBuf) -> Result<Digest> {
+async fn get_sha256_digest(path: &Utf8PathBuf) -> Result<Digest> {
     let mut reader = BufReader::new(
         tokio::fs::File::open(&path)
             .await
@@ -332,21 +329,21 @@ async fn download_prebuilt(
     repo: &str,
     commit: &str,
     expected_digest: &Vec<u8>,
-    path: &Path,
+    path: &Utf8Path,
 ) -> Result<()> {
     progress.set_message("downloading prebuilt".into());
     let url = format!(
         "https://buildomat.eng.oxide.computer/public/file/oxidecomputer/{}/image/{}/{}",
         repo,
         commit,
-        path.file_name().unwrap().to_string_lossy(),
+        path.file_name().unwrap(),
     );
     let response = reqwest::Client::new()
         .get(&url)
         .send()
         .await
         .with_context(|| format!("failed to get {url}"))?;
-    progress.set_length(
+    progress.increment_total(
         response
             .content_length()
             .ok_or_else(|| anyhow!("Missing Content Length"))?,
@@ -366,7 +363,7 @@ async fn download_prebuilt(
             .await
             .with_context(|| format!("failed writing {path:?}"))?;
         // Record progress in the UI
-        progress.increment(chunk.len().try_into().unwrap());
+        progress.increment_completed(chunk.len().try_into().unwrap());
     }
 
     let digest = context.finish();
@@ -381,16 +378,16 @@ async fn download_prebuilt(
 }
 
 // Ensures a package exists, either by creating it or downloading it.
-async fn get_package(
+async fn ensure_package(
     config: &Config,
-    target: &Target,
     ui: &Arc<ProgressUI>,
     package_name: &String,
     package: &Package,
-    output_directory: &Path,
+    output_directory: &Utf8Path,
+    disable_cache: bool,
 ) -> Result<()> {
-    let total_work = package.get_total_work_for_target(&target)?;
-    let progress = ui.add_package(package_name.to_string(), total_work);
+    let target = &config.target;
+    let progress = ui.add_package(package_name.to_string());
     match &package.source {
         PackageSource::Prebuilt { repo, commit, sha256 } => {
             let expected_digest = hex::decode(&sha256)?;
@@ -434,19 +431,26 @@ async fn get_package(
             }
         }
         PackageSource::Manual => {
+            progress.set_message("confirming manual package".into());
             let path = package.get_output_path(package_name, &output_directory);
             if !path.exists() {
                 bail!(
                     "The package for {} (expected at {}) does not exist.",
                     package_name,
-                    path.to_string_lossy(),
+                    path,
                 );
             }
         }
         PackageSource::Local { .. } | PackageSource::Composite { .. } => {
-            progress.set_message("bundle package".into());
+            progress.set_message("building package".into());
+
+            let build_config = omicron_zone_package::package::BuildConfig {
+                target,
+                progress: &progress,
+                cache_disabled: disable_cache,
+            };
             package
-                .create_with_progress_for_target(&progress, &target, package_name, &output_directory)
+                .create(package_name, &output_directory, &build_config)
                 .await
                 .with_context(|| {
                     let msg = format!("failed to create {package_name} in {output_directory:?}");
@@ -462,76 +466,36 @@ async fn get_package(
     Ok(())
 }
 
-async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
-    use topological_sort::TopologicalSort;
-
+async fn do_package(
+    config: &Config,
+    output_directory: &Utf8Path,
+    disable_cache: bool,
+) -> Result<()> {
     create_dir_all(&output_directory)
         .map_err(|err| anyhow!("Cannot create output directory: {}", err))?;
 
-    let ui = ProgressUI::new();
+    let ui = ProgressUI::new(&config.log);
 
     do_build(&config).await?;
 
-    let mut all_packages = config
-        .package_config
-        .packages_to_build(&config.target)
-        .into_iter()
-        .map(|(package_name, package)| {
-            (package.get_output_file(package_name), (package_name, package))
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
+    let packages = config.package_config.packages_to_build(&config.target);
 
-    let mut outputs = TopologicalSort::<String>::new();
-    for (package_output, (_, package)) in &all_packages {
-        match &package.source {
-            PackageSource::Local { .. }
-            | PackageSource::Prebuilt { .. }
-            | PackageSource::Manual => {
-                // Skip intermediate leaf packages; if necessary they'll be
-                // added to the dependency graph by whatever composite package
-                // actually depends on them.
-                if !matches!(
-                    package.output,
-                    PackageOutput::Zone { intermediate_only: true }
-                ) {
-                    outputs.insert(package_output);
-                }
-            }
-            PackageSource::Composite { packages: deps } => {
-                for dep in deps {
-                    outputs.add_dependency(dep, package_output);
-                }
-            }
-        }
-    }
-
-    while !outputs.is_empty() {
-        let batch = outputs.pop_all();
-        assert!(
-            !batch.is_empty() || outputs.is_empty(),
-            "cyclic dependency in package manifest!"
-        );
-
-        let packages = batch.into_iter().map(|output| {
-            all_packages
-                .remove(&output)
-                .expect("package should've already been handled.")
-        });
-
-        let ui_refs = vec![ui.clone(); packages.len()];
-        let pkg_stream = stream::iter(packages)
+    let package_iter = packages.build_order();
+    for batch in package_iter {
+        let ui_refs = vec![ui.clone(); batch.len()];
+        let pkg_stream = stream::iter(batch)
             .zip(stream::iter(ui_refs))
             .map(Ok::<_, anyhow::Error>)
             .try_for_each_concurrent(
                 None,
                 |((package_name, package), ui)| async move {
-                    get_package(
+                    ensure_package(
                         &config,
-                        &config.target,
                         &ui,
                         package_name,
                         package,
                         output_directory,
+                        disable_cache,
                     )
                     .await
                 },
@@ -545,7 +509,7 @@ async fn do_package(config: &Config, output_directory: &Path) -> Result<()> {
 
 async fn do_stamp(
     config: &Config,
-    output_directory: &Path,
+    output_directory: &Utf8Path,
     package_name: &str,
     version: &semver::Version,
 ) -> Result<()> {
@@ -553,6 +517,7 @@ async fn do_stamp(
     let (_name, package) = config
         .package_config
         .packages_to_deploy(&config.target)
+        .0
         .into_iter()
         .find(|(name, _pkg)| name.as_str() == package_name)
         .ok_or_else(|| anyhow!("Package {package_name} not found"))?;
@@ -560,21 +525,21 @@ async fn do_stamp(
     // Stamp it
     let stamped_path =
         package.stamp(package_name, output_directory, version).await?;
-    println!("Created: {}", stamped_path.display());
+    println!("Created: {}", stamped_path);
     Ok(())
 }
 
 async fn do_unpack(
     config: &Config,
-    artifact_dir: &Path,
-    install_dir: &Path,
+    artifact_dir: &Utf8Path,
+    install_dir: &Utf8Path,
 ) -> Result<()> {
     create_dir_all(&install_dir).map_err(|err| {
         anyhow!("Cannot create installation directory: {}", err)
     })?;
 
     // Copy all packages to the install location in parallel.
-    let packages = config.package_config.packages_to_deploy(&config.target);
+    let packages = config.package_config.packages_to_deploy(&config.target).0;
 
     packages.par_iter().try_for_each(
         |(package_name, package)| -> Result<()> {
@@ -585,14 +550,14 @@ async fn do_unpack(
             info!(
                 &config.log,
                 "Installing service";
-                "src" => %src.to_string_lossy(),
-                "dst" => %dst.to_string_lossy(),
+                "src" => %src,
+                "dst" => %dst,
             );
             std::fs::copy(&src, &dst).map_err(|err| {
                 anyhow!(
                     "Failed to copy {src} to {dst}: {err}",
-                    src = src.display(),
-                    dst = dst.display()
+                    src = src,
+                    dst = dst
                 )
             })?;
             Ok(())
@@ -617,8 +582,8 @@ async fn do_unpack(
         info!(
             &config.log,
             "Unpacking service tarball";
-            "tar_path" => %tar_path.to_string_lossy(),
-            "service_path" => %service_path.to_string_lossy(),
+            "tar_path" => %tar_path,
+            "service_path" => %service_path,
         );
 
         let tar_file = std::fs::File::open(&tar_path)?;
@@ -631,7 +596,7 @@ async fn do_unpack(
     Ok(())
 }
 
-fn do_activate(config: &Config, install_dir: &Path) -> Result<()> {
+fn do_activate(config: &Config, install_dir: &Utf8Path) -> Result<()> {
     // Install the bootstrap service, which itself extracts and
     // installs other services.
     if let Some(package) =
@@ -643,8 +608,7 @@ fn do_activate(config: &Config, install_dir: &Path) -> Result<()> {
             .join("manifest.xml");
         info!(
             config.log,
-            "Installing bootstrap service from {}",
-            manifest_path.to_string_lossy()
+            "Installing bootstrap service from {}", manifest_path
         );
 
         smf::Config::import().run(&manifest_path)?;
@@ -655,8 +619,8 @@ fn do_activate(config: &Config, install_dir: &Path) -> Result<()> {
 
 async fn do_install(
     config: &Config,
-    artifact_dir: &Path,
-    install_dir: &Path,
+    artifact_dir: &Utf8Path,
+    install_dir: &Utf8Path,
 ) -> Result<()> {
     do_unpack(config, artifact_dir, install_dir).await?;
     do_activate(config, install_dir)
@@ -704,6 +668,7 @@ fn uninstall_all_packages(config: &Config) {
     for (_, package) in config
         .package_config
         .packages_to_deploy(&config.target)
+        .0
         .into_iter()
         .filter(|(_, package)| matches!(package.output, PackageOutput::Tarball))
     {
@@ -715,7 +680,9 @@ fn uninstall_all_packages(config: &Config) {
     }
 }
 
-fn remove_file_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
+fn remove_file_unless_already_removed<P: AsRef<Utf8Path>>(
+    path: P,
+) -> Result<()> {
     if let Err(e) = std::fs::remove_file(path.as_ref()) {
         match e.kind() {
             std::io::ErrorKind::NotFound => {}
@@ -725,7 +692,9 @@ fn remove_file_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
+fn remove_all_unless_already_removed<P: AsRef<Utf8Path>>(
+    path: P,
+) -> Result<()> {
     if let Err(e) = std::fs::remove_dir_all(path.as_ref()) {
         match e.kind() {
             std::io::ErrorKind::NotFound => {}
@@ -735,22 +704,22 @@ fn remove_all_unless_already_removed<P: AsRef<Path>>(path: P) -> Result<()> {
     Ok(())
 }
 
-fn remove_all_except<P: AsRef<Path>>(
+fn remove_all_except<P: AsRef<Utf8Path>>(
     path: P,
     to_keep: &[&str],
     log: &Logger,
 ) -> Result<()> {
-    let dir = match path.as_ref().read_dir() {
+    let dir = match path.as_ref().read_dir_utf8() {
         Ok(dir) => dir,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => bail!(e),
     };
     for entry in dir {
         let entry = entry?;
-        if to_keep.contains(&&*(entry.file_name().to_string_lossy())) {
-            info!(log, "Keeping: '{}'", entry.path().to_string_lossy());
+        if to_keep.contains(&entry.file_name()) {
+            info!(log, "Keeping: '{}'", entry.path());
         } else {
-            info!(log, "Removing: '{}'", entry.path().to_string_lossy());
+            info!(log, "Removing: '{}'", entry.path());
             if entry.metadata()?.is_dir() {
                 remove_all_unless_already_removed(entry.path())?;
             } else {
@@ -780,15 +749,11 @@ async fn do_uninstall(config: &Config) -> Result<()> {
 
 async fn do_clean(
     config: &Config,
-    artifact_dir: &Path,
-    install_dir: &Path,
+    artifact_dir: &Utf8Path,
+    install_dir: &Utf8Path,
 ) -> Result<()> {
     do_uninstall(&config).await?;
-    info!(
-        config.log,
-        "Removing artifacts from {}",
-        artifact_dir.to_string_lossy()
-    );
+    info!(config.log, "Removing artifacts from {}", artifact_dir);
     const ARTIFACTS_TO_KEEP: &[&str] = &[
         "clickhouse",
         "cockroachdb",
@@ -798,11 +763,7 @@ async fn do_clean(
         "softnpu",
     ];
     remove_all_except(artifact_dir, ARTIFACTS_TO_KEEP, &config.log)?;
-    info!(
-        config.log,
-        "Removing installed objects in: {}",
-        install_dir.to_string_lossy()
-    );
+    info!(config.log, "Removing installed objects in: {}", install_dir);
     const INSTALLED_OBJECTS_TO_KEEP: &[&str] = &["opte"];
     remove_all_except(install_dir, INSTALLED_OBJECTS_TO_KEEP, &config.log)?;
 
@@ -811,52 +772,80 @@ async fn do_clean(
 
 fn in_progress_style() -> ProgressStyle {
     ProgressStyle::default_bar()
-        .template(
-            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
-        )
+        .template("[{elapsed:>3}] {bar:30.cyan/blue} {pos:>7}/{len:7} {msg}")
         .expect("Invalid template")
         .progress_chars("#>.")
 }
 
 fn completed_progress_style() -> ProgressStyle {
     ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg:.green}")
+        .template(
+            "[{elapsed:>3}] {bar:30.cyan/blue} {pos:>7}/{len:7} {msg:.green}",
+        )
         .expect("Invalid template")
         .progress_chars("#>.")
 }
 
 fn error_progress_style() -> ProgressStyle {
     ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg:.red}")
+        .template(
+            "[{elapsed:>3}] {bar:30.cyan/blue} {pos:>7}/{len:7} {msg:.red}",
+        )
         .expect("Invalid template")
         .progress_chars("#>.")
 }
 
 // Struct managing display of progress to UI.
 struct ProgressUI {
+    log: Logger,
     multi: MultiProgress,
     style: ProgressStyle,
 }
 
+impl ProgressUI {
+    fn new(log: &Logger) -> Arc<Self> {
+        Arc::new(Self {
+            log: log.clone(),
+            multi: MultiProgress::new(),
+            style: in_progress_style(),
+        })
+    }
+
+    fn add_package(&self, service_name: String) -> PackageProgress {
+        let pb = self.multi.add(ProgressBar::new(1));
+        pb.set_style(self.style.clone());
+        pb.set_message(service_name.clone());
+        pb.tick();
+        PackageProgress::new(&self.log, pb, service_name)
+    }
+}
+
 struct PackageProgress {
+    log: Logger,
     pb: ProgressBar,
     service_name: String,
 }
 
 impl PackageProgress {
+    fn new(log: &Logger, pb: ProgressBar, service_name: String) -> Self {
+        Self {
+            log: log.new(o!("package" => service_name.clone())),
+            pb,
+            service_name,
+        }
+    }
+
     fn finish(&self) {
         self.pb.set_style(completed_progress_style());
         self.pb.finish_with_message(format!("{}: done", self.service_name));
         self.pb.tick();
     }
 
-    fn set_length(&self, total: u64) {
-        self.pb.set_length(total);
-    }
-
     fn set_error_message(&self, message: std::borrow::Cow<'static, str>) {
         self.pb.set_style(error_progress_style());
-        self.pb.set_message(format!("{}: {}", self.service_name, message));
+        let message = format!("{}: {}", self.service_name, message);
+        warn!(self.log, "{}", &message);
+        self.pb.set_message(message);
         self.pb.tick();
     }
 
@@ -868,29 +857,22 @@ impl PackageProgress {
 impl Progress for PackageProgress {
     fn set_message(&self, message: std::borrow::Cow<'static, str>) {
         self.pb.set_style(in_progress_style());
-        self.pb.set_message(format!("{}: {}", self.service_name, message));
+        let message = format!("{}: {}", self.service_name, message);
+        info!(self.log, "{}", &message);
+        self.pb.set_message(message);
         self.pb.tick();
     }
 
-    fn increment(&self, delta: u64) {
+    fn get_log(&self) -> &Logger {
+        &self.log
+    }
+
+    fn increment_total(&self, delta: u64) {
+        self.pb.inc_length(delta);
+    }
+
+    fn increment_completed(&self, delta: u64) {
         self.pb.inc(delta);
-    }
-}
-
-impl ProgressUI {
-    fn new() -> Arc<Self> {
-        Arc::new(Self {
-            multi: MultiProgress::new(),
-            style: in_progress_style(),
-        })
-    }
-
-    fn add_package(&self, service_name: String, total: u64) -> PackageProgress {
-        let pb = self.multi.add(ProgressBar::new(total));
-        pb.set_style(self.style.clone());
-        pb.set_message(service_name.clone());
-        pb.tick();
-        PackageProgress { pb, service_name }
     }
 }
 
@@ -932,10 +914,16 @@ async fn main() -> Result<()> {
     let args = Args::try_parse()?;
     let package_config = parse::<_, PackageConfig>(&args.manifest)?;
 
-    let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+    let mut open_options = std::fs::OpenOptions::new();
+    open_options.write(true).create(true).truncate(true);
+    tokio::fs::create_dir_all(&args.artifact_dir).await?;
+    let logpath = args.artifact_dir.join("LOG");
+    let logfile = std::io::LineWriter::new(open_options.open(&logpath)?);
+    println!("Logging to: {}", std::fs::canonicalize(logpath)?.display());
+
+    let drain = slog_bunyan::new(logfile).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
-    let log = slog::Logger::root(drain, o!());
+    let log = Logger::root(drain, o!());
 
     let target_help_str = || -> String {
         format!(
@@ -950,7 +938,7 @@ async fn main() -> Result<()> {
             std::fs::read_to_string(&target_path).map_err(|e| {
                 eprintln!(
                     "Failed to read build target: {}\n{}",
-                    target_path.display(),
+                    target_path,
                     target_help_str()
                 );
                 e
@@ -959,7 +947,7 @@ async fn main() -> Result<()> {
             .map_err(|e| {
                 eprintln!(
                     "Failed to parse {} as target\n{}",
-                    target_path.display(),
+                    target_path,
                     target_help_str()
                 );
                 e
@@ -979,10 +967,10 @@ async fn main() -> Result<()> {
 
     // Use a CWD that is the root of the Omicron repository.
     if let Ok(manifest) = env::var("CARGO_MANIFEST_DIR") {
-        let manifest_dir = PathBuf::from(manifest);
+        let manifest_dir = Utf8PathBuf::from(manifest);
         let root = manifest_dir.parent().unwrap();
         env::set_current_dir(root).with_context(|| {
-            format!("failed to set current directory to {}", root.display())
+            format!("failed to set current directory to {}", root)
         })?;
     }
 
@@ -993,8 +981,9 @@ async fn main() -> Result<()> {
         SubCommand::Build(BuildCommand::Dot) => {
             do_dot(&get_config()?).await?;
         }
-        SubCommand::Build(BuildCommand::Package) => {
-            do_package(&get_config()?, &args.artifact_dir).await?;
+        SubCommand::Build(BuildCommand::Package { disable_cache }) => {
+            do_package(&get_config()?, &args.artifact_dir, *disable_cache)
+                .await?;
         }
         SubCommand::Build(BuildCommand::Stamp { package_name, version }) => {
             do_stamp(&get_config()?, &args.artifact_dir, package_name, version)

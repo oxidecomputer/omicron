@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 #
 # ci_download_clickhouse: fetches the appropriate ClickHouse binary tarball
@@ -20,7 +20,7 @@ DOWNLOAD_DIR="$TARGET_DIR/downloads"
 DEST_DIR="./$TARGET_DIR/clickhouse"
 
 # If you change this, you must also update the md5sums below
-CIDL_VERSION="v22.8.9.24"
+CIDL_VERSION="$(cat "$SOURCE_DIR/clickhouse_version")"
 source "$SOURCE_DIR/clickhouse_checksums"
 
 # Download from manually-populated S3 bucket for now

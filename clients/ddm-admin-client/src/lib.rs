@@ -20,7 +20,7 @@ pub use inner::types;
 pub use inner::Error;
 
 use either::Either;
-use inner::types::Ipv6Prefix;
+use inner::types::{Ipv6Prefix, TunnelOrigin};
 use inner::Client as InnerClient;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -108,6 +108,22 @@ impl Client {
         });
     }
 
+    pub fn advertise_tunnel_endpoint(&self, endpoint: TunnelOrigin) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            retry_notify(retry_policy_internal_service_aggressive(), || async {
+                me.inner.advertise_tunnel_endpoints(&vec![endpoint.clone()]).await?;
+                Ok(())
+            }, |err, duration| {
+                info!(
+                    me.log,
+                    "Failed to notify ddmd of tunnel endpoint (retry in {duration:?}";
+                    "err" => %err,
+                );
+            }).await.unwrap();
+        });
+    }
+
     /// Returns the addresses of connected sleds.
     ///
     /// Note: These sleds have not yet been verified.
@@ -116,7 +132,6 @@ impl Client {
         interfaces: &'a [BootstrapInterface],
     ) -> Result<impl Iterator<Item = Ipv6Addr> + 'a, DdmError> {
         let prefixes = self.inner.get_prefixes().await?.into_inner();
-        info!(self.log, "Received prefixes from ddmd"; "prefixes" => ?prefixes);
         Ok(prefixes.into_iter().flat_map(|(_, prefixes)| {
             prefixes.into_iter().flat_map(|prefix| {
                 let mut segments = prefix.destination.addr.segments();

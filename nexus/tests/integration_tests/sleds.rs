@@ -7,13 +7,13 @@
 use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use nexus_test_interface::NexusServer;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_physical_disk;
 use nexus_test_utils::resource_helpers::create_project;
 use nexus_test_utils::resource_helpers::delete_physical_disk;
 use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
@@ -111,10 +111,10 @@ async fn test_physical_disk_create_list_disable_delete(
     let sleds_url = "/v1/system/hardware/sleds";
     assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 1);
 
-    // Verify that there are no disks.
+    // The test framework may set up some disks initially.
     let disks_url =
         format!("/v1/system/hardware/sleds/{SLED_AGENT_UUID}/disks");
-    assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
+    let disks_initial = physical_disks_list(&external_client, &disks_url).await;
 
     // Insert a new disk using the internal API, observe it in the external API
     let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
@@ -128,34 +128,48 @@ async fn test_physical_disk_create_list_disable_delete(
     )
     .await;
     let disks = physical_disks_list(&external_client, &disks_url).await;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].vendor, "v");
-    assert_eq!(disks[0].serial, "s");
-    assert_eq!(disks[0].model, "m");
-    assert_eq!(disks[0].state, PhysicalDiskState::Active);
+    assert_eq!(disks.len(), disks_initial.len() + 1);
+    let new_disk = disks
+        .iter()
+        .find(|found_disk| {
+            found_disk.vendor == "v"
+                && found_disk.serial == "s"
+                && found_disk.model == "m"
+        })
+        .expect("did not find the new disk");
+    assert_eq!(new_disk.state, PhysicalDiskState::Active);
 
     // Disable the disk, marking it as "not-for-use".
     let disk_url =
-        format!("/v1/system/hardware/disks/{}", disks[0].identity.id);
+        format!("/v1/system/hardware/disks/{}", new_disk.identity.id);
     let disk = physical_disks_update(
         &external_client,
         &disk_url,
         &PhysicalDiskUpdate::Disable,
     )
     .await;
-    assert_eq!(disk.vendor, "v");
-    assert_eq!(disk.serial, "s");
-    assert_eq!(disk.model, "m");
     assert_eq!(disk.state, PhysicalDiskState::Draining);
 
     // Confirm that listing the disks again shows this new state too
     let disks = physical_disks_list(&external_client, &disks_url).await;
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].state, PhysicalDiskState::Draining);
+    let new_disk = disks
+        .iter()
+        .find(|found_disk| {
+            found_disk.vendor == "v"
+                && found_disk.serial == "s"
+                && found_disk.model == "m"
+        })
+        .expect("did not find the new disk");
+    assert_eq!(new_disk.state, PhysicalDiskState::Draining);
 
     // Delete that disk using the internal API, observe it in the external API
     delete_physical_disk(&internal_client, "v", "s", "m", sled_id).await;
-    assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
+    assert_eq!(
+        physical_disks_list(&external_client, &disks_url).await,
+        disks_initial
+    );
 }
 
 #[nexus_test]
@@ -174,7 +188,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
         .is_empty());
 
     // Create an IP pool and project that we'll use for testing.
-    populate_ip_pool(&external_client, "default", None).await;
+    create_default_ip_pool(&external_client).await;
     let project = create_project(&external_client, "test-project").await;
     let instance =
         create_instance(&external_client, "test-project", "test-instance")

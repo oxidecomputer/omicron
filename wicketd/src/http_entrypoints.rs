@@ -25,7 +25,6 @@ use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
-use futures::TryStreamExt;
 use gateway_client::types::IgnitionCommand;
 use gateway_client::types::SpIdentifier;
 use gateway_client::types::SpType;
@@ -33,7 +32,6 @@ use http::StatusCode;
 use internal_dns::resolver::Resolver;
 use omicron_common::address;
 use omicron_common::api::external::SemverVersion;
-use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::update::ArtifactHashId;
 use omicron_common::update::ArtifactId;
@@ -44,12 +42,11 @@ use sled_hardware::Baseboard;
 use slog::o;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::io;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
 use wicket_common::rack_setup::PutRssUserConfigInsensitive;
+use wicket_common::rack_setup::UserSpecifiedRackNetworkConfig;
 use wicket_common::update_events::EventReport;
 use wicket_common::WICKETD_TIMEOUT;
 
@@ -175,7 +172,7 @@ pub struct CurrentRssUserConfigInsensitive {
     pub internal_services_ip_pool_ranges: Vec<address::IpRange>,
     pub external_dns_ips: Vec<IpAddr>,
     pub external_dns_zone_name: String,
-    pub rack_network_config: Option<RackNetworkConfig>,
+    pub rack_network_config: Option<UserSpecifiedRackNetworkConfig>,
 }
 
 // This is a summary of the subset of `RackInitializeRequest` that is sensitive;
@@ -570,44 +567,7 @@ async fn put_repository(
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let rqctx = rqctx.context();
 
-    // Create a temporary file to store the incoming archive.
-    let tempfile = tokio::task::spawn_blocking(|| {
-        camino_tempfile::tempfile().map_err(|err| {
-            HttpError::for_unavail(
-                None,
-                format!("failed to create temp file: {err}"),
-            )
-        })
-    })
-    .await
-    .unwrap()?;
-    let mut tempfile =
-        tokio::io::BufWriter::new(tokio::fs::File::from_std(tempfile));
-
-    let mut body = std::pin::pin!(body.into_stream());
-
-    // Stream the uploaded body into our tempfile.
-    while let Some(bytes) = body.try_next().await? {
-        tempfile.write_all(&bytes).await.map_err(|err| {
-            HttpError::for_unavail(
-                None,
-                format!("failed to write to temp file: {err}"),
-            )
-        })?;
-    }
-
-    // Flush writes. We don't need to seek back to the beginning of the file
-    // because extracting the repository will do its own seeking as a part of
-    // unzipping this repo.
-    tempfile.flush().await.map_err(|err| {
-        HttpError::for_unavail(
-            None,
-            format!("failed to flush temp file: {err}"),
-        )
-    })?;
-
-    let tempfile = tempfile.into_inner().into_std().await;
-    rqctx.update_tracker.put_repository(io::BufReader::new(tempfile)).await?;
+    rqctx.update_tracker.put_repository(body.into_stream()).await?;
 
     Ok(HttpResponseUpdatedNoContent())
 }
@@ -1229,12 +1189,14 @@ async fn post_start_preflight_uplink_check(
     let (network_config, dns_servers, ntp_servers) = {
         let rss_config = rqctx.rss_config.lock().unwrap();
 
-        let network_config =
-            rss_config.rack_network_config().cloned().ok_or_else(|| {
+        let network_config = rss_config
+            .user_specified_rack_network_config()
+            .cloned()
+            .ok_or_else(|| {
                 HttpError::for_bad_request(
                     None,
                     "uplink preflight check requires setting \
-                 the uplink config for RSS"
+                     the uplink config for RSS"
                         .to_string(),
                 )
             })?;

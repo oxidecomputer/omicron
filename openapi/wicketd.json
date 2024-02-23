@@ -1132,7 +1132,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
               }
             ]
           }
@@ -1628,7 +1628,7 @@
         ]
       },
       "PowerState": {
-        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.",
+        "description": "See RFD 81.\n\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"See RFD 81.\\n\\nThis enum only lists power states the SP is able to control; higher power states are controlled by ignition.\", \"type\": \"string\", \"enum\": [ \"A0\", \"A1\", \"A2\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "A0",
@@ -2172,7 +2172,7 @@
             }
           },
           "rack_network_config": {
-            "$ref": "#/components/schemas/RackNetworkConfigV1"
+            "$ref": "#/components/schemas/UserSpecifiedRackNetworkConfig"
           }
         },
         "required": [
@@ -2186,51 +2186,12 @@
         ]
       },
       "RackInitId": {
+        "description": "RackInitId\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"format\": \"uuid\" } ``` </details>",
         "type": "string",
         "format": "uuid"
       },
-      "RackNetworkConfigV1": {
-        "description": "Initial network configuration",
-        "type": "object",
-        "properties": {
-          "bgp": {
-            "description": "BGP configurations for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/BgpConfig"
-            }
-          },
-          "infra_ip_first": {
-            "description": "First ip address to be used for configuring network infrastructure",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "infra_ip_last": {
-            "description": "Last ip address to be used for configuring network infrastructure",
-            "type": "string",
-            "format": "ipv4"
-          },
-          "ports": {
-            "description": "Uplinks for connecting the rack to external networks",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
-            }
-          },
-          "rack_subnet": {
-            "$ref": "#/components/schemas/Ipv6Network"
-          }
-        },
-        "required": [
-          "bgp",
-          "infra_ip_first",
-          "infra_ip_last",
-          "ports",
-          "rack_subnet"
-        ]
-      },
       "RackOperationStatus": {
-        "description": "Current status of any rack-level operation being performed by this bootstrap agent.",
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackInitId\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackInitId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RackResetId\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/RackResetId\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2397,6 +2358,7 @@
         ]
       },
       "RackResetId": {
+        "description": "RackResetId\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"format\": \"uuid\" } ``` </details>",
         "type": "string",
         "format": "uuid"
       },
@@ -2444,6 +2406,7 @@
         ]
       },
       "RotSlot": {
+        "description": "RotSlot\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"a\" ] } } }, { \"type\": \"object\", \"required\": [ \"slot\" ], \"properties\": { \"slot\": { \"type\": \"string\", \"enum\": [ \"b\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2476,6 +2439,7 @@
         ]
       },
       "RotState": {
+        "description": "RotState\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"active\", \"persistent_boot_preference\", \"state\" ], \"properties\": { \"active\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"pending_persistent_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] }, \"persistent_boot_preference\": { \"$ref\": \"#/components/schemas/RotSlot\" }, \"slot_a_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"slot_b_sha3_256_digest\": { \"type\": [ \"string\", \"null\" ] }, \"state\": { \"type\": \"string\", \"enum\": [ \"enabled\" ] }, \"transient_boot_preference\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/RotSlot\" } ] } } }, { \"type\": \"object\", \"required\": [ \"message\", \"state\" ], \"properties\": { \"message\": { \"type\": \"string\" }, \"state\": { \"type\": \"string\", \"enum\": [ \"communication_failed\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2570,6 +2534,7 @@
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
       "SpComponentCaboose": {
+        "description": "SpComponentCaboose\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"version\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "board": {
@@ -2593,7 +2558,7 @@
         ]
       },
       "SpComponentInfo": {
-        "description": "Overview of a single SP component.",
+        "description": "Overview of a single SP component.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Overview of a single SP component.\", \"type\": \"object\", \"required\": [ \"capabilities\", \"component\", \"description\", \"device\", \"presence\" ], \"properties\": { \"capabilities\": { \"description\": \"`capabilities` is a bitmask; interpret it via [`gateway_messages::DeviceCapabilities`].\", \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"component\": { \"description\": \"The unique identifier for this component.\", \"type\": \"string\" }, \"description\": { \"description\": \"A human-readable description of the component.\", \"type\": \"string\" }, \"device\": { \"description\": \"The name of the physical device.\", \"type\": \"string\" }, \"presence\": { \"description\": \"Whether or not the component is present, to the best of the SP's ability to judge.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/SpComponentPresence\" } ] }, \"serial_number\": { \"description\": \"The component's serial number, if it has one.\", \"type\": [ \"string\", \"null\" ] } } } ``` </details>",
         "type": "object",
         "properties": {
           "capabilities": {
@@ -2637,7 +2602,7 @@
         ]
       },
       "SpComponentPresence": {
-        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).",
+        "description": "Description of the presence or absence of a component.\n\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Description of the presence or absence of a component.\\n\\nThe presence of some components may vary based on the power state of the sled (e.g., components that time out or appear unavailable if the sled is in A2 may become present when the sled moves to A0).\", \"oneOf\": [ { \"description\": \"The component is present.\", \"type\": \"string\", \"enum\": [ \"present\" ] }, { \"description\": \"The component is not present.\", \"type\": \"string\", \"enum\": [ \"not_present\" ] }, { \"description\": \"The component is present but in a failed or faulty state.\", \"type\": \"string\", \"enum\": [ \"failed\" ] }, { \"description\": \"The SP is unable to determine the presence of the component.\", \"type\": \"string\", \"enum\": [ \"unavailable\" ] }, { \"description\": \"The SP's attempt to determine the presence of the component timed out.\", \"type\": \"string\", \"enum\": [ \"timeout\" ] }, { \"description\": \"The SP's attempt to determine the presence of the component failed.\", \"type\": \"string\", \"enum\": [ \"error\" ] } ] } ``` </details>",
         "oneOf": [
           {
             "description": "The component is present.",
@@ -2684,6 +2649,7 @@
         ]
       },
       "SpIdentifier": {
+        "description": "SpIdentifier\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"slot\", \"type\" ], \"properties\": { \"slot\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"type\": { \"$ref\": \"#/components/schemas/SpType\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "slot": {
@@ -2701,7 +2667,7 @@
         ]
       },
       "SpIgnition": {
-        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?",
+        "description": "State of an ignition target.\n\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"State of an ignition target.\\n\\nTODO: Ignition returns much more information than we're reporting here: do we want to expand this?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"present\" ], \"properties\": { \"present\": { \"type\": \"string\", \"enum\": [ \"no\" ] } } }, { \"type\": \"object\", \"required\": [ \"ctrl_detect_0\", \"ctrl_detect_1\", \"flt_a2\", \"flt_a3\", \"flt_rot\", \"flt_sp\", \"id\", \"power\", \"present\" ], \"properties\": { \"ctrl_detect_0\": { \"type\": \"boolean\" }, \"ctrl_detect_1\": { \"type\": \"boolean\" }, \"flt_a2\": { \"type\": \"boolean\" }, \"flt_a3\": { \"type\": \"boolean\" }, \"flt_rot\": { \"type\": \"boolean\" }, \"flt_sp\": { \"type\": \"boolean\" }, \"id\": { \"$ref\": \"#/components/schemas/SpIgnitionSystemType\" }, \"power\": { \"type\": \"boolean\" }, \"present\": { \"type\": \"string\", \"enum\": [ \"yes\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2766,7 +2732,7 @@
         ]
       },
       "SpIgnitionSystemType": {
-        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?",
+        "description": "TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"TODO: Do we want to bake in specific board names, or use raw u16 ID numbers?\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"gimlet\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"sidecar\" ] } } }, { \"type\": \"object\", \"required\": [ \"system_type\" ], \"properties\": { \"system_type\": { \"type\": \"string\", \"enum\": [ \"psc\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"system_type\" ], \"properties\": { \"id\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"system_type\": { \"type\": \"string\", \"enum\": [ \"unknown\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2892,6 +2858,7 @@
         ]
       },
       "SpState": {
+        "description": "SpState\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"base_mac_address\", \"hubris_archive_id\", \"model\", \"power_state\", \"revision\", \"rot\", \"serial_number\" ], \"properties\": { \"base_mac_address\": { \"type\": \"array\", \"items\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"maxItems\": 6, \"minItems\": 6 }, \"hubris_archive_id\": { \"type\": \"string\" }, \"model\": { \"type\": \"string\" }, \"power_state\": { \"$ref\": \"#/components/schemas/PowerState\" }, \"revision\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"rot\": { \"$ref\": \"#/components/schemas/RotState\" }, \"serial_number\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "base_mac_address": {
@@ -2936,6 +2903,7 @@
         ]
       },
       "SpType": {
+        "description": "SpType\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"string\", \"enum\": [ \"sled\", \"power\", \"switch\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "sled",
@@ -4690,8 +4658,40 @@
           }
         ]
       },
+      "UserSpecifiedRackNetworkConfig": {
+        "description": "User-specified parts of [`RackNetworkConfig`](omicron_common::api::internal::shared::RackNetworkConfig).",
+        "type": "object",
+        "properties": {
+          "bgp": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpConfig"
+            }
+          },
+          "infra_ip_first": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "infra_ip_last": {
+            "type": "string",
+            "format": "ipv4"
+          },
+          "ports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortConfigV1"
+            }
+          }
+        },
+        "required": [
+          "bgp",
+          "infra_ip_first",
+          "infra_ip_last",
+          "ports"
+        ]
+      },
       "IgnitionCommand": {
-        "description": "Ignition command.",
+        "description": "Ignition command.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Ignition command.\", \"type\": \"string\", \"enum\": [ \"power_on\", \"power_off\", \"power_reset\" ] } ``` </details>",
         "type": "string",
         "enum": [
           "power_on",

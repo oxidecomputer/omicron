@@ -17,6 +17,7 @@ hex.workspace = true
 http.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
+omicron-uuid-kinds.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
@@ -38,6 +39,7 @@ parse-display.workspace = true
 progenitor.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true
+regress.workspace = true
 
 [dev-dependencies]
 camino-tempfile.workspace = true

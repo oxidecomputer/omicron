@@ -8,9 +8,10 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use crate::params::{
-    DiskEnsureBody, InstanceEnsureBody, InstancePutMigrationIdsBody,
-    InstancePutStateBody, InstancePutStateResponse, InstanceUnregisterResponse,
-    VpcFirewallRulesEnsureBody,
+    DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
+    InstancePutMigrationIdsBody, InstancePutStateBody,
+    InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
+    OmicronZonesConfig, VpcFirewallRulesEnsureBody,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -45,6 +46,8 @@ pub fn api() -> SledApiDescription {
         api.register(instance_put_state)?;
         api.register(instance_register)?;
         api.register(instance_unregister)?;
+        api.register(instance_put_external_ip)?;
+        api.register(instance_delete_external_ip)?;
         api.register(instance_poke_post)?;
         api.register(disk_put)?;
         api.register(disk_poke_post)?;
@@ -56,6 +59,9 @@ pub fn api() -> SledApiDescription {
         api.register(uplink_ensure)?;
         api.register(read_network_bootstore_config)?;
         api.register(write_network_bootstore_config)?;
+        api.register(inventory)?;
+        api.register(omicron_zones_get)?;
+        api.register(omicron_zones_put)?;
 
         Ok(())
     }
@@ -147,6 +153,38 @@ async fn instance_put_migration_ids(
         )
         .await?,
     ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_put_external_ip(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_put_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[endpoint {
+    method = DELETE,
+    path = "/instances/{instance_id}/external-ip",
+}]
+async fn instance_delete_external_ip(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    path_params: Path<InstancePathParam>,
+    body: TypedBody<InstanceExternalIpBody>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let instance_id = path_params.into_inner().instance_id;
+    let body_args = body.into_inner();
+    sa.instance_delete_external_ip(instance_id, &body_args).await?;
+    Ok(HttpResponseUpdatedNoContent())
 }
 
 #[endpoint {
@@ -382,5 +420,45 @@ async fn write_network_bootstore_config(
     _rqctx: RequestContext<Arc<SledAgent>>,
     _body: TypedBody<EarlyNetworkConfig>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+/// Fetch basic information about this sled
+#[endpoint {
+    method = GET,
+    path = "/inventory",
+}]
+async fn inventory(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<Inventory>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(
+        sa.inventory(rqctx.server.local_addr)
+            .map_err(|e| HttpError::for_internal_error(format!("{:#}", e)))?,
+    ))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/omicron-zones",
+}]
+async fn omicron_zones_get(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.omicron_zones_list().await))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/omicron-zones",
+}]
+async fn omicron_zones_put(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<OmicronZonesConfig>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    sa.omicron_zones_ensure(body_args).await;
     Ok(HttpResponseUpdatedNoContent())
 }

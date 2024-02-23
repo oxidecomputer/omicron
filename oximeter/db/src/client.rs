@@ -50,7 +50,7 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-#[usdt::provider(provider = "clickhouse__client")]
+#[usdt::provider(provider = "clickhouse_client")]
 mod probes {
     fn query__start(_: &usdt::UniqueId, sql: &str) {}
     fn query__done(_: &usdt::UniqueId) {}
@@ -1399,6 +1399,7 @@ mod tests {
     use crate::query::field_table_name;
     use bytes::Bytes;
     use chrono::Utc;
+    use dropshot::test_util::LogContext;
     use omicron_test_utils::dev::clickhouse::{
         ClickHouseCluster, ClickHouseInstance,
     };
@@ -1463,8 +1464,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_node() {
+        let logctx = test_setup_log("test_single_node");
         // Let the OS assign a port and discover it after ClickHouse starts
-        let mut db = ClickHouseInstance::new_single_node(0)
+        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
             .await
             .expect("Failed to start ClickHouse");
 
@@ -1635,22 +1637,24 @@ mod tests {
             .unwrap();
 
         db.cleanup().await.expect("Failed to cleanup ClickHouse server");
+        logctx.cleanup_successful();
     }
 
-    async fn create_cluster() -> ClickHouseCluster {
+    async fn create_cluster(logctx: &LogContext) -> ClickHouseCluster {
         let cur_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let replica_config =
             cur_dir.as_path().join("src/configs/replica_config.xml");
         let keeper_config =
             cur_dir.as_path().join("src/configs/keeper_config.xml");
-        ClickHouseCluster::new(replica_config, keeper_config)
+        ClickHouseCluster::new(logctx, replica_config, keeper_config)
             .await
             .expect("Failed to initialise ClickHouse Cluster")
     }
 
     #[tokio::test]
     async fn test_replicated() {
-        let mut cluster = create_cluster().await;
+        let logctx = test_setup_log("test_replicated");
+        let mut cluster = create_cluster(&logctx).await;
 
         // Tests that the expected error is returned on a wrong address
         bad_db_connection_test().await.unwrap();
@@ -1884,6 +1888,8 @@ mod tests {
             .cleanup()
             .await
             .expect("Failed to cleanup ClickHouse server 2");
+
+        logctx.cleanup_successful();
     }
 
     async fn bad_db_connection_test() -> Result<(), Error> {
@@ -4099,7 +4105,7 @@ mod tests {
         const TEST_NAME: &str = "test_apply_one_schema_upgrade_replicated";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut cluster = create_cluster().await;
+        let mut cluster = create_cluster(&logctx).await;
         let address = cluster.replica_1.address;
         test_apply_one_schema_upgrade_impl(log, address, true).await;
 
@@ -4138,7 +4144,7 @@ mod tests {
         const TEST_NAME: &str = "test_apply_one_schema_upgrade_single_node";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
+        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
@@ -4152,7 +4158,7 @@ mod tests {
         let logctx =
             test_setup_log("test_ensure_schema_with_version_gaps_fails");
         let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
+        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
@@ -4195,7 +4201,7 @@ mod tests {
             "test_ensure_schema_with_missing_desired_schema_version_fails",
         );
         let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
+        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
@@ -4327,7 +4333,7 @@ mod tests {
             "test_ensure_schema_walks_through_multiple_steps_single_node";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
+        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
@@ -4345,7 +4351,7 @@ mod tests {
             "test_ensure_schema_walks_through_multiple_steps_replicated";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut cluster = create_cluster().await;
+        let mut cluster = create_cluster(&logctx).await;
         let address = cluster.replica_1.address;
         test_ensure_schema_walks_through_multiple_steps_impl(
             log, address, true,
@@ -4448,7 +4454,7 @@ mod tests {
         let logctx = test_setup_log("test_select_all_field_types");
         let log = &logctx.log;
 
-        let mut db = ClickHouseInstance::new_single_node(0)
+        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());
@@ -4479,7 +4485,7 @@ mod tests {
     async fn test_sql_query_output() {
         let logctx = test_setup_log("test_sql_query_output");
         let log = &logctx.log;
-        let mut db = ClickHouseInstance::new_single_node(0)
+        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
             .await
             .expect("Failed to start ClickHouse");
         let address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db.port());

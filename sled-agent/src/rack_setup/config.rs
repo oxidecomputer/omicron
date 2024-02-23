@@ -70,12 +70,14 @@ impl SetupServiceConfig {
     }
 
     pub fn az_subnet(&self) -> Ipv6Subnet<AZ_PREFIX> {
-        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_subnet)
+        Ipv6Subnet::<AZ_PREFIX>::new(self.rack_network_config.rack_subnet.ip())
     }
 
     /// Returns the subnet for our rack.
     pub fn rack_subnet(&self) -> Ipv6Subnet<RACK_PREFIX> {
-        Ipv6Subnet::<RACK_PREFIX>::new(self.rack_subnet)
+        Ipv6Subnet::<RACK_PREFIX>::new(
+            self.rack_network_config.rack_subnet.ip(),
+        )
     }
 
     /// Returns the subnet for the `index`-th sled in the rack.
@@ -92,12 +94,12 @@ mod test {
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::RackNetworkConfig;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     #[test]
     fn test_subnets() {
         let cfg = SetupServiceConfig {
-            rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
             trust_quorum_peers: None,
             bootstrap_discovery: BootstrapAddressDiscovery::OnlyOurs,
             ntp_servers: vec![String::from("test.pool.example.com")],
@@ -119,7 +121,13 @@ mod test {
                     .parse()
                     .unwrap(),
             },
-            rack_network_config: None,
+            rack_network_config: RackNetworkConfig {
+                rack_subnet: "fd00:1122:3344:0100::".parse().unwrap(),
+                infra_ip_first: Ipv4Addr::LOCALHOST,
+                infra_ip_last: Ipv4Addr::LOCALHOST,
+                ports: Vec::new(),
+                bgp: Vec::new(),
+            },
         };
 
         assert_eq!(

@@ -10,6 +10,7 @@
 
 use crate::ServerContext;
 use anyhow::Context;
+use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::{
     endpoint, http_response_found, http_response_see_other, HttpError,
     HttpResponseFound, HttpResponseHeaders, HttpResponseSeeOther,
@@ -42,7 +43,7 @@ use serde::{Deserialize, Serialize};
 use serde_urlencoded;
 use std::num::NonZeroU32;
 use std::str::FromStr;
-use std::{collections::HashSet, ffi::OsString, path::PathBuf, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 // -----------------------------------------------------
 // High-level overview of how login works in the console
@@ -699,17 +700,18 @@ macro_rules! console_page_wildcard {
 console_page_wildcard!(console_projects, "/projects/{path:.*}");
 console_page_wildcard!(console_settings_page, "/settings/{path:.*}");
 console_page_wildcard!(console_system_page, "/system/{path:.*}");
+console_page_wildcard!(console_lookup, "/lookup/{path:.*}");
 console_page!(console_root, "/");
 console_page!(console_projects_new, "/projects-new");
 console_page!(console_silo_images, "/images");
 console_page!(console_silo_utilization, "/utilization");
 console_page!(console_silo_access, "/access");
 
-/// Make a new PathBuf with `.gz` on the end
-fn with_gz_ext(path: &PathBuf) -> PathBuf {
-    let mut new_path = path.clone();
-    let new_ext = match path.extension().map(|ext| ext.to_str()) {
-        Some(Some(curr_ext)) => format!("{curr_ext}.gz"),
+/// Make a new Utf8PathBuf with `.gz` on the end
+fn with_gz_ext(path: &Utf8Path) -> Utf8PathBuf {
+    let mut new_path = path.to_owned();
+    let new_ext = match path.extension() {
+        Some(curr_ext) => format!("{curr_ext}.gz"),
         _ => "gz".to_string(),
     };
     new_path.set_extension(new_ext);
@@ -731,14 +733,20 @@ pub(crate) async fn asset(
     path_params: Path<RestPathParam>,
 ) -> Result<Response<Body>, HttpError> {
     let apictx = rqctx.context();
-    let path = PathBuf::from_iter(path_params.into_inner().path);
+    let path = Utf8PathBuf::from_iter(path_params.into_inner().path);
 
     // Bail unless the extension is allowed
-    let ext = path
-        .extension()
-        .map_or_else(|| OsString::from("disallowed"), |ext| ext.to_os_string());
-    if !ALLOWED_EXTENSIONS.contains(&ext) {
-        return Err(not_found("file extension not allowed"));
+    match path.extension() {
+        Some(ext) => {
+            if !ALLOWED_EXTENSIONS.contains(&ext) {
+                return Err(not_found("file extension not allowed"));
+            }
+        }
+        None => {
+            return Err(not_found(
+                "requested file does not have extension, not allowed",
+            ));
+        }
     }
 
     // We only serve assets from assets/ within static_dir
@@ -794,7 +802,7 @@ pub(crate) async fn serve_console_index(
         .static_dir
         .to_owned()
         .ok_or_else(|| not_found("static_dir undefined"))?;
-    let file = static_dir.join(PathBuf::from("index.html"));
+    let file = static_dir.join("index.html");
     let file_contents = tokio::fs::read(&file)
         .await
         .map_err(|e| not_found(&format!("accessing {:?}: {:#}", file, e)))?;
@@ -810,19 +818,19 @@ fn not_found(internal_msg: &str) -> HttpError {
     HttpError::for_not_found(None, internal_msg.to_string())
 }
 
-static ALLOWED_EXTENSIONS: Lazy<HashSet<OsString>> = Lazy::new(|| {
-    HashSet::from(
-        [
-            "js", "css", "html", "ico", "map", "otf", "png", "svg", "ttf",
-            "txt", "webp", "woff", "woff2",
-        ]
-        .map(|s| OsString::from(s)),
-    )
+static ALLOWED_EXTENSIONS: Lazy<HashSet<&'static str>> = Lazy::new(|| {
+    HashSet::from([
+        "js", "css", "html", "ico", "map", "otf", "png", "svg", "ttf", "txt",
+        "webp", "woff", "woff2",
+    ])
 });
 
 /// Starting from `root_dir`, follow the segments of `path` down the file tree
 /// until we find a file (or not). Do not follow symlinks.
-fn find_file(path: &PathBuf, root_dir: &PathBuf) -> Result<PathBuf, HttpError> {
+fn find_file(
+    path: &Utf8Path,
+    root_dir: &Utf8Path,
+) -> Result<Utf8PathBuf, HttpError> {
     let mut current = root_dir.to_owned(); // start from `root_dir`
     for segment in path.into_iter() {
         // If we hit a non-directory thing already and we still have segments
@@ -855,24 +863,24 @@ fn find_file(path: &PathBuf, root_dir: &PathBuf) -> Result<PathBuf, HttpError> {
 #[cfg(test)]
 mod test {
     use super::{find_file, RelativeUri};
+    use camino::{Utf8Path, Utf8PathBuf};
     use http::StatusCode;
-    use std::{env::current_dir, path::PathBuf};
 
     #[test]
     fn test_find_file_finds_file() {
-        let root = current_dir().unwrap();
+        let root = current_dir();
         let file =
-            find_file(&PathBuf::from("tests/static/assets/hello.txt"), &root);
+            find_file(Utf8Path::new("tests/static/assets/hello.txt"), &root);
         assert!(file.is_ok());
-        let file = find_file(&PathBuf::from("tests/static/index.html"), &root);
+        let file = find_file(Utf8Path::new("tests/static/index.html"), &root);
         assert!(file.is_ok());
     }
 
     #[test]
     fn test_find_file_404_on_nonexistent() {
-        let root = current_dir().unwrap();
+        let root = current_dir();
         let error =
-            find_file(&PathBuf::from("tests/static/nonexistent.svg"), &root)
+            find_file(Utf8Path::new("tests/static/nonexistent.svg"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "failed to get file metadata",);
@@ -880,9 +888,9 @@ mod test {
 
     #[test]
     fn test_find_file_404_on_nonexistent_nested() {
-        let root = current_dir().unwrap();
+        let root = current_dir();
         let error = find_file(
-            &PathBuf::from("tests/static/a/b/c/nonexistent.svg"),
+            Utf8Path::new("tests/static/a/b/c/nonexistent.svg"),
             &root,
         )
         .unwrap_err();
@@ -892,9 +900,9 @@ mod test {
 
     #[test]
     fn test_find_file_404_on_directory() {
-        let root = current_dir().unwrap();
+        let root = current_dir();
         let error =
-            find_file(&PathBuf::from("tests/static/assets/a_directory"), &root)
+            find_file(Utf8Path::new("tests/static/assets/a_directory"), &root)
                 .unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "expected a non-directory");
@@ -902,33 +910,33 @@ mod test {
 
     #[test]
     fn test_find_file_404_on_symlink() {
-        let root = current_dir().unwrap();
+        let root = current_dir();
         let path_str = "tests/static/assets/a_symlink";
 
         // the file in question does exist and is a symlink
         assert!(root
-            .join(PathBuf::from(path_str))
+            .join(path_str)
             .symlink_metadata()
             .unwrap()
             .file_type()
             .is_symlink());
 
         // so we 404
-        let error = find_file(&PathBuf::from(path_str), &root).unwrap_err();
+        let error = find_file(Utf8Path::new(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "attempted to follow a symlink");
     }
 
     #[test]
     fn test_find_file_wont_follow_symlink() {
-        let root = current_dir().unwrap();
+        let root = current_dir();
         let path_str = "tests/static/assets/a_symlink/another_file.txt";
 
         // the file in question does exist
-        assert!(root.join(PathBuf::from(path_str)).exists());
+        assert!(root.join(path_str).exists());
 
         // but it 404s because the path goes through a symlink
-        let error = find_file(&PathBuf::from(path_str), &root).unwrap_err();
+        let error = find_file(Utf8Path::new(path_str), &root).unwrap_err();
         assert_eq!(error.status_code, StatusCode::NOT_FOUND);
         assert_eq!(error.internal_message, "attempted to follow a symlink");
     }
@@ -944,5 +952,10 @@ mod test {
         for b in bad.iter() {
             assert!(RelativeUri::try_from(b.to_string()).is_err());
         }
+    }
+
+    fn current_dir() -> Utf8PathBuf {
+        Utf8PathBuf::try_from(std::env::current_dir().unwrap())
+            .expect("current dir is valid UTF-8")
     }
 }

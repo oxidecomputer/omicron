@@ -42,7 +42,6 @@ tokio-stream.workspace = true
 tokio-util.workspace = true
 tough.workspace = true
 trust-dns-resolver.workspace = true
-snafu.workspace = true
 toml.workspace = true
 uuid.workspace = true
 
@@ -56,6 +55,7 @@ omicron-common.workspace = true
 omicron-passwords.workspace = true
 sled-hardware.workspace = true
 tufaceous-lib.workspace = true
+update-common.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
 wicketd-client.workspace = true

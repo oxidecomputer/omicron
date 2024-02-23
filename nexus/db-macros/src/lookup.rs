@@ -6,10 +6,11 @@
 //!
 //! See nexus/src/db/lookup.rs.
 
+use nexus_macros_common::PrimaryKeyType;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
-use std::ops::Deref;
+use syn::spanned::Spanned;
 
 //
 // INPUT (arguments to the macro)
@@ -39,7 +40,7 @@ pub struct Input {
     /// whether lookup by name is supported (usually within the parent collection)
     lookup_by_name: bool,
     /// Description of the primary key columns
-    primary_key_columns: Vec<PrimaryKeyColumn>,
+    primary_key_columns: Vec<InputPrimaryKeyColumn>,
     /// This resources supports soft-deletes
     soft_deletes: bool,
     /// This resource appears under the `Silo` hierarchy, but nevertheless
@@ -52,10 +53,47 @@ pub struct Input {
     visible_outside_silo: bool,
 }
 
-#[derive(serde::Deserialize)]
 struct PrimaryKeyColumn {
     column_name: String,
-    rust_type: ParseWrapper<syn::Type>,
+    ty: PrimaryKeyType,
+}
+
+#[derive(serde::Deserialize)]
+struct InputPrimaryKeyColumn {
+    column_name: String,
+    // Exactly one of rust_type and uuid_kind must be specified.
+    #[serde(default)]
+    rust_type: Option<ParseWrapper<syn::Type>>,
+    #[serde(default)]
+    uuid_kind: Option<ParseWrapper<syn::Ident>>,
+}
+
+impl InputPrimaryKeyColumn {
+    fn validate(self) -> syn::Result<PrimaryKeyColumn> {
+        let ty = match (self.rust_type, self.uuid_kind) {
+            (Some(rust_type), Some(_)) => {
+                return Err(syn::Error::new(
+                    rust_type.span(),
+                    "only one of rust_type and uuid_kind may be specified",
+                ));
+            }
+            (Some(rust_type), None) => {
+                PrimaryKeyType::Standard(rust_type.into_inner())
+            }
+            (None, Some(uuid_kind)) => {
+                PrimaryKeyType::new_typed_uuid(&uuid_kind)
+            }
+            (None, None) => {
+                return Err(syn::Error::new(
+                    proc_macro2::Span::call_site(),
+                    "for primary_key_columns, \
+                    one of rust_type and uuid_kind must be specified",
+                ));
+            }
+        };
+
+        Ok(PrimaryKeyColumn { column_name: self.column_name, ty })
+    }
 }
 
 //
@@ -106,7 +144,7 @@ pub struct Config {
 }
 
 impl Config {
-    fn for_input(input: Input) -> Config {
+    fn for_input(input: Input) -> syn::Result<Config> {
         let resource = Resource::for_name(&input.name);
 
         let mut path_types: Vec<_> =
@@ -127,7 +165,13 @@ impl Config {
         let silo_restricted = !input.visible_outside_silo
             && input.ancestors.iter().any(|s| s == "Silo");
 
-        Config {
+        let primary_key_columns: Vec<_> = input
+            .primary_key_columns
+            .into_iter()
+            .map(|c| c.validate())
+            .collect::<syn::Result<_>>()?;
+
+        Ok(Config {
             resource,
             silo_restricted,
             path_types,
@@ -135,9 +179,9 @@ impl Config {
             parent,
             child_resources,
             lookup_by_name: input.lookup_by_name,
-            primary_key_columns: input.primary_key_columns,
+            primary_key_columns,
             soft_deletes: input.soft_deletes,
-        }
+        })
     }
 }
 
@@ -172,7 +216,7 @@ pub fn lookup_resource(
     raw_input: TokenStream,
 ) -> Result<TokenStream, syn::Error> {
     let input = serde_tokenstream::from_tokenstream::<Input>(&raw_input)?;
-    let config = Config::for_input(input);
+    let config = Config::for_input(input)?;
 
     let resource_name = &config.resource.name;
     let the_basics = generate_struct(&config);
@@ -204,8 +248,7 @@ fn generate_struct(config: &Config) -> TokenStream {
         functions on this struct) for lookup or fetch",
         resource_name
     );
-    let pkey_types =
-        config.primary_key_columns.iter().map(|c| c.rust_type.deref());
+    let pkey_types = config.primary_key_columns.iter().map(|c| c.ty.external());
 
     /* configure the lookup enum */
     let name_variant = if config.lookup_by_name {
@@ -706,11 +749,8 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     let resource_as_snake = format_ident!("{}", &config.resource.name_as_snake);
     let path_types = &config.path_types;
     let path_authz_names = &config.path_authz_names;
-    let pkey_types: Vec<_> = config
-        .primary_key_columns
-        .iter()
-        .map(|c| c.rust_type.deref())
-        .collect();
+    let pkey_types: Vec<_> =
+        config.primary_key_columns.iter().map(|c| c.ty.external()).collect();
     let pkey_column_names = config
         .primary_key_columns
         .iter()
@@ -721,6 +761,18 @@ fn generate_database_functions(config: &Config) -> TokenStream {
         .enumerate()
         .map(|(i, _)| format_ident!("v{}", i))
         .collect();
+
+    // Generate tokens that also perform conversion from external to db types,
+    // if necessary.
+    let pkey_names_convert: Vec<_> = config
+        .primary_key_columns
+        .iter()
+        .zip(pkey_names.iter())
+        .map(|(col, name)| {
+            col.ty.external_to_db_other(quote! { #name.clone() })
+        })
+        .collect();
+
     let (
         parent_lookup_arg_formal,
         parent_lookup_arg_actual,
@@ -837,7 +889,11 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     let lookup_type = if config.primary_key_columns.len() == 1
         && config.primary_key_columns[0].column_name == "id"
     {
-        quote! { LookupType::ById(#(#pkey_names.clone())*) }
+        let pkey_name = &pkey_names[0];
+        let by_id = quote! {
+            ::omicron_uuid_kinds::GenericUuid::into_untyped_uuid(*#pkey_name)
+        };
+        quote! { LookupType::ById(#by_id) }
     } else {
         let fmtstr = config
             .primary_key_columns
@@ -889,7 +945,7 @@ fn generate_database_functions(config: &Config) -> TokenStream {
 
             let db_row = dsl::#resource_as_snake
                 #soft_delete_filter
-                #(.filter(dsl::#pkey_column_names.eq(#pkey_names.clone())))*
+                #(.filter(dsl::#pkey_column_names.eq(#pkey_names_convert)))*
                 .select(nexus_db_model::#resource_name::as_select())
                 .get_result_async(&*datastore.pool_connection_authorized(opctx).await?)
                 .await
@@ -913,22 +969,25 @@ fn generate_database_functions(config: &Config) -> TokenStream {
     }
 }
 
-// This isn't so much a test (although it does make sure we don't panic on some
-// basic cases).  This is a way to dump the output of the macro for some common
-// inputs.  This is invaluable for debugging.  If there's a bug where the macro
-// generates syntactically invalid Rust, `cargo expand` will often not print the
-// macro's output.  Instead, you can paste the output of this test into
-// lookup.rs, replacing the call to the macro, then reformat the file, and then
-// build it in order to see the compiler error in context.
 #[cfg(test)]
 mod test {
+    use crate::test_helpers::pretty_format;
+
     use super::lookup_resource;
-    use proc_macro2::TokenStream;
+    use expectorate::assert_contents;
     use quote::quote;
 
+    /// Ensure that generated code is as expected.
+    ///
+    /// This is both a test, and a way to dump the output of the macro for some
+    /// common inputs.  This is invaluable for debugging.  If there's a bug
+    /// where the macro generates syntactically invalid Rust, `cargo expand`
+    /// will often not print the macro's output.  Instead, you can paste the
+    /// output of this test into lookup.rs, replacing the call to the macro,
+    /// then reformat the file, and then build it in order to see the compiler
+    /// error in context.
     #[test]
-    #[ignore]
-    fn test_lookup_dump() {
+    fn test_lookup_snapshots() {
         let output = lookup_resource(quote! {
             name = "Project",
             ancestors = ["Silo"],
@@ -938,7 +997,7 @@ mod test {
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
         })
         .unwrap();
-        println!("{}", pretty_format(output));
+        assert_contents("outputs/project.txt", &pretty_format(output));
 
         let output = lookup_resource(quote! {
             name = "SiloUser",
@@ -949,7 +1008,18 @@ mod test {
             primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
         })
         .unwrap();
-        println!("{}", pretty_format(output));
+        assert_contents("outputs/silo_user.txt", &pretty_format(output));
+
+        let output = lookup_resource(quote! {
+            name = "Sled",
+            ancestors = [],
+            children = [],
+            lookup_by_name = false,
+            soft_deletes = true,
+            primary_key_columns = [ { column_name = "id", uuid_kind = SledKind } ]
+        })
+        .unwrap();
+        assert_contents("outputs/sled.txt", &pretty_format(output));
 
         let output = lookup_resource(quote! {
             name = "UpdateArtifact",
@@ -964,11 +1034,6 @@ mod test {
             ]
         })
         .unwrap();
-        println!("{}", pretty_format(output));
-    }
-
-    fn pretty_format(input: TokenStream) -> String {
-        let parsed = syn::parse2(input).unwrap();
-        prettyplease::unparse(&parsed)
+        assert_contents("outputs/update_artifact.txt", &pretty_format(output));
     }
 }

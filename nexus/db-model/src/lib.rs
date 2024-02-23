@@ -12,6 +12,7 @@ extern crate newtype_derive;
 use uuid::Uuid;
 
 mod address_lot;
+mod bfd;
 mod bgp;
 mod block_size;
 mod bootstore;
@@ -37,7 +38,7 @@ mod instance_state;
 mod inventory;
 mod ip_pool;
 mod ipv4net;
-mod ipv6;
+pub mod ipv6;
 mod ipv6net;
 mod l4_port_range;
 mod macaddr;
@@ -52,11 +53,12 @@ mod project;
 mod semver_version;
 mod switch_interface;
 mod switch_port;
-mod system_update;
 // These actually represent subqueries, not real table.
 // However, they must be defined in the same crate as our tables
 // for join-based marker trait generation.
+mod deployment;
 mod ipv4_nat_entry;
+mod omicron_zone_config;
 pub mod queries;
 mod quota;
 mod rack;
@@ -81,8 +83,9 @@ mod sled_underlay_subnet_allocation;
 mod snapshot;
 mod ssh_key;
 mod switch;
+mod tuf_repo;
+mod typed_uuid;
 mod unsigned;
-mod update_artifact;
 mod user_builtin;
 mod utilization;
 mod virtual_provisioning_collection;
@@ -108,6 +111,7 @@ mod db {
 pub use self::macaddr::*;
 pub use self::unsigned::*;
 pub use address_lot::*;
+pub use bfd::*;
 pub use bgp::*;
 pub use block_size::*;
 pub use bootstore::*;
@@ -118,6 +122,7 @@ pub use console_session::*;
 pub use dataset::*;
 pub use dataset_kind::*;
 pub use db_metadata::*;
+pub use deployment::*;
 pub use device_auth::*;
 pub use digest::*;
 pub use disk::*;
@@ -169,8 +174,8 @@ pub use ssh_key::*;
 pub use switch::*;
 pub use switch_interface::*;
 pub use switch_port::*;
-pub use system_update::*;
-pub use update_artifact::*;
+pub use tuf_repo::*;
+pub use typed_uuid::to_db_typed_uuid;
 pub use user_builtin::*;
 pub use utilization::*;
 pub use virtual_provisioning_collection::*;
@@ -420,10 +425,13 @@ impl DatabaseString for ProjectRole {
 
 #[cfg(test)]
 mod tests {
+    use crate::RequestAddressError;
+
     use super::VpcSubnet;
     use ipnetwork::Ipv4Network;
     use ipnetwork::Ipv6Network;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::IpNet;
     use omicron_common::api::external::Ipv4Net;
     use omicron_common::api::external::Ipv6Net;
     use std::net::IpAddr;
@@ -528,18 +536,37 @@ mod tests {
     #[test]
     fn test_ip_subnet_check_requestable_address() {
         let subnet = super::Ipv4Net(Ipv4Net("192.168.0.0/16".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.0.10".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.1.0".parse().unwrap()));
-        assert!(!subnet.check_requestable_addr("192.168.0.0".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("192.168.0.255".parse().unwrap()));
-        assert!(
-            !subnet.check_requestable_addr("192.168.255.255".parse().unwrap())
+        subnet.check_requestable_addr("192.168.0.10".parse().unwrap()).unwrap();
+        subnet.check_requestable_addr("192.168.1.0".parse().unwrap()).unwrap();
+        let addr = "192.178.0.10".parse().unwrap();
+        assert_eq!(
+            subnet.check_requestable_addr(addr),
+            Err(RequestAddressError::OutsideSubnet(
+                addr.into(),
+                IpNet::from(subnet.0).into()
+            ))
+        );
+        assert_eq!(
+            subnet.check_requestable_addr("192.168.0.0".parse().unwrap()),
+            Err(RequestAddressError::Reserved)
+        );
+
+        subnet
+            .check_requestable_addr("192.168.0.255".parse().unwrap())
+            .unwrap();
+
+        assert_eq!(
+            subnet.check_requestable_addr("192.168.255.255".parse().unwrap()),
+            Err(RequestAddressError::Broadcast)
         );
 
         let subnet = super::Ipv6Net(Ipv6Net("fd00::/64".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("fd00::a".parse().unwrap()));
-        assert!(!subnet.check_requestable_addr("fd00::1".parse().unwrap()));
-        assert!(subnet.check_requestable_addr("fd00::1:1".parse().unwrap()));
+        subnet.check_requestable_addr("fd00::a".parse().unwrap()).unwrap();
+        assert_eq!(
+            subnet.check_requestable_addr("fd00::1".parse().unwrap()),
+            Err(RequestAddressError::Reserved)
+        );
+        subnet.check_requestable_addr("fd00::1:1".parse().unwrap()).unwrap();
     }
 
     /// Does some basic smoke checks on an impl of `DatabaseString`

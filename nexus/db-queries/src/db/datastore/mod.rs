@@ -48,12 +48,14 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod address_lot;
+mod bfd;
 mod bgp;
 mod bootstore;
 mod certificate;
 mod console_session;
 mod dataset;
 mod db_metadata;
+mod deployment;
 mod device_auth;
 mod disk;
 mod dns;
@@ -103,6 +105,7 @@ pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
+use std::num::NonZeroU32;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::read_only_resources_associated_with_volume;
@@ -118,6 +121,14 @@ pub const SERVICE_IP_POOL_NAME: &str = "oxide-service-pool";
 
 /// The name of the built-in Project and VPC for Oxide services.
 pub const SERVICES_DB_NAME: &str = "oxide-services";
+
+/// "limit" to be used in SQL queries that paginate through large result sets
+///
+/// This value is chosen to be small enough to avoid any queries being too
+/// expensive.
+// unsafe: `new_unchecked` is only unsound if the argument is 0.
+pub const SQL_BATCH_SIZE: NonZeroU32 =
+    unsafe { NonZeroU32::new_unchecked(1000) };
 
 // Represents a query that is ready to be executed.
 //
@@ -148,6 +159,7 @@ pub type DataStoreConnection<'a> =
     bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
 
 pub struct DataStore {
+    log: Logger,
     pool: Arc<Pool>,
     virtual_provisioning_collection_producer: crate::provisioning::Producer,
     transaction_retry_producer: crate::transaction_retry::Producer,
@@ -162,8 +174,9 @@ impl DataStore {
     /// Ignores the underlying DB version. Should be used with caution, as usage
     /// of this method can construct a Datastore which does not understand
     /// the underlying CockroachDB schema. Data corruption could result.
-    pub fn new_unchecked(pool: Arc<Pool>) -> Result<Self, String> {
+    pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Result<Self, String> {
         let datastore = DataStore {
+            log,
             pool,
             virtual_provisioning_collection_producer:
                 crate::provisioning::Producer::new(),
@@ -182,7 +195,8 @@ impl DataStore {
         pool: Arc<Pool>,
         config: Option<&SchemaConfig>,
     ) -> Result<Self, String> {
-        let datastore = Self::new_unchecked(pool)?;
+        let datastore =
+            Self::new_unchecked(log.new(o!("component" => "datastore")), pool)?;
 
         // Keep looping until we find that the schema matches our expectation.
         const EXPECTED_VERSION: SemverVersion =
@@ -228,6 +242,7 @@ impl DataStore {
         name: &'static str,
     ) -> crate::transaction_retry::RetryHelper {
         crate::transaction_retry::RetryHelper::new(
+            &self.log,
             &self.transaction_retry_producer,
             name,
         )
@@ -275,8 +290,8 @@ impl DataStore {
         self.pool_connection_unauthorized().await
     }
 
-    /// Return the next available IPv6 address for an Oxide service running on
-    /// the provided sled.
+    /// Return the next available IPv6 address for a propolis instance running
+    /// on the provided sled.
     pub async fn next_ipv6_address(
         &self,
         opctx: &OpContext,
@@ -397,20 +412,19 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
-        BlockSize, ComponentUpdate, ComponentUpdateIdentity, ConsoleSession,
-        Dataset, DatasetKind, ExternalIp, PhysicalDisk, PhysicalDiskKind,
-        Project, Rack, Region, Service, ServiceKind, SiloUser, SledBaseboard,
-        SledProvisionState, SledSystemHardware, SledUpdate, SshKey,
-        SystemUpdate, UpdateableComponentType, VpcSubnet, Zpool,
+        BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
+        PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
+        ServiceKind, SiloUser, SledBaseboard, SledProvisionState,
+        SledSystemHardware, SledUpdate, SshKey, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
-    use assert_matches::assert_matches;
     use chrono::{Duration, Utc};
+    use nexus_db_model::IpAttachState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::{
-        self, ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
+        ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
     use omicron_common::nexus_config::RegionAllocationStrategy;
     use omicron_test_utils::dev;
@@ -1431,7 +1445,6 @@ mod test {
     // Test sled-specific IPv6 address allocation
     #[tokio::test]
     async fn test_sled_ipv6_address_allocation() {
-        use omicron_common::address::RSS_RESERVED_ADDRESSES as STATIC_IPV6_ADDRESS_OFFSET;
         use std::net::Ipv6Addr;
 
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
@@ -1467,41 +1480,14 @@ mod test {
         datastore.sled_upsert(sled2).await.unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
-        let expected_ip = Ipv6Addr::new(
-            0xfd00,
-            0x1de,
-            0,
-            0,
-            0,
-            0,
-            0,
-            2 + STATIC_IPV6_ADDRESS_OFFSET,
-        );
+        let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
-        let expected_ip = Ipv6Addr::new(
-            0xfd00,
-            0x1de,
-            0,
-            0,
-            0,
-            0,
-            0,
-            3 + STATIC_IPV6_ADDRESS_OFFSET,
-        );
+        let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 1);
         assert_eq!(ip, expected_ip);
 
         let ip = datastore.next_ipv6_address(&opctx, sled2_id).await.unwrap();
-        let expected_ip = Ipv6Addr::new(
-            0xfd00,
-            0x1df,
-            0,
-            0,
-            0,
-            0,
-            0,
-            2 + STATIC_IPV6_ADDRESS_OFFSET,
-        );
+        let expected_ip = Ipv6Addr::new(0xfd00, 0x1df, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
 
         let _ = db.cleanup().await;
@@ -1798,7 +1784,8 @@ mod test {
         // Create a few records.
         let now = Utc::now();
         let instance_id = Uuid::new_v4();
-        let ips = (0..4)
+        let kinds = [IpKind::SNat, IpKind::Ephemeral];
+        let ips = (0..2)
             .map(|i| ExternalIp {
                 id: Uuid::new_v4(),
                 name: None,
@@ -1811,12 +1798,13 @@ mod test {
                 project_id: None,
                 is_service: false,
                 parent_id: Some(instance_id),
-                kind: IpKind::Ephemeral,
+                kind: kinds[i as usize],
                 ip: ipnetwork::IpNetwork::from(IpAddr::from(Ipv4Addr::new(
                     10, 0, 0, i,
                 ))),
                 first_port: crate::db::model::SqlU16(0),
                 last_port: crate::db::model::SqlU16(10),
+                state: nexus_db_model::IpAttachState::Attached,
             })
             .collect::<Vec<_>>();
         diesel::insert_into(dsl::external_ip)
@@ -1878,6 +1866,7 @@ mod test {
             ))),
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
+            state: nexus_db_model::IpAttachState::Attached,
         };
         diesel::insert_into(dsl::external_ip)
             .values(ip.clone())
@@ -1948,6 +1937,7 @@ mod test {
             ip: addresses.next().unwrap().into(),
             first_port: crate::db::model::SqlU16(0),
             last_port: crate::db::model::SqlU16(10),
+            state: nexus_db_model::IpAttachState::Attached,
         };
 
         // Combinations of NULL and non-NULL for:
@@ -1955,6 +1945,7 @@ mod test {
         // - description
         // - parent (instance / service) UUID
         // - project UUID
+        // - attach state
         let names = [None, Some("foo")];
         let descriptions = [None, Some("foo".to_string())];
         let parent_ids = [None, Some(Uuid::new_v4())];
@@ -1995,6 +1986,12 @@ mod test {
                 continue;
             }
 
+            let state = if parent_id.is_some() {
+                IpAttachState::Attached
+            } else {
+                IpAttachState::Detached
+            };
+
             let new_ip = ExternalIp {
                 id: Uuid::new_v4(),
                 name: name_local.clone(),
@@ -2003,6 +2000,7 @@ mod test {
                 is_service,
                 parent_id: *parent_id,
                 project_id: *project_id,
+                state,
                 ..ip
             };
 
@@ -2075,6 +2073,11 @@ mod test {
             let name_local = name.map(|v| {
                 db::model::Name(Name::try_from(v.to_string()).unwrap())
             });
+            let state = if parent_id.is_some() {
+                IpAttachState::Attached
+            } else {
+                IpAttachState::Detached
+            };
             let new_ip = ExternalIp {
                 id: Uuid::new_v4(),
                 name: name_local,
@@ -2084,6 +2087,7 @@ mod test {
                 is_service,
                 parent_id: *parent_id,
                 project_id: *project_id,
+                state,
                 ..ip
             };
             let res = diesel::insert_into(dsl::external_ip)
@@ -2091,9 +2095,10 @@ mod test {
                 .execute_async(&*conn)
                 .await;
             let ip_type = if is_service { "Service" } else { "Instance" };
+            let null_snat_parent = parent_id.is_none() && kind == IpKind::SNat;
             if name.is_none()
                 && description.is_none()
-                && parent_id.is_some()
+                && !null_snat_parent
                 && project_id.is_none()
             {
                 // Name/description must be NULL, instance ID cannot
@@ -2137,111 +2142,6 @@ mod test {
                 );
             }
         }
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    /// Expect DB error if we try to insert a system update with an id that
-    /// already exists. If version matches, update the existing row (currently
-    /// only time_modified)
-    #[tokio::test]
-    async fn test_system_update_conflict() {
-        let logctx = dev::test_setup_log("test_system_update_conflict");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
-        let v1 = external::SemverVersion::new(1, 0, 0);
-        let update1 = SystemUpdate::new(v1.clone()).unwrap();
-        datastore
-            .upsert_system_update(&opctx, update1.clone())
-            .await
-            .expect("Failed to create system update");
-
-        // same version, but different ID (generated by constructor). should
-        // conflict and therefore update time_modified, keeping the old ID
-        let update2 = SystemUpdate::new(v1).unwrap();
-        let updated_update = datastore
-            .upsert_system_update(&opctx, update2.clone())
-            .await
-            .unwrap();
-        assert!(updated_update.identity.id == update1.identity.id);
-        assert!(
-            updated_update.identity.time_modified
-                != update1.identity.time_modified
-        );
-
-        // now let's do same ID, but different version. should conflict on the
-        // ID because it's the PK, but since the version doesn't match an
-        // existing row, it errors out instead of updating one
-        let update3 =
-            SystemUpdate::new(external::SemverVersion::new(2, 0, 0)).unwrap();
-        let update3 = SystemUpdate { identity: update1.identity, ..update3 };
-        let conflict =
-            datastore.upsert_system_update(&opctx, update3).await.unwrap_err();
-        assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
-
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    /// Expect DB error if we try to insert a component update with a (version,
-    /// component_type) that already exists
-    #[tokio::test]
-    async fn test_component_update_conflict() {
-        let logctx = dev::test_setup_log("test_component_update_conflict");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-
-        // we need a system update for the component updates to hang off of
-        let v1 = external::SemverVersion::new(1, 0, 0);
-        let system_update = SystemUpdate::new(v1.clone()).unwrap();
-        datastore
-            .upsert_system_update(&opctx, system_update.clone())
-            .await
-            .expect("Failed to create system update");
-
-        // create a component update, that's fine
-        let cu1 = ComponentUpdate {
-            identity: ComponentUpdateIdentity::new(Uuid::new_v4()),
-            component_type: UpdateableComponentType::HubrisForSidecarRot,
-            version: db::model::SemverVersion::new(1, 0, 0),
-        };
-        datastore
-            .create_component_update(
-                &opctx,
-                system_update.identity.id,
-                cu1.clone(),
-            )
-            .await
-            .expect("Failed to create component update");
-
-        // create a second component update with same version but different
-        // type, also fine
-        let cu2 = ComponentUpdate {
-            identity: ComponentUpdateIdentity::new(Uuid::new_v4()),
-            component_type: UpdateableComponentType::HubrisForSidecarSp,
-            version: db::model::SemverVersion::new(1, 0, 0),
-        };
-        datastore
-            .create_component_update(
-                &opctx,
-                system_update.identity.id,
-                cu2.clone(),
-            )
-            .await
-            .expect("Failed to create component update");
-
-        // but same type and version should fail
-        let cu3 = ComponentUpdate {
-            identity: ComponentUpdateIdentity::new(Uuid::new_v4()),
-            ..cu1
-        };
-        let conflict = datastore
-            .create_component_update(&opctx, system_update.identity.id, cu3)
-            .await
-            .unwrap_err();
-        assert_matches!(conflict, Error::ObjectAlreadyExists { .. });
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

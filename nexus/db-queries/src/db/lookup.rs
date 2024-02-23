@@ -17,11 +17,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use db_macros::lookup_resource;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
-use nexus_db_model::KnownArtifactKind;
 use nexus_db_model::Name;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
@@ -431,25 +432,25 @@ impl<'a> LookupPath<'a> {
         )
     }
 
-    /// Select a resource of type UpdateArtifact, identified by its
-    /// `(name, version, kind)` tuple
-    pub fn update_artifact_tuple(
-        self,
-        name: &str,
-        version: db::model::SemverVersion,
-        kind: KnownArtifactKind,
-    ) -> UpdateArtifact<'a> {
-        UpdateArtifact::PrimaryKey(
-            Root { lookup_root: self },
-            name.to_string(),
-            version,
-            kind,
-        )
+    /// Select a resource of type TufRepo, identified by its UUID.
+    pub fn tuf_repo_id(self, id: TypedUuid<TufRepoKind>) -> TufRepo<'a> {
+        TufRepo::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type UpdateDeployment, identified by its id
-    pub fn update_deployment_id(self, id: Uuid) -> UpdateDeployment<'a> {
-        UpdateDeployment::PrimaryKey(Root { lookup_root: self }, id)
+    /// Select a resource of type UpdateArtifact, identified by its
+    /// `(name, version, kind)` tuple
+    pub fn tuf_artifact_tuple(
+        self,
+        name: impl Into<String>,
+        version: db::model::SemverVersion,
+        kind: impl Into<String>,
+    ) -> TufArtifact<'a> {
+        TufArtifact::PrimaryKey(
+            Root { lookup_root: self },
+            name.into(),
+            version,
+            kind.into(),
+        )
     }
 
     /// Select a resource of type UserBuiltin, identified by its `name`
@@ -857,7 +858,18 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "UpdateArtifact",
+    name = "TufRepo",
+    ancestors = [],
+    // TODO: should this have TufArtifact as a child? This is a many-many
+    // relationship.
+    children = [],
+    lookup_by_name = false,
+    soft_deletes = false,
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufRepoKind } ]
+}
+
+lookup_resource! {
+    name = "TufArtifact",
     ancestors = [],
     children = [],
     lookup_by_name = false,
@@ -865,26 +877,8 @@ lookup_resource! {
     primary_key_columns = [
         { column_name = "name", rust_type = String },
         { column_name = "version", rust_type = db::model::SemverVersion },
-        { column_name = "kind", rust_type = KnownArtifactKind }
+        { column_name = "kind", rust_type = String },
     ]
-}
-
-lookup_resource! {
-    name = "SystemUpdate",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
-    name = "UpdateDeployment",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {
