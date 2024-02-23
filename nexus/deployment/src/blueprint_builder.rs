@@ -749,12 +749,14 @@ pub mod test {
         let initial_blueprint =
             BlueprintBuilder::build_initial_from_collection(
                 &system_builder.to_collection().unwrap(),
+                Generation::new(),
                 &policy,
                 "test suite",
             )
             .unwrap();
         let mut builder = BlueprintBuilder::new_based_on(
             &initial_blueprint,
+            Generation::new(),
             &policy,
             "test suite",
         )
@@ -918,9 +920,13 @@ pub mod test {
         let new_sled_id = Uuid::new_v4();
         let _ = system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let policy = system.to_policy().unwrap();
-        let mut builder =
-            BlueprintBuilder::new_based_on(&blueprint2, &policy, "test_basic")
-                .expect("failed to create builder");
+        let mut builder = BlueprintBuilder::new_based_on(
+            &blueprint2,
+            Generation::new(),
+            &policy,
+            "test_basic",
+        )
+        .expect("failed to create builder");
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
         let new_sled_resources = policy.sleds.get(&new_sled_id).unwrap();
         for pool_name in &new_sled_resources.zpools {

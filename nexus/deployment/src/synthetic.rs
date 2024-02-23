@@ -27,6 +27,7 @@ use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
@@ -247,6 +248,7 @@ impl SyntheticSystemBuilder {
     pub fn to_blueprint(&self, creator: &str) -> anyhow::Result<Blueprint> {
         BlueprintBuilder::build_initial_from_collection(
             &self.to_collection()?,
+            Generation::new(),
             &self.to_policy()?,
             creator,
         )
