@@ -47,17 +47,21 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
         .map(|dataset| dataset.id())
         .collect::<BTreeSet<_>>();
 
-    let datasets_to_insert = all_omicron_zones.filter_map(|zone| {
+    let mut num_inserted = 0;
+    let mut num_already_exist = 0;
+
+    for zone in all_omicron_zones {
         let OmicronZoneType::Crucible { address, dataset } = &zone.zone_type
         else {
-            return None;
+            continue;
         };
 
         let id = zone.id;
 
         // If already present in the datastore, move on.
         if crucible_datasets.remove(&id) {
-            return None;
+            num_already_exist += 1;
+            continue;
         }
 
         // Map progenitor client strings into the types we need. We never
@@ -70,7 +74,7 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
                     "address" => address,
                     "err" => InlineErrorChain::new(&err),
                 );
-                return None;
+                continue;
             }
         };
         let zpool_name: ZpoolName = match dataset.pool_name.parse() {
@@ -81,20 +85,13 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
                     "pool_name" => &*dataset.pool_name,
                     "err" => err,
                 );
-                return None;
+                continue;
             }
         };
 
         let pool_id = zpool_name.id();
-
-        Some(Dataset::new(id, pool_id, addr, DatasetKind::Crucible))
-    });
-
-    let mut num_inserted = 0;
-
-    for dataset in datasets_to_insert {
-        let id = dataset.id();
-        let maybe_dataset = datastore
+        let dataset = Dataset::new(id, pool_id, addr, DatasetKind::Crucible);
+        let maybe_inserted = datastore
             .dataset_insert_if_not_exists(dataset)
             .await
             .with_context(|| {
@@ -104,13 +101,15 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
         // If we succeeded in inserting, log it; if `maybe_dataset` is `None`,
         // we must have lost the TOCTOU race described above, and another Nexus
         // must have inserted this dataset before we could.
-        if let Some(dataset) = maybe_dataset {
+        if maybe_inserted.is_some() {
             info!(
                 opctx.log,
                 "inserted new dataset for crucible zone";
-                "id" => %dataset.id(),
+                "id" => %id,
             );
             num_inserted += 1;
+        } else {
+            num_already_exist += 1;
         }
     }
 
@@ -125,6 +124,13 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
             "dataset_ids" => ?crucible_datasets,
         );
     }
+
+    info!(
+        opctx.log,
+        "ensured all crucible zones have dataset records";
+        "num_inserted" => num_inserted,
+        "num_already_existed" => num_already_exist,
+    );
 
     Ok(num_inserted)
 }
