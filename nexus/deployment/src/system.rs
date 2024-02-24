@@ -14,6 +14,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::external_api::views::SledProvisionState;
+use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
@@ -45,8 +46,8 @@ pub struct SystemDescription {
     collector: Option<String>,
     sleds: Vec<Sled>,
     sled_subnets: Box<dyn SubnetIterator>,
-    available_non_scrimlet_slots: BTreeSet<u32>,
-    available_scrimlet_slots: BTreeSet<u32>,
+    available_non_scrimlet_slots: BTreeSet<u16>,
+    available_scrimlet_slots: BTreeSet<u16>,
     target_nexus_zone_count: usize,
     service_ip_pool_ranges: Vec<IpRange>,
 }
@@ -69,8 +70,8 @@ impl SystemDescription {
         // We use `BTreeSet` because it efficiently expresses what we want,
         // though the set sizes are small enough that it doesn't much matter.
         // XXX-dap are these constants defined somewhere?
-        let available_scrimlet_slots: BTreeSet<u32> = BTreeSet::from([14, 16]);
-        let available_non_scrimlet_slots: BTreeSet<u32> = (0..=31)
+        let available_scrimlet_slots: BTreeSet<u16> = BTreeSet::from([14, 16]);
+        let available_non_scrimlet_slots: BTreeSet<u16> = (0..=31)
             .collect::<BTreeSet<_>>()
             .difference(&available_scrimlet_slots)
             .copied()
@@ -184,7 +185,7 @@ impl SystemDescription {
         };
 
         let sled_id = sled.id.unwrap_or_else(Uuid::new_v4);
-        let sled = Sled::new(
+        let sled = Sled::new_simulated(
             sled_id,
             sled_subnet,
             sled.sled_role,
@@ -193,7 +194,25 @@ impl SystemDescription {
             hardware_slot,
             sled.npools,
         );
+        // XXX-dap what if one by this id already exists
         self.sleds.push(sled);
+        Ok(self)
+    }
+
+    // XXX-dap what if one by this id already exists
+    pub fn sled_full(
+        &mut self,
+        sled_id: Uuid,
+        sled_resources: SledResources,
+        inventory_sp: Option<SledHwInventory<'_>>,
+        inventory_sled_agent: &nexus_types::inventory::SledAgent,
+    ) -> anyhow::Result<&mut Self> {
+        self.sleds.push(Sled::new_full(
+            sled_id,
+            sled_resources,
+            inventory_sp,
+            inventory_sled_agent,
+        ));
         Ok(self)
     }
 
@@ -206,17 +225,21 @@ impl SystemDescription {
         let mut builder = CollectionBuilder::new(collector_label);
 
         for s in &self.sleds {
-            let slot = s.hardware_slot;
-            if let Some(sp_state) = s.sp_state() {
+            if let Some((slot, sp_state)) = s.sp_state() {
                 builder
-                    .found_sp_state("fake MGS 1", SpType::Sled, slot, sp_state)
+                    .found_sp_state(
+                        "fake MGS 1",
+                        SpType::Sled,
+                        u32::from(*slot),
+                        sp_state.clone(),
+                    )
                     .context("recording SP state")?;
             }
 
             builder
                 .found_sled_inventory(
                     "fake sled agent",
-                    s.sled_agent_inventory(),
+                    s.sled_agent_inventory().clone(),
                 )
                 .context("recording sled agent")?;
         }
@@ -269,7 +292,7 @@ pub struct SledBuilder {
     id: Option<Uuid>,
     unique: Option<String>,
     hardware: SledHardware,
-    hardware_slot: Option<u32>,
+    hardware_slot: Option<u16>,
     sled_role: SledRole,
     npools: u8,
 }
@@ -309,7 +332,7 @@ impl SledBuilder {
         self
     }
 
-    pub fn hardware_slot(mut self, hardware_slot: u32) -> Self {
+    pub fn hardware_slot(mut self, hardware_slot: u16) -> Self {
         self.hardware_slot = Some(hardware_slot);
         self
     }
@@ -320,28 +343,30 @@ impl SledBuilder {
     }
 }
 
+#[derive(Debug)]
+pub struct SledHwInventory<'a> {
+    pub baseboard_id: &'a BaseboardId,
+    pub sp: &'a nexus_types::inventory::ServiceProcessor,
+    pub rot: &'a nexus_types::inventory::RotState,
+}
+
 #[derive(Clone, Debug)]
 struct Sled {
     sled_id: Uuid,
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-    sled_role: SledRole,
-    unique: String,
-    model: String,
-    serial: String,
-    revision: u32,
-    hardware: SledHardware,
-    hardware_slot: u32,
+    inventory_sp: Option<(u16, SpState)>,
+    inventory_sled_agent: sled_agent_client::types::Inventory,
     zpools: Vec<ZpoolName>,
 }
 
 impl Sled {
-    fn new(
+    fn new_simulated(
         sled_id: Uuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_role: SledRole,
         unique: Option<String>,
         hardware: SledHardware,
-        hardware_slot: u32,
+        hardware_slot: u16,
         nzpools: u8,
     ) -> Sled {
         let unique = unique.unwrap_or_else(|| hardware_slot.to_string());
@@ -351,76 +376,152 @@ impl Sled {
         let zpools = (0..nzpools)
             .map(|_| format!("oxp_{}", Uuid::new_v4()).parse().unwrap())
             .collect();
+        let inventory_sp = match hardware {
+            SledHardware::Empty => None,
+            SledHardware::Gimlet | SledHardware::Pc | SledHardware::Unknown => {
+                Some((
+                    hardware_slot,
+                    SpState {
+                        base_mac_address: [0; 6],
+                        hubris_archive_id: format!("hubris{}", unique),
+                        model: model.clone(),
+                        power_state: PowerState::A2,
+                        revision,
+                        rot: RotState::Enabled {
+                            active: RotSlot::A,
+                            pending_persistent_boot_preference: None,
+                            persistent_boot_preference: RotSlot::A,
+                            slot_a_sha3_256_digest: Some(String::from(
+                                "slotAdigest1",
+                            )),
+                            slot_b_sha3_256_digest: Some(String::from(
+                                "slotBdigest1",
+                            )),
+                            transient_boot_preference: None,
+                        },
+                        serial_number: serial.clone(),
+                    },
+                ))
+            }
+        };
+
+        let inventory_sled_agent = {
+            let baseboard = match hardware {
+                SledHardware::Gimlet => {
+                    sled_agent_client::types::Baseboard::Gimlet {
+                        identifier: serial.clone(),
+                        model: model.clone(),
+                        revision: i64::from(revision),
+                    }
+                }
+                SledHardware::Pc => sled_agent_client::types::Baseboard::Pc {
+                    identifier: serial.clone(),
+                    model: model.clone(),
+                },
+                SledHardware::Unknown | SledHardware::Empty => {
+                    sled_agent_client::types::Baseboard::Unknown
+                }
+            };
+            let sled_agent_address = get_sled_address(sled_subnet).to_string();
+            sled_agent_client::types::Inventory {
+                baseboard,
+                reservoir_size: ByteCount::from(1024),
+                sled_role,
+                sled_agent_address,
+                sled_id: sled_id,
+                usable_hardware_threads: 10,
+                usable_physical_ram: ByteCount::from(1024 * 1024),
+            }
+        };
 
         Sled {
             sled_id,
             sled_subnet,
-            sled_role,
-            unique,
-            model,
-            serial,
-            revision,
-            hardware,
-            hardware_slot,
+            inventory_sp,
+            inventory_sled_agent,
             zpools,
         }
     }
 
-    fn sp_state(&self) -> Option<SpState> {
-        match self.hardware {
-            SledHardware::Empty => None,
-            SledHardware::Gimlet | SledHardware::Pc | SledHardware::Unknown => {
-                let unique = &self.unique;
-                Some(SpState {
-                    base_mac_address: [0; 6],
-                    hubris_archive_id: format!("hubris{}", unique),
-                    model: self.model.clone(),
-                    power_state: PowerState::A2,
-                    revision: self.revision,
-                    rot: RotState::Enabled {
-                        active: RotSlot::A,
-                        pending_persistent_boot_preference: None,
-                        persistent_boot_preference: RotSlot::A,
-                        slot_a_sha3_256_digest: Some(String::from(
-                            "slotAdigest1",
-                        )),
-                        slot_b_sha3_256_digest: Some(String::from(
-                            "slotBdigest1",
-                        )),
-                        transient_boot_preference: None,
-                    },
-                    serial_number: self.serial.clone(),
-                })
-            }
+    fn new_full(
+        sled_id: Uuid,
+        sled_resources: SledResources,
+        inventory_sp: Option<SledHwInventory<'_>>,
+        inv_sled_agent: &nexus_types::inventory::SledAgent,
+    ) -> Sled {
+        // XXX-dap ignoring the provision state here
+
+        // XXX-dap kind of janky that we have to work backwards here: faking up
+        // sled_agent_client types for given inventory types.  This process is
+        // also lossy, though it doesn't matter since we're only trying to go
+        // back to the inventory type anyway.
+
+        let baseboard = inventory_sp
+            .as_ref()
+            .map(|sledhw| sled_agent_client::types::Baseboard::Gimlet {
+                identifier: sledhw.baseboard_id.serial_number.clone(),
+                model: sledhw.baseboard_id.part_number.clone(),
+                revision: i64::from(sledhw.sp.baseboard_revision),
+            })
+            .unwrap_or(sled_agent_client::types::Baseboard::Unknown);
+
+        let inventory_sp = inventory_sp.map(|sledhw| {
+            let sp_state = SpState {
+                base_mac_address: [0; 6],
+                hubris_archive_id: sledhw.sp.hubris_archive.clone(),
+                model: sledhw.baseboard_id.part_number.clone(),
+                power_state: sledhw.sp.power_state,
+                revision: sledhw.sp.baseboard_revision,
+                rot: RotState::Enabled {
+                    active: sledhw.rot.active_slot,
+                    pending_persistent_boot_preference: sledhw
+                        .rot
+                        .pending_persistent_boot_preference,
+                    persistent_boot_preference: sledhw
+                        .rot
+                        .persistent_boot_preference,
+                    slot_a_sha3_256_digest: sledhw
+                        .rot
+                        .slot_a_sha3_256_digest
+                        .clone(),
+                    slot_b_sha3_256_digest: sledhw
+                        .rot
+                        .slot_b_sha3_256_digest
+                        .clone(),
+                    transient_boot_preference: sledhw
+                        .rot
+                        .transient_boot_preference,
+                },
+                serial_number: sledhw.baseboard_id.serial_number.clone(),
+            };
+
+            (sledhw.sp.sp_slot, sp_state)
+        });
+
+        let inventory_sled_agent = sled_agent_client::types::Inventory {
+            baseboard,
+            reservoir_size: inv_sled_agent.reservoir_size,
+            sled_role: inv_sled_agent.sled_role,
+            sled_agent_address: inv_sled_agent.sled_agent_address.to_string(),
+            sled_id,
+            usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
+            usable_physical_ram: inv_sled_agent.usable_physical_ram,
+        };
+
+        Sled {
+            sled_id,
+            sled_subnet: sled_resources.subnet,
+            zpools: sled_resources.zpools.into_iter().collect(),
+            inventory_sp,
+            inventory_sled_agent,
         }
     }
 
-    fn sled_agent_inventory(&self) -> sled_agent_client::types::Inventory {
-        let baseboard = match self.hardware {
-            SledHardware::Gimlet => {
-                sled_agent_client::types::Baseboard::Gimlet {
-                    identifier: self.serial.clone(),
-                    model: self.model.clone(),
-                    revision: i64::from(self.revision),
-                }
-            }
-            SledHardware::Pc => sled_agent_client::types::Baseboard::Pc {
-                identifier: self.serial.clone(),
-                model: self.model.clone(),
-            },
-            SledHardware::Unknown | SledHardware::Empty => {
-                sled_agent_client::types::Baseboard::Unknown
-            }
-        };
-        let sled_agent_address = get_sled_address(self.sled_subnet).to_string();
-        sled_agent_client::types::Inventory {
-            baseboard,
-            reservoir_size: ByteCount::from(1024),
-            sled_role: self.sled_role,
-            sled_agent_address,
-            sled_id: self.sled_id,
-            usable_hardware_threads: 10,
-            usable_physical_ram: ByteCount::from(1024 * 1024),
-        }
+    fn sp_state(&self) -> Option<&(u16, SpState)> {
+        self.inventory_sp.as_ref()
+    }
+
+    fn sled_agent_inventory(&self) -> &sled_agent_client::types::Inventory {
+        &self.inventory_sled_agent
     }
 }

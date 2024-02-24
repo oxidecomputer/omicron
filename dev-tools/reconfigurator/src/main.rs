@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail, ensure, Context};
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
-use nexus_deployment::system::{SledBuilder, SystemDescription};
+use nexus_deployment::system::{
+    SledBuilder, SledHwInventory, SystemDescription,
+};
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
@@ -17,7 +19,7 @@ use uuid::Uuid;
 
 // Current status:
 // - starting to flesh out the basic CRUD stuff.  it kind of works.  it's hard
-//   to really see it because I haven't fleshed out "show".
+//   to really see it because I haven't fleshed out "show".  save/load works.
 // - I think it's finally time to switch to using the derive version of clap +
 //   reedline directly.  This is in my way right now because I'm getting back
 //   errors that I cannot see.  See item below.
@@ -83,8 +85,6 @@ use uuid::Uuid;
 //
 // At some point we can add:
 //
-// - save to file (sleds, collections, blueprints)
-// - load from file (ditto)
 // - omdb: read from database, save to same format of file
 //
 // Then we can see what would happen when we make changes to a production system
@@ -174,8 +174,15 @@ fn main() -> anyhow::Result<()> {
         .with_command(
             Command::new("load")
                 .about("load state from a file")
-                .arg(Arg::new("filename").required(true)),
+                .arg(Arg::new("filename").required(true))
+                .arg(Arg::new("collection_id")),
             cmd_load,
+        )
+        .with_command(
+            Command::new("file-contents")
+                .about("show the contents of a given file")
+                .arg(Arg::new("filename").required(true)),
+            cmd_file_contents,
         );
 
     repl.run().context("unexpected failure")
@@ -422,6 +429,15 @@ fn cmd_save(
     )))
 }
 
+fn read_file(
+    input_path: &camino::Utf8Path,
+) -> anyhow::Result<UnstableReconfiguratorState> {
+    let file = std::fs::File::open(input_path)
+        .with_context(|| format!("open {:?}", input_path))?;
+    serde_json::from_reader(file)
+        .with_context(|| format!("read {:?}", input_path))
+}
+
 fn cmd_load(
     args: ArgMatches,
     sim: &mut ReconfiguratorSim,
@@ -430,12 +446,107 @@ fn cmd_load(
         .get_one::<String>("filename")
         .ok_or_else(|| anyhow!("missing filename"))?;
     let input_path = camino::Utf8Path::new(input_path_str);
-    let file = std::fs::File::open(input_path)
-        .with_context(|| format!("open {:?}", input_path))?;
-    let loaded: UnstableReconfiguratorState = serde_json::from_reader(file)
-        .with_context(|| format!("read {:?}", input_path))?;
+    let collection_id = args
+        .get_one::<String>("collection_id")
+        .map(|s| s.parse::<Uuid>())
+        .transpose()
+        .context("parsing \"collection_id\" as uuid")?;
+    let loaded = read_file(input_path)?;
 
     let mut s = String::new();
+
+    let collection_id = match collection_id {
+        Some(s) => s,
+        None => {
+            ensure!(
+                loaded.collections.len() == 1,
+                "no collection_id specified and file contains {} collections",
+                loaded.collections.len()
+            );
+            loaded.collections[0].id
+        }
+    };
+
+    swriteln!(
+        s,
+        "using collection {} as source of sled inventory data",
+        collection_id
+    );
+    let primary_collection =
+        loaded.collections.iter().find(|c| c.id == collection_id).ok_or_else(
+            || {
+                anyhow!(
+                    "collection {} not found in file {:?}",
+                    collection_id,
+                    input_path
+                )
+            },
+        )?;
+
+    let current_policy = sim.system.to_policy().context("generating policy")?;
+    for (sled_id, sled_resources) in loaded.policy.sleds {
+        if current_policy.sleds.contains_key(&sled_id) {
+            swriteln!(
+                s,
+                "saved sled {}: skipped (one with \
+                the same id is already loaded)",
+                sled_id
+            );
+            continue;
+        }
+
+        let Some(inventory_sled_agent) =
+            primary_collection.sled_agents.get(&sled_id)
+        else {
+            swriteln!(
+                s,
+                "error: saved sled {}: no inventory found for sled agent in \
+                collection {}",
+                sled_id,
+                collection_id
+            );
+            continue;
+        };
+
+        let inventory_sp = match &inventory_sled_agent.baseboard_id {
+            Some(baseboard_id) => {
+                let inv_sp = primary_collection
+                    .sps
+                    .get(baseboard_id)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "error: saved sled {}: missing SP inventory",
+                            sled_id
+                        )
+                    })?;
+                let inv_rot = primary_collection
+                    .rots
+                    .get(baseboard_id)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "error: saved sled {}: missing RoT inventory",
+                            sled_id
+                        )
+                    })?;
+                Some(SledHwInventory { baseboard_id, sp: inv_sp, rot: inv_rot })
+            }
+            None => None,
+        };
+
+        let result = sim.system.sled_full(
+            sled_id,
+            sled_resources,
+            inventory_sp,
+            inventory_sled_agent,
+        );
+
+        match result {
+            Ok(_) => swriteln!(s, "saved sled {}: loaded", sled_id),
+            Err(error) => {
+                swriteln!(s, "error: saved sled {}: {:#}", sled_id, error)
+            }
+        };
+    }
 
     // XXX-dap O(n^2)
     for collection in loaded.collections {
@@ -467,54 +578,39 @@ fn cmd_load(
         }
     }
 
-    let current_policy = sim.system.to_policy().context("generating policy")?;
-    for (sled_id, sled_resources) in loaded.policy.sleds {
-        if current_policy.sleds.contains_key(&sled_id) {
-            swriteln!(
-                s,
-                "saved sled {}: skipped (one with \
-                the same id is already loaded)",
-                sled_id
-            );
-            continue;
-        }
+    swriteln!(s, "loaded data from {:?}", input_path);
+    Ok(Some(s))
+}
 
-        // XXX-dap This is not right.
-        //
-        // At the very least, we need to load the other pieces of SledResources
-        // here:
-        //
-        // - provision state
-        // - subnet
-        // - the specific list of zpools
-        //
-        // Otherwise we definitely haven't really saved/loaded all the relevant
-        // state.
-        //
-        // Arguably we should also save/load all the other inventory information
-        // that we have about sleds.  Otherwise, new inventories generated from
-        // the SystemDescription will look different from the ones that would
-        // have been generated in whatever context we saved this file in the
-        // first place.  It's not clear yet how much this matters?  At the very
-        // least though it's pretty surprising behavior.
-        //
-        // Maybe the way to refactor this is:
-        //
-        // - `Sled` within `SystemBuilder` ought to store its specific zpools
-        //   and inventory data instead of generating it on-demand
-        // - When creating a `Sled` from `SledBuilder`, we generate this once
-        //   and store it into the `Sled
-        // - One can also generate a `Sled` from a `(sled_id, SledResources,
-        //   Inventory, OmicronZones)` tuple?
-        let sled = SledBuilder::new().id(sled_id);
-        match sim.system.sled(sled) {
-            Ok(_) => swriteln!(s, "saved sled {}: loaded", sled_id),
-            Err(error) => {
-                swriteln!(s, "error: saved sled {}: {:#}", sled_id, error)
-            }
-        };
+fn cmd_file_contents(
+    args: ArgMatches,
+    _sim: &mut ReconfiguratorSim,
+) -> anyhow::Result<Option<String>> {
+    let input_path_str: &String = args
+        .get_one::<String>("filename")
+        .ok_or_else(|| anyhow!("missing filename"))?;
+    let input_path = camino::Utf8Path::new(input_path_str);
+    let loaded = read_file(input_path)?;
+
+    let mut s = String::new();
+
+    for (sled_id, sled_resources) in loaded.policy.sleds {
+        swriteln!(
+            s,
+            "sled: {} (subnet: {}, zpools: {})",
+            sled_id,
+            sled_resources.subnet.net(),
+            sled_resources.zpools.len()
+        );
     }
 
-    swriteln!(s, "loaded data from {:?}", input_path);
+    for collection in loaded.collections {
+        swriteln!(s, "collection: {}", collection.id);
+    }
+
+    for blueprint in loaded.blueprints {
+        swriteln!(s, "blueprint:  {}", blueprint.id);
+    }
+
     Ok(Some(s))
 }
