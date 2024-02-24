@@ -36,8 +36,6 @@ pub mod loopback_address_delete;
 pub mod project_create;
 pub mod snapshot_create;
 pub mod snapshot_delete;
-pub mod switch_port_settings_apply;
-pub mod switch_port_settings_clear;
 pub mod switch_port_settings_common;
 pub mod test_saga;
 pub mod volume_delete;
@@ -151,12 +149,6 @@ fn make_action_registry() -> ActionRegistry {
     );
     <loopback_address_delete::SagaLoopbackAddressDelete
         as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <switch_port_settings_apply::SagaSwitchPortSettingsApply as NexusSaga>::register_actions(
-        &mut registry,
-    );
-    <switch_port_settings_clear::SagaSwitchPortSettingsClear as NexusSaga>::register_actions(
         &mut registry,
     );
     <project_create::SagaProjectCreate as NexusSaga>::register_actions(
