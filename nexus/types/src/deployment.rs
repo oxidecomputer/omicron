@@ -47,7 +47,7 @@ use uuid::Uuid;
 ///
 /// The current policy is pretty limited.  It's aimed primarily at supporting
 /// the add/remove sled use case.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
     /// set of sleds that are supposed to be part of the control plane, along
     /// with information about resources available to the planner
@@ -62,7 +62,7 @@ pub struct Policy {
 }
 
 /// Describes the resources available on each sled for the planner
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
     /// provision state of this sled
     pub provision_state: SledProvisionState,
@@ -637,4 +637,18 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
 
         Ok(())
     }
+}
+
+/// Encapsulates Reconfigurator state
+///
+/// This serialized from is intended for saving state from hand-constructed or
+/// real, deployed systems and loading it back into a simulator or test suite
+///
+/// **This format is not stable.  It may change at any time without
+/// backwards-compatibility guarantees.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnstableReconfiguratorState {
+    pub policy: Policy,
+    pub collections: Vec<Collection>,
+    pub blueprints: Vec<Blueprint>,
 }

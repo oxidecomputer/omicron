@@ -4605,6 +4605,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "serde_with",
  "sled-agent-client",
  "steno",
  "strum 0.26.1",
@@ -7004,6 +7005,7 @@ name = "reconfigurator"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "clap 4.5.0",
  "dropshot",
  "nexus-deployment",

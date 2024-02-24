@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
 use nexus_deployment::system::{SledBuilder, SystemDescription};
-use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use reedline_repl_rs::clap::{Arg, ArgMatches, Command};
@@ -164,6 +164,12 @@ fn main() -> anyhow::Result<()> {
                 .arg(Arg::new("parent_blueprint_id").required(true))
                 .arg(Arg::new("collection_id").required(true)),
             cmd_blueprint_plan,
+        )
+        .with_command(
+            Command::new("save")
+                .about("load all state to a file")
+                .arg(Arg::new("filename").required(true)),
+            cmd_save,
         );
 
     repl.run().context("unexpected failure")
@@ -358,4 +364,51 @@ fn cmd_blueprint_plan(
     );
     sim.blueprints.push(blueprint);
     Ok(Some(rv))
+}
+
+fn cmd_save(
+    args: ArgMatches,
+    sim: &mut ReconfiguratorSim,
+) -> anyhow::Result<Option<String>> {
+    let policy = sim.system.to_policy().context("creating policy")?;
+    let saved = UnstableReconfiguratorState {
+        policy,
+        collections: sim.collections.clone(),
+        blueprints: sim.blueprints.clone(),
+    };
+
+    let output_path_str: &String = args
+        .get_one::<String>("filename")
+        .ok_or_else(|| anyhow!("missing filename"))?;
+    let output_path = camino::Utf8Path::new(&output_path_str);
+
+    // Check up front if the output path exists so that we don't clobber it.
+    // This is not perfect because there's a time-of-check-to-time-of-use race,
+    // but it seems better than nothing.
+    match std::fs::metadata(&output_path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            bail!("stat {:?}: {:#}", output_path, e);
+        }
+        Ok(_) => {
+            bail!("error: file {:?} already exists", output_path);
+        }
+    };
+
+    let output_path_basename = output_path
+        .file_name()
+        .ok_or_else(|| anyhow!("unsupported path (no filename part)"))?;
+    let tmppath =
+        output_path.with_file_name(format!("{}.tmp", output_path_basename));
+    let tmpfile = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&tmppath)
+        .with_context(|| format!("open {:?}", tmppath))?;
+    serde_json::to_writer_pretty(&tmpfile, &saved)
+        .with_context(|| format!("writing to {:?}", tmppath))
+        .unwrap_or_else(|e| panic!("{:#}", e));
+    std::fs::rename(&tmppath, &output_path)
+        .with_context(|| format!("mv {:?} {:?}", &tmppath, &output_path))?;
+    Ok(Some(format!("wrote {:?}", output_path)))
 }
