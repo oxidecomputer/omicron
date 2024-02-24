@@ -858,6 +858,13 @@ pub enum InstanceExternalIpBody {
 // becomes easier to maintain a separate copy, we should do that.
 pub type SledRole = nexus_client::types::SledRole;
 
+/// Identifies information about disks which may be attached to Sleds.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InventoryDisk {
+    pub identity: omicron_common::disk::DiskIdentity,
+    pub variant: sled_hardware::DiskVariant,
+}
+
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Inventory {
@@ -868,6 +875,7 @@ pub struct Inventory {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    pub disks: Vec<InventoryDisk>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

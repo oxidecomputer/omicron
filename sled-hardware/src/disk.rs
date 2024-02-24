@@ -8,6 +8,8 @@ use illumos_utils::zpool::Zpool;
 use illumos_utils::zpool::ZpoolKind;
 use illumos_utils::zpool::ZpoolName;
 use omicron_common::disk::DiskIdentity;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use slog::Logger;
 use slog::{info, warn};
 use uuid::Uuid;
@@ -299,8 +301,9 @@ impl PooledDisk {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
+)]
 pub enum DiskVariant {
     U2,
     M2,

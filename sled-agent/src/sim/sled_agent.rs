@@ -26,7 +26,6 @@ use futures::lock::Mutex;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
-use nexus_client::types::PhysicalDiskKind;
 use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -501,7 +500,7 @@ impl SledAgent {
         serial: String,
         model: String,
     ) {
-        let variant = PhysicalDiskKind::U2;
+        let variant = sled_hardware::DiskVariant::U2;
         self.storage
             .lock()
             .await
@@ -729,7 +728,10 @@ impl SledAgent {
         Ok(())
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
@@ -750,6 +752,17 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
+            disks: self
+                .storage
+                .lock()
+                .await
+                .physical_disks()
+                .iter()
+                .map(|(identity, info)| crate::params::InventoryDisk {
+                    identity: identity.clone(),
+                    variant: info.variant,
+                })
+                .collect(),
         })
     }
 
