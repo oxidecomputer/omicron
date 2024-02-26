@@ -219,6 +219,7 @@ impl ClickHouseInstance {
             .env("CH_KEEPER_ID_CURRENT", k_id.to_string())
             .env("CH_DATASTORE", data_dir.datastore_path())
             .env("CH_LOG_STORAGE_PATH", data_dir.keeper_log_storage_path())
+            .env("CH_STORAGE_PATH", data_dir.keeper_storage_path())
             .env(
                 "CH_SNAPSHOT_STORAGE_PATH",
                 data_dir.keeper_snapshot_storage_path(),
@@ -317,6 +318,8 @@ impl ClickHouseDataDir {
             .context("failed to create datastore directory")?;
         std::fs::create_dir(ret.cwd_path())
             .context("failed to create cwd directory")?;
+        std::fs::create_dir(ret.keeper_storage_path())
+            .context("failed to create keeper storagedirectory")?;
         std::fs::create_dir(ret.keeper_log_storage_path())
             .context("failed to create keeper log directory")?;
         std::fs::create_dir(ret.keeper_snapshot_storage_path())
@@ -382,6 +385,10 @@ impl ClickHouseDataDir {
 
     fn keeper_snapshot_storage_path(&self) -> Utf8PathBuf {
         self.dir.path().join("snapshots/")
+    }
+
+    fn keeper_storage_path(&self) -> Utf8PathBuf {
+        self.dir.path().join("storage/")
     }
 
     fn close_clean(self) -> Result<(), anyhow::Error> {
