@@ -11,6 +11,7 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+#[derive(Clone)]
 pub struct ProfileBuilder {
     name: String,
     services: Vec<ServiceBuilder>,
@@ -58,6 +59,7 @@ impl Display for ProfileBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct ServiceBuilder {
     name: String,
     instances: Vec<ServiceInstanceBuilder>,
@@ -114,6 +116,7 @@ impl Display for ServiceBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct ServiceInstanceBuilder {
     name: String,
     enabled: bool,

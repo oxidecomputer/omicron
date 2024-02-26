@@ -1568,12 +1568,13 @@ impl ServiceManager {
             .install()
             .await?;
 
+        let disabled_ssh_service = ServiceBuilder::new("network/ssh")
+            .add_instance(ServiceInstanceBuilder::new("default").disable());
+
         // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
         //
         // These zones are self-assembling -- after they boot, there should
         // be no "zlogin" necessary to initialize.
-        let disabled_ssh_service = ServiceBuilder::new("network/ssh")
-            .add_instance(ServiceInstanceBuilder::new("default").disable());
         match &request {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
@@ -1994,11 +1995,14 @@ impl ServiceManager {
                     .add_property("allow", "astring", &rack_net)
                     .add_property("boundary", "boolean", &is_boundary);
 
-                for server in ntp_servers {
+                for server in ntp_servers.clone() {
                     ntp_config
                         .clone()
-                        .add_property("server", "astring", server);
+                        .add_property("server", "astring", &server);
                 }
+
+                let disabled_dns_client_service = ServiceBuilder::new("network/dns/client")
+            .add_instance(ServiceInstanceBuilder::new("default").disable());
 
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
                     .add_instance(
@@ -2013,6 +2017,14 @@ impl ServiceManager {
                     .add_service(opte_interface_setup)
                     .add_service(disabled_ssh_service)
                     .add_service(ntp_service);
+
+                if ntp_servers.is_empty() {
+                    profile.clone().add_service(disabled_dns_client_service);
+                } else {
+                    // Enable dns client service
+                    todo!()
+                }
+
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
