@@ -185,7 +185,11 @@ mod tests {
                 },
                 rack_id,
             );
-            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+            datastore
+                .sled_upsert(sled)
+                .await
+                .expect("failed to upsert sled")
+                .unwrap();
 
             for zone in &config.zones.zones {
                 let OmicronZoneType::Crucible { dataset, .. } = &zone.zone_type
