@@ -99,7 +99,6 @@ impl DataStore {
     ) -> CreateResult<Option<Dataset>> {
         use db::schema::dataset::dsl;
 
-        let dataset_id = dataset.id();
         let zpool_id = dataset.pool_id;
         Zpool::insert_resource(
             zpool_id,
@@ -117,13 +116,9 @@ impl DataStore {
                 type_name: ResourceType::Zpool,
                 lookup_type: LookupType::ById(zpool_id),
             },
-            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
-                e,
-                ErrorHandler::Conflict(
-                    ResourceType::Dataset,
-                    &dataset_id.to_string(),
-                ),
-            ),
+            AsyncInsertError::DatabaseError(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
         })
     }
 
