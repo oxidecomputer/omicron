@@ -972,7 +972,7 @@ mod tests {
             // (https://github.com/oxidecomputer/omicron/issues/3580).
             write_and_wait(
                 &mut file,
-                format!("{}", &CLICKHOUSE_PORT[..30]),
+                (&CLICKHOUSE_PORT[..30]).to_string(),
                 writer_interval,
             )
             .await;
