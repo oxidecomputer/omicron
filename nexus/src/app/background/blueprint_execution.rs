@@ -20,6 +20,7 @@ pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     nexus_label: String,
+    tx: watch::Sender<usize>,
 }
 
 impl BlueprintExecutor {
@@ -30,7 +31,12 @@ impl BlueprintExecutor {
         >,
         nexus_label: String,
     ) -> BlueprintExecutor {
-        BlueprintExecutor { datastore, rx_blueprint, nexus_label }
+        let (tx, _) = watch::channel(0);
+        BlueprintExecutor { datastore, rx_blueprint, nexus_label, tx }
+    }
+
+    pub fn watcher(&self) -> watch::Receiver<usize> {
+        self.tx.subscribe()
     }
 }
 
@@ -70,6 +76,9 @@ impl BackgroundTask for BlueprintExecutor {
                 &self.nexus_label,
             )
             .await;
+
+            // Trigger anybody waiting for this to finish.
+            self.tx.send_modify(|count| *count = *count + 1);
 
             // Return the result as a `serde_json::Value`
             match result {
