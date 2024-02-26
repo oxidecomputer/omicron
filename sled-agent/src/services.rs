@@ -1338,6 +1338,7 @@ impl ServiceManager {
         needed
     }
 
+    // TODO: Set up a new service for this
     async fn configure_dns_client(
         &self,
         running_zone: &RunningZone,
@@ -1941,7 +1942,8 @@ impl ServiceManager {
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::BoundaryNtp { .. },
+                        zone_type:
+                            OmicronZoneType::BoundaryNtp { ntp_servers, .. },
                         underlay_address,
                         ..
                     },
@@ -1950,7 +1952,8 @@ impl ServiceManager {
             | ZoneArgs::Omicron(OmicronZoneConfigLocal {
                 zone:
                     OmicronZoneConfig {
-                        zone_type: OmicronZoneType::InternalNtp { .. },
+                        zone_type:
+                            OmicronZoneType::InternalNtp { ntp_servers, .. },
                         underlay_address,
                         ..
                     },
@@ -1975,11 +1978,28 @@ impl ServiceManager {
                 let opte_interface_setup =
                     Self::opte_interface_set_up_install(&installed_zone)?;
 
+                let rack_net =
+                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
+                        .net()
+                        .to_string();
+
+                // It's safe to unwrap here as we already know it's one of InternalNTP or BoundaryNtp.
+                let is_boundary = matches!(
+                    request.omicron_type().unwrap(),
+                    OmicronZoneType::BoundaryNtp { .. }
+                )
+                .to_string();
+
                 let ntp_config = PropertyGroupBuilder::new("config")
-                    .add_property("file", "astring", "todo!()")
-                    .add_property("server", "astring", "todo!()")
-                    .add_property("allow", "astring", "todo!()")
-                    .add_property("boundary", "boolean", "todo!()");
+                    .add_property("allow", "astring", &rack_net)
+                    .add_property("boundary", "boolean", &is_boundary);
+
+                for server in ntp_servers {
+                    ntp_config
+                        .clone()
+                        .add_property("server", "astring", server);
+                }
+
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
                     .add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1997,8 +2017,16 @@ impl ServiceManager {
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| {
-                        Error::io("Failed to setup External DNS profile", err)
+                        Error::io("Failed to setup NTP profile", err)
                     })?;
+
+                // TODO: set up a service for this
+                // self.configure_dns_client(
+                //                            &running_zone,
+                //                            &dns_servers,
+                //                            &domain,
+                //                        )
+                //                        .await?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
             _ => {}
@@ -2316,74 +2344,76 @@ impl ServiceManager {
                         smfh.refresh()?;
                     }
                     // TODO: Remove this section once implemented
-                    OmicronZoneType::BoundaryNtp {
-                        ntp_servers,
-                        dns_servers,
-                        domain,
-                        ..
-                    }
-                    | OmicronZoneType::InternalNtp {
-                        ntp_servers,
-                        dns_servers,
-                        domain,
-                        ..
-                    } => {
-                        let boundary = matches!(
-                            &zone_config.zone.zone_type,
-                            OmicronZoneType::BoundaryNtp { .. }
-                        );
-                        info!(
-                            self.inner.log,
-                            "Set up NTP service boundary={}, Servers={:?}",
-                            boundary,
-                            ntp_servers
-                        );
-
-                        let sled_info =
-                            if let Some(info) = self.inner.sled_info.get() {
-                                info
-                            } else {
-                                return Err(Error::SledAgentNotReady);
-                            };
-
-                        // TODO: Left off here
-                        let rack_net = Ipv6Subnet::<RACK_PREFIX>::new(
-                            sled_info.underlay_address,
-                        )
-                        .net();
-
-                        smfh.setprop("config/allow", &format!("{}", rack_net))?;
-                        smfh.setprop(
-                            "config/boundary",
-                            if boundary { "true" } else { "false" },
-                        )?;
-
-                        if boundary {
-                            // Configure OPTE port for boundary NTP
-                            running_zone
-                                .ensure_address_for_port("public", 0)
-                                .await?;
-                        }
-
-                        smfh.delpropvalue("config/server", "*")?;
-                        for server in ntp_servers {
-                            smfh.addpropvalue("config/server", server)?;
-                        }
-                        self.configure_dns_client(
-                            &running_zone,
-                            &dns_servers,
-                            &domain,
-                        )
-                        .await?;
-
-                        smfh.refresh()?;
-                    }
-                    OmicronZoneType::Clickhouse { .. }
+                    //                    OmicronZoneType::BoundaryNtp {
+                    //                        ntp_servers,
+                    //                        dns_servers,
+                    //                        domain,
+                    //                        ..
+                    //                    }
+                    //                    | OmicronZoneType::InternalNtp {
+                    //                        ntp_servers,
+                    //                        dns_servers,
+                    //                        domain,
+                    //                        ..
+                    //                    } => {
+                    //                        let boundary = matches!(
+                    //                            &zone_config.zone.zone_type,
+                    //                            OmicronZoneType::BoundaryNtp { .. }
+                    //                        );
+                    //                        info!(
+                    //                            self.inner.log,
+                    //                            "Set up NTP service boundary={}, Servers={:?}",
+                    //                            boundary,
+                    //                            ntp_servers
+                    //                        );
+                    //
+                    //                        let sled_info =
+                    //                            if let Some(info) = self.inner.sled_info.get() {
+                    //                                info
+                    //                            } else {
+                    //                                return Err(Error::SledAgentNotReady);
+                    //                            };
+                    //
+                    //                        // TODO: Left off here
+                    //                        let rack_net = Ipv6Subnet::<RACK_PREFIX>::new(
+                    //                            sled_info.underlay_address,
+                    //                        )
+                    //                        .net();
+                    //
+                    //                        smfh.setprop("config/allow", &format!("{}", rack_net))?;
+                    //                        smfh.setprop(
+                    //                            "config/boundary",
+                    //                            if boundary { "true" } else { "false" },
+                    //                        )?;
+                    //
+                    //                        if boundary {
+                    //                            // Configure OPTE port for boundary NTP
+                    //                            running_zone
+                    //                                .ensure_address_for_port("public", 0)
+                    //                                .await?;
+                    //                        }
+                    //
+                    //                        smfh.delpropvalue("config/server", "*")?;
+                    //                        for server in ntp_servers {
+                    //                            smfh.addpropvalue("config/server", server)?;
+                    //                        }
+                    //                        self.configure_dns_client(
+                    //                            &running_zone,
+                    //                            &dns_servers,
+                    //                            &domain,
+                    //                        )
+                    //                        .await?;
+                    //
+                    //                        smfh.refresh()?;
+                    //                    }
+                    OmicronZoneType::BoundaryNtp { .. }
+                    | OmicronZoneType::Clickhouse { .. }
                     | OmicronZoneType::ClickhouseKeeper { .. }
                     | OmicronZoneType::CockroachDb { .. }
                     | OmicronZoneType::Crucible { .. }
                     | OmicronZoneType::CruciblePantry { .. }
                     | OmicronZoneType::ExternalDns { .. }
+                    | OmicronZoneType::InternalNtp { .. }
                     | OmicronZoneType::Oximeter { .. } => {
                         panic!(
                             "{} is a service which exists as part of a \
