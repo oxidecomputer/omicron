@@ -33,6 +33,7 @@ use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, SledInstanceState, VmmRuntimeState,
 };
@@ -49,7 +50,7 @@ use slog::Logger;
 use std::net::IpAddr;
 use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use uuid::Uuid;
 
 // The depth of the request queue for the instance.
@@ -125,6 +126,9 @@ pub enum Error {
 
     #[error("Instance dropped our request")]
     RequestDropped(#[from] oneshot::error::RecvError),
+
+    #[error("VMM reservoir watch dropped")]
+    VmmReservoirWatchDropped(#[from] watch::error::RecvError),
 }
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
@@ -354,6 +358,10 @@ struct InstanceRunner {
 
     // Object representing membership in the "instance manager".
     instance_ticket: InstanceTicket,
+
+    // Used to ensure the reservoir is allocated with enough capacity
+    // for starting an instance.
+    vmm_reservoir_watch: watch::Receiver<Option<ByteCount>>,
 }
 
 impl InstanceRunner {
@@ -948,6 +956,7 @@ impl Instance {
             storage,
             zone_bundler,
             zone_builder_factory,
+            vmm_reservoir_watch,
         } = services;
 
         let mut dhcp_config = DhcpCfg {
@@ -1028,6 +1037,7 @@ impl Instance {
             zone_builder_factory,
             zone_bundler,
             instance_ticket: ticket,
+            vmm_reservoir_watch,
         };
 
         let runner_handle =
@@ -1179,6 +1189,20 @@ impl InstanceRunner {
         &mut self,
         migration_params: Option<InstanceMigrationTargetParams>,
     ) -> Result<(), Error> {
+        // Wait for enough allocated reservoir space for at least this VM.
+        let mem_needed = self.properties.memory;
+        let val_ref = self
+            .vmm_reservoir_watch
+            .wait_for(|val| {
+                val.map_or(false, |size| {
+                    size.to_whole_mebibytes() >= mem_needed
+                })
+            })
+            .await?;
+        // Drop the ref so we don't hold the lock on the watch and block
+        // the producer.
+        drop(val_ref);
+
         if let Some(running_state) = self.running_state.as_ref() {
             info!(
                 &self.log,
