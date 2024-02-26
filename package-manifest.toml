@@ -273,6 +273,18 @@ output.type = "zone"
 [package.ntp]
 service_name = "ntp"
 only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [
+  "ntp-svc.tar.gz",
+  "opte-interface-setup.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
+output.type = "zone"
+
+[package.ntp-svc]
+service_name = "ntp-svc"
+only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
 	{ from = "smf/ntp/manifest", to = "/var/svc/manifest/site/ntp" },

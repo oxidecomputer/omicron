@@ -1162,7 +1162,8 @@ impl ServiceManager {
             zone_args.omicron_type(),
             Some(OmicronZoneType::ExternalDns { .. })
                 | Some(OmicronZoneType::Nexus { .. })
-                | Some(OmicronZoneType::BoundaryNtp { .. })
+                | Some(OmicronZoneType::BoundaryNtp { .. }) // TODO: Add if necessary
+                                                            // | Some(OmicronZoneType::InternalNtp { .. })
         ) {
             return Ok(vec![]);
         }
@@ -1937,6 +1938,69 @@ impl ServiceManager {
                     })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type: OmicronZoneType::BoundaryNtp { .. },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            })
+            | ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type: OmicronZoneType::InternalNtp { .. },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let static_addr = underlay_address.to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    &static_addr.clone(),
+                )?;
+
+                // Boundary NTP requires to be reachable externally but internal NTP does not
+                // TODO: Currently this is a service that the NTP service depends on,
+                // but it shouldn't be if this is an internal NTP zone. Figure out how to
+                // handle this in a better way.
+                let opte_interface_setup =
+                    Self::opte_interface_set_up_install(&installed_zone)?;
+
+                let ntp_config = PropertyGroupBuilder::new("config")
+                    .add_property("file", "astring", "todo!()")
+                    .add_property("server", "astring", "todo!()")
+                    .add_property("allow", "astring", "todo!()")
+                    .add_property("boundary", "boolean", "todo!()");
+                let ntp_service = ServiceBuilder::new("oxide/ntp")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(ntp_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    // TODO: perhaps only add the service if it's a boundary ntp?
+                    // But then I can't make the service depend on it (≖_≖ )
+                    .add_service(opte_interface_setup)
+                    .add_service(disabled_ssh_service)
+                    .add_service(ntp_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup External DNS profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
             _ => {}
         }
 
@@ -2251,6 +2315,7 @@ impl ServiceManager {
                         // service is enabled.
                         smfh.refresh()?;
                     }
+                    // TODO: Remove this section once implemented
                     OmicronZoneType::BoundaryNtp {
                         ntp_servers,
                         dns_servers,
@@ -2281,6 +2346,7 @@ impl ServiceManager {
                                 return Err(Error::SledAgentNotReady);
                             };
 
+                        // TODO: Left off here
                         let rack_net = Ipv6Subnet::<RACK_PREFIX>::new(
                             sled_info.underlay_address,
                         )
