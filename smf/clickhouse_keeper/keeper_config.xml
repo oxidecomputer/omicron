@@ -9,14 +9,13 @@
     </logger>
 
     <!-- To allow all use :: -->
-    <listen_host from_env="CH_LISTEN_ADDR"/> 
+    <listen_host from_env="CH_LISTEN_ADDR"/>
     <path replace="true" from_env="CH_DATASTORE"/>
 
     <keeper_server>
         <tcp_port from_env="CH_LISTEN_PORT"/>
         <server_id from_env="CH_KEEPER_ID_CURRENT"/>
         <log_storage_path from_env="CH_LOG_STORAGE_PATH"/>
-        <storage_path from_env="CH_STORAGE_PATH"/>
         <snapshot_storage_path from_env="CH_SNAPSHOT_STORAGE_PATH"/>
         <coordination_settings>
             <operation_timeout_ms>10000</operation_timeout_ms>
