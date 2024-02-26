@@ -157,9 +157,11 @@ impl ClickHouseInstance {
             .env("CH_REPLICA_NUMBER", r_number)
             .env("CH_REPLICA_HOST_01", "::1")
             .env("CH_REPLICA_HOST_02", "::1")
-            // ClickHouse servers have a small quirk, where when setting the keeper hosts as IPv6 localhost
-            // addresses in the replica configuration file, they must be wrapped in square brackets
-            // Otherwise, when running any query, a "Service not found" error appears.
+            // ClickHouse servers have a small quirk, where when setting the
+            // keeper hosts as IPv6 localhost addresses in the replica
+            // configuration file, they must be wrapped in square brackets
+            // Otherwise, when running any query, a "Service not found" error
+            // appears.
             .env("CH_KEEPER_HOST_01", "[::1]")
             .env("CH_KEEPER_HOST_02", "[::1]")
             .env("CH_KEEPER_HOST_03", "[::1]")
@@ -192,9 +194,9 @@ impl ClickHouseInstance {
         k_id: u16,
         config_path: PathBuf,
     ) -> Result<Self, anyhow::Error> {
-        // We assume that only 3 keepers will be run, and the ID of the keeper can only
-        // be one of "1", "2" or "3". This is to avoid having to pass the IDs of the
-        // other keepers as part of the function's parameters.
+        // We assume that only 3 keepers will be run, and the ID of the keeper
+        // can only be one of "1", "2" or "3". This is to avoid having to pass
+        // the IDs of the other keepers as part of the function's parameters.
         if ![1, 2, 3].contains(&k_id) {
             return Err(ClickHouseError::InvalidKeeperId.into());
         }
@@ -648,8 +650,9 @@ pub async fn wait_for_port(
     Ok(p)
 }
 
-// Parse the ClickHouse log file at the given path, looking for a line reporting the port number of
-// the HTTP server. This is only used if the port is chosen by the OS, not the caller.
+// Parse the ClickHouse log file at the given path, looking for a line
+// reporting the port number of the HTTP server. This is only used if the port
+// is chosen by the OS, not the caller.
 async fn discover_local_listening_port(
     path: &Utf8Path,
     timeout: Duration,
@@ -662,8 +665,8 @@ async fn discover_local_listening_port(
 
 // Parse the clickhouse log for a port number.
 //
-// NOTE: This function loops forever until the expected line is found. It should be run under a
-// timeout, or some other mechanism for cancelling it.
+// NOTE: This function loops forever until the expected line is found. It
+// should be run under a timeout, or some other mechanism for cancelling it.
 async fn find_clickhouse_port_in_log(
     path: &Utf8Path,
 ) -> Result<u16, ClickHouseError> {
@@ -735,8 +738,8 @@ pub async fn wait_for_ready(
     Ok(p)
 }
 
-// Parse the ClickHouse log file at the given path, looking for a line reporting that the server
-// is ready for connections.
+// Parse the ClickHouse log file at the given path, looking for a line
+// reporting that the server is ready for connections.
 async fn discover_ready(
     path: &Utf8Path,
     timeout: Duration,
@@ -749,8 +752,8 @@ async fn discover_ready(
 
 // Parse the clickhouse log to know if the server is ready for connections.
 //
-// NOTE: This function loops forever until the expected line is found. It should be run under a
-// timeout, or some other mechanism for cancelling it.
+// NOTE: This function loops forever until the expected line is found. It
+// should be run under a timeout, or some other mechanism for cancelling it.
 async fn clickhouse_ready_from_log(
     path: &Utf8Path,
 ) -> Result<(), ClickHouseError> {
@@ -863,10 +866,11 @@ mod tests {
 
     // A regression test for #131.
     //
-    // The function `discover_local_listening_port` initially read from the log file until EOF, but
-    // there's no guarantee that ClickHouse has written the port we're searching for before the
-    // reader consumes the whole file. This test confirms that the file is read until the line is
-    // found, ignoring EOF, at least until the timeout is hit.
+    // The function `discover_local_listening_port` initially read from the log
+    // file until EOF, but there's no guarantee that ClickHouse has written the
+    // port we're searching for before the reader consumes the whole file. This
+    // test confirms that the file is read until the line is found, ignoring
+    // EOF, at least until the timeout is hit.
     #[tokio::test]
     async fn test_discover_local_listening_port_slow_write() {
         // In this case the writer is slightly "slower" than the reader.
@@ -887,9 +891,11 @@ mod tests {
         assert!(read_log_file(reader_timeout, writer_interval).await.is_err());
     }
 
-    // Implementation of the above tests, simulating simultaneous reading/writing of the log file
+    // Implementation of the above tests, simulating simultaneous
+    // reading/writing of the log file
     //
-    // This uses Tokio's test utilities to manage time, rather than relying on timeouts.
+    // This uses Tokio's test utilities to manage time, rather than relying on
+    // timeouts.
     async fn read_log_file(
         reader_timeout: Duration,
         writer_interval: Duration,
@@ -911,12 +917,14 @@ mod tests {
 
         // Start a task that slowly writes lines to the log file.
         //
-        // NOTE: This looks overly complicated, and it is. We have to wrap this in a mutex because
-        // both this function, and the writer task we're spawning, need access to the file. They
-        // may complete in any order, and so it's not possible to give one of them ownership over
-        // the `NamedTempFile`. If the owning task completes, that may delete the file before the
-        // other task accesses it. So we need interior mutability (because one of the references is
-        // mutable for writing), and _this_ scope must own it.
+        // NOTE: This looks overly complicated, and it is. We have to wrap this
+        // in a mutex because both this function, and the writer task we're
+        // spawning, need access to the file. They may complete in any order,
+        // and so it's not possible to give one of them ownership over the
+        // `NamedTempFile`. If the owning task completes, that may delete the
+        // file before the other task accesses it. So we need interior
+        // mutability (because one of the references is mutable for writing),
+        // and _this_ scope must own it.
         let file = Arc::new(Mutex::new(NamedUtf8TempFile::new()?));
         let path = file.lock().await.path().to_path_buf();
         let writer_file = file.clone();
@@ -957,8 +965,9 @@ mod tests {
 
         // "Run" the test.
         //
-        // Note that the futures for the reader/writer tasks must be pinned to the stack, so that
-        // they may be polled on multiple passes through the select loop without consuming them.
+        // Note that the futures for the reader/writer tasks must be pinned to
+        // the stack, so that they may be polled on multiple passes through the
+        // select loop without consuming them.
         tokio::pin!(writer_task);
         tokio::pin!(reader_task);
         let mut poll_writer = true;
