@@ -2574,7 +2574,7 @@ async fn test_upstairs_live_repair_notify_idempotent(
     let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
 
     // Notify start
-    let notify_url = format!("/upstairs/{upstairs_id}/live_repair_start");
+    let notify_url = format!("/upstairs/{upstairs_id}/live-repair-start");
 
     int_client
         .make_request(
@@ -2615,7 +2615,7 @@ async fn test_upstairs_live_repair_notify_idempotent(
         .unwrap();
 
     // Notify finish
-    let notify_url = format!("/upstairs/{upstairs_id}/live_repair_finish");
+    let notify_url = format!("/upstairs/{upstairs_id}/live-repair-finish");
 
     int_client
         .make_request(
@@ -2671,7 +2671,7 @@ async fn test_upstairs_live_repair_notify_different_finish_status(
     let repair_id: TypedUuid<LiveRepairKind> = TypedUuid::new_v4();
     let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
 
-    let notify_url = format!("/upstairs/{upstairs_id}/live_repair_finish");
+    let notify_url = format!("/upstairs/{upstairs_id}/live-repair-finish");
 
     int_client
         .make_request(
@@ -2728,9 +2728,9 @@ async fn test_upstairs_live_repair_same_upstairs_retry(
 
     // Simulate one failed repair
 
-    let notify_start_url = format!("/upstairs/{upstairs_id}/live_repair_start");
+    let notify_start_url = format!("/upstairs/{upstairs_id}/live-repair-start");
     let notify_finish_url =
-        format!("/upstairs/{upstairs_id}/live_repair_finish");
+        format!("/upstairs/{upstairs_id}/live-repair-finish");
 
     int_client
         .make_request(
@@ -2829,9 +2829,9 @@ async fn test_upstairs_live_repair_different_upstairs_retry(
 
     // Simulate one failed repair by one Upstairs
 
-    let notify_start_url = format!("/upstairs/{upstairs_id}/live_repair_start");
+    let notify_start_url = format!("/upstairs/{upstairs_id}/live-repair-start");
     let notify_finish_url =
-        format!("/upstairs/{upstairs_id}/live_repair_finish");
+        format!("/upstairs/{upstairs_id}/live-repair-finish");
 
     int_client
         .make_request(
@@ -2932,9 +2932,9 @@ async fn test_upstairs_live_repair_different_upstairs_retry_interrupted(
     // Simulate one failed repair by one Upstairs, which was interrupted (which
     // leads to no finish message).
 
-    let notify_start_url = format!("/upstairs/{upstairs_id}/live_repair_start");
+    let notify_start_url = format!("/upstairs/{upstairs_id}/live-repair-start");
     let notify_finish_url =
-        format!("/upstairs/{upstairs_id}/live_repair_finish");
+        format!("/upstairs/{upstairs_id}/live-repair-finish");
 
     int_client
         .make_request(
