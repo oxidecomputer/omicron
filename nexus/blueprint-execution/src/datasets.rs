@@ -134,3 +134,178 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
 
     Ok(num_inserted)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nexus_db_model::SledBaseboard;
+    use nexus_db_model::SledSystemHardware;
+    use nexus_db_model::SledUpdate;
+    use nexus_db_model::Zpool;
+    use nexus_test_utils_macros::nexus_test;
+    use sled_agent_client::types::OmicronZoneDataset;
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
+
+    #[nexus_test]
+    async fn test_ensure_crucible_dataset_records_exist(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        // Set up.
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        let opctx = &opctx;
+
+        // Use the standard representative inventory collection.
+        let representative = nexus_inventory::examples::representative();
+        let collection = representative.builder.build();
+
+        // Record the sleds and zpools contained in this collection.
+        let rack_id = Uuid::new_v4();
+        for (&sled_id, config) in &collection.omicron_zones {
+            let sled = SledUpdate::new(
+                sled_id,
+                "[::1]:0".parse().unwrap(),
+                SledBaseboard {
+                    serial_number: format!("test-{sled_id}"),
+                    part_number: "test-sled".to_string(),
+                    revision: 0,
+                },
+                SledSystemHardware {
+                    is_scrimlet: false,
+                    usable_hardware_threads: 128,
+                    usable_physical_ram: (64 << 30).try_into().unwrap(),
+                    reservoir_size: (16 << 30).try_into().unwrap(),
+                },
+                rack_id,
+            );
+            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
+
+            for zone in &config.zones.zones {
+                let OmicronZoneType::Crucible { dataset, .. } = &zone.zone_type
+                else {
+                    continue;
+                };
+                let zpool_name: ZpoolName =
+                    dataset.pool_name.parse().expect("invalid zpool name");
+                let zpool = Zpool::new(
+                    zpool_name.id(),
+                    sled_id,
+                    Uuid::new_v4(), // physical_disk_id
+                    (1 << 30).try_into().unwrap(), // total_size
+                );
+                datastore
+                    .zpool_upsert(zpool)
+                    .await
+                    .expect("failed to upsert zpool");
+            }
+        }
+
+        // How many crucible zones are there?
+        let ncrucible_zones = collection
+            .all_omicron_zones()
+            .filter(|z| matches!(z.zone_type, OmicronZoneType::Crucible { .. }))
+            .count();
+
+        // Prior to ensuring datasets exist, there should be none.
+        assert_eq!(
+            datastore
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+        let ndatasets_inserted = ensure_crucible_dataset_records_exist(
+            opctx,
+            datastore,
+            collection.all_omicron_zones(),
+        )
+        .await
+        .expect("failed to ensure crucible datasets");
+
+        // We should have inserted a dataset for each crucible zone.
+        assert_eq!(ncrucible_zones, ndatasets_inserted);
+        assert_eq!(
+            datastore
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
+                .await
+                .unwrap()
+                .len(),
+            ncrucible_zones,
+        );
+
+        // Ensuring the same crucible datasets again should insert no new
+        // records.
+        let ndatasets_inserted = ensure_crucible_dataset_records_exist(
+            opctx,
+            datastore,
+            collection.all_omicron_zones(),
+        )
+        .await
+        .expect("failed to ensure crucible datasets");
+        assert_eq!(0, ndatasets_inserted);
+        assert_eq!(
+            datastore
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
+                .await
+                .unwrap()
+                .len(),
+            ncrucible_zones,
+        );
+
+        // Create another zpool on one of the sleds, so we can add a new
+        // crucible zone that uses it.
+        let new_zpool_id = Uuid::new_v4();
+        for &sled_id in collection.omicron_zones.keys().take(1) {
+            let zpool = Zpool::new(
+                new_zpool_id,
+                sled_id,
+                Uuid::new_v4(),                // physical_disk_id
+                (1 << 30).try_into().unwrap(), // total_size
+            );
+            datastore
+                .zpool_upsert(zpool)
+                .await
+                .expect("failed to upsert zpool");
+        }
+
+        // Call `ensure_crucible_dataset_records_exist` again, adding a new
+        // crucible zone. It should insert only this new zone.
+        let new_zone = OmicronZoneConfig {
+            id: Uuid::new_v4(),
+            underlay_address: "::1".parse().unwrap(),
+            zone_type: OmicronZoneType::Crucible {
+                address: "[::1]:0".to_string(),
+                dataset: OmicronZoneDataset {
+                    pool_name: ZpoolName::new_external(new_zpool_id)
+                        .to_string()
+                        .parse()
+                        .unwrap(),
+                },
+            },
+        };
+        let ndatasets_inserted = ensure_crucible_dataset_records_exist(
+            opctx,
+            datastore,
+            collection.all_omicron_zones().chain(std::iter::once(&new_zone)),
+        )
+        .await
+        .expect("failed to ensure crucible datasets");
+        assert_eq!(ndatasets_inserted, 1);
+        assert_eq!(
+            datastore
+                .dataset_list_all_batched(opctx, Some(DatasetKind::Crucible))
+                .await
+                .unwrap()
+                .len(),
+            ncrucible_zones + 1,
+        );
+    }
+}
