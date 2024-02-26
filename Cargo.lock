@@ -4406,6 +4406,7 @@ dependencies = [
  "pem",
  "petgraph",
  "pq-sys",
+ "predicates",
  "pretty_assertions",
  "rand 0.8.5",
  "rcgen",

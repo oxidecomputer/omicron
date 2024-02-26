@@ -53,7 +53,8 @@ use illumos_utils::dladm::{
 use illumos_utils::link::{Link, VnicAllocator};
 use illumos_utils::opte::{DhcpCfg, Port, PortManager, PortTicket};
 use illumos_utils::running_zone::{
-    InstalledZone, RunCommandError, RunningZone, ZoneBuilderFactory,
+    EnsureAddressError, InstalledZone, RunCommandError, RunningZone,
+    ZoneBuilderFactory,
 };
 use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
@@ -68,6 +69,8 @@ use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
+use omicron_common::address::DNS_HTTP_PORT;
+use omicron_common::address::DNS_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -1444,6 +1447,32 @@ impl ServiceManager {
             .add_instance(ServiceInstanceBuilder::new("default")))
     }
 
+    fn opte_interface_set_up_install(
+        zone: &InstalledZone,
+    ) -> Result<ServiceBuilder, Error> {
+        let port_idx = 0;
+        let port = zone.opte_ports().nth(port_idx).ok_or_else(|| {
+            Error::ZoneEnsureAddress(EnsureAddressError::MissingOptePort {
+                zone: String::from(zone.name()),
+                port_idx,
+            })
+        })?;
+
+        let opte_interface = port.vnic_name();
+        let opte_gateway = port.gateway().ip().to_string();
+        let opte_ip = port.ip().to_string();
+
+        let mut config_builder = PropertyGroupBuilder::new("config");
+        config_builder = config_builder
+            .add_property("interface", "astring", opte_interface)
+            .add_property("gateway", "astring", &opte_gateway)
+            .add_property("ip", "astring", &opte_ip);
+
+        Ok(ServiceBuilder::new("oxide/opte-interface-setup")
+            .add_property_group(config_builder)
+            .add_instance(ServiceInstanceBuilder::new("default")))
+    }
+
     async fn initialize_zone(
         &self,
         request: ZoneArgs<'_>,
@@ -1841,6 +1870,73 @@ impl ServiceManager {
                     })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type: OmicronZoneType::ExternalDns { .. },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let static_addr = underlay_address.to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    info,
+                    &installed_zone,
+                    &static_addr.clone(),
+                )?;
+
+                // Like Nexus, we need to be reachable externally via
+                // `dns_address` but we don't listen on that address
+                // directly but instead on a VPC private IP. OPTE will
+                // en/decapsulate as appropriate.
+                let opte_interface_setup =
+                    Self::opte_interface_set_up_install(&installed_zone)?;
+
+                let port_idx = 0;
+                let port = installed_zone
+                    .opte_ports()
+                    .nth(port_idx)
+                    .ok_or_else(|| {
+                        Error::ZoneEnsureAddress(
+                            EnsureAddressError::MissingOptePort {
+                                zone: String::from(installed_zone.name()),
+                                port_idx,
+                            },
+                        )
+                    })?;
+                let opte_ip = port.ip();
+
+                let http_addr = format!("[{}]:{}", static_addr, DNS_HTTP_PORT);
+                let dns_addr = format!("{}:{}", opte_ip, DNS_PORT);
+
+                let external_dns_config = PropertyGroupBuilder::new("config")
+                    .add_property("http_address", "astring", &http_addr)
+                    .add_property("dns_address", "astring", &dns_addr);
+                let external_dns_service =
+                    ServiceBuilder::new("oxide/external_dns").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(external_dns_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(opte_interface_setup)
+                    .add_service(disabled_ssh_service)
+                    .add_service(external_dns_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup External DNS profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
             _ => {}
         }
 
@@ -2081,47 +2177,6 @@ impl ServiceManager {
                             .await
                             .map_err(|err| Error::io_path(&config_path, err))?;
                     }
-
-                    OmicronZoneType::ExternalDns {
-                        http_address,
-                        dns_address,
-                        ..
-                    } => {
-                        info!(
-                            self.inner.log,
-                            "Setting up external-dns service"
-                        );
-
-                        // Like Nexus, we need to be reachable externally via
-                        // `dns_address` but we don't listen on that address
-                        // directly but instead on a VPC private IP. OPTE will
-                        // en/decapsulate as appropriate.
-                        let port_ip = running_zone
-                            .ensure_address_for_port("public", 0)
-                            .await?
-                            .ip();
-                        let dns_address =
-                            SocketAddr::new(port_ip, dns_address.port());
-
-                        smfh.setprop(
-                            "config/http_address",
-                            format!(
-                                "[{}]:{}",
-                                http_address.ip(),
-                                http_address.port(),
-                            ),
-                        )?;
-                        smfh.setprop(
-                            "config/dns_address",
-                            dns_address.to_string(),
-                        )?;
-
-                        // Refresh the manifest with the new properties we set,
-                        // so they become "effective" properties when the
-                        // service is enabled.
-                        smfh.refresh()?;
-                    }
-
                     OmicronZoneType::InternalDns {
                         http_address,
                         dns_address,
@@ -2262,6 +2317,7 @@ impl ServiceManager {
                     | OmicronZoneType::CockroachDb { .. }
                     | OmicronZoneType::Crucible { .. }
                     | OmicronZoneType::CruciblePantry { .. }
+                    | OmicronZoneType::ExternalDns { .. }
                     | OmicronZoneType::Oximeter { .. } => {
                         panic!(
                             "{} is a service which exists as part of a \

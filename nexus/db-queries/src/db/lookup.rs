@@ -950,7 +950,8 @@ mod test {
         let logctx = dev::test_setup_log("test_lookup");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
         let project_name: Name = Name("my-project".parse().unwrap());

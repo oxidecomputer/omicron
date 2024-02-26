@@ -328,7 +328,8 @@ mod test {
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::ZpoolName;
-    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
     use nexus_types::internal_api::params::DnsRecord;
@@ -409,7 +410,8 @@ mod test {
             .zip(possible_sled_subnets)
             .map(|(sled_id, subnet)| {
                 let sled_resources = SledResources {
-                    provision_state: SledProvisionState::Provisionable,
+                    policy: SledPolicy::provisionable(),
+                    state: SledState::Active,
                     zpools: BTreeSet::from([ZpoolName::from_str(&format!(
                         "oxp_{}",
                         Uuid::new_v4()

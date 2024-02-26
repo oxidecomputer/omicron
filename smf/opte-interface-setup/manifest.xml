@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
 
-<service_bundle type='manifest' name='zone-network-setup'>
+<service_bundle type='manifest' name='opte-interface-setup'>
 
-<service name='oxide/zone-network-setup' type='service' version='1'>
+<service name='oxide/opte-interface-setup' type='service' version='1'>
   <create_default_instance enabled='true' />
 
   <!-- Run after the operating system's svc:/network/physical service is done. -->
@@ -18,7 +18,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='/opt/oxide/zone-network-cli/bin/zone-networking set-up -d %{config/datalink} -s %{config/static_addr} -g %{config/gateway}'
+    exec='/opt/oxide/zone-network-cli/bin/zone-networking opte-interface-set-up -i %{config/interface} -g %{config/gateway} -p %{config/ip}'
     timeout_seconds='0' />
   
   <property_group name='startd' type='framework'>
@@ -26,19 +26,19 @@
   </property_group>
 
   <property_group name='config' type='application'>
-    <propval name='datalink' type='astring' value='unknown' />
     <propval name='gateway' type='astring' value='unknown' />
-    <propval name='static_addr' type='astring' value='unknown' />
+    <propval name='interface' type='astring' value='unknown' />
+    <propval name='ip' type='astring' value='unknown' />
   </property_group>
 
   <stability value='Unstable' />
 
   <template>
     <common_name>
-      <loctext xml:lang='C'>Oxide Zone Network Setup</loctext>
+      <loctext xml:lang='C'>Oxide OPTE interface set up</loctext>
     </common_name>
     <description>
-      <loctext xml:lang='C'>Configures networking for control plane zones</loctext>
+      <loctext xml:lang='C'>Sets up an OPTE interface for control plane zones that require it</loctext>
     </description>
   </template>
 </service>

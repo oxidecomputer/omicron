@@ -19,7 +19,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::net::IpAddr;
+use strum::{EnumIter, IntoEnumIterator};
 use uuid::Uuid;
 
 use super::params::PhysicalDiskKind;
@@ -418,30 +420,212 @@ pub struct Sled {
     pub baseboard: Baseboard,
     /// The rack to which this Sled is currently attached
     pub rack_id: Uuid,
-    /// The provision state of the sled.
-    pub provision_state: SledProvisionState,
+    /// The operator-defined policy of a sled.
+    pub policy: SledPolicy,
+    /// The current state Nexus believes the sled to be in.
+    pub state: SledState,
     /// The number of hardware threads which can execute on this sled
     pub usable_hardware_threads: u32,
     /// Amount of RAM which may be used by the Sled's OS
     pub usable_physical_ram: ByteCount,
 }
 
-/// The provision state of a sled.
+/// The operator-defined provision policy of a sled.
 ///
 /// This controls whether new resources are going to be provisioned on this
 /// sled.
 #[derive(
-    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum SledProvisionState {
+pub enum SledProvisionPolicy {
     /// New resources will be provisioned on this sled.
     Provisionable,
 
-    /// New resources will not be provisioned on this sled. However, existing
-    /// resources will continue to be on this sled unless manually migrated
-    /// off.
+    /// New resources will not be provisioned on this sled. However, if the
+    /// sled is currently in service, existing resources will continue to be on
+    /// this sled unless manually migrated off.
     NonProvisionable,
+}
+
+impl SledProvisionPolicy {
+    /// Returns the opposite of the current provision state.
+    pub const fn invert(self) -> Self {
+        match self {
+            Self::Provisionable => Self::NonProvisionable,
+            Self::NonProvisionable => Self::Provisionable,
+        }
+    }
+}
+
+/// The operator-defined policy of a sled.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum SledPolicy {
+    /// The operator has indicated that the sled is in-service.
+    InService {
+        /// Determines whether new resources can be provisioned onto the sled.
+        provision_policy: SledProvisionPolicy,
+    },
+
+    /// The operator has indicated that the sled has been permanently removed
+    /// from service.
+    ///
+    /// This is a terminal state: once a particular sled ID is expunged, it
+    /// will never return to service. (The actual hardware may be reused, but
+    /// it will be treated as a brand-new sled.)
+    ///
+    /// An expunged sled is always non-provisionable.
+    Expunged,
+    // NOTE: if you add a new value here, be sure to add it to
+    // the `IntoEnumIterator` impl below!
+}
+
+// Can't automatically derive strum::EnumIter because that doesn't provide a
+// way to iterate over nested enums.
+impl IntoEnumIterator for SledPolicy {
+    type Iterator = std::array::IntoIter<Self, 3>;
+
+    fn iter() -> Self::Iterator {
+        [
+            Self::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
+            Self::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+            Self::Expunged,
+        ]
+        .into_iter()
+    }
+}
+
+impl SledPolicy {
+    /// Creates a new `SledPolicy` that is in-service and provisionable.
+    pub fn provisionable() -> Self {
+        Self::InService { provision_policy: SledProvisionPolicy::Provisionable }
+    }
+
+    /// Returns the list of all in-service policies.
+    pub fn all_in_service() -> &'static [Self] {
+        &[
+            Self::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
+            Self::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            },
+        ]
+    }
+
+    /// Returns true if the sled can have services provisioned on it.
+    pub fn is_provisionable(&self) -> bool {
+        match self {
+            Self::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            } => true,
+            Self::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            }
+            | Self::Expunged => false,
+        }
+    }
+
+    /// Returns the provision policy, if the sled is in service.
+    pub fn provision_policy(&self) -> Option<SledProvisionPolicy> {
+        match self {
+            Self::InService { provision_policy } => Some(*provision_policy),
+            Self::Expunged => None,
+        }
+    }
+
+    /// Returns true if the sled can be decommissioned in this state.
+    pub fn is_decommissionable(&self) -> bool {
+        // This should be kept in sync with decommissionable_states below.
+        match self {
+            Self::InService { .. } => false,
+            Self::Expunged => true,
+        }
+    }
+
+    /// Returns all the possible policies a sled can have for it to be
+    /// decommissioned.
+    pub fn all_decommissionable() -> &'static [Self] {
+        &[Self::Expunged]
+    }
+}
+
+impl fmt::Display for SledPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            } => write!(f, "in service"),
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            } => write!(f, "in service (not provisionable)"),
+            SledPolicy::Expunged => write!(f, "expunged"),
+        }
+    }
+}
+
+/// The current state of the sled, as determined by Nexus.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum SledState {
+    /// The sled is currently active, and has resources allocated on it.
+    Active,
+
+    /// The sled has been permanently removed from service.
+    ///
+    /// This is a terminal state: once a particular sled ID is decommissioned,
+    /// it will never return to service. (The actual hardware may be reused,
+    /// but it will be treated as a brand-new sled.)
+    Decommissioned,
+}
+
+impl SledState {
+    /// Returns true if the sled state makes it eligible for services that
+    /// aren't required to be on every sled.
+    ///
+    /// For example, NTP must exist on every sled, but Nexus does not have to.
+    pub fn is_eligible_for_discretionary_services(&self) -> bool {
+        // (Explicit match, so that this fails to compile if a new state is
+        // added.)
+        match self {
+            SledState::Active => true,
+            SledState::Decommissioned => false,
+        }
+    }
+}
+
+impl fmt::Display for SledState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SledState::Active => write!(f, "active"),
+            SledState::Decommissioned => write!(f, "decommissioned"),
+        }
+    }
 }
 
 /// An operator's view of an instance running on a given sled
