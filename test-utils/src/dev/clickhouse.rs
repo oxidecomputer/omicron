@@ -29,11 +29,11 @@ const CLICKHOUSE_TIMEOUT: Duration = Duration::from_secs(30);
 // Timeout used when starting a ClickHouse keeper subprocess.
 const CLICKHOUSE_KEEPER_TIMEOUT: Duration = Duration::from_secs(30);
 
-// The string to look for in a keeper log file that indiccates that the server
+// The string to look for in a keeper log file that indicates that the server
 // is ready.
 const KEEPER_READY: &'static str = "Server initialized, waiting for quorum";
 
-// The string to look for in a clickhouse log file that indiccates that the
+// The string to look for in a clickhouse log file that indicates that the
 // server is ready.
 const CLICKHOUSE_READY: &'static str =
     "<Information> Application: Ready for connections";
