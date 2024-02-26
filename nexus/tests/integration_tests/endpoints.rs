@@ -768,7 +768,7 @@ pub static DEMO_FLOAT_IP_CREATE: Lazy<params::FloatingIpCreate> =
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        address: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
+        ip: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
         pool: None,
     });
 

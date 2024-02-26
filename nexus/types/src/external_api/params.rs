@@ -883,7 +883,7 @@ pub struct FloatingIpCreate {
     /// An IP address to reserve for use as a floating IP. This field is
     /// optional: when not set, an address will be automatically chosen from
     /// `pool`. If set, then the IP must be available in the resolved `pool`.
-    pub address: Option<IpAddr>,
+    pub ip: Option<IpAddr>,
 
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.

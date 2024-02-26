@@ -11864,7 +11864,7 @@
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
         "properties": {
-          "address": {
+          "ip": {
             "nullable": true,
             "description": "An IP address to reserve for use as a floating IP. This field is optional: when not set, an address will be automatically chosen from `pool`. If set, then the IP must be available in the resolved `pool`.",
             "type": "string",
