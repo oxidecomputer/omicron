@@ -4598,6 +4598,7 @@ dependencies = [
  "dns-service-client",
  "futures",
  "gateway-client",
+ "humantime",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",

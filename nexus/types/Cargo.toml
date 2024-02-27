@@ -9,6 +9,7 @@ anyhow.workspace = true
 chrono.workspace = true
 base64.workspace = true
 futures.workspace = true
+humantime.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
 parse-display.workspace = true

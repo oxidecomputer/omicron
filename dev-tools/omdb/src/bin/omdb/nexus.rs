@@ -824,39 +824,7 @@ async fn cmd_nexus_blueprints_show(
         .blueprint_view(&args.blueprint_id)
         .await
         .with_context(|| format!("fetching blueprint {}", args.blueprint_id))?;
-    println!("blueprint  {}", blueprint.id);
-    println!(
-        "parent:    {}",
-        blueprint
-            .parent_blueprint_id
-            .map(|u| u.to_string())
-            .unwrap_or_else(|| String::from("<none>"))
-    );
-    println!(
-        "created by {}{}",
-        blueprint.creator,
-        if blueprint.creator.parse::<Uuid>().is_ok() {
-            " (likely a Nexus instance)"
-        } else {
-            ""
-        }
-    );
-    println!(
-        "created at {}",
-        humantime::format_rfc3339_millis(blueprint.time_created.into(),)
-    );
-    println!("comment: {}", blueprint.comment);
-    println!("zones:\n");
-    for (sled_id, sled_zones) in &blueprint.omicron_zones {
-        println!(
-            "  sled {}: Omicron zones at generation {}",
-            sled_id, sled_zones.generation
-        );
-        for z in &sled_zones.zones {
-            println!("    {} {}", z.id, z.zone_type.label());
-        }
-    }
-
+    println!("{:?}", blueprint);
     Ok(())
 }
 

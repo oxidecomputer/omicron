@@ -30,6 +30,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use uuid::Uuid;
 
 /// Fleet-wide deployment policy
@@ -118,7 +119,7 @@ pub struct SledResources {
 // zones deployed on each host and some supporting configuration (e.g., DNS).
 // This is aimed at supporting add/remove sleds.  The plan is to grow this to
 // include more of the system as we support more use cases.
-#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
@@ -206,6 +207,59 @@ impl Blueprint {
             after_zones: &self.omicron_zones,
             after_zones_in_service: &self.zones_in_service,
         }
+    }
+}
+
+impl fmt::Debug for Blueprint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "blueprint  {}", self.id)?;
+        writeln!(
+            f,
+            "parent:    {}",
+            self.parent_blueprint_id
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| String::from("<none>"))
+        )?;
+        writeln!(
+            f,
+            "created by {}{}",
+            self.creator,
+            if self.creator.parse::<Uuid>().is_ok() {
+                " (likely a Nexus instance)"
+            } else {
+                ""
+            }
+        )?;
+        writeln!(
+            f,
+            "created at {}",
+            humantime::format_rfc3339_millis(self.time_created.into(),)
+        )?;
+        writeln!(f, "internal DNS version: {}", self.internal_dns_version)?;
+        writeln!(f, "comment: {}", self.comment)?;
+        writeln!(f, "zones:\n")?;
+        for (sled_id, sled_zones) in &self.omicron_zones {
+            writeln!(
+                f,
+                "  sled {}: Omicron zones at generation {}",
+                sled_id, sled_zones.generation
+            )?;
+            for z in &sled_zones.zones {
+                writeln!(
+                    f,
+                    "    {} {} {}",
+                    z.id,
+                    if self.zones_in_service.contains(&z.id) {
+                        "in service    "
+                    } else {
+                        "not in service"
+                    },
+                    z.zone_type.label(),
+                )?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -477,12 +531,12 @@ impl<'a> OmicronZonesDiff<'a> {
 
     fn print_whole_sled(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
+        f: &mut fmt::Formatter<'_>,
         prefix: char,
         label: &str,
         bbsledzones: &OmicronZonesConfig,
         sled_id: Uuid,
-    ) -> std::fmt::Result {
+    ) -> fmt::Result {
         writeln!(f, "{} sled {} ({})", prefix, sled_id, label)?;
         writeln!(
             f,
@@ -506,8 +560,8 @@ impl<'a> OmicronZonesDiff<'a> {
 }
 
 /// Implements diff(1)-like output for diff'ing two blueprints
-impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<'a> fmt::Display for OmicronZonesDiff<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "diff {} {}", self.before_label, self.after_label)?;
         writeln!(f, "--- {}", self.before_label)?;
         writeln!(f, "+++ {}", self.after_label)?;

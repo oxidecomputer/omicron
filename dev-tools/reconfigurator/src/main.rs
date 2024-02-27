@@ -34,9 +34,7 @@ use uuid::Uuid;
 //   - only support loading *saved* stuff from existing systems (nope)
 // - flesh out:
 //   - "inventory show"
-//   - "blueprint show"
 //   - "inventory-diff-zones"
-//   - "blueprint-diff-zones"
 //   - "blueprint-diff-zones-from-inventory"
 // - after I've done that, I should be able to walk through a pretty nice demo
 //   of the form:
@@ -159,6 +157,19 @@ fn main() -> anyhow::Result<()> {
                 .arg(Arg::new("parent_blueprint_id").required(true))
                 .arg(Arg::new("collection_id").required(true)),
             cmd_blueprint_plan,
+        )
+        .with_command(
+            Command::new("blueprint-show")
+                .about("show details about one blueprint")
+                .arg(Arg::new("blueprint_id").required(true)),
+            cmd_blueprint_show,
+        )
+        .with_command(
+            Command::new("blueprint-diff")
+                .about("diff two blueprints")
+                .arg(Arg::new("blueprint1_id").required(true))
+                .arg(Arg::new("blueprint2_id").required(true)),
+            cmd_blueprint_diff,
         )
         .with_command(
             Command::new("save")
@@ -372,6 +383,52 @@ fn cmd_blueprint_plan(
     );
     sim.blueprints.push(blueprint);
     Ok(Some(rv))
+}
+
+fn cmd_blueprint_show(
+    args: ArgMatches,
+    sim: &mut ReconfiguratorSim,
+) -> anyhow::Result<Option<String>> {
+    let blueprint_id: Uuid = args
+        .get_one::<String>("blueprint_id")
+        .ok_or_else(|| anyhow!("missing blueprint_id"))?
+        .parse()
+        .context("blueprint_id")?;
+    let blueprint = sim
+        .blueprints
+        .iter()
+        .find(|b| b.id == blueprint_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
+    Ok(Some(format!("{:?}", blueprint)))
+}
+
+fn cmd_blueprint_diff(
+    args: ArgMatches,
+    sim: &mut ReconfiguratorSim,
+) -> anyhow::Result<Option<String>> {
+    let blueprint1_id: Uuid = args
+        .get_one::<String>("blueprint1_id")
+        .ok_or_else(|| anyhow!("missing blueprint1_id"))?
+        .parse()
+        .context("blueprint1_id")?;
+    let blueprint2_id: Uuid = args
+        .get_one::<String>("blueprint2_id")
+        .ok_or_else(|| anyhow!("missing blueprint2_id"))?
+        .parse()
+        .context("blueprint2_id")?;
+    let blueprint1 = sim
+        .blueprints
+        .iter()
+        .find(|b| b.id == blueprint1_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint1_id))?;
+    let blueprint2 = sim
+        .blueprints
+        .iter()
+        .find(|b| b.id == blueprint2_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
+
+    let diff = blueprint1.diff_sleds(&blueprint2);
+    Ok(Some(diff.to_string()))
 }
 
 fn cmd_save(
