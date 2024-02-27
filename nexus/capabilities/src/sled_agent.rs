@@ -14,11 +14,7 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[async_trait::async_trait]
-pub trait NexusSledAgentCapabilities: NexusBaseCapabilities {
-    /// [`OpContext`] to use when looking up sled agents by ID.
-    fn opctx(&self) -> &OpContext;
-
+pub trait NexusSledAgentBaseCapabilities: NexusBaseCapabilities {
     fn sled_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -37,6 +33,12 @@ pub trait NexusSledAgentCapabilities: NexusBaseCapabilities {
             .unwrap();
         Client::new_with_client(&format!("http://{address}"), client, log)
     }
+}
+
+#[async_trait::async_trait]
+pub trait NexusSledAgentCapabilities: NexusSledAgentBaseCapabilities {
+    /// [`OpContext`] used by `sled_client_by_id`.
+    fn opctx(&self) -> &OpContext;
 
     async fn sled_client_by_id(
         &self,

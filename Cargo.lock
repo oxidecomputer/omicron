@@ -4274,6 +4274,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnet",
+ "nexus-capabilities",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-deployment",

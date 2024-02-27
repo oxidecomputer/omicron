@@ -7,6 +7,8 @@
 //! See `nexus_deployment` crate-level docs for background.
 
 use anyhow::{anyhow, Context};
+use nexus_capabilities::NexusBaseCapabilities;
+use nexus_capabilities::NexusSledAgentBaseCapabilities;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -14,6 +16,7 @@ use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use slog::info;
+use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
@@ -46,6 +49,25 @@ impl From<nexus_db_model::Sled> for Sled {
     }
 }
 
+// A vastly-restricted `Nexus` object that allows us access to some of Nexus
+// proper's capabilities.
+struct NexusContext<'a> {
+    opctx: OpContext,
+    datastore: &'a DataStore,
+}
+
+impl NexusBaseCapabilities for NexusContext<'_> {
+    fn log(&self) -> &Logger {
+        &self.opctx.log
+    }
+
+    fn datastore(&self) -> &DataStore {
+        self.datastore
+    }
+}
+
+impl NexusSledAgentBaseCapabilities for NexusContext<'_> {}
+
 /// Make one attempt to realize the given blueprint, meaning to take actions to
 /// alter the real system to match the blueprint
 ///
@@ -64,43 +86,49 @@ where
         "comment".to_string(),
         blueprint.comment.clone(),
     )]));
+    let nexusctx = NexusContext { opctx, datastore };
 
     info!(
-        opctx.log,
+        nexusctx.log(),
         "attempting to realize blueprint";
-        "blueprint_id" => ?blueprint.id
+        "blueprint_id" => %blueprint.id
     );
 
     resource_allocation::ensure_zone_resources_allocated(
-        &opctx,
-        datastore,
+        &nexusctx.opctx,
+        nexusctx.datastore,
         &blueprint.omicron_zones,
     )
     .await
     .map_err(|err| vec![err])?;
 
-    let sleds_by_id: BTreeMap<Uuid, _> = datastore
-        .sled_list_all_batched(&opctx)
+    let sleds_by_id: BTreeMap<Uuid, _> = nexusctx
+        .datastore
+        .sled_list_all_batched(&nexusctx.opctx)
         .await
         .context("listing all sleds")
         .map_err(|e| vec![e])?
         .into_iter()
         .map(|db_sled| (db_sled.id(), Sled::from(db_sled)))
         .collect();
-    omicron_zones::deploy_zones(&opctx, &sleds_by_id, &blueprint.omicron_zones)
-        .await?;
+    omicron_zones::deploy_zones(
+        &nexusctx,
+        &sleds_by_id,
+        &blueprint.omicron_zones,
+    )
+    .await?;
 
     datasets::ensure_crucible_dataset_records_exist(
-        &opctx,
-        datastore,
+        &nexusctx.opctx,
+        nexusctx.datastore,
         blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;
 
     dns::deploy_dns(
-        &opctx,
-        datastore,
+        &nexusctx.opctx,
+        nexusctx.datastore,
         String::from(nexus_label),
         blueprint,
         &sleds_by_id,

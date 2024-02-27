@@ -9,6 +9,7 @@ use slog::Logger;
 
 mod sled_agent;
 
+pub use sled_agent::NexusSledAgentBaseCapabilities;
 pub use sled_agent::NexusSledAgentCapabilities;
 
 pub trait NexusBaseCapabilities {

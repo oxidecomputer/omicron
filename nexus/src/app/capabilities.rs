@@ -17,6 +17,8 @@ impl nexus_capabilities::NexusBaseCapabilities for Nexus {
     }
 }
 
+impl nexus_capabilities::NexusSledAgentBaseCapabilities for Nexus {}
+
 impl nexus_capabilities::NexusSledAgentCapabilities for Nexus {
     fn opctx(&self) -> &OpContext {
         &self.opctx_alloc

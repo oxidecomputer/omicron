@@ -4,14 +4,15 @@
 
 //! Manges deployment of Omicron zones to Sled Agents
 
+use crate::NexusContext;
 use crate::Sled;
 use anyhow::anyhow;
 use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
-use nexus_db_queries::context::OpContext;
+use nexus_capabilities::NexusBaseCapabilities;
+use nexus_capabilities::NexusSledAgentBaseCapabilities;
 use nexus_types::deployment::OmicronZonesConfig;
-use sled_agent_client::Client as SledAgentClient;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
@@ -20,7 +21,7 @@ use uuid::Uuid;
 /// Idempotently ensure that the specified Omicron zones are deployed to the
 /// corresponding sleds
 pub(crate) async fn deploy_zones(
-    opctx: &OpContext,
+    nexusctx: &NexusContext<'_>,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
     zones: &BTreeMap<Uuid, OmicronZonesConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
@@ -30,23 +31,24 @@ pub(crate) async fn deploy_zones(
                 Some(sled) => sled,
                 None => {
                     let err = anyhow!("sled not found in db list: {}", sled_id);
-                    warn!(opctx.log, "{err:#}");
+                    warn!(nexusctx.log(), "{err:#}");
                     return Some(err);
                 }
             };
-            let client = sled_client(opctx, &db_sled);
+            let client =
+                nexusctx.sled_client(*sled_id, db_sled.sled_agent_address);
             let result =
-                client.omicron_zones_put(&config).await.with_context(|| {
+                client.omicron_zones_put(config).await.with_context(|| {
                     format!("Failed to put {config:#?} to sled {sled_id}")
                 });
             match result {
                 Err(error) => {
-                    warn!(opctx.log, "{error:#}");
+                    warn!(nexusctx.log(), "{error:#}");
                     Some(error)
                 }
                 Ok(_) => {
                     info!(
-                        opctx.log,
+                        nexusctx.log(),
                         "Successfully deployed zones for sled agent";
                         "sled_id" => %sled_id,
                         "generation" => %config.generation,
@@ -65,29 +67,10 @@ pub(crate) async fn deploy_zones(
     }
 }
 
-// This is a modified copy of the functionality from `nexus/src/app/sled.rs`.
-// There's no good way to access this functionality right now since it is a
-// method on the `Nexus` type. We want to have a more constrained type we can
-// pass into background tasks for this type of functionality, but for now we
-// just copy the functionality.
-fn sled_client(opctx: &OpContext, sled: &Sled) -> SledAgentClient {
-    let dur = std::time::Duration::from_secs(60);
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(dur)
-        .timeout(dur)
-        .build()
-        .unwrap();
-    SledAgentClient::new_with_client(
-        &format!("http://{}", sled.sled_agent_address),
-        client,
-        opctx.log.clone(),
-    )
-}
-
 #[cfg(test)]
 mod test {
     use super::deploy_zones;
-    use crate::Sled;
+    use crate::{NexusContext, Sled};
     use httptest::matchers::{all_of, json_decoded, request};
     use httptest::responders::status_code;
     use httptest::Expectation;
@@ -135,10 +118,13 @@ mod test {
     async fn test_deploy_omicron_zones(cptestctx: &ControlPlaneTestContext) {
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
-            cptestctx.logctx.log.clone(),
-            datastore.clone(),
-        );
+        let nexusctx = NexusContext {
+            opctx: OpContext::for_tests(
+                cptestctx.logctx.log.clone(),
+                datastore.clone(),
+            ),
+            datastore,
+        };
 
         // Create some fake sled-agent servers to respond to zone puts and add
         // sleds to CRDB.
@@ -165,7 +151,7 @@ mod test {
         // Get a success result back when the blueprint has an empty set of
         // zones.
         let blueprint = Arc::new(create_blueprint(BTreeMap::new()));
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+        deploy_zones(&nexusctx, &sleds_by_id, &blueprint.1.omicron_zones)
             .await
             .expect("failed to deploy no zones");
 
@@ -220,7 +206,7 @@ mod test {
         }
 
         // Execute it.
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+        deploy_zones(&nexusctx, &sleds_by_id, &blueprint.1.omicron_zones)
             .await
             .expect("failed to deploy initial zones");
 
@@ -237,7 +223,7 @@ mod test {
                 .respond_with(status_code(204)),
             );
         }
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+        deploy_zones(&nexusctx, &sleds_by_id, &blueprint.1.omicron_zones)
             .await
             .expect("failed to deploy same zones");
         s1.verify_and_clear();
@@ -261,7 +247,7 @@ mod test {
         );
 
         let errors =
-            deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+            deploy_zones(&nexusctx, &sleds_by_id, &blueprint.1.omicron_zones)
                 .await
                 .expect_err("unexpectedly succeeded in deploying zones");
 
@@ -311,7 +297,7 @@ mod test {
         }
 
         // Activate the task
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+        deploy_zones(&nexusctx, &sleds_by_id, &blueprint.1.omicron_zones)
             .await
             .expect("failed to deploy last round of zones");
         s1.verify_and_clear();

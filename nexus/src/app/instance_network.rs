@@ -7,6 +7,7 @@
 use crate::app::sagas::retry_until_known_result;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
+use nexus_capabilities::NexusSledAgentBaseCapabilities;
 use nexus_capabilities::NexusSledAgentCapabilities;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
