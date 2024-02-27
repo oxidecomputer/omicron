@@ -10,7 +10,7 @@ use slog::Logger;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::oneshot;
 
 use sled_hardware::HardwareManager;
 
@@ -73,7 +73,6 @@ enum ReservoirManagerMsg {
 pub struct VmmReservoirManagerHandle {
     reservoir_size: Arc<AtomicU64>,
     tx: flume::Sender<ReservoirManagerMsg>,
-    watch_rx: watch::Receiver<Option<ByteCount>>,
     _manager_handle: thread::JoinHandle<()>,
 }
 
@@ -81,13 +80,6 @@ impl VmmReservoirManagerHandle {
     /// Returns the last-set size of the reservoir
     pub fn reservoir_size(&self) -> ByteCount {
         self.reservoir_size.load(Ordering::SeqCst).try_into().unwrap()
-    }
-
-    /// Return a [`tokio::sync::watch::Receiver`] whose value changes when the
-    /// reservoir size is updated.
-    #[allow(unused)]
-    pub fn watcher(&self) -> watch::Receiver<Option<ByteCount>> {
-        self.watch_rx.clone()
     }
 
     /// Tell the [`VmmReservoirManager`] to set the reservoir size and wait for
@@ -118,7 +110,6 @@ impl VmmReservoirManagerHandle {
 pub struct VmmReservoirManager {
     reservoir_size: Arc<AtomicU64>,
     rx: flume::Receiver<ReservoirManagerMsg>,
-    watch_tx: watch::Sender<Option<ByteCount>>,
     log: Logger,
 }
 
@@ -134,22 +125,15 @@ impl VmmReservoirManager {
         // we want to ensure it is complete before allowing another call.
         let (tx, rx) = flume::bounded(0);
         let reservoir_size = Arc::new(AtomicU64::new(0));
-        let (watch_tx, watch_rx) = watch::channel(None);
         let manager = VmmReservoirManager {
             reservoir_size: reservoir_size.clone(),
             rx,
-            watch_tx,
             log,
         };
         let _manager_handle = thread::spawn(move || {
             manager.run(hardware_manager, reservoir_mode)
         });
-        VmmReservoirManagerHandle {
-            reservoir_size,
-            tx,
-            watch_rx,
-            _manager_handle,
-        }
+        VmmReservoirManagerHandle { reservoir_size, tx, _manager_handle }
     }
 
     fn run(
@@ -251,7 +235,6 @@ impl VmmReservoirManager {
         vmm_reservoir::ReservoirControl::set(reservoir_size)?;
 
         self.reservoir_size.store(reservoir_size.to_bytes(), Ordering::SeqCst);
-        self.watch_tx.send_replace(Some(reservoir_size));
         info!(
             self.log,
             "Finished setting reservoir size to {reservoir_size} bytes"
