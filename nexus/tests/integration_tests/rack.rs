@@ -14,9 +14,10 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::Rack;
 use nexus_types::internal_api::params::Baseboard;
-use nexus_types::internal_api::params::SledAgentStartupInfo;
+use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SledRole;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 use omicron_nexus::TestInterfaces;
 use uuid::Uuid;
 
@@ -109,7 +110,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     // Just pick some random fields other than `baseboard`
     let baseboard = uninitialized_sleds.pop().unwrap().baseboard;
     let sled_uuid = Uuid::new_v4();
-    let sa = SledAgentStartupInfo {
+    let sa = SledAgentInfo {
         sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
         role: SledRole::Gimlet,
         baseboard: Baseboard {
@@ -120,6 +121,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
         usable_hardware_threads: 32,
         usable_physical_ram: ByteCount::from_gibibytes_u32(100),
         reservoir_size: ByteCount::from_mebibytes_u32(100),
+        generation: Generation::new(),
     };
     internal_client
         .make_request(

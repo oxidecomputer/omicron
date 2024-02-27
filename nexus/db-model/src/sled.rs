@@ -8,7 +8,11 @@ use crate::schema::{physical_disk, service, sled, zpool};
 use crate::{ipv6, SledProvisionState};
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
-use nexus_types::{external_api::shared, external_api::views, identity::Asset};
+use nexus_types::{
+    external_api::{shared, views},
+    identity::Asset,
+    internal_api::params,
+};
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -102,6 +106,29 @@ impl From<Sled> for views::Sled {
             provision_state: sled.provision_state.into(),
             usable_hardware_threads: sled.usable_hardware_threads.0,
             usable_physical_ram: *sled.usable_physical_ram,
+        }
+    }
+}
+
+impl From<Sled> for params::SledAgentInfo {
+    fn from(sled: Sled) -> Self {
+        let role = if sled.is_scrimlet {
+            params::SledRole::Scrimlet
+        } else {
+            params::SledRole::Gimlet
+        };
+        Self {
+            sa_address: sled.address(),
+            role,
+            baseboard: params::Baseboard {
+                serial_number: sled.serial_number.clone(),
+                part_number: sled.part_number.clone(),
+                revision: sled.revision,
+            },
+            usable_hardware_threads: sled.usable_hardware_threads.into(),
+            usable_physical_ram: sled.usable_physical_ram.into(),
+            reservoir_size: sled.reservoir_size.into(),
+            generation: sled.rcgen.into(),
         }
     }
 }

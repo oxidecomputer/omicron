@@ -5,8 +5,8 @@
 //! Sleds, and the hardware and services within them.
 
 use crate::internal_api::params::{
-    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
-    SledRole, ZpoolPutRequest,
+    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentInfo, SledRole,
+    ZpoolPutRequest,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -43,7 +43,7 @@ impl super::Nexus {
         &self,
         _opctx: &OpContext,
         id: Uuid,
-        info: SledAgentStartupInfo,
+        info: SledAgentInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
 
