@@ -85,7 +85,7 @@ rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] 
 regex = { version = "1.10.3" }
 regex-automata = { version = "0.4.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8.2" }
-reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.11.24", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.22", features = ["serde"] }
@@ -192,7 +192,7 @@ rand_chacha = { version = "0.3.1", default-features = false, features = ["std"] 
 regex = { version = "1.10.3" }
 regex-automata = { version = "0.4.4", default-features = false, features = ["dfa-onepass", "hybrid", "meta", "nfa-backtrack", "perf-inline", "perf-literal", "unicode"] }
 regex-syntax = { version = "0.8.2" }
-reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.11.24", features = ["blocking", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.22", features = ["serde"] }
