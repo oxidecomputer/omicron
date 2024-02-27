@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 mod dns;
 mod omicron_zones;
+mod resource_allocation;
 
 struct Sled {
     id: Uuid,
@@ -69,6 +70,14 @@ where
         "blueprint_id" => ?blueprint.id
     );
 
+    resource_allocation::ensure_zone_resources_allocated(
+        &opctx,
+        datastore,
+        &blueprint.omicron_zones,
+    )
+    .await
+    .map_err(|err| vec![err])?;
+
     let sleds_by_id: BTreeMap<Uuid, _> = datastore
         .sled_list_all_batched(&opctx)
         .await
@@ -82,9 +91,9 @@ where
 
     dns::deploy_dns(
         &opctx,
-        &datastore,
+        datastore,
         String::from(nexus_label),
-        &blueprint,
+        blueprint,
         &sleds_by_id,
     )
     .await

@@ -1953,7 +1953,8 @@ mod tests {
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
             let (opctx, db_datastore) =
-                crate::db::datastore::datastore_test(&logctx, &db).await;
+                crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                    .await;
 
             let authz_silo = opctx.authn.silo_required().unwrap();
 

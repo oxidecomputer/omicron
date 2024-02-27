@@ -29,6 +29,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use nexus_db_model::ServiceNetworkInterface;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DeleteResult;
@@ -126,15 +127,69 @@ impl DataStore {
             .map(NetworkInterface::as_instance)
     }
 
-    #[cfg(test)]
+    /// List network interfaces associated with a given service.
+    pub async fn service_list_network_interfaces(
+        &self,
+        opctx: &OpContext,
+        service_id: Uuid,
+    ) -> ListResultVec<ServiceNetworkInterface> {
+        // See the comment in `service_create_network_interface`. There's no
+        // obvious parent for a service network interface (as opposed to
+        // instance network interfaces, which require ListChildren on the
+        // instance to list). As a logical proxy, we check for listing children
+        // of the service IP pool.
+        let (authz_service_ip_pool, _) =
+            self.ip_pools_service_lookup(opctx).await?;
+        opctx
+            .authorize(authz::Action::ListChildren, &authz_service_ip_pool)
+            .await?;
+
+        use db::schema::service_network_interface::dsl;
+        dsl::service_network_interface
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::service_id.eq(service_id))
+            .select(ServiceNetworkInterface::as_select())
+            .get_results_async::<ServiceNetworkInterface>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Create a network interface attached to the provided service zone.
+    pub async fn service_create_network_interface(
+        &self,
+        opctx: &OpContext,
+        interface: IncompleteNetworkInterface,
+    ) -> Result<ServiceNetworkInterface, network_interface::InsertError> {
+        // In `instance_create_network_interface`, the authz checks are for
+        // creating children of the VpcSubnet and the instance. We don't have an
+        // instance. We do have a VpcSubet, but for services these are all
+        // fixed data subnets.
+        //
+        // As a proxy auth check that isn't really guarding the right resource
+        // but should logically be equivalent, we can insert a authz check for
+        // creating children of the service IP pool. For any service zone with
+        // external networking, we create an external IP (in the service IP
+        // pool) and a network interface (in the relevant VpcSubnet). Putting
+        // this check here ensures that the caller can't proceed if they also
+        // couldn't proceed with creating the corresponding external IP.
+        let (authz_service_ip_pool, _) = self
+            .ip_pools_service_lookup(opctx)
+            .await
+            .map_err(network_interface::InsertError::External)?;
+        opctx
+            .authorize(authz::Action::CreateChild, &authz_service_ip_pool)
+            .await
+            .map_err(network_interface::InsertError::External)?;
+        self.service_create_network_interface_raw(opctx, interface).await
+    }
+
     pub(crate) async fn service_create_network_interface_raw(
         &self,
         opctx: &OpContext,
         interface: IncompleteNetworkInterface,
-    ) -> Result<
-        db::model::ServiceNetworkInterface,
-        network_interface::InsertError,
-    > {
+    ) -> Result<ServiceNetworkInterface, network_interface::InsertError> {
         if interface.kind != NetworkInterfaceKind::Service {
             return Err(network_interface::InsertError::External(
                 Error::invalid_request(

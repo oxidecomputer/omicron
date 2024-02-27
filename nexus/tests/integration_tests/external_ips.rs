@@ -189,7 +189,7 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
             name: fip_name.parse().unwrap(),
             description: String::from("a floating ip"),
         },
-        address: None,
+        ip: None,
         pool: Some(NameOrId::Name("other-pool".parse().unwrap())),
     };
     let url = format!("/v1/floating-ips?project={}", project.identity.name);
@@ -259,7 +259,7 @@ async fn test_floating_ip_create_fails_in_other_silo_pool(
             name: fip_name.parse().unwrap(),
             description: String::from("a floating ip"),
         },
-        address: None,
+        ip: None,
         pool: Some(NameOrId::Name("external-silo-pool".parse().unwrap())),
     };
 
@@ -316,7 +316,7 @@ async fn test_floating_ip_create_ip_in_use(
                 name: FIP_NAMES[1].parse().unwrap(),
                 description: "another fip".into(),
             },
-            address: Some(contested_ip),
+            ip: Some(contested_ip),
             pool: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -364,7 +364,7 @@ async fn test_floating_ip_create_name_in_use(
                 name: contested_name.parse().unwrap(),
                 description: "another fip".into(),
             },
-            address: None,
+            ip: None,
             pool: None,
         }))
         .expect_status(Some(StatusCode::BAD_REQUEST)),

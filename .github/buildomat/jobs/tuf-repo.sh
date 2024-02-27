@@ -278,8 +278,8 @@ EOF
     done
 }
 # usage:              SERIES           ROT_DIR      ROT_VERSION              BOARDS...
-add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.5  "${ALL_BOARDS[@]}"
-add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.5     "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.6  "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.6     "${ALL_BOARDS[@]}"
 
 for series in "${SERIES_LIST[@]}"; do
     /work/tufaceous assemble --no-generate-key /work/manifest-"$series".toml /work/repo-"$series".zip
