@@ -724,7 +724,8 @@ impl<'a> BlueprintZones<'a> {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv4Range;
     use omicron_common::address::Ipv6Subnet;
@@ -736,14 +737,26 @@ pub mod test {
     };
     use std::str::FromStr;
 
-    /// Returns a collection and policy describing a pretty simple system
-    pub fn example() -> (Collection, Policy) {
+    pub const DEFAULT_N_SLEDS: usize = 3;
+
+    /// Returns a collection and policy describing a pretty simple system.
+    ///
+    /// `n_sleds` is the number of sleds supported. Currently, this value can
+    /// be anywhere between 0 and 5. (More can be added in the future if
+    /// necessary.)
+    pub fn example(n_sleds: usize) -> (Collection, Policy) {
         let mut builder = nexus_inventory::CollectionBuilder::new("test-suite");
+
+        if n_sleds > 5 {
+            panic!("example() only supports up to 5 sleds, but got {n_sleds}");
+        }
 
         let sled_ids = [
             "72443b6c-b8bb-4ffa-ab3a-aeaa428ed79b",
             "a5f3db3a-61aa-4f90-ad3e-02833c253bf5",
             "0d168386-2551-44e8-98dd-ae7a7570f8a0",
+            "aaaaa1a1-0c3f-4928-aba7-6ec5c1db05f7",
+            "85e88acb-7b86-45ff-9c88-734e1da71c3d",
         ];
         let mut policy = Policy {
             sleds: BTreeMap::new(),
@@ -771,7 +784,7 @@ pub mod test {
             })
         };
 
-        for sled_id_str in sled_ids.iter() {
+        for sled_id_str in sled_ids.iter().take(n_sleds) {
             let sled_id: Uuid = sled_id_str.parse().unwrap();
             let sled_ip = policy_add_sled(&mut policy, sled_id);
             let serial_number = format!("s{}", policy.sleds.len());
@@ -900,7 +913,8 @@ pub mod test {
         policy.sleds.insert(
             sled_id,
             SledResources {
-                provision_state: SledProvisionState::Provisionable,
+                policy: SledPolicy::provisionable(),
+                state: SledState::Active,
                 zpools,
                 subnet,
             },
@@ -931,7 +945,7 @@ pub mod test {
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
         // describes no changes.
-        let (collection, policy) = example();
+        let (collection, policy) = example(DEFAULT_N_SLEDS);
         let blueprint_initial =
             BlueprintBuilder::build_initial_from_collection(
                 &collection,
@@ -977,7 +991,7 @@ pub mod test {
 
     #[test]
     fn test_basic() {
-        let (collection, mut policy) = example();
+        let (collection, mut policy) = example(DEFAULT_N_SLEDS);
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
@@ -1096,7 +1110,7 @@ pub mod test {
 
     #[test]
     fn test_add_nexus_with_no_existing_nexus_zones() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We don't care about the internal DNS version here.
         let internal_dns_version = Generation::new();
@@ -1147,7 +1161,7 @@ pub mod test {
 
     #[test]
     fn test_add_nexus_error_cases() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We don't care about the internal DNS version here.
         let internal_dns_version = Generation::new();
@@ -1259,7 +1273,7 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_zones_with_same_external_ip() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same external IP. Skim through the zones, copy the
@@ -1310,7 +1324,7 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_nexus_zones_with_same_nic_ip() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // Nexus zones with the same NIC IP. Skim through the zones, copy
@@ -1359,7 +1373,7 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_zones_with_same_vnic_mac() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same service vNIC MAC address. Skim through the

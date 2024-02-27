@@ -217,7 +217,8 @@ mod test {
         let logctx = dev::test_setup_log("test_unregistered_resource");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
 
         // Define a resource that we "forget" to register with Oso.
         use super::AuthorizedResource;

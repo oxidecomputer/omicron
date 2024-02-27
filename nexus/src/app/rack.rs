@@ -61,6 +61,7 @@ use sled_agent_client::types::{
     BgpConfig, BgpPeerConfig as SledBgpPeerConfig, EarlyNetworkConfig,
     PortConfigV1, RackNetworkConfigV1, RouteConfig as SledRouteConfig,
 };
+use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
@@ -647,7 +648,7 @@ impl super::Nexus {
         if rack.rack_subnet.is_some() {
             return Ok(());
         }
-        let sa = self.get_any_sled_agent(opctx).await?;
+        let sa = self.get_any_sled_agent_client(opctx).await?;
         let result = sa
             .read_network_bootstore_config_cache()
             .await
@@ -883,7 +884,27 @@ impl super::Nexus {
                 },
             },
         };
-        let sa = self.get_any_sled_agent(opctx).await?;
+
+        // This timeout value is fairly arbitrary (as they usually are).  As of
+        // this writing, this operation is known to take close to two minutes on
+        // production hardware.
+        let dur = std::time::Duration::from_secs(300);
+        let sa_url = self.get_any_sled_agent_url(opctx).await?;
+        let reqwest_client = reqwest::ClientBuilder::new()
+            .connect_timeout(dur)
+            .timeout(dur)
+            .build()
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to create reqwest client for sled agent: {}",
+                    InlineErrorChain::new(&e)
+                ))
+            })?;
+        let sa = sled_agent_client::Client::new_with_client(
+            &sa_url,
+            reqwest_client,
+            self.log.new(o!("sled_agent_url" => sa_url.clone())),
+        );
         sa.sled_add(&req).await.map_err(|e| Error::InternalError {
             internal_message: format!(
                 "failed to add sled with baseboard {:?} to rack {}: {e}",
@@ -899,10 +920,10 @@ impl super::Nexus {
         Ok(())
     }
 
-    async fn get_any_sled_agent(
+    async fn get_any_sled_agent_url(
         &self,
         opctx: &OpContext,
-    ) -> Result<sled_agent_client::Client, Error> {
+    ) -> Result<String, Error> {
         let addr = self
             .sled_list(opctx, &DataPageParams::max_page())
             .await?
@@ -911,11 +932,15 @@ impl super::Nexus {
                 internal_message: "no sled agents available".into(),
             })?
             .address();
+        Ok(format!("http://{}", addr))
+    }
 
-        Ok(sled_agent_client::Client::new(
-            &format!("http://{}", addr),
-            self.log.clone(),
-        ))
+    async fn get_any_sled_agent_client(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<sled_agent_client::Client, Error> {
+        let url = self.get_any_sled_agent_url(opctx).await?;
+        Ok(sled_agent_client::Client::new(&url, self.log.clone()))
     }
 }
 

@@ -27,6 +27,9 @@ use nexus_db_model::queries::region_allocation::{
     proposed_dataset_changes, shuffled_candidate_datasets, updated_datasets,
 };
 use nexus_db_model::schema;
+use nexus_db_model::to_db_sled_policy;
+use nexus_db_model::SledState;
+use nexus_types::external_api::views::SledPolicy;
 use omicron_common::api::external;
 use omicron_common::nexus_config::RegionAllocationStrategy;
 
@@ -321,14 +324,16 @@ impl CandidateZpools {
             .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id))
             .inner_join(with_sled);
 
-        let sled_is_provisionable = sled_dsl::provision_state
-            .eq(crate::db::model::SledProvisionState::Provisionable);
+        let sled_is_provisionable = sled_dsl::sled_policy
+            .eq(to_db_sled_policy(SledPolicy::provisionable()));
+        let sled_is_active = sled_dsl::sled_state.eq(SledState::Active);
 
         let base_query = old_zpool_usage
             .query_source()
             .inner_join(with_zpool)
             .filter(it_will_fit)
             .filter(sled_is_provisionable)
+            .filter(sled_is_active)
             .select((old_zpool_usage::dsl::pool_id,));
 
         let query = if distinct_sleds {

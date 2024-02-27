@@ -1248,7 +1248,7 @@ pub fn read_only_resources_associated_with_volume(
 mod tests {
     use super::*;
 
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
 

@@ -256,7 +256,7 @@ impl DataStore {
 
         let pool_id = pool.id();
 
-        let data = if let Some(ip) = params.address {
+        let data = if let Some(ip) = params.ip {
             IncompleteExternalIp::for_floating_explicit(
                 ip_id,
                 &Name(params.identity.name),
