@@ -19,22 +19,11 @@ use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
-use omicron_common::api::external::LookupResult;
-use sled_agent_client::Client as SledAgentClient;
 use std::net::SocketAddrV6;
-use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
     // Sleds
-    pub fn sled_lookup<'a>(
-        &'a self,
-        opctx: &'a OpContext,
-        sled_id: &Uuid,
-    ) -> LookupResult<lookup::Sled<'a>> {
-        let sled = LookupPath::new(opctx, &self.db_datastore).sled_id(*sled_id);
-        Ok(sled)
-    }
 
     // TODO-robustness we should have a limit on how many sled agents there can
     // be (for graceful degradation at large scale).
@@ -103,34 +92,6 @@ impl super::Nexus {
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<db::model::Sled> {
         self.db_datastore.sled_list(&opctx, pagparams).await
-    }
-
-    pub async fn sled_client(
-        &self,
-        id: &Uuid,
-    ) -> Result<Arc<SledAgentClient>, Error> {
-        // TODO: We should consider injecting connection pooling here,
-        // but for now, connections to sled agents are constructed
-        // on an "as requested" basis.
-        //
-        // Frankly, returning an "Arc" here without a connection pool is a
-        // little silly; it's not actually used if each client connection exists
-        // as a one-shot.
-        let (.., sled) =
-            self.sled_lookup(&self.opctx_alloc, id)?.fetch().await?;
-
-        let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .unwrap();
-        Ok(Arc::new(SledAgentClient::new_with_client(
-            &format!("http://{}", sled.address()),
-            client,
-            log,
-        )))
     }
 
     pub(crate) async fn reserve_on_random_sled(

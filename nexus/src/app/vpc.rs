@@ -6,6 +6,7 @@
 
 use crate::app::sagas;
 use crate::external_api::params;
+use nexus_capabilities::NexusSledAgentCapabilities;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -274,7 +275,7 @@ impl super::Nexus {
             let vpc_id = vpc.id();
             let sled_rules_request = sled_rules_request.clone();
             sled_requests.push(async move {
-                self.sled_client(&sled_id)
+                self.sled_client_by_id(sled_id)
                     .await?
                     .vpc_firewall_rules_put(&vpc_id, &sled_rules_request)
                     .await

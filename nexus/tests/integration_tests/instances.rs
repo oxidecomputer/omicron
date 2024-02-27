@@ -12,6 +12,7 @@ use camino::Utf8Path;
 use http::method::Method;
 use http::StatusCode;
 use itertools::Itertools;
+use nexus_capabilities::NexusSledAgentCapabilities;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::fixed_data::silo::SILO_ID;
@@ -4678,6 +4679,6 @@ async fn instance_simulate_on_sled(
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance on sled";
           "instance_id" => %instance_id, "sled_id" => %sled_id);
-    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    let sa = nexus.sled_client_by_id(sled_id).await.unwrap();
     sa.instance_finish_transition(instance_id).await;
 }

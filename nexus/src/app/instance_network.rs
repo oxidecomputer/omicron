@@ -7,6 +7,7 @@
 use crate::app::sagas::retry_until_known_result;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
+use nexus_capabilities::NexusSledAgentCapabilities;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::Ipv4NatEntry;
@@ -108,7 +109,7 @@ impl super::Nexus {
 
         // Look up the supplied sled's physical host IP.
         let physical_host_ip =
-            *self.sled_lookup(&self.opctx_alloc, &sled_id)?.fetch().await?.1.ip;
+            *self.sled_lookup(&self.opctx_alloc, sled_id).fetch().await?.1.ip;
 
         let mut last_sled_id: Option<Uuid> = None;
         loop {
@@ -134,7 +135,7 @@ impl super::Nexus {
                 }
 
                 for nic in &instance_nics {
-                    let client = self.sled_client(&sled.id()).await?;
+                    let client = self.sled_client_by_id(sled.id()).await?;
                     let nic_id = nic.id;
                     let mapping = SetVirtualNetworkInterfaceHost {
                         virtual_ip: nic.ip,
@@ -223,7 +224,7 @@ impl super::Nexus {
 
             for sled in &sleds_page {
                 for nic in &instance_nics {
-                    let client = self.sled_client(&sled.id()).await?;
+                    let client = self.sled_client_by_id(sled.id()).await?;
                     let nic_id = nic.id;
                     let mapping = DeleteVirtualNetworkInterfaceHost {
                         virtual_ip: nic.ip,

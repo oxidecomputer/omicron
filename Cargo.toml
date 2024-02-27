@@ -38,6 +38,7 @@ members = [
     "nexus",
     "nexus/authz-macros",
     "nexus/blueprint-execution",
+    "nexus/capabilities",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -115,6 +116,7 @@ default-members = [
     "nexus",
     "nexus/authz-macros",
     "nexus/blueprint-execution",
+    "nexus/capabilities",
     "nexus/macros-common",
     "nexus/db-macros",
     "nexus/db-model",
@@ -254,6 +256,7 @@ newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
 multimap = "0.10.0"
 nexus-blueprint-execution = { path = "nexus/blueprint-execution" }
+nexus-capabilities = { path = "nexus/capabilities" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }

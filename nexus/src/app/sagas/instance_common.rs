@@ -8,6 +8,7 @@ use std::net::{IpAddr, Ipv6Addr};
 
 use crate::Nexus;
 use chrono::Utc;
+use nexus_capabilities::NexusSledAgentCapabilities;
 use nexus_db_model::{
     ByteCount, ExternalIp, IpAttachState, Ipv4NatEntry,
     SledReservationConstraints, SledResource,
@@ -388,7 +389,7 @@ pub async fn instance_ip_add_opte(
 
     osagactx
         .nexus()
-        .sled_client(&sled_uuid)
+        .sled_client_by_id(sled_uuid)
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(
@@ -443,7 +444,7 @@ pub async fn instance_ip_remove_opte(
 
     osagactx
         .nexus()
-        .sled_client(&sled_uuid)
+        .sled_client_by_id(sled_uuid)
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(

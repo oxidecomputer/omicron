@@ -35,6 +35,7 @@ use dropshot::{
 };
 use dropshot::{ApiDescription, StreamingBody};
 use ipnetwork::IpNetwork;
+use nexus_capabilities::NexusSledAgentCapabilities;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
@@ -5160,7 +5161,7 @@ async fn sled_view(
         let path = path_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let (.., sled) =
-            nexus.sled_lookup(&opctx, &path.sled_id)?.fetch().await?;
+            nexus.sled_lookup(&opctx, path.sled_id).fetch().await?;
         Ok(HttpResponseOk(sled.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
@@ -5186,7 +5187,7 @@ async fn sled_set_provision_policy(
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
+        let sled_lookup = nexus.sled_lookup(&opctx, path.sled_id);
 
         let old_state = nexus
             .sled_set_provision_policy(&opctx, &sled_lookup, new_state)
@@ -5217,7 +5218,7 @@ async fn sled_instance_list(
         let path = path_params.into_inner();
         let query = query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
+        let sled_lookup = nexus.sled_lookup(&opctx, path.sled_id);
         let sled_instances = nexus
             .sled_instance_list(
                 &opctx,

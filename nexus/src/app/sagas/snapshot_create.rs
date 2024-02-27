@@ -104,6 +104,7 @@ use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use anyhow::anyhow;
 use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
+use nexus_capabilities::NexusSledAgentCapabilities;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
@@ -695,7 +696,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
 
     let sled_agent_client = osagactx
         .nexus()
-        .sled_client(&sled_id)
+        .sled_client_by_id(sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1974,7 +1975,7 @@ mod test {
         let sled_id = instance_state
             .sled_id()
             .expect("starting instance should have a sled");
-        let sa = nexus.sled_client(&sled_id).await.unwrap();
+        let sa = nexus.sled_client_by_id(sled_id).await.unwrap();
 
         sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus

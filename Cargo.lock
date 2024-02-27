@@ -4296,6 +4296,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-capabilities"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "nexus-db-queries",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "reqwest",
+ "sled-agent-client",
+ "slog",
+ "slog-error-chain",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -5032,6 +5047,7 @@ dependencies = [
  "mg-admin-client",
  "mime_guess",
  "nexus-blueprint-execution",
+ "nexus-capabilities",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",

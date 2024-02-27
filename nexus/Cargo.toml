@@ -78,6 +78,7 @@ trust-dns-resolver.workspace = true
 uuid.workspace = true
 
 nexus-blueprint-execution.workspace = true
+nexus-capabilities.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true

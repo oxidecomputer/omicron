@@ -38,6 +38,7 @@ mod address_lot;
 pub(crate) mod background;
 mod bfd;
 mod bgp;
+mod capabilities;
 mod certificate;
 mod deployment;
 mod device_auth;
