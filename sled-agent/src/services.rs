@@ -36,7 +36,6 @@ use crate::params::{
 };
 use crate::profile::*;
 use crate::services_migration::{AllZoneRequests, SERVICES_LEDGER_FILENAME};
-use crate::smf_helper::Service;
 use crate::smf_helper::SmfHelper;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
@@ -1339,61 +1338,61 @@ impl ServiceManager {
     }
 
     // TODO: Set up a new service for this
-    async fn configure_dns_client(
-        &self,
-        running_zone: &RunningZone,
-        dns_servers: &[IpAddr],
-        domain: &Option<String>,
-    ) -> Result<(), Error> {
-        struct DnsClient {}
-
-        impl crate::smf_helper::Service for DnsClient {
-            fn service_name(&self) -> String {
-                "dns_client".to_string()
-            }
-            fn smf_name(&self) -> String {
-                "svc:/network/dns/client".to_string()
-            }
-            fn should_import(&self) -> bool {
-                false
-            }
-        }
-
-        let service = DnsClient {};
-        let smfh = SmfHelper::new(&running_zone, &service);
-
-        let etc = running_zone.root().join("etc");
-        let resolv_conf = etc.join("resolv.conf");
-        let nsswitch_conf = etc.join("nsswitch.conf");
-        let nsswitch_dns = etc.join("nsswitch.dns");
-
-        if dns_servers.is_empty() {
-            // Disable the dns/client service
-            smfh.disable()?;
-        } else {
-            debug!(self.inner.log, "enabling {:?}", service.service_name());
-            let mut config = String::new();
-            if let Some(d) = domain {
-                config.push_str(&format!("domain {d}\n"));
-            }
-            for s in dns_servers {
-                config.push_str(&format!("nameserver {s}\n"));
-            }
-
-            debug!(self.inner.log, "creating {resolv_conf}");
-            tokio::fs::write(&resolv_conf, config)
-                .await
-                .map_err(|err| Error::io_path(&resolv_conf, err))?;
-
-            tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
-                .await
-                .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
-
-            smfh.refresh()?;
-            smfh.enable()?;
-        }
-        Ok(())
-    }
+//    async fn configure_dns_client(
+//        &self,
+//        running_zone: &RunningZone,
+//        dns_servers: &[IpAddr],
+//        domain: &Option<String>,
+//    ) -> Result<(), Error> {
+//        struct DnsClient {}
+//
+//        impl crate::smf_helper::Service for DnsClient {
+//            fn service_name(&self) -> String {
+//                "dns_client".to_string()
+//            }
+//            fn smf_name(&self) -> String {
+//                "svc:/network/dns/client".to_string()
+//            }
+//            fn should_import(&self) -> bool {
+//                false
+//            }
+//        }
+//
+//        let service = DnsClient {};
+//        let smfh = SmfHelper::new(&running_zone, &service);
+//
+//        let etc = running_zone.root().join("etc");
+//        let resolv_conf = etc.join("resolv.conf");
+//        let nsswitch_conf = etc.join("nsswitch.conf");
+//        let nsswitch_dns = etc.join("nsswitch.dns");
+//
+//        if dns_servers.is_empty() {
+//            // Disable the dns/client service
+//            smfh.disable()?;
+//        } else {
+//            debug!(self.inner.log, "enabling {:?}", service.service_name());
+//            let mut config = String::new();
+//            if let Some(d) = domain {
+//                config.push_str(&format!("domain {d}\n"));
+//            }
+//            for s in dns_servers {
+//                config.push_str(&format!("nameserver {s}\n"));
+//            }
+//
+//            debug!(self.inner.log, "creating {resolv_conf}");
+//            tokio::fs::write(&resolv_conf, config)
+//                .await
+//                .map_err(|err| Error::io_path(&resolv_conf, err))?;
+//
+//            tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
+//                .await
+//                .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
+//
+//            smfh.refresh()?;
+//            smfh.enable()?;
+//        }
+//        Ok(())
+//    }
 
     async fn dns_install(
         info: &SledAgentInfo,
@@ -1944,7 +1943,9 @@ impl ServiceManager {
                 zone:
                     OmicronZoneConfig {
                         zone_type:
-                            OmicronZoneType::BoundaryNtp { ntp_servers, .. },
+                            OmicronZoneType::BoundaryNtp {
+                                ntp_servers, domain, ..
+                            },
                         underlay_address,
                         ..
                     },
@@ -1954,7 +1955,9 @@ impl ServiceManager {
                 zone:
                     OmicronZoneConfig {
                         zone_type:
-                            OmicronZoneType::InternalNtp { ntp_servers, .. },
+                            OmicronZoneType::InternalNtp {
+                                ntp_servers, domain, ..
+                            },
                         underlay_address,
                         ..
                     },
@@ -1991,8 +1994,11 @@ impl ServiceManager {
                 )
                 .to_string();
 
+                let domain = if let Some(d) = domain { d } else { "unknown" };
+
                 let ntp_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
+                    .add_property("domain", "astring", domain)
                     .add_property("boundary", "boolean", &is_boundary);
 
                 for server in ntp_servers.clone() {
@@ -2001,8 +2007,18 @@ impl ServiceManager {
                         .add_property("server", "astring", &server);
                 }
 
-                let disabled_dns_client_service = ServiceBuilder::new("network/dns/client")
-            .add_instance(ServiceInstanceBuilder::new("default").disable());
+                let dns_client_service;
+                if ntp_servers.is_empty() {
+                    dns_client_service =
+                        ServiceBuilder::new("network/dns/client").add_instance(
+                            ServiceInstanceBuilder::new("default").disable(),
+                        );
+                } else {
+                    dns_client_service = ServiceBuilder::new(
+                        "network/dns/client",
+                    )
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+                }
 
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
                     .add_instance(
@@ -2016,14 +2032,8 @@ impl ServiceManager {
                     // But then I can't make the service depend on it (≖_≖ )
                     .add_service(opte_interface_setup)
                     .add_service(disabled_ssh_service)
+                    .add_service(dns_client_service)
                     .add_service(ntp_service);
-
-                if ntp_servers.is_empty() {
-                    profile.clone().add_service(disabled_dns_client_service);
-                } else {
-                    // Enable dns client service
-                    todo!()
-                }
 
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)

@@ -22,7 +22,7 @@ function config { die $SMF_EXIT_ERR_CONFIG "$@"; }
 typeset -r action=${1:?action parameter not specified}
 typeset -r contract=$2	# For the refresh and stop methods
 
-for var in file boundary server allow; do
+for var in file boundary server allow domain; do
 	nameref _var=$var
 
 	typeset _var=`svcprop -p config/$var $SMF_FMRI`
@@ -106,13 +106,34 @@ function update_logadm {
 	svcadm refresh logadm-upgrade
 }
 
+function configure_dns_client {
+	if [[ $boundary == true ]]; then
+		echo "* Generating resolv.conf file"
+		if [[ $domain != "unknown" ]]; then
+			echo "domain $domain" >> /etc/resolv.conf
+		fi
+
+		for s in $server; do
+			echo "nameserver $s" >> /etc/resolv.conf
+		done
+
+		echo "* Copying nsswitch.dns to nsswitch.conf"
+		cp /etc/nsswitch.dns /etc/nsswitch.conf
+
+		svcadm refresh -t svc:/network/dns/client
+		svcadm enable -t svc:/network/dns/client
+	done
+}
+
 case $action in
 	start)
+		configure_dns_client
 		generate_config_file
 		update_logadm
 		start_daemon
 		;;
 	refresh)
+		configure_dns_client
 		generate_config_file && stop_daemon
 		# SMF will restart the service since the contract is now empty.
 		;;

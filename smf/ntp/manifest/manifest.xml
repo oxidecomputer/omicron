@@ -79,6 +79,7 @@
     <propval name="boundary" type="boolean" value="false" />
     <propval name="server" type="astring" value="" />
     <propval name="allow" type="astring" value="" />
+    <propval name="domain" type="astring" value="unknown" />
   </property_group>
 
   <stability value="Unstable" />
