@@ -11,9 +11,11 @@ use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
+use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -55,6 +57,7 @@ impl super::Nexus {
                 .upstairs_repair_notification(
                     opctx,
                     UpstairsRepairNotification::new(
+                        repair_start_info.time,
                         repair_start_info.repair_id,
                         repair_start_info.repair_type.into(),
                         upstairs_id,
@@ -88,6 +91,7 @@ impl super::Nexus {
                 .upstairs_repair_notification(
                     opctx,
                     UpstairsRepairNotification::new(
+                        repair_finish_info.time,
                         repair_finish_info.repair_id,
                         repair_finish_info.repair_type.into(),
                         upstairs_id,
@@ -111,5 +115,29 @@ impl super::Nexus {
         }
 
         Ok(())
+    }
+
+    /// An Upstairs is updating us with repair progress
+    pub(crate) async fn upstairs_repair_progress(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        repair_id: TypedUuid<UpstairsRepairKind>,
+        repair_progress: RepairProgress,
+    ) -> DeleteResult {
+        info!(
+            self.log,
+            "received upstairs_repair_progress from upstairs {upstairs_id} for repair {repair_id}: {:?}",
+            repair_progress,
+        );
+
+        self.db_datastore
+            .upstairs_repair_progress(
+                opctx,
+                upstairs_id,
+                repair_id,
+                repair_progress,
+            )
+            .await
     }
 }

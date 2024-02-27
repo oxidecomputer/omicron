@@ -3544,6 +3544,15 @@ CREATE TABLE IF NOT EXISTS upstairs_repair_notification (
     PRIMARY KEY (repair_id, upstairs_id, session_id, region_id, notification_type)
 );
 
+CREATE TABLE IF NOT EXISTS upstairs_repair_progress (
+    repair_id UUID NOT NULL,
+    time TIMESTAMPTZ NOT NULL,
+    current_item INT8 NOT NULL,
+    total_items INT8 NOT NULL,
+
+    PRIMARY KEY (repair_id, time, current_item, total_items)
+);
+
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,

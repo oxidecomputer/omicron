@@ -5,17 +5,18 @@
 use super::impl_enum_type;
 use crate::ipv6;
 use crate::schema::upstairs_repair_notification;
+use crate::schema::upstairs_repair_progress;
 use crate::typed_uuid::DbTypedUuid;
 use crate::SqlU16;
 use chrono::{DateTime, Utc};
+use omicron_common::api::internal;
 use omicron_uuid_kinds::DownstairsRegionKind;
-use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddrV6;
-use omicron_common::api::internal; // internal::nexus::UpstairsRepairType;
+use std::net::SocketAddrV6; // internal::nexus::UpstairsRepairType;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
@@ -49,8 +50,12 @@ impl_enum_type!(
 impl From<internal::nexus::UpstairsRepairType> for UpstairsRepairType {
     fn from(v: internal::nexus::UpstairsRepairType) -> UpstairsRepairType {
         match v {
-            internal::nexus::UpstairsRepairType::Live => UpstairsRepairType::Live,
-            internal::nexus::UpstairsRepairType::Reconciliation => UpstairsRepairType::Reconciliation,
+            internal::nexus::UpstairsRepairType::Live => {
+                UpstairsRepairType::Live
+            }
+            internal::nexus::UpstairsRepairType::Reconciliation => {
+                UpstairsRepairType::Reconciliation
+            }
         }
     }
 }
@@ -79,6 +84,8 @@ impl From<internal::nexus::UpstairsRepairType> for UpstairsRepairType {
 #[derive(Queryable, Insertable, Debug, Clone, Selectable)]
 #[diesel(table_name = upstairs_repair_notification)]
 pub struct UpstairsRepairNotification {
+    // Importantly, this is client time, not Nexus' time that it received the
+    // notification.
     pub time: DateTime<Utc>,
 
     pub repair_id: DbTypedUuid<UpstairsRepairKind>,
@@ -107,7 +114,9 @@ pub struct UpstairsRepairNotification {
 }
 
 impl UpstairsRepairNotification {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
+        time: DateTime<Utc>,
         repair_id: TypedUuid<UpstairsRepairKind>,
         repair_type: UpstairsRepairType,
         upstairs_id: TypedUuid<UpstairsKind>,
@@ -117,7 +126,7 @@ impl UpstairsRepairNotification {
         notification_type: UpstairsRepairNotificationType,
     ) -> Self {
         Self {
-            time: Utc::now(),
+            time,
             repair_id: repair_id.into(),
             repair_type,
             upstairs_id: upstairs_id.into(),
@@ -132,4 +141,14 @@ impl UpstairsRepairNotification {
     pub fn address(&self) -> SocketAddrV6 {
         SocketAddrV6::new(*self.target_ip, *self.target_port, 0, 0)
     }
+}
+
+/// A record of Crucible Upstairs repair progress.
+#[derive(Queryable, Insertable, Debug, Clone, Selectable)]
+#[diesel(table_name = upstairs_repair_progress)]
+pub struct UpstairsRepairProgress {
+    pub repair_id: DbTypedUuid<UpstairsRepairKind>,
+    pub time: DateTime<Utc>,
+    pub current_item: i64,
+    pub total_items: i64,
 }

@@ -42,11 +42,13 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
+use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -75,8 +77,10 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
+
         api.register(cpapi_upstairs_repair_start)?;
         api.register(cpapi_upstairs_repair_finish)?;
+        api.register(cpapi_upstairs_repair_progress)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -540,6 +544,42 @@ async fn cpapi_upstairs_repair_finish(
                 &opctx,
                 path.upstairs_id,
                 repair_finish_info.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Upstairs requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct UpstairsRepairPathParam {
+    upstairs_id: TypedUuid<UpstairsKind>,
+    repair_id: TypedUuid<UpstairsRepairKind>,
+}
+
+/// An Upstairs will update this endpoint with the progress of a repair
+#[endpoint {
+     method = POST,
+     path = "/upstairs/{upstairs_id}/repair/{repair_id}/progress",
+ }]
+async fn cpapi_upstairs_repair_progress(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsRepairPathParam>,
+    repair_progress: TypedBody<RepairProgress>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .upstairs_repair_progress(
+                &opctx,
+                path.upstairs_id,
+                path.repair_id,
+                repair_progress.into_inner(),
             )
             .await?;
         Ok(HttpResponseUpdatedNoContent())

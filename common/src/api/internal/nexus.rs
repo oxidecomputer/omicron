@@ -10,8 +10,8 @@ use crate::api::external::{
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
-use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
 use parse_display::{Display, FromStr};
 use schemars::JsonSchema;
@@ -270,6 +270,7 @@ pub struct DownstairsUnderRepair {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
 pub struct RepairStartInfo {
+    pub time: DateTime<Utc>,
     pub session_id: TypedUuid<UpstairsSessionKind>,
     pub repair_id: TypedUuid<UpstairsRepairKind>,
     pub repair_type: UpstairsRepairType,
@@ -278,9 +279,17 @@ pub struct RepairStartInfo {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
 pub struct RepairFinishInfo {
+    pub time: DateTime<Utc>,
     pub session_id: TypedUuid<UpstairsSessionKind>,
     pub repair_id: TypedUuid<UpstairsRepairKind>,
     pub repair_type: UpstairsRepairType,
     pub repairs: Vec<DownstairsUnderRepair>,
     pub aborted: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct RepairProgress {
+    pub time: DateTime<Utc>,
+    pub current_item: i64,
+    pub total_items: i64,
 }

@@ -11,10 +11,11 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
-use crate::db::model::UpstairsRepairNotification;
-use crate::db::model::UpstairsRepairNotificationType;
 use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
+use crate::db::model::UpstairsRepairNotification;
+use crate::db::model::UpstairsRepairNotificationType;
+use crate::db::model::UpstairsRepairProgress;
 use crate::db::model::Volume;
 use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
 use crate::transaction_retry::OptionalError;
@@ -28,6 +29,10 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal::nexus::RepairProgress;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -913,6 +918,66 @@ impl DataStore {
                             dsl::notification_type,
                         ))
                         .do_nothing()
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    err
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    /// Record Upstairs repair progress
+    pub async fn upstairs_repair_progress(
+        &self,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        repair_id: TypedUuid<UpstairsRepairKind>,
+        repair_progress: RepairProgress,
+    ) -> Result<(), Error> {
+        use db::schema::upstairs_repair_notification::dsl as notification_dsl;
+        use db::schema::upstairs_repair_progress::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper("upstairs_repair_progress")
+            .transaction(&conn, |conn| {
+                let repair_progress = repair_progress.clone();
+                let err = err.clone();
+
+                async move {
+                    // Check that there is a repair id for the upstairs id
+                    let matching_repair: Option<UpstairsRepairNotification> =
+                        notification_dsl::upstairs_repair_notification
+                            .filter(notification_dsl::repair_id.eq(nexus_db_model::to_db_typed_uuid(repair_id)))
+                            .filter(notification_dsl::upstairs_id.eq(nexus_db_model::to_db_typed_uuid(upstairs_id)))
+                            .filter(notification_dsl::notification_type.eq(UpstairsRepairNotificationType::Started))
+                            .get_result_async(&conn)
+                            .await
+                            .optional()?;
+
+                    if matching_repair.is_none() {
+                        // XXX should be 404
+                        return Err(err.bail(Error::invalid_request(&format!(
+                            "upstairs {upstairs_id} repair {repair_id} not found"
+                        ))));
+                    }
+
+                    diesel::insert_into(dsl::upstairs_repair_progress)
+                        .values(UpstairsRepairProgress {
+                            repair_id: repair_id.into(),
+                            time: repair_progress.time,
+                            current_item: repair_progress.current_item,
+                            total_items: repair_progress.total_items,
+                        })
                         .execute_async(&conn)
                         .await?;
 

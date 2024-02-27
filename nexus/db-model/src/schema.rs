@@ -1535,6 +1535,15 @@ table! {
 }
 
 table! {
+    upstairs_repair_progress (repair_id, time, current_item, total_items) {
+        repair_id -> Uuid,
+        time -> Timestamptz,
+        current_item -> Int8,
+        total_items -> Int8,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,
