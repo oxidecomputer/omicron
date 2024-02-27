@@ -20,9 +20,6 @@ use uuid::Uuid;
 // Current status:
 // - starting to flesh out the basic CRUD stuff.  it kind of works.  it's hard
 //   to really see it because I haven't fleshed out "show".  save/load works.
-// - one possible next step is to add "save" to omdb -- see below.
-//   then I could work on the rest of this stuff using those instead of having
-//   to solve the blueprint bootstrapping problem
 // - I think it's finally time to switch to using the derive version of clap +
 //   reedline directly.  This is in my way right now because I'm getting back
 //   errors that I cannot see.  See item below.
@@ -34,8 +31,7 @@ use uuid::Uuid;
 //     what RSS would do (maybe even have RSS use this?)
 //   - add support to SystemDescription for putting zones onto things
 //     (not sure this is worth doing)
-//   - build support for loading *saved* stuff from existing systems and only
-//     support that (nope)
+//   - only support loading *saved* stuff from existing systems (nope)
 // - flesh out:
 //   - "inventory show"
 //   - "blueprint show"
@@ -86,14 +82,8 @@ use uuid::Uuid;
 // blueprint but by starting with an inventory that has zones in it.  (We might
 // _get_ that through the above simulation.)
 //
-// At some point we can add:
-//
-// - omdb: read from database, save to same format of file
-//   - to achieve this, move `blueprint_planning_context()` into the datastore
-//   - then it's pretty straightforwrd for omdb to construct this
-//
-// Then we can see what would happen when we make changes to a production system
-// by saving its state and loading it here.
+// With the omdb command, we can see what would happen when we make changes to a
+// production system by saving its state and loading it here.
 //
 // XXX-dap reedline-repl-rs nits
 // - cannot turn off the date banner

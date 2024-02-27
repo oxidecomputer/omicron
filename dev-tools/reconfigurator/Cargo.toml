@@ -4,19 +4,24 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[build-dependencies]
+omicron-rpaths.workspace = true
+
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
-nexus-types.workspace = true
 nexus-deployment.workspace = true
+nexus-types.workspace = true
 omicron-common.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 reedline-repl-rs.workspace = true
-slog.workspace = true
+serde_json.workspace = true
+serde.workspace = true
 slog-error-chain.workspace = true
+slog.workspace = true
 swrite.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
