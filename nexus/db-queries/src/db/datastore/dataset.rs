@@ -127,7 +127,7 @@ impl DataStore {
     /// If `filter_kind` is `Some(value)`, only datasets with a `kind` matching
     /// `value` will be returned. If `filter_kind` is `None`, all datasets will
     /// be returned.
-    pub async fn dataset_list(
+    async fn dataset_list(
         &self,
         opctx: &OpContext,
         filter_kind: Option<DatasetKind>,
