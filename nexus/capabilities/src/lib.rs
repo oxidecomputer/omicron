@@ -9,10 +9,9 @@ use slog::Logger;
 
 mod sled_agent;
 
-pub use sled_agent::NexusSledAgentBaseCapabilities;
-pub use sled_agent::NexusSledAgentCapabilities;
+pub use sled_agent::SledAgent;
 
-pub trait NexusBaseCapabilities {
+pub trait Base {
     fn log(&self) -> &Logger;
     fn datastore(&self) -> &db::DataStore;
 }

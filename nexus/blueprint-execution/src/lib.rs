@@ -7,8 +7,8 @@
 //! See `nexus_deployment` crate-level docs for background.
 
 use anyhow::{anyhow, Context};
-use nexus_capabilities::NexusBaseCapabilities;
-use nexus_capabilities::NexusSledAgentBaseCapabilities;
+use nexus_capabilities::Base;
+use nexus_capabilities::SledAgent;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -56,7 +56,7 @@ struct NexusContext<'a> {
     datastore: &'a DataStore,
 }
 
-impl NexusBaseCapabilities for NexusContext<'_> {
+impl Base for NexusContext<'_> {
     fn log(&self) -> &Logger {
         &self.opctx.log
     }
@@ -66,7 +66,7 @@ impl NexusBaseCapabilities for NexusContext<'_> {
     }
 }
 
-impl NexusSledAgentBaseCapabilities for NexusContext<'_> {}
+impl SledAgent for NexusContext<'_> {}
 
 /// Make one attempt to realize the given blueprint, meaning to take actions to
 /// alter the real system to match the blueprint

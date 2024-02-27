@@ -4,7 +4,7 @@
 
 //! Nexus capabilities for creating sled-agent clients
 
-use crate::NexusBaseCapabilities;
+use crate::Base;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -14,7 +14,8 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
-pub trait NexusSledAgentBaseCapabilities: NexusBaseCapabilities {
+#[async_trait::async_trait]
+pub trait SledAgent: Base {
     fn sled_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -33,15 +34,10 @@ pub trait NexusSledAgentBaseCapabilities: NexusBaseCapabilities {
             .unwrap();
         Client::new_with_client(&format!("http://{address}"), client, log)
     }
-}
-
-#[async_trait::async_trait]
-pub trait NexusSledAgentCapabilities: NexusSledAgentBaseCapabilities {
-    /// [`OpContext`] used by `sled_client_by_id`.
-    fn opctx(&self) -> &OpContext;
 
     async fn sled_client_by_id(
         &self,
+        opctx: &OpContext,
         id: Uuid,
     ) -> Result<Arc<Client>, omicron_common::api::external::Error> {
         // TODO: We should consider injecting connection pooling here,
@@ -51,7 +47,7 @@ pub trait NexusSledAgentCapabilities: NexusSledAgentBaseCapabilities {
         // Frankly, returning an "Arc" here without a connection pool is a
         // little silly; it's not actually used if each client connection exists
         // as a one-shot.
-        let (.., sled) = self.sled_lookup(self.opctx(), id).fetch().await?;
+        let (.., sled) = self.sled_lookup(opctx, id).fetch().await?;
 
         Ok(Arc::new(self.sled_client(id, sled.address())))
     }

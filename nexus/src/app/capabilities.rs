@@ -3,11 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::Nexus;
-use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use slog::Logger;
 
-impl nexus_capabilities::NexusBaseCapabilities for Nexus {
+impl nexus_capabilities::Base for Nexus {
     fn log(&self) -> &Logger {
         &self.log
     }
@@ -17,10 +16,4 @@ impl nexus_capabilities::NexusBaseCapabilities for Nexus {
     }
 }
 
-impl nexus_capabilities::NexusSledAgentBaseCapabilities for Nexus {}
-
-impl nexus_capabilities::NexusSledAgentCapabilities for Nexus {
-    fn opctx(&self) -> &OpContext {
-        &self.opctx_alloc
-    }
-}
+impl nexus_capabilities::SledAgent for Nexus {}
