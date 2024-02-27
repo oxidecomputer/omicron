@@ -20,6 +20,7 @@ pub use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingIfExists;
 use dropshot::ConfigLoggingLevel;
+use omicron_common::disk::DiskIdentity;
 use slog::Logger;
 use std::io::BufReader;
 
@@ -144,4 +145,14 @@ pub fn process_running(pid: u32) -> bool {
     // It should be okay to invoke this syscall with these arguments.  This
     // only checks whether the process is running.
     0 == (unsafe { libc::kill(pid as libc::pid_t, 0) })
+}
+
+/// Returns a DiskIdentity that can be passed to ensure_partition_layout when
+/// not operating on a real disk.
+pub fn mock_device_identity() -> DiskIdentity {
+    DiskIdentity {
+        vendor: "MockVendor".to_string(),
+        serial: "MOCKSERIAL".to_string(),
+        model: "MOCKMODEL".to_string(),
+    }
 }

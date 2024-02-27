@@ -4,10 +4,14 @@
 
 //! illumos-specific mechanisms for parsing disk info.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
 use crate::illumos::gpt;
 use crate::{DiskPaths, DiskVariant, Partition, PooledDiskError};
 use camino::Utf8Path;
 use illumos_utils::zpool::ZpoolName;
+use omicron_common::disk::DiskIdentity;
 use slog::info;
 use slog::Logger;
 use uuid::Uuid;
@@ -16,6 +20,64 @@ use uuid::Uuid;
 use illumos_utils::zpool::MockZpool as Zpool;
 #[cfg(not(test))]
 use illumos_utils::zpool::Zpool;
+
+struct NvmeDeviceSettings {
+    size: u32,
+    lba_meta_size: u32,
+    lba_data_size: u64,
+}
+
+static PREFERRED_NVME_DEVICE_FORMATS: OnceLock<
+    HashMap<&'static str, NvmeDeviceSettings>,
+> = OnceLock::new();
+
+fn preferred_nvme_device_settings(
+) -> &'static HashMap<&'static str, NvmeDeviceSettings> {
+    PREFERRED_NVME_DEVICE_FORMATS.get_or_init(|| {
+        HashMap::from([
+            (
+                "WUS4C6432DSP3X3",
+                NvmeDeviceSettings {
+                    size: 3200,
+                    lba_meta_size: 0,
+                    lba_data_size: 512,
+                },
+            ),
+            (
+                "NEWMODELHERE",
+                NvmeDeviceSettings {
+                    size: 3200,
+                    lba_meta_size: 0,
+                    lba_data_size: 512,
+                },
+            ),
+        ])
+    })
+}
+
+#[derive(Debug, thiserror::Error)]
+#[cfg(target_os = "illumos")]
+pub enum NvmeFormattingError {
+    #[error(transparent)]
+    NvmeInit(#[from] libnvme::NvmeInitError),
+    #[error(transparent)]
+    Nvme(#[from] libnvme::NvmeError),
+    #[error("Device is missing expected LBA format")]
+    LbaFormatMissing,
+    #[error("Device has {0} active namespaces but we expected 1")]
+    UnexpectedNamespaces(usize),
+    #[error(transparent)]
+    InfoError(#[from] libnvme::controller_info::NvmeInfoError),
+    #[error("Could not find NVMe controller for disk with serial {0}")]
+    NoController(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+#[cfg(not(target_os = "illumos"))]
+pub enum NvmeFormattingError {
+    #[error("NVMe formatting is unsupported on this platform")]
+    UnsupportedPlatform,
+}
 
 // The expected layout of an M.2 device within the Oxide rack.
 //
@@ -79,8 +141,11 @@ pub fn ensure_partition_layout(
     log: &Logger,
     paths: &DiskPaths,
     variant: DiskVariant,
+    identity: &DiskIdentity,
 ) -> Result<Vec<Partition>, PooledDiskError> {
-    internal_ensure_partition_layout::<libefi_illumos::Gpt>(log, paths, variant)
+    internal_ensure_partition_layout::<libefi_illumos::Gpt>(
+        log, paths, variant, identity,
+    )
 }
 
 // Same as the [ensure_partition_layout], but with generic parameters
@@ -89,6 +154,7 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     log: &Logger,
     paths: &DiskPaths,
     variant: DiskVariant,
+    identity: &DiskIdentity,
 ) -> Result<Vec<Partition>, PooledDiskError> {
     // Open the "Whole Disk" as a raw device to be parsed by the
     // libefi-illumos library. This lets us peek at the GPT before
@@ -119,6 +185,11 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
             };
             match variant {
                 DiskVariant::U2 => {
+                    // First we need to check that this disk is of the proper
+                    // size and correct logical block address formatting.
+                    ensure_size_and_formatting(log, identity)?;
+
+                    // If we were successful we can create a zpool on this disk.
                     info!(log, "Formatting zpool on disk {}", paths.devfs_path);
                     // If a zpool does not already exist, create one.
                     let zpool_name = ZpoolName::new_external(Uuid::new_v4());
@@ -154,13 +225,124 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     }
 }
 
+#[cfg(target_os = "illumos")]
+fn ensure_size_and_formatting(
+    log: &Logger,
+    identity: &DiskIdentity,
+) -> Result<(), NvmeFormattingError> {
+    use libnvme::namespace::NamespaceDiscoveryLevel;
+    use libnvme::Nvme;
+
+    let mut controller_found = false;
+
+    if let Some(nvme_settings) =
+        preferred_nvme_device_settings().get(identity.model.as_str())
+    {
+        let nvme = Nvme::new()?;
+        for controller in nvme.controller_discovery()?.into_iter() {
+            let controller = controller?.write_lock().map_err(|(_, e)| e)?;
+            let controller_info = controller.get_info()?;
+            // Make sure we are operating on the correct NVMe device.
+            if controller_info.serial() != identity.serial {
+                continue;
+            };
+            controller_found = true;
+            let nsdisc = controller
+                .namespace_discovery(NamespaceDiscoveryLevel::Active)?;
+            let namespaces =
+                nsdisc.into_iter().collect::<Result<Vec<_>, _>>()?;
+            if namespaces.len() != 1 {
+                return Err(NvmeFormattingError::UnexpectedNamespaces(
+                    namespaces.len(),
+                ));
+            }
+
+            // TODO we need to abstract this detail awway somehow as not all
+            // devices will be WD
+            let size = controller.wdc_resize_get()?;
+
+            // First we need to detach blkdev from the namespace
+            namespaces.iter().try_for_each(|ns| ns.blkdev_detach())?;
+
+            // Resize the device if needed to ensure we get the expected
+            // durability level in terms of drive writes per day
+            if size != nvme_settings.size {
+                // TODO this also needs to be abstracted away
+                controller.wdc_resize_set(nvme_settings.size)?;
+                info!(
+                    log,
+                    "Resized {} from {size} to {}",
+                    identity.serial,
+                    nvme_settings.size
+                )
+            }
+
+            // Find the LBA format we want to use for the device
+            let lba = controller_info
+                .lba_formats()
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .find(|lba| {
+                    lba.meta_size() == nvme_settings.lba_meta_size
+                        && lba.data_size() == nvme_settings.lba_data_size
+                })
+                .ok_or_else(|| NvmeFormattingError::LbaFormatMissing)?
+                .id();
+
+            // Execute the request to format the device
+            controller
+                .format_request()?
+                .set_lbaf(lba)?
+                // TODO map this to libnvme::BROADCAST_NAMESPACE once added
+                .set_nsid(u32::MAX)?
+                // No secure erase
+                .set_ses(0)?
+                .execute()?;
+
+            // Attach blkdev to the namespace again
+            namespaces.iter().try_for_each(|ns| ns.blkdev_attach())?;
+            info!(
+                log,
+                "Formatted {} using LBA with data size of {}",
+                identity.serial,
+                nvme_settings.lba_data_size
+            );
+        }
+    } else {
+        // XXX should this be a an error?
+        info!(
+            log,
+            "There is no preferred NVMe setting for disk model {}; nothing to\
+            do for disk with serial {}",
+            identity.model,
+            identity.serial
+        );
+        return Ok(());
+    }
+
+    if !controller_found {
+        return Err(NvmeFormattingError::NoController(identity.serial.clone()));
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "illumos"))]
+fn ensure_size_and_formatting(
+    log: &Logger,
+    identity: &DiskIdentity,
+) -> Result<(), NvmeFormattingError> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::DiskPaths;
     use camino::Utf8PathBuf;
     use illumos_utils::zpool::MockZpool;
-    use omicron_test_utils::dev::test_setup_log;
+    use omicron_test_utils::dev::{mock_device_identity, test_setup_log};
     use std::path::Path;
 
     struct FakePartition {
@@ -196,6 +378,7 @@ mod test {
             &log,
             &DiskPaths { devfs_path, dev_path: None },
             DiskVariant::U2,
+            &mock_device_identity(),
         );
         match result {
             Err(PooledDiskError::CannotFormatMissingDevPath { .. }) => {}
@@ -229,6 +412,7 @@ mod test {
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
             DiskVariant::U2,
+            &mock_device_identity(),
         )
         .expect("Should have succeeded partitioning disk");
 
@@ -253,6 +437,7 @@ mod test {
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH))
             },
             DiskVariant::M2,
+            &mock_device_identity(),
         )
         .is_err());
 
@@ -290,6 +475,7 @@ mod test {
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
             DiskVariant::U2,
+            &mock_device_identity(),
         )
         .expect("Should be able to parse disk");
 
@@ -332,6 +518,7 @@ mod test {
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
             DiskVariant::M2,
+            &mock_device_identity(),
         )
         .expect("Should be able to parse disk");
 
@@ -371,6 +558,7 @@ mod test {
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
                 },
                 DiskVariant::M2,
+                &mock_device_identity(),
             )
             .expect_err("Should have failed parsing empty GPT"),
             PooledDiskError::BadPartitionLayout { .. }
@@ -396,6 +584,7 @@ mod test {
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
                 },
                 DiskVariant::U2,
+                &mock_device_identity(),
             )
             .expect_err("Should have failed parsing empty GPT"),
             PooledDiskError::BadPartitionLayout { .. }
