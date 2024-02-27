@@ -1359,6 +1359,19 @@ table! {
 }
 
 table! {
+    inv_physical_disk (inv_collection_id, sled_id, vendor, serial, model) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        vendor -> Text,
+        serial -> Text,
+        model -> Text,
+
+        variant -> crate::PhysicalDiskKindEnum,
+    }
+}
+
+table! {
     inv_sled_omicron_zones (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,

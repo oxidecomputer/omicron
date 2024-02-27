@@ -39,6 +39,7 @@ use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvOmicronZone;
 use nexus_db_model::InvOmicronZoneNic;
+use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::InvRootOfTrust;
 use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
@@ -125,6 +126,25 @@ impl DataStore {
                 ))
             })
             .collect::<Result<Vec<_>, Error>>()?;
+        // Pull disks out of all sled agents
+        let disks: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent
+                    .disks
+                    .iter()
+                    .map(|disk| {
+                        InvPhysicalDisk::new(
+                            collection_id,
+                            *sled_id,
+                            disk.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+
         // Partition the sled agents into those with an associated baseboard id
         // and those without one.  We handle these pretty differently.
         let (sled_agents_baseboards, sled_agents_no_baseboards): (
@@ -636,6 +656,20 @@ impl DataStore {
                         _source,
                         _which,
                     ) = dsl_inv_rot_page::inv_root_of_trust_page::all_columns();
+                }
+            }
+
+            // Insert rows for all the physical disks we found.
+            {
+                use db::schema::inv_physical_disk::dsl;
+
+                let mut iter =
+                    disks.chunks(SQL_BATCH_SIZE.get().try_into().unwrap());
+                while let Some(some_disks) = iter.next() {
+                    let _ = diesel::insert_into(dsl::inv_physical_disk)
+                        .values(some_disks.to_vec())
+                        .execute_async(&conn)
+                        .await?;
                 }
             }
 
@@ -1391,6 +1425,83 @@ impl DataStore {
             rows
         };
 
+        // Mapping of "Sled ID" -> "All disks reported by that sled"
+        let physical_disks: BTreeMap<
+            Uuid,
+            Vec<nexus_types::inventory::PhysicalDisk>,
+        > = {
+            use db::schema::inv_physical_disk::dsl;
+
+            let mut disks = BTreeMap::<
+                Uuid,
+                Vec<nexus_types::inventory::PhysicalDisk>,
+            >::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                // The primary key of physical disks is more than two columns,
+                // which complicates a bit of the pagination query. This
+                // code below is effectively an implementation of
+                // "paginated_multicolumn" for these four columns (sled_id,
+                // vendor, model, serial).
+                type PK = (Uuid, String, String, String);
+
+                let pagparams = &p.current_pagparams();
+                let mut query = dsl::inv_physical_disk
+                    .into_boxed()
+                    .limit(pagparams.limit.get().into())
+                    .filter(dsl::inv_collection_id.eq(id));
+                let marker = pagparams.marker.map(|m: &PK| m.clone());
+                if let Some((sled_id, vendor, serial, model)) = marker {
+                    query = query.filter(
+                        dsl::sled_id
+                            .eq(sled_id)
+                            .and(dsl::vendor.eq(vendor.clone()))
+                            .and(dsl::model.eq(model.clone()))
+                            .and(dsl::serial.gt(serial.clone())),
+                    );
+                    query = query.or_filter(
+                        dsl::sled_id
+                            .eq(sled_id)
+                            .and(dsl::vendor.eq(vendor.clone()))
+                            .and(dsl::model.gt(model.clone())),
+                    );
+                    query = query.or_filter(
+                        dsl::sled_id
+                            .eq(sled_id)
+                            .and(dsl::vendor.gt(vendor.clone())),
+                    );
+                    query = query.or_filter(dsl::sled_id.gt(sled_id));
+                }
+                query = query
+                    .order(dsl::sled_id.asc())
+                    .then_order_by(dsl::vendor.asc())
+                    .then_order_by(dsl::model.asc())
+                    .then_order_by(dsl::serial.asc());
+
+                let batch: Vec<_> = query
+                    .select(InvPhysicalDisk::as_select())
+                    .load_async(&*conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (
+                        row.sled_id,
+                        row.vendor.clone(),
+                        row.serial.clone(),
+                        row.model.clone(),
+                    )
+                });
+
+                for disk in batch {
+                    disks.entry(disk.sled_id).or_default().push(disk.into());
+                }
+            }
+
+            disks
+        };
+
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
         // Agents.
         let baseboard_id_ids: BTreeSet<_> = sps
@@ -1494,6 +1605,10 @@ impl DataStore {
                         ),
                         usable_physical_ram: s.usable_physical_ram.into(),
                         reservoir_size: s.reservoir_size.into(),
+                        disks: physical_disks
+                            .get(&sled_id)
+                            .map(|disks| disks.to_vec())
+                            .unwrap_or_default(),
                     };
                     Ok((sled_id, sled_agent))
                 })

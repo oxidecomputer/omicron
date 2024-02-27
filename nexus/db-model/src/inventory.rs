@@ -7,10 +7,11 @@
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_omicron_zone, inv_omicron_zone_nic, inv_root_of_trust,
-    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
-    inv_sled_omicron_zones, sw_caboose, sw_root_of_trust_page,
+    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
+    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
+    inv_sled_agent, inv_sled_omicron_zones, sw_caboose, sw_root_of_trust_page,
 };
+use crate::PhysicalDiskKind;
 use crate::{
     impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SqlU16, SqlU32,
     SqlU8,
@@ -648,6 +649,48 @@ impl InvSledAgent {
                 ),
                 reservoir_size: ByteCount::from(sled_agent.reservoir_size),
             })
+        }
+    }
+}
+
+/// See [`nexus_types::inventory::PhysicalDisk`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_physical_disk)]
+pub struct InvPhysicalDisk {
+    pub inv_collection_id: Uuid,
+    pub sled_id: Uuid,
+    pub vendor: String,
+    pub serial: String,
+    pub model: String,
+    pub variant: PhysicalDiskKind,
+}
+
+impl InvPhysicalDisk {
+    pub fn new(
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        disk: nexus_types::inventory::PhysicalDisk,
+    ) -> Self {
+        Self {
+            inv_collection_id,
+            sled_id,
+            vendor: disk.identity.vendor,
+            serial: disk.identity.serial,
+            model: disk.identity.model,
+            variant: disk.variant.into(),
+        }
+    }
+}
+
+impl From<InvPhysicalDisk> for nexus_types::inventory::PhysicalDisk {
+    fn from(disk: InvPhysicalDisk) -> Self {
+        Self {
+            identity: omicron_common::disk::DiskIdentity {
+                vendor: disk.vendor,
+                serial: disk.serial,
+                model: disk.model,
+            },
+            variant: disk.variant.into(),
         }
     }
 }
