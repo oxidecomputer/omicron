@@ -31,7 +31,6 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::watch;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
@@ -74,7 +73,6 @@ pub(crate) struct InstanceManagerServices {
     pub storage: StorageHandle,
     pub zone_bundler: ZoneBundler,
     pub zone_builder_factory: ZoneBuilderFactory,
-    pub vmm_reservoir_watch: watch::Receiver<Option<ByteCount>>,
 }
 
 // Describes the internals of the "InstanceManager", though most of the
@@ -121,7 +119,6 @@ impl InstanceManager {
             storage,
             zone_bundler,
             zone_builder_factory,
-            vmm_reservoir_watch: vmm_reservoir_manager.watcher(),
         };
 
         let runner_handle =
@@ -386,7 +383,6 @@ struct InstanceManagerRunner {
     storage: StorageHandle,
     zone_bundler: ZoneBundler,
     zone_builder_factory: ZoneBuilderFactory,
-    vmm_reservoir_watch: watch::Receiver<Option<ByteCount>>,
 }
 
 impl InstanceManagerRunner {
@@ -545,7 +541,6 @@ impl InstanceManagerRunner {
                     storage: self.storage.clone(),
                     zone_bundler: self.zone_bundler.clone(),
                     zone_builder_factory: self.zone_builder_factory.clone(),
-                    vmm_reservoir_watch: self.vmm_reservoir_watch.clone(),
                 };
 
                 let state = crate::instance::InstanceInitialState {
