@@ -11,8 +11,8 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
-use crate::db::model::LiveRepairNotification;
-use crate::db::model::LiveRepairNotificationType;
+use crate::db::model::UpstairsRepairNotification;
+use crate::db::model::UpstairsRepairNotificationType;
 use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
 use crate::db::model::Volume;
@@ -819,47 +819,68 @@ impl DataStore {
     // instead of the top level of the Volume. The following functions have an
     // Upstairs ID instead of a Volume ID for this reason.
 
-    /// Record when an Upstairs notifies us about a live repair. If that record
+    /// Record when an Upstairs notifies us about a repair. If that record
     /// (uniquely identified by the four IDs passed in plus the notification
     /// type) exists already, do nothing.
-    pub async fn live_repair_notification(
+    pub async fn upstairs_repair_notification(
         &self,
         opctx: &OpContext,
-        record: LiveRepairNotification,
+        record: UpstairsRepairNotification,
     ) -> Result<(), Error> {
-        use db::schema::live_repair_notification::dsl;
+        use db::schema::upstairs_repair_notification::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
 
-        self.transaction_retry_wrapper("live_repair_notification")
+        self.transaction_retry_wrapper("upstairs_repair_notification")
             .transaction(&conn, |conn| {
                 let record = record.clone();
                 let err = err.clone();
 
                 async move {
+                    // Return 409 if a repair ID does not match types
+                    let mismatched_record_type_count: usize =
+                        dsl::upstairs_repair_notification
+                            .filter(dsl::repair_id.eq(record.repair_id))
+                            .filter(dsl::repair_type.ne(record.repair_type))
+                            .execute_async(&conn)
+                            .await?;
+
+                    if mismatched_record_type_count == 0 {
+                        // ok, no existing records or the existing records match
+                        // the type
+                    } else if mismatched_record_type_count == 1 {
+                        // XXX is it possible that the match count is larger
+                        // than 1?
+                        return Err(err.bail(Error::conflict(&format!(
+                            "existing repair type for id {} does not match {:?}!",
+                            record.repair_id,
+                            record.repair_type,
+                        ))));
+                    }
+
                     match &record.notification_type {
-                        LiveRepairNotificationType::Started => {
+                        UpstairsRepairNotificationType::Started => {
                             // Proceed - the insertion can succeed or fail below
                             // based on the table's primary key
                         }
 
-                        LiveRepairNotificationType::Succeeded
-                        | LiveRepairNotificationType::Failed => {
+                        UpstairsRepairNotificationType::Succeeded
+                        | UpstairsRepairNotificationType::Failed => {
                             // However, Nexus must accept only one "finished"
                             // status - an Upstairs cannot change this and must
                             // instead perform another repair with a new repair
                             // ID.
                             let maybe_existing_finish_record: Option<
-                                LiveRepairNotification,
-                            > = dsl::live_repair_notification
+                                UpstairsRepairNotification,
+                            > = dsl::upstairs_repair_notification
                                 .filter(dsl::repair_id.eq(record.repair_id))
                                 .filter(dsl::upstairs_id.eq(record.upstairs_id))
                                 .filter(dsl::session_id.eq(record.session_id))
                                 .filter(dsl::region_id.eq(record.region_id))
                                 .filter(dsl::notification_type.eq_any(vec![
-                                    LiveRepairNotificationType::Succeeded,
-                                    LiveRepairNotificationType::Failed,
+                                    UpstairsRepairNotificationType::Succeeded,
+                                    UpstairsRepairNotificationType::Failed,
                                 ]))
                                 .get_result_async(&conn)
                                 .await
@@ -882,7 +903,7 @@ impl DataStore {
                         }
                     }
 
-                    diesel::insert_into(dsl::live_repair_notification)
+                    diesel::insert_into(dsl::upstairs_repair_notification)
                         .values(record)
                         .on_conflict((
                             dsl::repair_id,

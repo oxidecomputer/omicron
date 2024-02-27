@@ -1518,10 +1518,11 @@ table! {
 }
 
 table! {
-    live_repair_notification (repair_id, upstairs_id, session_id, region_id, notification_type) {
+    upstairs_repair_notification (repair_id, upstairs_id, session_id, region_id, notification_type) {
         time -> Timestamptz,
 
         repair_id -> Uuid,
+        repair_type -> crate::UpstairsRepairTypeEnum,
         upstairs_id -> Uuid,
         session_id -> Uuid,
 
@@ -1529,7 +1530,7 @@ table! {
         target_ip -> Inet,
         target_port -> Int4,
 
-        notification_type -> crate::LiveRepairNotificationTypeEnum,
+        notification_type -> crate::UpstairsRepairNotificationTypeEnum,
     }
 }
 

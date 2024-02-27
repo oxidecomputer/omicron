@@ -75,8 +75,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
-        api.register(cpapi_live_repair_start)?;
-        api.register(cpapi_live_repair_finish)?;
+        api.register(cpapi_upstairs_repair_start)?;
+        api.register(cpapi_upstairs_repair_finish)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -491,12 +491,12 @@ struct UpstairsPathParam {
     upstairs_id: TypedUuid<UpstairsKind>,
 }
 
-/// An Upstairs will notify this endpoint when a live repair starts
+/// An Upstairs will notify this endpoint when a repair starts
 #[endpoint {
      method = POST,
-     path = "/upstairs/{upstairs_id}/live-repair-start",
+     path = "/upstairs/{upstairs_id}/repair-start",
  }]
-async fn cpapi_live_repair_start(
+async fn cpapi_upstairs_repair_start(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UpstairsPathParam>,
     repair_start_info: TypedBody<RepairStartInfo>,
@@ -508,7 +508,7 @@ async fn cpapi_live_repair_start(
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus
-            .live_repair_start(
+            .upstairs_repair_start(
                 &opctx,
                 path.upstairs_id,
                 repair_start_info.into_inner(),
@@ -519,12 +519,12 @@ async fn cpapi_live_repair_start(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// An Upstairs will notify this endpoint when a live repair finishes.
+/// An Upstairs will notify this endpoint when a repair finishes.
 #[endpoint {
      method = POST,
-     path = "/upstairs/{upstairs_id}/live-repair-finish",
+     path = "/upstairs/{upstairs_id}/repair-finish",
  }]
-async fn cpapi_live_repair_finish(
+async fn cpapi_upstairs_repair_finish(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UpstairsPathParam>,
     repair_finish_info: TypedBody<RepairFinishInfo>,
@@ -536,7 +536,7 @@ async fn cpapi_live_repair_finish(
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus
-            .live_repair_finish(
+            .upstairs_repair_finish(
                 &opctx,
                 path.upstairs_id,
                 repair_finish_info.into_inner(),

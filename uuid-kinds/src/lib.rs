@@ -46,9 +46,9 @@ macro_rules! impl_typed_uuid_kind {
 
 impl_typed_uuid_kind! {
     DownstairsRegionKind => "downstairs_region",
-    LiveRepairKind => "live_repair",
     LoopbackAddressKind => "loopback_address",
     TufRepoKind => "tuf_repo",
     UpstairsKind => "upstairs",
+    UpstairsRepairKind => "upstairs_repair",
     UpstairsSessionKind => "upstairs_session",
 }

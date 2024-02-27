@@ -35,8 +35,8 @@ progenitor::generate_api!(
         NewPasswordHash = omicron_passwords::NewPasswordHash,
 
         TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
+        TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
         TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
-        TypedUuidForLiveRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::LiveRepairKind>,
     }
 );
 

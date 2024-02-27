@@ -5,8 +5,8 @@
 //! Volumes
 
 use crate::app::sagas;
-use nexus_db_model::LiveRepairNotification;
-use nexus_db_model::LiveRepairNotificationType;
+use nexus_db_model::UpstairsRepairNotification;
+use nexus_db_model::UpstairsRepairNotificationType;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DeleteResult;
@@ -37,8 +37,8 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// An Upstairs is telling us when a live repair is starting.
-    pub(crate) async fn live_repair_start(
+    /// An Upstairs is telling us when a repair is starting.
+    pub(crate) async fn upstairs_repair_start(
         self: &Arc<Self>,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,
@@ -46,21 +46,22 @@ impl super::Nexus {
     ) -> DeleteResult {
         info!(
             self.log,
-            "received live_repair_start from upstairs {upstairs_id}: {:?}",
+            "received upstairs_repair_start from upstairs {upstairs_id}: {:?}",
             repair_start_info,
         );
 
         for repaired_downstairs in repair_start_info.repairs {
             self.db_datastore
-                .live_repair_notification(
+                .upstairs_repair_notification(
                     opctx,
-                    LiveRepairNotification::new(
+                    UpstairsRepairNotification::new(
                         repair_start_info.repair_id,
+                        repair_start_info.repair_type.into(),
                         upstairs_id,
                         repair_start_info.session_id,
                         repaired_downstairs.region_uuid,
                         repaired_downstairs.target_addr,
-                        LiveRepairNotificationType::Started,
+                        UpstairsRepairNotificationType::Started,
                     ),
                 )
                 .await?;
@@ -69,8 +70,8 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// An Upstairs is telling us when a live repair is finished, and the result.
-    pub(crate) async fn live_repair_finish(
+    /// An Upstairs is telling us when a repair is finished, and the result.
+    pub(crate) async fn upstairs_repair_finish(
         self: &Arc<Self>,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,
@@ -78,24 +79,25 @@ impl super::Nexus {
     ) -> DeleteResult {
         info!(
             self.log,
-            "received live_repair_finish from upstairs {upstairs_id}: {:?}",
+            "received upstairs_repair_finish from upstairs {upstairs_id}: {:?}",
             repair_finish_info,
         );
 
         for repaired_downstairs in repair_finish_info.repairs {
             self.db_datastore
-                .live_repair_notification(
+                .upstairs_repair_notification(
                     opctx,
-                    LiveRepairNotification::new(
+                    UpstairsRepairNotification::new(
                         repair_finish_info.repair_id,
+                        repair_finish_info.repair_type.into(),
                         upstairs_id,
                         repair_finish_info.session_id,
                         repaired_downstairs.region_uuid,
                         repaired_downstairs.target_addr,
                         if repair_finish_info.aborted {
-                            LiveRepairNotificationType::Failed
+                            UpstairsRepairNotificationType::Failed
                         } else {
-                            LiveRepairNotificationType::Succeeded
+                            UpstairsRepairNotificationType::Succeeded
                         },
                     ),
                 )
