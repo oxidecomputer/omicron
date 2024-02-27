@@ -257,6 +257,7 @@ pub enum HostIdentifier {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
 pub enum UpstairsRepairType {
     Live,
     Reconciliation,

@@ -962,10 +962,55 @@
         }
       }
     },
-    "/upstairs/{upstairs_id}/live-repair-finish": {
+    "/upstairs/{upstairs_id}/repair/{repair_id}/progress": {
       "post": {
-        "summary": "An Upstairs will notify this endpoint when a live repair finishes.",
-        "operationId": "cpapi_live_repair_finish",
+        "summary": "An Upstairs will update this endpoint with the progress of a repair",
+        "operationId": "cpapi_upstairs_repair_progress",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repair_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairProgress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/upstairs/{upstairs_id}/repair-finish": {
+      "post": {
+        "summary": "An Upstairs will notify this endpoint when a repair finishes.",
+        "operationId": "cpapi_upstairs_repair_finish",
         "parameters": [
           {
             "in": "path",
@@ -999,10 +1044,10 @@
         }
       }
     },
-    "/upstairs/{upstairs_id}/live-repair-start": {
+    "/upstairs/{upstairs_id}/repair-start": {
       "post": {
-        "summary": "An Upstairs will notify this endpoint when a live repair starts",
-        "operationId": "cpapi_live_repair_start",
+        "summary": "An Upstairs will notify this endpoint when a repair starts",
+        "operationId": "cpapi_upstairs_repair_start",
         "parameters": [
           {
             "in": "path",
@@ -5855,7 +5900,10 @@
             "type": "boolean"
           },
           "repair_id": {
-            "$ref": "#/components/schemas/TypedUuidForLiveRepairKind"
+            "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+          },
+          "repair_type": {
+            "$ref": "#/components/schemas/UpstairsRepairType"
           },
           "repairs": {
             "type": "array",
@@ -5865,20 +5913,51 @@
           },
           "session_id": {
             "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "aborted",
           "repair_id",
+          "repair_type",
           "repairs",
-          "session_id"
+          "session_id",
+          "time"
+        ]
+      },
+      "RepairProgress": {
+        "type": "object",
+        "properties": {
+          "current_item": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "total_items": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "current_item",
+          "time",
+          "total_items"
         ]
       },
       "RepairStartInfo": {
         "type": "object",
         "properties": {
           "repair_id": {
-            "$ref": "#/components/schemas/TypedUuidForLiveRepairKind"
+            "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+          },
+          "repair_type": {
+            "$ref": "#/components/schemas/UpstairsRepairType"
           },
           "repairs": {
             "type": "array",
@@ -5888,12 +5967,18 @@
           },
           "session_id": {
             "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
           "repair_id",
+          "repair_type",
           "repairs",
-          "session_id"
+          "session_id",
+          "time"
         ]
       },
       "RouteConfig": {
@@ -6687,13 +6772,20 @@
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForLiveRepairKind": {
+      "TypedUuidForUpstairsRepairKind": {
         "type": "string",
         "format": "uuid"
       },
       "TypedUuidForUpstairsSessionKind": {
         "type": "string",
         "format": "uuid"
+      },
+      "UpstairsRepairType": {
+        "type": "string",
+        "enum": [
+          "live",
+          "reconciliation"
+        ]
       },
       "UserId": {
         "title": "A name unique within the parent collection",
