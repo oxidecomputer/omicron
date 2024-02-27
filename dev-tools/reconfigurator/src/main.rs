@@ -214,7 +214,7 @@ fn cmd_sled_add(
 ) -> anyhow::Result<Option<String>> {
     let mut sled = SledBuilder::new();
     let _ = sim.system.sled(sled).context("adding sled")?;
-    Ok(Some(format!("added sled")))
+    Ok(Some(String::from("added sled")))
 }
 
 fn cmd_sled_show(
