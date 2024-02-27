@@ -89,7 +89,7 @@ reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.22", features = ["serde"] }
-serde = { version = "1.0.196", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.197", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.114", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
@@ -100,7 +100,7 @@ string_cache = { version = "0.8.7" }
 strum = { version = "0.25.0", features = ["derive"] }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.48", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.51", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.27", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.36.0", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.10", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
@@ -196,7 +196,7 @@ reqwest = { version = "0.11.22", features = ["blocking", "json", "rustls-tls", "
 ring = { version = "0.17.8", features = ["std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid1"] }
 semver = { version = "1.0.22", features = ["serde"] }
-serde = { version = "1.0.196", features = ["alloc", "derive", "rc"] }
+serde = { version = "1.0.197", features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0.114", features = ["raw_value", "unbounded_depth"] }
 sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.3.0", features = ["inline", "unicode"] }
@@ -207,7 +207,7 @@ string_cache = { version = "0.8.7" }
 strum = { version = "0.25.0", features = ["derive"] }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
-syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.48", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
+syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.51", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.27", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.13", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.36.0", features = ["full", "test-util"] }
