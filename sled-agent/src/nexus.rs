@@ -242,14 +242,37 @@ pub struct NexusNotifierInput {
     instances: InstanceManager,
 }
 
+/// A mechanism for notifying nexus about this sled agent
+///
+/// The semantics are as follows:
+///  1. At any time there is a single outstanding HTTP request to nexus
+///  2. On startup, this task gets the latest sled-agent info if any
+///     and saves it.
+///  3. Whenever the state needs to be updated to a value different
+///     from what nexus has, the generation number is bumped
+///     and the new state transmitted.
+///  4. If a caller requests an update to be made to nexus it gets
+///     marked as pending and when the last outstanding request completes
+///     a new update will be made if necessary.
 pub struct NexusNotifierTask {
     input: NexusNotifierInput,
     log: Logger,
     rx: mpsc::Receiver<NexusNotifierMsg>,
-    // We only send `Get` requests if we haven't learned our generation yet
-    generation: Option<Generation>,
 
-    // Do we need to notify nexus about an update to our state.
+    // The last known value either put or gotten from nexus
+    //
+    // We only send `Get` requests if we haven't learned any info yet
+    nexus_known_info: Option<SledAgentInfo>,
+
+    // The info sent in the last outstanding `Put` request
+    //
+    // In some cases the result of a put is indeterminate. We may get a timeout
+    // back for instance. If the value of the data changes when we try another
+    // put, we must bump the generation number. We therefore save any proposed
+    // nexus info until we know it has been successfully put.
+    proposed_info: Option<SledAgentInfo>,
+
+    // Do we need to notify nexus about an update to our state?
     pending_notification: bool,
 
     // We only have one outstanding nexus request at a time.
@@ -278,7 +301,8 @@ impl NexusNotifierTask {
                 input,
                 log: log.new(o!("component" => "NexusNotifierTask")),
                 rx,
-                generation: None,
+                nexus_known_info: None,
+                proposed_info: None,
                 // We start with pending true, because we always want to attempt
                 // to retrieve the current generation number before we upsert
                 // ourselves.
@@ -334,13 +358,13 @@ impl NexusNotifierTask {
         let sled_id = self.input.sled_id;
 
         // Have we learned about any generations stored in CRDB yet?
-        if let Some(generation) = self.generation {
+        if let Some(known_info) = &self.nexus_known_info {
             let role = if self.input.hardware.is_scrimlet() {
                 nexus_client::types::SledRole::Scrimlet
             } else {
                 nexus_client::types::SledRole::Gimlet
             };
-            let info = SledAgentInfo {
+            let mut info = SledAgentInfo {
                 sa_address: self.input.sled_address.to_string(),
                 role,
                 baseboard: self.input.hardware.baseboard().convert(),
@@ -354,8 +378,33 @@ impl NexusNotifierTask {
                     .usable_physical_ram_bytes()
                     .into(),
                 reservoir_size: self.input.instances.reservoir_size().into(),
-                generation,
+                generation: known_info.generation,
             };
+            // We don't need to send a request if the info is identical to what
+            // nexus knows
+            if info == *known_info {
+                return;
+            }
+
+            // If we already have a proposed value and it's different from what
+            // we're about to propose, we need to bump the generation number
+            // greater than what we last proposed.
+            if let Some(proposed_info) = &self.proposed_info {
+                if *proposed_info != info {
+                    info.generation = proposed_info.generation.next();
+                } else {
+                    // Re-try to send nexus the same info
+                    info.generation = proposed_info.generation;
+                }
+            } else {
+                // We don't have a proposed value, so bump the generation
+                // of the value that nexus knows.
+                info.generation = known_info.generation.next();
+            }
+
+            // Unconditionally save what we are about to propose
+            self.proposed_info = Some(info.clone());
+
             self.outstanding_request = Some(tokio::spawn(async move {
                 client
                     .sled_agent_put(&sled_id, &info)
@@ -373,5 +422,55 @@ impl NexusNotifierTask {
     }
 
     /// Handle a reply from nexus by extracting the value from a `JoinHandle`
-    async fn handle_nexus_reply(&mut self) {}
+    async fn handle_nexus_reply(&mut self) {
+        let res = match self
+            .outstanding_request
+            .take()
+            .expect("missing JoinHandle")
+            .await
+        {
+            Ok(res) => res,
+            Err(e) => {
+                error!(self.log, "Nexus request task exited prematurely: {e}");
+                return;
+            }
+        };
+        match res {
+            Ok(NexusSuccess::Get(info)) => match &mut self.nexus_known_info {
+                None => {
+                    self.nexus_known_info = Some(info);
+                }
+                Some(known) => {
+                    warn!(
+                        self.log,
+                        "Got unexpected `Get` response";
+                        "known" => ?known,
+                        "got" => ?info
+                    );
+                    if known.generation < info.generation {
+                        warn!(
+                            self.log,
+                            "Replacing known info with unexpected info";
+                            "known_generation" => %known.generation,
+                            "new_generation" => %info.generation
+                        );
+                        *known = info;
+                    } else if known.generation == info.generation {
+                        if *known != info {
+                            error!(
+                               self.log,
+                               "Different SledAgentInfo held by nexus and sled-agent for same generation";
+                                "generation" => %info.generation
+                            );
+                        }
+                    } else {
+                        // This is just a stale response, although it still shouldn't occur
+                        warn!(self.log, "Received stale response"; "info" => ?info);
+                    }
+                }
+            },
+            Ok(NexusSuccess::Put) => {}
+            Err(e) => {}
+        }
+    }
 }
