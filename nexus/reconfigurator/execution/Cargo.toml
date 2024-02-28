@@ -1,5 +1,5 @@
 [package]
-name = "nexus-blueprint-execution"
+name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 edition = "2021"
 
@@ -33,7 +33,7 @@ omicron-workspace-hack.workspace = true
 chrono.workspace = true
 httptest.workspace = true
 ipnet.workspace = true
-nexus-deployment.workspace = true
+nexus-reconfigurator-planning.workspace = true
 nexus-inventory.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true

@@ -4263,39 +4263,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-blueprint-execution"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dns-service-client",
- "futures",
- "httptest",
- "illumos-utils",
- "internal-dns",
- "ipnet",
- "nexus-db-model",
- "nexus-db-queries",
- "nexus-deployment",
- "nexus-inventory",
- "nexus-test-utils",
- "nexus-test-utils-macros",
- "nexus-types",
- "omicron-common",
- "omicron-nexus",
- "omicron-rpaths",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "pq-sys",
- "reqwest",
- "sled-agent-client",
- "slog",
- "slog-error-chain",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "nexus-client"
 version = "0.1.0"
 dependencies = [
@@ -4386,8 +4353,8 @@ dependencies = [
  "macaddr",
  "newtype_derive",
  "nexus-db-model",
- "nexus-deployment",
  "nexus-inventory",
+ "nexus-reconfigurator-planning",
  "nexus-test-utils",
  "nexus-types",
  "omicron-common",
@@ -4445,26 +4412,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-deployment"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "internal-dns",
- "ipnet",
- "ipnetwork",
- "nexus-inventory",
- "nexus-types",
- "omicron-common",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "sled-agent-client",
- "slog",
- "thiserror",
- "uuid",
-]
-
-[[package]]
 name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
@@ -4499,6 +4446,59 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.48",
+]
+
+[[package]]
+name = "nexus-reconfigurator-execution"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dns-service-client",
+ "futures",
+ "httptest",
+ "illumos-utils",
+ "internal-dns",
+ "ipnet",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-inventory",
+ "nexus-reconfigurator-planning",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
+ "nexus-types",
+ "omicron-common",
+ "omicron-nexus",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "reqwest",
+ "sled-agent-client",
+ "slog",
+ "slog-error-chain",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "nexus-reconfigurator-planning"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "internal-dns",
+ "ipnet",
+ "ipnetwork",
+ "nexus-inventory",
+ "nexus-types",
+ "omicron-common",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "sled-agent-client",
+ "slog",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]
@@ -5031,12 +5031,12 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "mime_guess",
- "nexus-blueprint-execution",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
- "nexus-deployment",
  "nexus-inventory",
+ "nexus-reconfigurator-execution",
+ "nexus-reconfigurator-planning",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",

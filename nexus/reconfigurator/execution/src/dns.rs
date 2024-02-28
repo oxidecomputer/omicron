@@ -320,8 +320,8 @@ mod test {
     use crate::Sled;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
-    use nexus_deployment::blueprint_builder::BlueprintBuilder;
     use nexus_inventory::CollectionBuilder;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;

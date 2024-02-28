@@ -37,14 +37,14 @@ members = [
     "key-manager",
     "nexus",
     "nexus/authz-macros",
-    "nexus/blueprint-execution",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
-    "nexus/deployment",
     "nexus/inventory",
     "nexus/macros-common",
+    "nexus/reconfigurator/execution",
+    "nexus/reconfigurator/planning",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -114,14 +114,14 @@ default-members = [
     "key-manager",
     "nexus",
     "nexus/authz-macros",
-    "nexus/blueprint-execution",
     "nexus/macros-common",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
-    "nexus/deployment",
     "nexus/inventory",
+    "nexus/reconfigurator/execution",
+    "nexus/reconfigurator/planning",
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
@@ -253,14 +253,14 @@ mockall = "0.12"
 newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
 multimap = "0.10.0"
-nexus-blueprint-execution = { path = "nexus/blueprint-execution" }
 nexus-client = { path = "clients/nexus-client" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
-nexus-deployment = { path = "nexus/deployment" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-macros-common = { path = "nexus/macros-common" }
+nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
+nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
