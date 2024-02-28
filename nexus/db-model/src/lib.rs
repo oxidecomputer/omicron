@@ -10,6 +10,7 @@ extern crate diesel;
 extern crate newtype_derive;
 
 mod address_lot;
+pub mod background_task_toggles;
 mod bfd;
 mod bgp;
 mod block_size;

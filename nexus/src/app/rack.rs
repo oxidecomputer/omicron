@@ -11,6 +11,8 @@ use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use gateway_client::types::SpType;
 use ipnetwork::{IpNetwork, Ipv6Network};
+use nexus_db_model::background_task_toggles::BackgroundTaskToggleValues;
+use nexus_db_model::background_task_toggles::SYNC_SWITCH_PORT_SETTINGS;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_queries::authz;
@@ -596,6 +598,16 @@ impl super::Nexus {
                 .await?;
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
           // record port speed
+
+        // enable rpw for network configurations
+        let toggle_values = BackgroundTaskToggleValues {
+            name: SYNC_SWITCH_PORT_SETTINGS.into(),
+            enabled: true,
+        };
+
+        self.db_datastore
+            .set_background_task_toggle(opctx, toggle_values)
+            .await?;
 
         self.initial_bootstore_sync(&opctx).await?;
 
