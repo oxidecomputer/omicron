@@ -16,6 +16,9 @@ use uuid::Uuid;
 
 #[async_trait::async_trait]
 pub trait SledAgent: Base {
+    /// Operational context used for sled lookups to create sled agent clients
+    fn opctx_sled_client(&self) -> &OpContext;
+
     fn sled_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -37,7 +40,6 @@ pub trait SledAgent: Base {
 
     async fn sled_client_by_id(
         &self,
-        opctx: &OpContext,
         id: Uuid,
     ) -> Result<Arc<Client>, omicron_common::api::external::Error> {
         // TODO: We should consider injecting connection pooling here,
@@ -47,7 +49,8 @@ pub trait SledAgent: Base {
         // Frankly, returning an "Arc" here without a connection pool is a
         // little silly; it's not actually used if each client connection exists
         // as a one-shot.
-        let (.., sled) = self.sled_lookup(opctx, id).fetch().await?;
+        let (.., sled) =
+            self.sled_lookup(self.opctx_sled_client(), id).fetch().await?;
 
         Ok(Arc::new(self.sled_client(id, sled.address())))
     }

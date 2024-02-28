@@ -5,6 +5,8 @@ edition = "2021"
 
 [dependencies]
 async-trait.workspace = true
+futures.workspace = true
+ipnetwork.workspace = true
 nexus-db-queries.workspace = true
 omicron-common.workspace = true
 reqwest.workspace = true

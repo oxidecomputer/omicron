@@ -7,8 +7,10 @@
 use nexus_db_queries::db;
 use slog::Logger;
 
+mod firewall_rules;
 mod sled_agent;
 
+pub use firewall_rules::FirewallRules;
 pub use sled_agent::SledAgent;
 
 pub trait Base {

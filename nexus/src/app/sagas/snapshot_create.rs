@@ -696,7 +696,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
 
     let sled_agent_client = osagactx
         .nexus()
-        .sled_client_by_id(&osagactx.nexus().opctx_alloc, sled_id)
+        .sled_client_by_id(sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1975,8 +1975,7 @@ mod test {
         let sled_id = instance_state
             .sled_id()
             .expect("starting instance should have a sled");
-        let sa =
-            nexus.sled_client_by_id(&nexus.opctx_alloc, sled_id).await.unwrap();
+        let sa = nexus.sled_client_by_id(sled_id).await.unwrap();
 
         sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus

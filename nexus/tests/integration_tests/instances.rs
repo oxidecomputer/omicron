@@ -4679,10 +4679,6 @@ async fn instance_simulate_on_sled(
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance on sled";
           "instance_id" => %instance_id, "sled_id" => %sled_id);
-    let opctx = OpContext::for_tests(
-        cptestctx.logctx.log.new(o!()),
-        nexus.datastore().clone(),
-    );
-    let sa = nexus.sled_client_by_id(&opctx, sled_id).await.unwrap();
+    let sa = nexus.sled_client_by_id(sled_id).await.unwrap();
     sa.instance_finish_transition(instance_id).await;
 }

@@ -8,6 +8,7 @@ use super::NexusSaga;
 use super::ACTION_GENERATE_ID;
 use crate::app::sagas::declare_saga_actions;
 use crate::external_api::params;
+use nexus_capabilities::FirewallRules;
 use nexus_db_queries::db::queries::vpc_subnet::SubnetError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults as defaults;

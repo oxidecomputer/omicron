@@ -11,6 +11,7 @@ use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use gateway_client::types::SpType;
 use ipnetwork::{IpNetwork, Ipv6Network};
+use nexus_capabilities::FirewallRules;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::{SwitchLinkFec, SwitchLinkSpeed};

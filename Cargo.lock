@@ -4301,6 +4301,8 @@ name = "nexus-capabilities"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures",
+ "ipnetwork",
  "nexus-db-queries",
  "omicron-common",
  "omicron-workspace-hack",

@@ -389,7 +389,7 @@ pub async fn instance_ip_add_opte(
 
     osagactx
         .nexus()
-        .sled_client_by_id(&osagactx.nexus().opctx_alloc, sled_uuid)
+        .sled_client_by_id(sled_uuid)
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(
@@ -444,7 +444,7 @@ pub async fn instance_ip_remove_opte(
 
     osagactx
         .nexus()
-        .sled_client_by_id(&osagactx.nexus().opctx_alloc, sled_uuid)
+        .sled_client_by_id(sled_uuid)
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(

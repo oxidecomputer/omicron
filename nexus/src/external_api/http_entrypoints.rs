@@ -35,6 +35,7 @@ use dropshot::{
 };
 use dropshot::{ApiDescription, StreamingBody};
 use ipnetwork::IpNetwork;
+use nexus_capabilities::FirewallRules;
 use nexus_capabilities::SledAgent;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;

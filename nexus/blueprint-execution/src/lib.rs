@@ -66,7 +66,11 @@ impl Base for NexusContext<'_> {
     }
 }
 
-impl SledAgent for NexusContext<'_> {}
+impl SledAgent for NexusContext<'_> {
+    fn opctx_sled_client(&self) -> &OpContext {
+        &self.opctx
+    }
+}
 
 /// Make one attempt to realize the given blueprint, meaning to take actions to
 /// alter the real system to match the blueprint
