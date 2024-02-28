@@ -130,6 +130,13 @@ impl SwitchPortSettingsManager {
                 }
             };
 
+            info!(
+                log,
+                "fetching switch port settings";
+                "switch_location" => ?location,
+                "port" => ?port,
+            );
+
             let settings = match self
                 .datastore
                 .switch_port_settings_get(opctx, &id.into())
@@ -241,9 +248,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // get the static routes on each switch
                 let downstream_static_routes =
                     downstream_static_routes(&mgd_clients, log).await;
+                info!(&log, "retrieved existing routes"; "routes" => ?downstream_static_routes);
 
                 // generate the complete set of static routes that should be on a given switch
                 let upstream_static_routes = upstream_static_routes(&changes);
+                info!(&log, "retrieved desired routes"; "routes" => ?upstream_static_routes);
 
                 // diff the downstream and upstream routes. Add what is missing from downstream, remove what is not present in upstream.
                 let routes_to_add = static_routes_to_add(
@@ -251,16 +260,20 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     &downstream_static_routes,
                     log,
                 );
+                info!(&log, "calculated static routes to add"; "routes" => ?routes_to_add);
 
                 let routes_to_del = static_routes_to_del(
                     downstream_static_routes,
                     upstream_static_routes,
                 );
+                info!(&log, "calculated static routes to delete"; "routes" => ?routes_to_del);
 
                 // delete the unneeded routes first, just in case there is a conflicting route for one we need to add
+                info!(&log, "deleting static routes"; "routes" => ?routes_to_del);
                 delete_static_routes(&mgd_clients, routes_to_del, log).await;
 
                 // add the new routes
+                info!(&log, "adding static routes"; "routes" => ?routes_to_add);
                 add_static_routes(&mgd_clients, routes_to_add, log).await;
 
                 //
@@ -276,6 +289,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             None => todo!("handle missing client"),
                         };
 
+                    info!(
+                        &log,
+                        "applying SMF config uplink updates to switch zone";
+                        "switch_location" => ?location,
+                        "config" => ?config,
+                    );
                     if let Err(_) = client
                         .uplink_ensure(&sled_agent_client::types::SwitchPorts {
                             uplinks: config.clone(),
@@ -467,6 +486,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
                     for config in configs {
+                        info!(
+                            &log,
+                            "applying bgp config";
+                            "switch_location" => ?location,
+                            "config" => ?config,
+                        );
                         if let Err(e) = client.inner.bgp_apply(config).await {
                             error!(log, "error while applying bgp configuration"; "error" => ?e);
                         }
@@ -616,7 +641,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 let bootstore_needs_update = {
                     match downstream_config {
-                        Some(existing_config) => {
+                        Some(ref existing_config) => {
                             existing_config.schema_version != upstream_config.schema_version ||
                             existing_config.body.ntp_servers != upstream_config.body.ntp_servers ||
                             existing_config.body.rack_network_config != upstream_config.body.rack_network_config
@@ -634,6 +659,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         };
 
                     upstream_config.generation = generation as u64;
+                    info!(
+                        &log,
+                        "updating bootstore config";
+                        "old config" => ?downstream_config,
+                        "new config" => ?upstream_config,
+                    );
 
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
@@ -968,6 +999,13 @@ async fn apply_switch_port_changes(
                 };
 
                 // apply settings via dpd client
+                info!(
+                    &log,
+                    "applying settings to switch port";
+                    "switch_location" => ?location,
+                    "port_id" => ?dpd_port_id,
+                    "settings" => ?dpd_port_settings,
+                );
                 match client
                     .port_settings_apply(
                         &dpd_port_id,
@@ -990,6 +1028,12 @@ async fn apply_switch_port_changes(
             }
             PortSettingsChange::Clear => {
                 // clear settings via dpd client
+                info!(
+                    &log,
+                    "clearing switch port settings";
+                    "switch_location" => ?location,
+                    "port_id" => ?dpd_port_id,
+                );
                 match client.port_settings_clear(&dpd_port_id, DPD_TAG).await {
                     Ok(_) => {}
                     Err(e) => {
@@ -1049,6 +1093,12 @@ async fn delete_static_routes(
             }
         };
 
+        info!(
+            &log,
+            "removing static v4 routes";
+            "switch_location" => ?switch_location,
+            "request" => ?request,
+        );
         if let Err(e) = client.inner.static_remove_v4_route(&request).await {
             error!(
                 &log,
@@ -1079,6 +1129,12 @@ async fn add_static_routes<'a>(
             }
         };
 
+        info!(
+            &log,
+            "adding static v4 routes";
+            "switch_location" => ?switch_location,
+            "request" => ?request,
+        );
         if let Err(e) = client.inner.static_add_v4_route(&request).await {
             error!(
                 &log,
