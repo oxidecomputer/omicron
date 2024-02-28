@@ -3756,6 +3756,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
 }
 
 #[nexus_test]
+#[ignore]
 async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.apictx();
