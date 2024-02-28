@@ -44,6 +44,7 @@ use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
@@ -693,7 +694,7 @@ impl SledAgent {
                     .client()
                     .sled_agent_put(
                         &sled_id,
-                        &nexus_client::types::SledAgentStartupInfo {
+                        &nexus_client::types::SledAgentInfo {
                             sa_address: sled_address.to_string(),
                             role,
                             baseboard: baseboard.clone(),
@@ -704,6 +705,7 @@ impl SledAgent {
                             reservoir_size: nexus_client::types::ByteCount(
                                 reservoir_size.to_bytes(),
                             ),
+                            generation: Generation::new(),
                         },
                     )
                     .await
