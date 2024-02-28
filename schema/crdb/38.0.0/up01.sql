@@ -9,5 +9,5 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
 
     variant omicron.public.physical_disk_kind NOT NULL,
 
-    PRIMARY KEY (inv_collection_id, sled_id, vendor, serial, model)
+    PRIMARY KEY (inv_collection_id, sled_id, vendor, model, serial)
 );
