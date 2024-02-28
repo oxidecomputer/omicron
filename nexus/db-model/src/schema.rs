@@ -1359,13 +1359,13 @@ table! {
 }
 
 table! {
-    inv_physical_disk (inv_collection_id, sled_id, vendor, serial, model) {
+    inv_physical_disk (inv_collection_id, sled_id, vendor, model, serial) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
 
         vendor -> Text,
-        serial -> Text,
         model -> Text,
+        serial -> Text,
 
         variant -> crate::PhysicalDiskKindEnum,
     }

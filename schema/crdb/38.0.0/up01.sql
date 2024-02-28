@@ -4,8 +4,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     sled_id UUID NOT NULL,
 
     vendor STRING(63) NOT NULL,
-    serial STRING(63) NOT NULL,
     model STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
 
     variant omicron.public.physical_disk_kind NOT NULL,
 

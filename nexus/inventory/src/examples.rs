@@ -272,6 +272,44 @@ pub fn representative() -> Representative {
     // This first one will match "sled1_bb"'s baseboard information.
     let sled_agent_id_basic =
         "c5aec1df-b897-49e4-8085-ccd975f9b529".parse().unwrap();
+    // Add some disks to this first sled.
+    let disks = vec![
+        // Let's say we have one manufacturer for our M.2...
+        sled_agent_client::types::InventoryDisk {
+            identity: sled_agent_client::types::DiskIdentity {
+                vendor: "macrohard".to_string(),
+                model: "box".to_string(),
+                serial: "XXIV".to_string(),
+            },
+            variant: sled_agent_client::types::DiskVariant::M2,
+        },
+        // ... and a couple different vendors for our U.2s
+        sled_agent_client::types::InventoryDisk {
+            identity: sled_agent_client::types::DiskIdentity {
+                vendor: "memetendo".to_string(),
+                model: "swatch".to_string(),
+                serial: "0001".to_string(),
+            },
+            variant: sled_agent_client::types::DiskVariant::U2,
+        },
+        sled_agent_client::types::InventoryDisk {
+            identity: sled_agent_client::types::DiskIdentity {
+                vendor: "memetendo".to_string(),
+                model: "swatch".to_string(),
+                serial: "0002".to_string(),
+            },
+            variant: sled_agent_client::types::DiskVariant::U2,
+        },
+        sled_agent_client::types::InventoryDisk {
+            identity: sled_agent_client::types::DiskIdentity {
+                vendor: "tony".to_string(),
+                model: "craystation".to_string(),
+                serial: "5".to_string(),
+            },
+            variant: sled_agent_client::types::DiskVariant::U2,
+        },
+    ];
+
     builder
         .found_sled_inventory(
             "fake sled agent 1",
@@ -283,6 +321,7 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 sled_agent_client::types::SledRole::Gimlet,
+                disks,
             ),
         )
         .unwrap();
@@ -307,6 +346,7 @@ pub fn representative() -> Representative {
                     revision: 0,
                 },
                 sled_agent_client::types::SledRole::Scrimlet,
+                vec![],
             ),
         )
         .unwrap();
@@ -326,6 +366,7 @@ pub fn representative() -> Representative {
                     model: String::from("fellofftruck"),
                 },
                 sled_agent_client::types::SledRole::Gimlet,
+                vec![],
             ),
         )
         .unwrap();
@@ -343,6 +384,7 @@ pub fn representative() -> Representative {
                 sled_agent_id_unknown,
                 sled_agent_client::types::Baseboard::Unknown,
                 sled_agent_client::types::SledRole::Gimlet,
+                vec![],
             ),
         )
         .unwrap();
@@ -439,6 +481,7 @@ pub fn sled_agent(
     sled_id: Uuid,
     baseboard: sled_agent_client::types::Baseboard,
     sled_role: sled_agent_client::types::SledRole,
+    disks: Vec<sled_agent_client::types::InventoryDisk>,
 ) -> sled_agent_client::types::Inventory {
     sled_agent_client::types::Inventory {
         baseboard,
@@ -448,6 +491,6 @@ pub fn sled_agent(
         sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
-        disks: vec![],
+        disks,
     }
 }

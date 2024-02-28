@@ -660,8 +660,8 @@ pub struct InvPhysicalDisk {
     pub inv_collection_id: Uuid,
     pub sled_id: Uuid,
     pub vendor: String,
-    pub serial: String,
     pub model: String,
+    pub serial: String,
     pub variant: PhysicalDiskKind,
 }
 
@@ -675,8 +675,8 @@ impl InvPhysicalDisk {
             inv_collection_id,
             sled_id,
             vendor: disk.identity.vendor,
-            serial: disk.identity.serial,
             model: disk.identity.model,
+            serial: disk.identity.serial,
             variant: disk.variant.into(),
         }
     }

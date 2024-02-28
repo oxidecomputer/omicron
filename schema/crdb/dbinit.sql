@@ -2969,8 +2969,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     sled_id UUID NOT NULL,
 
     vendor STRING(63) NOT NULL,
-    serial STRING(63) NOT NULL,
     model STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
 
     variant omicron.public.physical_disk_kind NOT NULL,
 
@@ -2981,7 +2981,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     --
     -- However, this imposes no constraint that the combination of vendor, serial
     -- and model are universally unique - just unique on a single sled.
-    PRIMARY KEY (inv_collection_id, sled_id, vendor, serial, model)
+    PRIMARY KEY (inv_collection_id, sled_id, vendor, model, serial)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (

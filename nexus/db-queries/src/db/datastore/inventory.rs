@@ -1063,6 +1063,7 @@ impl DataStore {
             ncabooses,
             nrot_pages,
             nsled_agents,
+            nphysical_disks,
             nsled_agent_zones,
             nzones,
             nnics,
@@ -1134,6 +1135,17 @@ impl DataStore {
                     .await?
                 };
 
+                // Remove rows for physical disks found.
+                let nphysical_disks = {
+                    use db::schema::inv_physical_disk::dsl;
+                    diesel::delete(
+                        dsl::inv_physical_disk
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows associated with Omicron zones
                 let nsled_agent_zones = {
                     use db::schema::inv_sled_omicron_zones::dsl;
@@ -1183,6 +1195,7 @@ impl DataStore {
                     ncabooses,
                     nrot_pages,
                     nsled_agents,
+                    nphysical_disks,
                     nsled_agent_zones,
                     nzones,
                     nnics,
@@ -1205,6 +1218,7 @@ impl DataStore {
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
             "nsled_agents" => nsled_agents,
+            "nphysical_disks" => nphysical_disks,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
@@ -1443,37 +1457,45 @@ impl DataStore {
                 // code below is effectively an implementation of
                 // "paginated_multicolumn" for these four columns (sled_id,
                 // vendor, model, serial).
-                type PK = (Uuid, String, String, String);
+                type Marker = (Uuid, String, String, String);
 
                 let pagparams = &p.current_pagparams();
                 let mut query = dsl::inv_physical_disk
                     .into_boxed()
                     .limit(pagparams.limit.get().into())
                     .filter(dsl::inv_collection_id.eq(id));
-                let marker = pagparams.marker.map(|m: &PK| m.clone());
+                let marker = pagparams.marker.map(|m: &Marker| m.clone());
                 if let Some((sled_id, vendor, serial, model)) = marker {
                     query = query.filter(
-                        dsl::sled_id
-                            .eq(sled_id)
+                        dsl::inv_collection_id
+                            .eq(id)
+                            .and(dsl::sled_id.eq(sled_id))
                             .and(dsl::vendor.eq(vendor.clone()))
                             .and(dsl::model.eq(model.clone()))
                             .and(dsl::serial.gt(serial.clone())),
                     );
                     query = query.or_filter(
-                        dsl::sled_id
-                            .eq(sled_id)
+                        dsl::inv_collection_id
+                            .eq(id)
+                            .and(dsl::sled_id.eq(sled_id))
                             .and(dsl::vendor.eq(vendor.clone()))
                             .and(dsl::model.gt(model.clone())),
                     );
                     query = query.or_filter(
-                        dsl::sled_id
-                            .eq(sled_id)
+                        dsl::inv_collection_id
+                            .eq(id)
+                            .and(dsl::sled_id.eq(sled_id))
                             .and(dsl::vendor.gt(vendor.clone())),
                     );
-                    query = query.or_filter(dsl::sled_id.gt(sled_id));
+                    query = query.or_filter(
+                        dsl::inv_collection_id
+                            .eq(id)
+                            .and(dsl::sled_id.gt(sled_id)),
+                    );
                 }
                 query = query
-                    .order(dsl::sled_id.asc())
+                    .order_by(dsl::inv_collection_id.asc())
+                    .then_order_by(dsl::sled_id.asc())
                     .then_order_by(dsl::vendor.asc())
                     .then_order_by(dsl::model.asc())
                     .then_order_by(dsl::serial.asc());
@@ -2048,6 +2070,7 @@ mod test {
     use nexus_types::inventory::RotPageWhich;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
+    use pretty_assertions::assert_eq;
     use std::num::NonZeroU32;
 
     struct CollectionCounts {
@@ -2494,6 +2517,12 @@ mod test {
                     .unwrap();
             assert_eq!(0, count);
             let count = schema::inv_sled_agent::dsl::inv_sled_agent
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_physical_disk::dsl::inv_physical_disk
                 .select(diesel::dsl::count_star())
                 .first_async::<i64>(&conn)
                 .await

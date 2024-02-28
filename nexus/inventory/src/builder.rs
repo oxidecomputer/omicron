@@ -908,6 +908,11 @@ mod test {
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
+        assert_eq!(sled1_agent.disks.len(), 4);
+        assert_eq!(sled1_agent.disks[0].identity.vendor, "memetendo");
+        assert_eq!(sled1_agent.disks[0].identity.model, "swatch");
+        assert_eq!(sled1_agent.disks[0].identity.serial, "0001");
+
         let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");
