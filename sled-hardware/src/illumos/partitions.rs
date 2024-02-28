@@ -21,14 +21,18 @@ use illumos_utils::zpool::MockZpool as Zpool;
 #[cfg(not(test))]
 use illumos_utils::zpool::Zpool;
 
-// We always want the device to be formatted with 4k data and 0 byte metadata.
-// In the future if we want to override these values we can introduce an
-// optional value in `NvmeDeviceSettings`.
-static DEFAULT_NVME_LBA_META_SIZE: u32 = 0;
+/// NVMe devices use a meta size of 0 as we don't support writing addditional
+/// metadata
+static NVME_LBA_META_SIZE: u32 = 0;
+/// NVMe devices default to using 4k logical block addressing unless overriden.
 static DEFAULT_NVME_LBA_DATA_SIZE: u64 = 4096;
 
+/// NVMe device settings for a particular NVMe model.
 struct NvmeDeviceSettings {
-    size: u32,
+    /// The desired disk size for dealing with overprovisioning.
+    size: Option<u32>,
+    /// An override for the default 4k LBA formatting.
+    lba_data_size_override: Option<u64>,
 }
 
 static PREFERRED_NVME_DEVICE_SETTINGS: OnceLock<
@@ -39,11 +43,40 @@ fn preferred_nvme_device_settings(
 ) -> &'static HashMap<&'static str, NvmeDeviceSettings> {
     PREFERRED_NVME_DEVICE_SETTINGS.get_or_init(|| {
         HashMap::from([
-            ("WUS4C6432DSP3X3", NvmeDeviceSettings { size: 3200 }),
-            ("WUS5EA138ESP7E1", NvmeDeviceSettings { size: 3200 }),
-            ("WUS5EA138ESP7E3", NvmeDeviceSettings { size: 3200 }),
-            ("WUS5EA176ESP7E1", NvmeDeviceSettings { size: 6400 }),
-            ("WUS5EA176ESP7E3", NvmeDeviceSettings { size: 6400 }),
+            // This disk ships with a size of 3200 from the factory, but we
+            // still wish to apply 4K LBA formatting.
+            (
+                "WUS4C6432DSP3X3",
+                NvmeDeviceSettings { size: None, lba_data_size_override: None },
+            ),
+            (
+                "WUS5EA138ESP7E1",
+                NvmeDeviceSettings {
+                    size: Some(3200),
+                    lba_data_size_override: None,
+                },
+            ),
+            (
+                "WUS5EA138ESP7E3",
+                NvmeDeviceSettings {
+                    size: Some(3200),
+                    lba_data_size_override: None,
+                },
+            ),
+            (
+                "WUS5EA176ESP7E1",
+                NvmeDeviceSettings {
+                    size: Some(6400),
+                    lba_data_size_override: None,
+                },
+            ),
+            (
+                "WUS5EA176ESP7E3",
+                NvmeDeviceSettings {
+                    size: Some(6400),
+                    lba_data_size_override: None,
+                },
+            ),
         ])
     })
 }
@@ -252,26 +285,30 @@ fn ensure_size_and_formatting(
 
             // Resize the device if needed to ensure we get the expected
             // durability level in terms of drive writes per day.
-            if size != nvme_settings.size {
-                // TODO this also needs to be abstracted away.
-                controller.wdc_resize_set(nvme_settings.size)?;
-                info!(
-                    log,
-                    "Resized {} from {size} to {}",
-                    identity.serial,
-                    nvme_settings.size
-                )
+            if let Some(wanted_size) = nvme_settings.size {
+                if size != wanted_size {
+                    // TODO this also needs to be abstracted away.
+                    controller.wdc_resize_set(wanted_size)?;
+                    info!(
+                        log,
+                        "Resized {} from {size} to {wanted_size}",
+                        identity.serial,
+                    )
+                }
             }
 
             // Find the LBA format we want to use for the device.
+            let wanted_data_size = nvme_settings
+                .lba_data_size_override
+                .unwrap_or(DEFAULT_NVME_LBA_DATA_SIZE);
             let desired_lba = controller_info
                 .lba_formats()
                 .into_iter()
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .find(|lba| {
-                    lba.meta_size() == DEFAULT_NVME_LBA_META_SIZE
-                        && lba.data_size() == DEFAULT_NVME_LBA_DATA_SIZE
+                    lba.meta_size() == NVME_LBA_META_SIZE
+                        && lba.data_size() == wanted_data_size
                 })
                 .ok_or_else(|| NvmeFormattingError::LbaFormatMissing)?;
 
@@ -291,9 +328,8 @@ fn ensure_size_and_formatting(
 
                 info!(
                     log,
-                    "Formatted {} using LBA with data size of {}",
+                    "Formatted {} using LBA with data size of {wanted_data_size}",
                     identity.serial,
-                    DEFAULT_NVME_LBA_DATA_SIZE
                 );
             }
 
