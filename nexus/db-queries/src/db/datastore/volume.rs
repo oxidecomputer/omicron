@@ -851,12 +851,7 @@ impl DataStore {
                             .execute_async(&conn)
                             .await?;
 
-                    if mismatched_record_type_count == 0 {
-                        // ok, no existing records or the existing records match
-                        // the type
-                    } else if mismatched_record_type_count == 1 {
-                        // XXX is it possible that the match count is larger
-                        // than 1?
+                    if mismatched_record_type_count > 0 {
                         return Err(err.bail(Error::conflict(&format!(
                             "existing repair type for id {} does not match {:?}!",
                             record.repair_id,
