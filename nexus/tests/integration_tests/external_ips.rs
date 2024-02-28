@@ -37,6 +37,7 @@ use nexus_types::identity::Resource;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
@@ -379,6 +380,49 @@ async fn test_floating_ip_create_name_in_use(
         error.message,
         format!("already exists: floating-ip \"{contested_name}\""),
     );
+}
+
+#[nexus_test]
+async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    create_default_ip_pool(&client).await;
+    let project = create_project(client, PROJECT_NAME).await;
+
+    let fip = create_floating_ip(
+        client,
+        FIP_NAMES[0],
+        project.identity.name.as_str(),
+        None,
+        None,
+    )
+    .await;
+
+    let floating_ip_url = get_floating_ip_by_id_url(&fip.identity.id);
+
+    let new_fip_name: &str = "updated";
+    let new_fip_desc: &str = "updated description";
+
+    let updates: params::FloatingIpUpdate = params::FloatingIpUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: Some(String::from(new_fip_name).parse().unwrap()),
+            description: Some(String::from(new_fip_desc).parse().unwrap()),
+        },
+    };
+
+    let new_fip = NexusRequest::object_put(client, &floating_ip_url, Some(&updates)).authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("")
+    .parsed_body::<FloatingIp>()
+    .unwrap();
+
+    assert_eq!(new_fip.identity.name.as_str(), new_fip_name);
+    assert_eq!(new_fip.identity.description, new_fip_desc);
+    assert_eq!(new_fip.project_id, project.identity.id);
+    assert_eq!(new_fip.identity.time_created, fip.identity.time_created);
+    assert_ne!(new_fip.identity.time_modified, fip.identity.time_modified);
+
 }
 
 #[nexus_test]
