@@ -8,7 +8,7 @@
 
 use anyhow::{anyhow, Context};
 use nexus_capabilities::Base;
-use nexus_capabilities::SledAgent;
+use nexus_capabilities::FirewallRules;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -66,11 +66,13 @@ impl Base for NexusContext<'_> {
     }
 }
 
-impl SledAgent for NexusContext<'_> {
+impl nexus_capabilities::SledAgent for NexusContext<'_> {
     fn opctx_sled_client(&self) -> &OpContext {
         &self.opctx
     }
 }
+
+impl nexus_capabilities::FirewallRules for NexusContext<'_> {}
 
 /// Make one attempt to realize the given blueprint, meaning to take actions to
 /// alter the real system to match the blueprint
@@ -121,6 +123,16 @@ where
         &blueprint.omicron_zones,
     )
     .await?;
+
+    // After deploying omicron zones, we may need to refresh OPTE service
+    // firewall rules. This is an idempotent operation, so we don't attempt
+    // to optimize out calling it in unnecessary cases, although we expect
+    // _most_ cases this is not needed.
+    nexusctx
+        .plumb_service_firewall_rules(&nexusctx.opctx, &[])
+        .await
+        .context("failed to plumb service firewall rules to sleds")
+        .map_err(|err| vec![err])?;
 
     datasets::ensure_crucible_dataset_records_exist(
         &nexusctx.opctx,
