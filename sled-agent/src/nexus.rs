@@ -469,8 +469,20 @@ impl NexusNotifierTask {
                     }
                 }
             },
-            Ok(NexusSuccess::Put) => {}
-            Err(e) => {}
+            Ok(NexusSuccess::Put) => {
+                // Unwrap Safety: we must have known and proposed values in
+                // order to have submitted a PUT request in the first place.
+                info!(
+                    self.log,
+                    "Successfully put SledAgentInfo to nexus";
+                    "old_generation" => %self.nexus_known_info.as_ref().unwrap().generation,
+                    "new_generation" => %self.proposed_info.as_ref().unwrap().generation,
+                );
+                self.nexus_known_info = self.proposed_info.take();
+            }
+            Err(e) => {
+                warn!(self.log, "Received Error from Nexus: {:?}", e);
+            }
         }
     }
 }
