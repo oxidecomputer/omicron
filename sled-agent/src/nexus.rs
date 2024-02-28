@@ -21,6 +21,7 @@ use tokio::time::{interval, Duration, MissedTickBehavior};
 use uuid::Uuid;
 
 use crate::instance_manager::InstanceManager;
+use crate::vmm_reservoir::VmmReservoirManagerHandle;
 
 /// A thin wrapper over a progenitor-generated NexusClient.
 ///
@@ -77,45 +78,6 @@ impl NexusClientWithResolver {
     /// services.
     pub fn resolver(&self) -> &Arc<Resolver> {
         &self.resolver
-    }
-}
-
-type NexusRequestFut = dyn Future<Output = ()> + Send;
-type NexusRequest = Pin<Box<NexusRequestFut>>;
-
-/// A queue of futures which represent requests to Nexus.
-pub struct NexusRequestQueue {
-    tx: mpsc::UnboundedSender<NexusRequest>,
-    _worker: JoinHandle<()>,
-}
-
-impl NexusRequestQueue {
-    /// Creates a new request queue, along with a worker which executes
-    /// any incoming tasks.
-    pub fn new() -> Self {
-        // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
-        // In the future, this should basically just be a wrapper around a
-        // generation number, and we shouldn't be serializing requests to Nexus.
-        //
-        // In the meanwhile, we're using an unbounded_channel for simplicity, so
-        // that we don't need to cope with dropped notifications /
-        // retransmissions.
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        let _worker = tokio::spawn(async move {
-            while let Some(fut) = rx.recv().await {
-                fut.await;
-            }
-        });
-
-        Self { tx, _worker }
-    }
-
-    /// Gets access to the sending portion of the request queue.
-    ///
-    /// Callers can use this to add their own requests.
-    pub fn sender(&self) -> &mpsc::UnboundedSender<NexusRequest> {
-        &self.tx
     }
 }
 
@@ -226,6 +188,16 @@ pub struct NexusNotifierHandle {
     tx: mpsc::Sender<NexusNotifierMsg>,
 }
 
+impl NexusNotifierHandle {
+    pub async fn notify_nexus_about_self(&self, log: &Logger) {
+        if let Err(_) =
+            self.tx.send(NexusNotifierMsg::NotifyNexusAboutSelf).await
+        {
+            warn!(log, "Failed to send to NexusNotifierTask: did it exit?");
+        }
+    }
+}
+
 // A successful reply from nexus
 pub enum NexusSuccess {
     Get(SledAgentInfo),
@@ -235,11 +207,11 @@ pub enum NexusSuccess {
 // A mechanism owned by the `NexusNotifierTask` that allows it to access
 // enough information to send a `SledAgentInfo` to Nexus.
 pub struct NexusNotifierInput {
-    sled_id: Uuid,
-    sled_address: SocketAddrV6,
-    nexus_client: NexusClient,
-    hardware: HardwareManager,
-    instances: InstanceManager,
+    pub sled_id: Uuid,
+    pub sled_address: SocketAddrV6,
+    pub nexus_client: NexusClient,
+    pub hardware: HardwareManager,
+    pub vmm_reservoir_manager: VmmReservoirManagerHandle,
 }
 
 /// A mechanism for notifying nexus about this sled agent
@@ -377,7 +349,11 @@ impl NexusNotifierTask {
                     .hardware
                     .usable_physical_ram_bytes()
                     .into(),
-                reservoir_size: self.input.instances.reservoir_size().into(),
+                reservoir_size: self
+                    .input
+                    .vmm_reservoir_manager
+                    .reservoir_size()
+                    .into(),
                 generation: known_info.generation,
             };
             // We don't need to send a request if the info is identical to what

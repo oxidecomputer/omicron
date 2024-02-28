@@ -172,7 +172,7 @@ impl HardwareMonitor {
                 }
                 HardwareUpdate::TofinoDeviceChange => {
                     if let Some(sled_agent) = &mut self.sled_agent {
-                        sled_agent.notify_nexus_about_self(&self.log);
+                        sled_agent.notify_nexus_about_self(&self.log).await;
                     }
                 }
                 HardwareUpdate::DiskAdded(disk) => {

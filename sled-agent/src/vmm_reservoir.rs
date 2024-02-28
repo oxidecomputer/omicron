@@ -69,11 +69,12 @@ enum ReservoirManagerMsg {
     },
 }
 
+#[derive(Clone)]
 /// A mechanism to interact with the [`VmmReservoirManager`]
 pub struct VmmReservoirManagerHandle {
     reservoir_size: Arc<AtomicU64>,
     tx: flume::Sender<ReservoirManagerMsg>,
-    _manager_handle: thread::JoinHandle<()>,
+    _manager_handle: Arc<thread::JoinHandle<()>>,
 }
 
 impl VmmReservoirManagerHandle {
@@ -130,9 +131,9 @@ impl VmmReservoirManager {
             rx,
             log,
         };
-        let _manager_handle = thread::spawn(move || {
+        let _manager_handle = Arc::new(thread::spawn(move || {
             manager.run(hardware_manager, reservoir_mode)
-        });
+        }));
         VmmReservoirManagerHandle { reservoir_size, tx, _manager_handle }
     }
 
