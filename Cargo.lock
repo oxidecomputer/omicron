@@ -463,20 +463,20 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d#c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=488a70c644e332dae98447292a95e45074c8107c#488a70c644e332dae98447292a95e45074c8107c"
 dependencies = [
  "bhyve_api_sys",
  "libc",
- "strum 0.25.0",
+ "strum 0.26.1",
 ]
 
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d#c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=488a70c644e332dae98447292a95e45074c8107c#488a70c644e332dae98447292a95e45074c8107c"
 dependencies = [
  "libc",
- "strum 0.25.0",
+ "strum 0.26.1",
 ]
 
 [[package]]
@@ -655,7 +655,7 @@ dependencies = [
  "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "regress",
  "reqwest",
  "schemars",
@@ -1315,7 +1315,7 @@ dependencies = [
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "reqwest",
  "schemars",
  "serde",
@@ -1331,7 +1331,7 @@ dependencies = [
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "reqwest",
  "schemars",
  "serde",
@@ -1568,8 +1568,8 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "omicron-zone-package",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "progenitor-client 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
+ "progenitor-client",
  "quote",
  "reqwest",
  "rustfmt-wrapper",
@@ -1891,7 +1891,7 @@ dependencies = [
  "chrono",
  "http 0.2.11",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "reqwest",
  "schemars",
  "serde",
@@ -1945,8 +1945,8 @@ dependencies = [
  "ipnetwork",
  "omicron-workspace-hack",
  "omicron-zone-package",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "progenitor-client 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
+ "progenitor-client",
  "quote",
  "rand 0.8.5",
  "regress",
@@ -2584,7 +2584,7 @@ dependencies = [
  "chrono",
  "gateway-messages",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -3506,7 +3506,7 @@ version = "0.1.0"
 dependencies = [
  "installinator-common",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "regress",
  "reqwest",
  "schemars",
@@ -3586,7 +3586,7 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "reqwest",
  "serde",
  "serde_json",
@@ -4083,8 +4083,8 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "omicron-zone-package",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "progenitor-client 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
+ "progenitor-client",
  "quote",
  "reqwest",
  "rustfmt-wrapper",
@@ -4305,7 +4305,7 @@ dependencies = [
  "omicron-common",
  "omicron-passwords",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "regress",
  "reqwest",
  "schemars",
@@ -4888,7 +4888,7 @@ dependencies = [
  "omicron-workspace-hack",
  "once_cell",
  "parse-display",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "proptest",
  "rand 0.8.5",
  "regress",
@@ -5063,7 +5063,7 @@ dependencies = [
  "petgraph",
  "pq-sys",
  "pretty_assertions",
- "progenitor-client 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor-client",
  "propolis-client",
  "rand 0.8.5",
  "rcgen",
@@ -5672,7 +5672,7 @@ dependencies = [
  "http 0.2.11",
  "hyper 0.14.27",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "rand 0.8.5",
  "regress",
  "reqwest",
@@ -5728,7 +5728,7 @@ dependencies = [
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "reqwest",
  "serde",
  "slog",
@@ -6543,20 +6543,9 @@ name = "progenitor"
 version = "0.5.0"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#08bbafc251d3d6828ca5921d1658c3d12d64fe7c"
 dependencies = [
- "progenitor-client 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "progenitor-impl 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "progenitor-macro 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "serde_json",
-]
-
-[[package]]
-name = "progenitor"
-version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/progenitor#08bbafc251d3d6828ca5921d1658c3d12d64fe7c"
-dependencies = [
- "progenitor-client 0.5.0 (git+https://github.com/oxidecomputer/progenitor)",
- "progenitor-impl 0.5.0 (git+https://github.com/oxidecomputer/progenitor)",
- "progenitor-macro 0.5.0 (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor-client",
+ "progenitor-impl",
+ "progenitor-macro",
  "serde_json",
 ]
 
@@ -6564,20 +6553,6 @@ dependencies = [
 name = "progenitor-client"
 version = "0.5.0"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#08bbafc251d3d6828ca5921d1658c3d12d64fe7c"
-dependencies = [
- "bytes",
- "futures-core",
- "percent-encoding",
- "reqwest",
- "serde",
- "serde_json",
- "serde_urlencoded",
-]
-
-[[package]]
-name = "progenitor-client"
-version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/progenitor#08bbafc251d3d6828ca5921d1658c3d12d64fe7c"
 dependencies = [
  "bytes",
  "futures-core",
@@ -6611,52 +6586,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "progenitor-impl"
-version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/progenitor#08bbafc251d3d6828ca5921d1658c3d12d64fe7c"
-dependencies = [
- "getopts",
- "heck 0.4.1",
- "http 0.2.11",
- "indexmap 2.2.3",
- "openapiv3",
- "proc-macro2",
- "quote",
- "regex",
- "schemars",
- "serde",
- "serde_json",
- "syn 2.0.51",
- "thiserror",
- "typify",
- "unicode-ident",
-]
-
-[[package]]
 name = "progenitor-macro"
 version = "0.5.0"
 source = "git+https://github.com/oxidecomputer/progenitor?branch=main#08bbafc251d3d6828ca5921d1658c3d12d64fe7c"
 dependencies = [
  "openapiv3",
  "proc-macro2",
- "progenitor-impl 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "quote",
- "schemars",
- "serde",
- "serde_json",
- "serde_tokenstream 0.2.0",
- "serde_yaml",
- "syn 2.0.51",
-]
-
-[[package]]
-name = "progenitor-macro"
-version = "0.5.0"
-source = "git+https://github.com/oxidecomputer/progenitor#08bbafc251d3d6828ca5921d1658c3d12d64fe7c"
-dependencies = [
- "openapiv3",
- "proc-macro2",
- "progenitor-impl 0.5.0 (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor-impl",
  "quote",
  "schemars",
  "serde",
@@ -6669,12 +6605,12 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d#c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=488a70c644e332dae98447292a95e45074c8107c#488a70c644e332dae98447292a95e45074c8107c"
 dependencies = [
  "async-trait",
  "base64",
  "futures",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor",
  "rand 0.8.5",
  "reqwest",
  "schemars",
@@ -6690,7 +6626,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d#c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=488a70c644e332dae98447292a95e45074c8107c#488a70c644e332dae98447292a95e45074c8107c"
 dependencies = [
  "anyhow",
  "atty",
@@ -6699,7 +6635,7 @@ dependencies = [
  "dropshot",
  "futures",
  "hyper 0.14.27",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor)",
+ "progenitor",
  "propolis_types",
  "rand 0.8.5",
  "reqwest",
@@ -6720,7 +6656,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d#c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=488a70c644e332dae98447292a95e45074c8107c#488a70c644e332dae98447292a95e45074c8107c"
 dependencies = [
  "schemars",
  "serde",
@@ -8166,7 +8102,7 @@ dependencies = [
  "ipnetwork",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "regress",
  "reqwest",
  "schemars",
@@ -10487,7 +10423,7 @@ dependencies = [
  "installinator-common",
  "ipnetwork",
  "omicron-workspace-hack",
- "progenitor 0.5.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor",
  "regress",
  "reqwest",
  "schemars",
