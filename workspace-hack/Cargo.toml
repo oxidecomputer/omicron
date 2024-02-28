@@ -97,7 +97,6 @@ slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "rele
 socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
-strum = { version = "0.25.0", features = ["derive"] }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.51", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
@@ -204,7 +203,6 @@ slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "rele
 socket2 = { version = "0.5.5", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
-strum = { version = "0.25.0", features = ["derive"] }
 subtle = { version = "2.5.0" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.51", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
