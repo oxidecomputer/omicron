@@ -56,7 +56,6 @@ fn preferred_nvme_device_settings(
 }
 
 #[derive(Debug, thiserror::Error)]
-#[cfg(target_os = "illumos")]
 pub enum NvmeFormattingError {
     #[error(transparent)]
     NvmeInit(#[from] libnvme::NvmeInitError),
@@ -70,13 +69,6 @@ pub enum NvmeFormattingError {
     InfoError(#[from] libnvme::controller_info::NvmeInfoError),
     #[error("Could not find NVMe controller for disk with serial {0}")]
     NoController(String),
-}
-
-#[derive(Debug, thiserror::Error)]
-#[cfg(not(target_os = "illumos"))]
-pub enum NvmeFormattingError {
-    #[error("NVMe formatting is unsupported on this platform")]
-    UnsupportedPlatform,
 }
 
 // The expected layout of an M.2 device within the Oxide rack.
@@ -225,7 +217,6 @@ fn internal_ensure_partition_layout<GPT: gpt::LibEfiGpt>(
     }
 }
 
-#[cfg(target_os = "illumos")]
 fn ensure_size_and_formatting(
     log: &Logger,
     identity: &DiskIdentity,
@@ -325,14 +316,6 @@ fn ensure_size_and_formatting(
         return Err(NvmeFormattingError::NoController(identity.serial.clone()));
     }
 
-    Ok(())
-}
-
-#[cfg(not(target_os = "illumos"))]
-fn ensure_size_and_formatting(
-    log: &Logger,
-    identity: &DiskIdentity,
-) -> Result<(), NvmeFormattingError> {
     Ok(())
 }
 
