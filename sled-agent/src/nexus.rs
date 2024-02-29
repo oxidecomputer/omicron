@@ -231,6 +231,12 @@ enum NexusSuccess {
     Put(SledAgentInfo),
 }
 
+// The type of operation issued to nexus
+enum NexusOp {
+    Get,
+    Put,
+}
+
 /// What sled-agent has confirmed that Nexus knows about this sled-agent
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NexusKnownInfo {
@@ -297,12 +303,13 @@ pub struct NexusNotifierTask {
     // notifier task. We wait for a notification on `outstanding_req_ready`
     // and then get the result from the `JoinHandle`.
     outstanding_request: Option<
-        tokio::task::JoinHandle<
+        tokio::task::JoinHandle<(
+            NexusOp,
             Result<
-                NexusSuccess,
+                SledAgentInfo,
                 nexus_client::Error<nexus_client::types::Error>,
             >,
-        >,
+        )>,
     >,
     // A notification sent from the outstanding task when it has completed.
     outstanding_req_ready: Arc<Notify>,
@@ -409,7 +416,7 @@ impl NexusNotifierTask {
     /// This should be spawned into a tokio task
     pub async fn run(mut self) {
         loop {
-            const RETRY_TIMEOUT: Duration = Duration::from_secs(5);
+            const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
             let mut interval = interval(RETRY_TIMEOUT);
             interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             tokio::select! {
@@ -492,12 +499,10 @@ impl NexusNotifierTask {
             let outstanding_req_ready = self.outstanding_req_ready.clone();
             self.total_put_requests_started += 1;
             self.outstanding_request = Some(tokio::spawn(async move {
-                let res = client
-                    .sled_agent_put(&sled_id, &info)
-                    .await
-                    .map(|_| NexusSuccess::Put(info));
+                let res =
+                    client.sled_agent_put(&sled_id, &info).await.map(|_| info);
                 outstanding_req_ready.notify_one();
-                res
+                (NexusOp::Put, res)
             }));
         } else {
             let outstanding_req_ready = self.outstanding_req_ready.clone();
@@ -506,9 +511,9 @@ impl NexusNotifierTask {
                 let res = client
                     .sled_agent_get(&sled_id)
                     .await
-                    .map(|info| NexusSuccess::Get(info.into_inner()));
+                    .map(|info| info.into_inner());
                 outstanding_req_ready.notify_one();
-                res
+                (NexusOp::Get, res)
             }));
         }
     }
@@ -516,7 +521,7 @@ impl NexusNotifierTask {
     /// Handle a reply from nexus by extracting the value from the `JoinHandle` of
     /// the last outstanding request.
     async fn handle_nexus_reply(&mut self) {
-        let res = match self
+        let (op, res) = match self
             .outstanding_request
             .take()
             .expect("missing JoinHandle")
@@ -528,8 +533,8 @@ impl NexusNotifierTask {
                 return;
             }
         };
-        match res {
-            Ok(NexusSuccess::Get(info)) => {
+        match (op, res) {
+            (NexusOp::Get, Ok(info)) => {
                 info!(
                     self.log,
                     "Retrieved SledAgentInfo from Nexus: {:?}", info
@@ -538,9 +543,9 @@ impl NexusNotifierTask {
                 self.nexus_known_info = Some(NexusKnownInfo::Found(info));
                 self.total_get_requests_completed += 1;
             }
-            Ok(NexusSuccess::Put(info)) => {
-                // Unwrap Safety: we must have known and proposed values in
-                // order to have submitted a PUT request in the first place.
+            (NexusOp::Put, Ok(info)) => {
+                // Unwrap Safety: we must have a known value in order to have
+                // submitted a PUT request in the first place.
                 info!(
                     self.log,
                     "Successfully put SledAgentInfo to nexus";
@@ -551,21 +556,28 @@ impl NexusNotifierTask {
                 self.nexus_known_info = Some(NexusKnownInfo::Found(info));
                 self.total_put_requests_completed += 1;
             }
-            Err(e) => {
+            (NexusOp::Get, Err(e)) => {
+                self.total_get_requests_completed += 1;
                 if e.status() == Some(http::StatusCode::NOT_FOUND) {
-                    // Was this for a get request? Then it just means we haven't
-                    // registered ourselves yet.
-                    //
-                    // TODO: This is a bit too implicit for my liking.
-                    // We should change the error type to include whether a put or get
-                    // request was issued.
                     if self.nexus_known_info.is_none() {
                         self.nexus_known_info = Some(NexusKnownInfo::NotFound);
-                        self.total_get_requests_completed += 1;
                         return;
                     }
+                    // Assert/panic if self.nexus_known_info.is_some() ?
                 }
-                warn!(self.log, "Received Error from Nexus: {:?}", e);
+                self.nexus_known_info = None;
+                warn!(
+                    self.log,
+                    "Received Error from Nexus for Get request: {:?}", e
+                );
+            }
+            (NexusOp::Put, Err(e)) => {
+                self.total_put_requests_completed += 1;
+                self.nexus_known_info = None;
+                warn!(
+                    self.log,
+                    "Received Error from Nexus for Put request: {:?}", e
+                );
             }
         }
     }
@@ -573,6 +585,8 @@ impl NexusNotifierTask {
 
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use crate::fakes::nexus::FakeNexusServer;
     use omicron_test_utils::dev::poll::{
         wait_for_condition as wait_for, CondCheckError,
@@ -591,21 +605,27 @@ mod test {
         info: Arc<std::sync::Mutex<Option<SledAgentInfo>>>,
     }
 
-    // A mechanism for injecting errors into nexus responses from the test
-    enum NexusErrorInjection {
-        DbConflict,
-    }
-
     // Puts and Gets with our magical fake nexus
     struct NexusServer {
         fake_crdb: FakeCrdb,
-        error: Option<NexusErrorInjection>,
+        // Injectable errors
+        get_error: Arc<AtomicBool>,
+        put_error: Arc<AtomicBool>,
     }
     impl FakeNexusServer for NexusServer {
         fn sled_agent_get(
             &self,
             sled_id: Uuid,
         ) -> Result<SledAgentInfo, Error> {
+            // Always disable any errors after the first time. This simplifies
+            // testing due to lack of races.
+            let injected_err = self.get_error.swap(false, Ordering::SeqCst);
+            if injected_err {
+                return Err(Error::ServiceUnavailable {
+                    internal_message: "go away".into(),
+                });
+            }
+
             self.fake_crdb.info.lock().unwrap().clone().ok_or(
                 Error::ObjectNotFound {
                     type_name: ResourceType::Sled,
@@ -619,18 +639,20 @@ mod test {
             _sled_id: Uuid,
             info: SledAgentInfo,
         ) -> Result<(), Error> {
-            match self.error {
-                None => {
-                    let mut crdb_info = self.fake_crdb.info.lock().unwrap();
-                    *crdb_info = Some(info);
-                    Ok(())
-                }
-                Some(NexusErrorInjection::DbConflict) => Err(Error::Conflict {
+            // Always disable any errors after the first time. This simplifies
+            // testing due to lack of races.
+            let injected_err = self.put_error.swap(false, Ordering::SeqCst);
+            if injected_err {
+                return Err(Error::Conflict {
                     message: MessagePair::new(
                         "I don't like the cut of your jib".into(),
                     ),
-                }),
+                });
             }
+
+            let mut crdb_info = self.fake_crdb.info.lock().unwrap();
+            *crdb_info = Some(info);
+            Ok(())
         }
     }
 
@@ -641,10 +663,16 @@ mod test {
         let sa_address = "::1".to_string();
         let fake_crdb = FakeCrdb::default();
         let sled_id = Uuid::new_v4();
+        let get_error = Arc::new(AtomicBool::new(false));
+        let put_error = Arc::new(AtomicBool::new(false));
 
         let nexus_server = crate::fakes::nexus::start_test_server(
             log.clone(),
-            Box::new(NexusServer { fake_crdb: fake_crdb.clone(), error: None }),
+            Box::new(NexusServer {
+                fake_crdb: fake_crdb.clone(),
+                get_error: get_error.clone(),
+                put_error: put_error.clone(),
+            }),
         );
         let nexus_client = NexusClient::new(
             &format!("http://{}", nexus_server.local_addr()),
@@ -759,6 +787,83 @@ mod test {
         assert_eq!(status.total_get_requests_completed, 1u64);
         assert_eq!(status.total_put_requests_completed, 1u64);
         assert_eq!(status.has_outstanding_request, false);
+        let expected = latest_sled_agent_info.lock().unwrap().clone();
+        assert_eq!(
+            status.nexus_known_info,
+            Some(NexusKnownInfo::Found(expected)),
+        );
+
+        // Update the VMM reservoir size and trigger a successful put to Nexus.
+        {
+            let mut info = latest_sled_agent_info.lock().unwrap();
+            info.reservoir_size = (1024 * 1024u64).into();
+            info.generation = info.generation.next();
+        }
+
+        // Wait for a steady state, when the the latest info has been put to nexus
+        handle.notify_nexus_about_self(log).await;
+        let status = wait_for::<_, (), _, _>(
+            || async {
+                let status = handle.get_status().await.unwrap();
+                if !status.has_pending_notification {
+                    Ok(status)
+                } else {
+                    Err(CondCheckError::NotYet)
+                }
+            },
+            &Duration::from_millis(2),
+            &Duration::from_secs(15),
+        )
+        .await
+        .expect("Failed to get status from Nexus");
+
+        assert_eq!(status.total_get_requests_started, 1u64);
+        assert_eq!(status.total_get_requests_completed, 1u64);
+        assert_eq!(status.total_put_requests_started, 2u64);
+        assert_eq!(status.total_put_requests_completed, 2u64);
+        assert_eq!(status.has_outstanding_request, false);
+        assert_eq!(status.cancelled_pending_notifications, 3);
+        let expected = latest_sled_agent_info.lock().unwrap().clone();
+        assert_eq!(
+            status.nexus_known_info,
+            Some(NexusKnownInfo::Found(expected)),
+        );
+
+        // Inject a put error and trigger a put to nexus after updating the VMM
+        // reservoir size. It should eventually succeed.
+        put_error.store(true, Ordering::SeqCst);
+        {
+            let mut info = latest_sled_agent_info.lock().unwrap();
+            info.reservoir_size = (2 * 1024 * 1024u64).into();
+            info.generation = info.generation.next();
+        }
+        handle.notify_nexus_about_self(log).await;
+        // Wait for a steady state, when the the latest info has been put to nexus.
+        // Ensure the second get request has been sent.
+        let status = wait_for::<_, (), _, _>(
+            || async {
+                let status = handle.get_status().await.unwrap();
+                if !status.has_pending_notification
+                    && status.total_get_requests_started == 2
+                {
+                    Ok(status)
+                } else {
+                    Err(CondCheckError::NotYet)
+                }
+            },
+            &Duration::from_millis(2),
+            &Duration::from_secs(15),
+        )
+        .await
+        .expect("Failed to get status from Nexus");
+
+        // One extra get and put request because of the put error
+        assert_eq!(status.total_get_requests_completed, 2u64);
+
+        assert_eq!(status.total_put_requests_started, 4u64);
+        assert_eq!(status.total_put_requests_completed, 4u64);
+        assert_eq!(status.has_outstanding_request, false);
+        assert_eq!(status.cancelled_pending_notifications, 4);
         let expected = latest_sled_agent_info.lock().unwrap().clone();
         assert_eq!(
             status.nexus_known_info,
