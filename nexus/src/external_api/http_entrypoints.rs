@@ -1954,7 +1954,7 @@ async fn floating_ip_update(
                 updated_floating_ip_params,
             )
             .await?;
-        Ok(HttpResponseOk(floating_ip.into()))
+        Ok(HttpResponseOk(floating_ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
