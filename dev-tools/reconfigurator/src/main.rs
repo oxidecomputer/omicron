@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+//! developer REPL for driving blueprint planning
+
 use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use clap::CommandFactory;
@@ -20,23 +22,32 @@ use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
 
-// XXX-dap current status:
-// - works okay
-// - kind of stuck on *simulation* step.  Really want to be able to ask what a
-//   multi-step process would do on a production system.  How to answer this?
-// - flesh out:
-//   - "inventory show" (not sure how easy this is, or how detailed we even
-//     want/need here)
-//   - "inventory-diff-zones" (needs new library support)
-//   - "blueprint-diff-zones-from-inventory"
-
+/// REPL state
 #[derive(Debug)]
 struct ReconfiguratorSim {
+    /// describes the sleds in the system
+    ///
+    /// This resembles what we get from the `sled` table in a real system.  It
+    /// also contains enough information to generate inventory collectinos that
+    /// describe the system.
     system: SystemDescription,
+
+    /// inventory collections created by the user
+    ///
+    /// This is stored as a `Vec` to preserve the order in which they were
+    /// created.
     collections: Vec<Collection>,
+
+    /// blueprints created by the user
+    ///
+    /// This is stored as a `Vec` to preserve the order in which they were
+    /// created.
     blueprints: Vec<Blueprint>,
+
     log: slog::Logger,
 }
+
+// REPL implementation
 
 fn main() -> anyhow::Result<()> {
     let log = dropshot::ConfigLogging::StderrTerminal {
@@ -73,6 +84,89 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+/// Describes next steps after evaluating one "line" of user input
+///
+/// This could just be `Result`, but it's easy to misuse that here because
+/// _commands_ might fail all the time without needing to bail out of the REPL.
+/// We use a separate type for clarity about what success/failure actually
+/// means.
+enum LoopResult {
+    /// Show the prompt and accept another command
+    Continue,
+
+    /// Exit the REPL with a fatal error
+    Bail(anyhow::Error),
+}
+
+/// Processes one "line" of user input.
+fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
+    // If no input was provided, take another lap (print the prompt and accept
+    // another line).  This gets handled specially because otherwise clap would
+    // treat this as a usage error and print a help message, which isn't what we
+    // want here.
+    if entry.trim().is_empty() {
+        return LoopResult::Continue;
+    }
+
+    // Parse the line of input as a REPL command.
+    //
+    // Using `split_whitespace()` like this is going to be a problem if we ever
+    // want to support arguments with whitespace in them (using quotes).  But
+    // it's good enough for now.
+    let parts = entry.split_whitespace();
+    let parsed_command = TopLevelArgs::command()
+        .multicall(true)
+        .try_get_matches_from(parts)
+        .and_then(|matches| TopLevelArgs::from_arg_matches(&matches));
+    let command = match parsed_command {
+        Err(error) => {
+            // We failed to parse the command.  Print the error.
+            return match error.print() {
+                // Assuming that worked, just take another lap.
+                Ok(_) => LoopResult::Continue,
+                // If we failed to even print the error, that itself is a fatal
+                // error.
+                Err(error) => LoopResult::Bail(
+                    anyhow!(error).context("printing previous error"),
+                ),
+            };
+        }
+        Ok(TopLevelArgs { command }) => command,
+    };
+
+    // Dispatch to the command's handler.
+    let cmd_result = match command {
+        Commands::SledList => cmd_sled_list(sim),
+        Commands::SledAdd => cmd_sled_add(sim),
+        Commands::SledShow(args) => cmd_sled_show(sim, args),
+        Commands::InventoryList => cmd_inventory_list(sim),
+        Commands::InventoryGenerate => cmd_inventory_generate(sim),
+        Commands::BlueprintList => cmd_blueprint_list(sim),
+        Commands::BlueprintFromInventory(args) => {
+            cmd_blueprint_from_inventory(sim, args)
+        }
+        Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
+        Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
+        Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
+        Commands::BlueprintDiffInventory(args) => {
+            cmd_blueprint_diff_inventory(sim, args)
+        }
+        Commands::Load(args) => cmd_load(sim, args),
+        Commands::FileContents(args) => cmd_file_contents(args),
+        Commands::Save(args) => cmd_save(sim, args),
+    };
+
+    match cmd_result {
+        Err(error) => println!("error: {:#}", error),
+        Ok(Some(s)) => println!("{}", s),
+        Ok(None) => (),
+    }
+
+    LoopResult::Continue
+}
+
+// clap configuration for the REPL commands
 
 /// reconfigurator-sim: simulate blueprint planning and execution
 #[derive(Debug, Parser)]
@@ -180,65 +274,7 @@ struct SaveArgs {
     filename: Utf8PathBuf,
 }
 
-enum LoopResult {
-    Continue,
-    Bail(anyhow::Error),
-}
-
-fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
-    if entry.trim().is_empty() {
-        return LoopResult::Continue;
-    }
-
-    // Using `split_whitespace()` like this is going to be a problem if we ever
-    // want to support quoted arguments or the like.
-    let parts = entry.split_whitespace();
-    let parsed_command = TopLevelArgs::command()
-        .multicall(true)
-        .try_get_matches_from(parts)
-        .and_then(|matches| TopLevelArgs::from_arg_matches(&matches));
-
-    let subcommand = match parsed_command {
-        Err(error) => {
-            return match error.print() {
-                Ok(_) => LoopResult::Continue,
-                Err(error) => LoopResult::Bail(
-                    anyhow!(error).context("printing previous error"),
-                ),
-            };
-        }
-        Ok(TopLevelArgs { command }) => command,
-    };
-
-    let cmd_result = match subcommand {
-        Commands::SledList => cmd_sled_list(sim),
-        Commands::SledAdd => cmd_sled_add(sim),
-        Commands::SledShow(args) => cmd_sled_show(sim, args),
-        Commands::InventoryList => cmd_inventory_list(sim),
-        Commands::InventoryGenerate => cmd_inventory_generate(sim),
-        Commands::BlueprintList => cmd_blueprint_list(sim),
-        Commands::BlueprintFromInventory(args) => {
-            cmd_blueprint_from_inventory(sim, args)
-        }
-        Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
-        Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
-        Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
-        Commands::BlueprintDiffInventory(args) => {
-            cmd_blueprint_diff_inventory(sim, args)
-        }
-        Commands::Load(args) => cmd_load(sim, args),
-        Commands::FileContents(args) => cmd_file_contents(args),
-        Commands::Save(args) => cmd_save(sim, args),
-    };
-
-    match cmd_result {
-        Err(error) => println!("error: {:#}", error),
-        Ok(Some(s)) => println!("{}", s),
-        Ok(None) => (),
-    }
-
-    LoopResult::Continue
-}
+// Command handlers
 
 fn cmd_sled_list(
     sim: &mut ReconfiguratorSim,
