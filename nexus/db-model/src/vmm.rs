@@ -14,6 +14,7 @@
 
 use super::{Generation, InstanceState};
 use crate::schema::vmm;
+use crate::SqlU16;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -43,6 +44,9 @@ pub struct Vmm {
     /// The IP address at which this VMM is serving the Propolis server API.
     pub propolis_ip: ipnetwork::IpNetwork,
 
+    /// The socket port on which this VMM is serving the Propolis server API.
+    pub propolis_port: SqlU16,
+
     /// Runtime state for the VMM.
     #[diesel(embed)]
     pub runtime: VmmRuntimeState,
@@ -61,6 +65,7 @@ impl Vmm {
         instance_id: Uuid,
         sled_id: Uuid,
         propolis_ip: ipnetwork::IpNetwork,
+        propolis_port: u16,
         initial_state: VmmInitialState,
     ) -> Self {
         use omicron_common::api::external::InstanceState as ApiInstanceState;
@@ -78,6 +83,7 @@ impl Vmm {
             instance_id,
             sled_id,
             propolis_ip,
+            propolis_port: SqlU16(propolis_port),
             runtime: VmmRuntimeState {
                 state: InstanceState::new(api_state),
                 time_state_updated: now,

@@ -267,7 +267,7 @@ pub async fn create_floating_ip(
     client: &ClientTestContext,
     fip_name: &str,
     project: &str,
-    address: Option<IpAddr>,
+    ip: Option<IpAddr>,
     parent_pool_name: Option<&str>,
 ) -> FloatingIp {
     object_create(
@@ -278,7 +278,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            address,
+            ip,
             pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
         },
     )

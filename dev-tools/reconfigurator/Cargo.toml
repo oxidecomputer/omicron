@@ -13,7 +13,7 @@ camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 indexmap.workspace = true
-nexus-deployment.workspace = true
+nexus-reconfigurator-planning.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.

@@ -724,65 +724,175 @@ impl<'a> BlueprintZones<'a> {
 #[cfg(test)]
 pub mod test {
     use super::*;
-    use crate::system::SledBuilder;
-    use crate::system::SystemDescription;
-    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use omicron_common::address::IpRange;
+    use omicron_common::address::Ipv4Range;
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::SLED_PREFIX;
-    use sled_agent_client::types::{OmicronZoneConfig, OmicronZoneType};
+    use omicron_common::api::external::ByteCount;
+    use sled_agent_client::types::{
+        Baseboard, Inventory, OmicronZoneConfig, OmicronZoneDataset,
+        OmicronZoneType, OmicronZonesConfig, SledRole,
+    };
     use std::str::FromStr;
 
-    /// Returns a collection and policy describing a small but non-trivial
-    /// system
-    pub fn example_system() -> SystemDescription {
-        // First, build a system that just has some sleds in it.
-        let mut system_builder = SystemDescription::new();
-        for _ in 0..3 {
-            let _ = system_builder.sled(SledBuilder::new()).unwrap();
-        }
-        let policy = system_builder.to_policy().unwrap();
+    pub const DEFAULT_N_SLEDS: usize = 3;
 
-        // Now use the BlueprintBuilder itself to add some stuff.
-        // XXX-dap is it... okay that we use the BlueprintBuilder here, when
-        // we're largely testing the BlueprintBuilder?
-        let initial_blueprint =
-            BlueprintBuilder::build_initial_from_collection(
-                &system_builder.to_collection().unwrap(),
-                Generation::new(),
-                &policy,
-                "test suite",
+    /// Returns a collection and policy describing a pretty simple system.
+    ///
+    /// `n_sleds` is the number of sleds supported. Currently, this value can
+    /// be anywhere between 0 and 5. (More can be added in the future if
+    /// necessary.)
+    pub fn example(n_sleds: usize) -> (Collection, Policy) {
+        let mut builder = nexus_inventory::CollectionBuilder::new("test-suite");
+
+        if n_sleds > 5 {
+            panic!("example() only supports up to 5 sleds, but got {n_sleds}");
+        }
+
+        let sled_ids = [
+            "72443b6c-b8bb-4ffa-ab3a-aeaa428ed79b",
+            "a5f3db3a-61aa-4f90-ad3e-02833c253bf5",
+            "0d168386-2551-44e8-98dd-ae7a7570f8a0",
+            "aaaaa1a1-0c3f-4928-aba7-6ec5c1db05f7",
+            "85e88acb-7b86-45ff-9c88-734e1da71c3d",
+        ];
+        let mut policy = Policy {
+            sleds: BTreeMap::new(),
+            // IPs from TEST-NET-1 (RFC 5737)
+            service_ip_pool_ranges: vec![Ipv4Range::new(
+                "192.0.2.2".parse().unwrap(),
+                "192.0.2.20".parse().unwrap(),
             )
-            .unwrap();
-        let mut builder = BlueprintBuilder::new_based_on(
-            &initial_blueprint,
-            Generation::new(),
-            &policy,
-            "test suite",
-        )
-        .unwrap();
+            .unwrap()
+            .into()],
+            target_nexus_zone_count: 3,
+        };
+        let mut service_ip_pool_range = policy.service_ip_pool_ranges[0].iter();
+        let mut nexus_nic_ips = NEXUS_OPTE_IPV4_SUBNET
+            .iter()
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
+        let mut nexus_nic_macs = {
+            let mut used = HashSet::new();
+            std::iter::from_fn(move || {
+                let mut mac = MacAddr::random_system();
+                while !used.insert(mac) {
+                    mac = MacAddr::random_system();
+                }
+                Some(mac)
+            })
+        };
 
-        for (sled_id, sled_resources) in &policy.sleds {
-            let _ = builder.sled_ensure_zone_ntp(*sled_id).unwrap();
-            let _ =
-                builder.sled_ensure_zone_multiple_nexus(*sled_id, 1).unwrap();
-            for pool_name in &sled_resources.zpools {
-                let _ = builder
-                    .sled_ensure_zone_crucible(*sled_id, pool_name.clone())
-                    .unwrap();
-            }
+        for sled_id_str in sled_ids.iter().take(n_sleds) {
+            let sled_id: Uuid = sled_id_str.parse().unwrap();
+            let sled_ip = policy_add_sled(&mut policy, sled_id);
+            let serial_number = format!("s{}", policy.sleds.len());
+            builder
+                .found_sled_inventory(
+                    "test-suite",
+                    Inventory {
+                        baseboard: Baseboard::Gimlet {
+                            identifier: serial_number,
+                            model: String::from("model1"),
+                            revision: 0,
+                        },
+                        reservoir_size: ByteCount::from(1024),
+                        sled_role: SledRole::Gimlet,
+                        sled_agent_address: SocketAddrV6::new(
+                            sled_ip, 12345, 0, 0,
+                        )
+                        .to_string(),
+                        sled_id,
+                        usable_hardware_threads: 10,
+                        usable_physical_ram: ByteCount::from(1024 * 1024),
+                    },
+                )
+                .unwrap();
+
+            let zpools = &policy.sleds.get(&sled_id).unwrap().zpools;
+            let mut sled_ips =
+                std::iter::successors(Some(sled_ip.saturating_add(1)), |ip| {
+                    println!("sled_ips iterator: currently {ip:?}");
+                    Some(ip.saturating_add(1))
+                });
+            let zones: Vec<_> = std::iter::once({
+                let ip = sled_ips.next().unwrap();
+                OmicronZoneConfig {
+                    id: Uuid::new_v4(),
+                    underlay_address: ip,
+                    zone_type: OmicronZoneType::InternalNtp {
+                        address: SocketAddrV6::new(ip, 12345, 0, 0).to_string(),
+                        dns_servers: vec![],
+                        domain: None,
+                        ntp_servers: vec![],
+                    },
+                }
+            })
+            .chain(std::iter::once({
+                let id = Uuid::new_v4();
+                let ip = sled_ips.next().unwrap();
+                let external_ip =
+                    service_ip_pool_range.next().expect("no service IPs left");
+                let nic_ip =
+                    nexus_nic_ips.next().expect("no nexus nic IPs left");
+                OmicronZoneConfig {
+                    id,
+                    underlay_address: ip,
+                    zone_type: OmicronZoneType::Nexus {
+                        internal_address: SocketAddrV6::new(ip, 12346, 0, 0)
+                            .to_string(),
+                        external_ip,
+                        nic: NetworkInterface {
+                            id: Uuid::new_v4(),
+                            kind: NetworkInterfaceKind::Service(id),
+                            name: format!("nexus-{id}").parse().unwrap(),
+                            ip: nic_ip.into(),
+                            mac: nexus_nic_macs
+                                .next()
+                                .expect("no nexus nic MACs left"),
+                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
+                            vni: Vni::SERVICES_VNI,
+                            primary: true,
+                            slot: 0,
+                        },
+                        external_tls: false,
+                        external_dns_servers: Vec::new(),
+                    },
+                }
+            }))
+            .chain(zpools.iter().map(|zpool_name| {
+                let ip = sled_ips.next().unwrap();
+                OmicronZoneConfig {
+                    id: Uuid::new_v4(),
+                    underlay_address: ip,
+                    zone_type: OmicronZoneType::Crucible {
+                        address: String::from("[::1]:12345"),
+                        dataset: OmicronZoneDataset {
+                            pool_name: zpool_name.clone(),
+                        },
+                    },
+                }
+            }))
+            .collect();
+
+            builder
+                .found_sled_omicron_zones(
+                    "test-suite",
+                    sled_id,
+                    OmicronZonesConfig {
+                        generation: Generation::new().next(),
+                        zones,
+                    },
+                )
+                .unwrap();
         }
 
-        system_builder
+        let collection = builder.build();
+
+        (collection, policy)
     }
 
-    // XXX-dap remove me
-    pub fn example() -> (Collection, Policy) {
-        let system = example_system();
-        (system.to_collection().unwrap(), system.to_policy().unwrap())
-    }
-
-    // XXX-dap remove me
     pub fn policy_add_sled(policy: &mut Policy, sled_id: Uuid) -> Ipv6Addr {
         let i = policy.sleds.len() + 1;
         let sled_ip: Ipv6Addr =
@@ -803,7 +913,8 @@ pub mod test {
         policy.sleds.insert(
             sled_id,
             SledResources {
-                provision_state: SledProvisionState::Provisionable,
+                policy: SledPolicy::provisionable(),
+                state: SledState::Active,
                 zpools,
                 subnet,
             },
@@ -834,7 +945,7 @@ pub mod test {
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
         // describes no changes.
-        let (collection, policy) = example();
+        let (collection, policy) = example(DEFAULT_N_SLEDS);
         let blueprint_initial =
             BlueprintBuilder::build_initial_from_collection(
                 &collection,
@@ -880,9 +991,14 @@ pub mod test {
 
     #[test]
     fn test_basic() {
-        let mut system = example_system();
-        let policy = system.to_policy().unwrap();
-        let blueprint1 = system.to_blueprint("test suite").unwrap();
+        let (collection, mut policy) = example(DEFAULT_N_SLEDS);
+        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            Generation::new(),
+            &policy,
+            "the_test",
+        )
+        .expect("failed to create initial blueprint");
         verify_blueprint(&blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
@@ -918,8 +1034,7 @@ pub mod test {
 
         // The next step is adding these zones to a new sled.
         let new_sled_id = Uuid::new_v4();
-        let _ = system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
-        let policy = system.to_policy().unwrap();
+        let _ = policy_add_sled(&mut policy, new_sled_id);
         let mut builder = BlueprintBuilder::new_based_on(
             &blueprint2,
             Generation::new(),
@@ -995,7 +1110,7 @@ pub mod test {
 
     #[test]
     fn test_add_nexus_with_no_existing_nexus_zones() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We don't care about the internal DNS version here.
         let internal_dns_version = Generation::new();
@@ -1046,7 +1161,7 @@ pub mod test {
 
     #[test]
     fn test_add_nexus_error_cases() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We don't care about the internal DNS version here.
         let internal_dns_version = Generation::new();
@@ -1158,7 +1273,7 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_zones_with_same_external_ip() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same external IP. Skim through the zones, copy the
@@ -1209,7 +1324,7 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_nexus_zones_with_same_nic_ip() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // Nexus zones with the same NIC IP. Skim through the zones, copy
@@ -1258,7 +1373,7 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_zones_with_same_vnic_mac() {
-        let (mut collection, policy) = example();
+        let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same service vNIC MAC address. Skim through the

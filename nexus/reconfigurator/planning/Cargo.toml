@@ -1,5 +1,5 @@
 [package]
-name = "nexus-deployment"
+name = "nexus-reconfigurator-planning"
 version = "0.1.0"
 edition = "2021"
 

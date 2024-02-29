@@ -172,7 +172,8 @@ pub fn policy_from_db(
                 .remove(&sled_id)
                 .unwrap_or_else(BTreeSet::new);
             let sled_info = SledResources {
-                provision_state: sled_row.provision_state().into(),
+                policy: sled_row.policy(),
+                state: sled_row.state().into(),
                 subnet,
                 zpools,
             };

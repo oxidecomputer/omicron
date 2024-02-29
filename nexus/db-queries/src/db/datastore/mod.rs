@@ -44,6 +44,7 @@ use omicron_common::backoff::{
 use omicron_common::nexus_config::SchemaConfig;
 use slog::Logger;
 use std::net::Ipv6Addr;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -87,6 +88,8 @@ mod ssh_key;
 mod switch;
 mod switch_interface;
 mod switch_port;
+#[cfg(test)]
+pub(crate) mod test_utils;
 mod update;
 mod utilization;
 mod virtual_provisioning_collection;
@@ -105,7 +108,7 @@ pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
-use std::num::NonZeroU32;
+pub use sled::SledUpsertOutput;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::read_only_resources_associated_with_volume;
@@ -352,52 +355,16 @@ pub enum UpdatePrecondition<T> {
     Value(T),
 }
 
-/// Constructs a DataStore for use in test suites that has preloaded the
-/// built-in users, roles, and role assignments that are needed for basic
-/// operation
-#[cfg(test)]
-pub async fn datastore_test(
-    logctx: &dropshot::test_util::LogContext,
-    db: &omicron_test_utils::dev::db::CockroachInstance,
-) -> (OpContext, Arc<DataStore>) {
-    use crate::authn;
-
-    let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-    let datastore =
-        Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
-
-    // Create an OpContext with the credentials of "db-init" just for the
-    // purpose of loading the built-in users, roles, and assignments.
-    let opctx = OpContext::for_background(
-        logctx.log.new(o!()),
-        Arc::new(authz::Authz::new(&logctx.log)),
-        authn::Context::internal_db_init(),
-        Arc::clone(&datastore),
-    );
-
-    // TODO: Can we just call "Populate" instead of doing this?
-    let rack_id = Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap();
-    datastore.load_builtin_users(&opctx).await.unwrap();
-    datastore.load_builtin_roles(&opctx).await.unwrap();
-    datastore.load_builtin_role_asgns(&opctx).await.unwrap();
-    datastore.load_builtin_silos(&opctx).await.unwrap();
-    datastore.load_builtin_projects(&opctx).await.unwrap();
-    datastore.load_builtin_vpcs(&opctx).await.unwrap();
-    datastore.load_silo_users(&opctx).await.unwrap();
-    datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
-    datastore
-        .load_builtin_fleet_virtual_provisioning_collection(&opctx)
-        .await
-        .unwrap();
-    datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
-
-    // Create an OpContext with the credentials of "test-privileged" for general
-    // testing.
-    let opctx =
-        OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
-
-    (opctx, datastore)
+/// Whether state transitions should be validated. "No" is only accessible in
+/// test-only code.
+///
+/// Intended only for testing around illegal states.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[must_use]
+enum ValidateTransition {
+    Yes,
+    #[cfg(test)]
+    No,
 }
 
 #[cfg(test)]
@@ -406,6 +373,10 @@ mod test {
     use crate::authn;
     use crate::authn::SiloAuthnPolicy;
     use crate::authz;
+    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::test_utils::{
+        IneligibleSledKind, IneligibleSleds,
+    };
     use crate::db::explain::ExplainableAsync;
     use crate::db::fixed_data::silo::DEFAULT_SILO;
     use crate::db::fixed_data::silo::SILO_ID;
@@ -414,8 +385,8 @@ mod test {
     use crate::db::model::{
         BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
         PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
-        ServiceKind, SiloUser, SledBaseboard, SledProvisionState,
-        SledSystemHardware, SledUpdate, SshKey, VpcSubnet, Zpool,
+        ServiceKind, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
+        SshKey, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use chrono::{Duration, Utc};
@@ -435,6 +406,7 @@ mod test {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
     use std::sync::Arc;
+    use strum::EnumCount;
     use uuid::Uuid;
 
     // Creates a "fake" Sled Baseboard.
@@ -648,37 +620,8 @@ mod test {
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled_update).await.unwrap();
+        datastore.sled_upsert(sled_update).await.unwrap().unwrap();
         sled_id
-    }
-
-    // Marks a sled as non-provisionable.
-    async fn mark_sled_non_provisionable(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        sled_id: Uuid,
-    ) {
-        let (authz_sled, sled) = LookupPath::new(opctx, datastore)
-            .sled_id(sled_id)
-            .fetch_for(authz::Action::Modify)
-            .await
-            .unwrap();
-        println!("sled: {:?}", sled);
-        let old_state = datastore
-            .sled_set_provision_state(
-                &opctx,
-                &authz_sled,
-                SledProvisionState::NonProvisionable,
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!(
-                    "error marking sled {sled_id} as non-provisionable: {error}"
-                )
-            });
-        // The old state should always be provisionable since that's where we
-        // start.
-        assert_eq!(old_state, SledProvisionState::Provisionable);
     }
 
     fn test_zpool_size() -> ByteCount {
@@ -742,95 +685,184 @@ mod test {
         }
     }
 
-    struct TestDataset {
-        sled_id: Uuid,
-        dataset_id: Uuid,
+    #[derive(Debug)]
+    struct TestDatasets {
+        // eligible and ineligible aren't currently used, but are probably handy
+        // for the future.
+        #[allow(dead_code)]
+        eligible: SledToDatasetMap,
+        #[allow(dead_code)]
+        ineligible: SledToDatasetMap,
+
+        // A map from eligible dataset IDs to their corresponding sled IDs.
+        eligible_dataset_ids: HashMap<Uuid, Uuid>,
+        ineligible_dataset_ids: HashMap<Uuid, IneligibleSledKind>,
     }
 
-    async fn create_test_datasets_for_region_allocation(
-        opctx: &OpContext,
-        datastore: Arc<DataStore>,
-        number_of_sleds: usize,
-    ) -> Vec<TestDataset> {
-        // Create sleds...
-        let sled_ids: Vec<Uuid> = stream::iter(0..number_of_sleds)
-            .then(|_| create_test_sled(&datastore))
-            .collect()
-            .await;
+    // Map of sled IDs to dataset IDs.
+    type SledToDatasetMap = HashMap<Uuid, Vec<Uuid>>;
 
-        struct PhysicalDisk {
-            sled_id: Uuid,
-            disk_id: Uuid,
-        }
+    impl TestDatasets {
+        async fn create(
+            opctx: &OpContext,
+            datastore: Arc<DataStore>,
+            num_eligible_sleds: usize,
+        ) -> Self {
+            let eligible =
+                Self::create_impl(opctx, datastore.clone(), num_eligible_sleds)
+                    .await;
 
-        // create 9 disks on each sled
-        let physical_disks: Vec<PhysicalDisk> = stream::iter(sled_ids)
-            .map(|sled_id| {
-                let sled_id_iter: Vec<Uuid> = (0..9).map(|_| sled_id).collect();
-                stream::iter(sled_id_iter).then(|sled_id| {
-                    let disk_id_future = create_test_physical_disk(
-                        &datastore,
-                        opctx,
-                        sled_id,
-                        PhysicalDiskKind::U2,
-                    );
-                    async move {
-                        let disk_id = disk_id_future.await;
-                        PhysicalDisk { sled_id, disk_id }
-                    }
+            let eligible_dataset_ids = eligible
+                .iter()
+                .flat_map(|(sled_id, dataset_ids)| {
+                    dataset_ids
+                        .iter()
+                        .map(move |dataset_id| (*dataset_id, *sled_id))
                 })
-            })
-            .flatten()
-            .collect()
+                .collect();
+
+            let ineligible = Self::create_impl(
+                opctx,
+                datastore.clone(),
+                IneligibleSledKind::COUNT,
+            )
             .await;
 
-        #[derive(Copy, Clone)]
-        struct Zpool {
-            sled_id: Uuid,
-            pool_id: Uuid,
-        }
+            let mut ineligible_sled_ids = ineligible.keys();
 
-        // 1 pool per disk
-        let zpools: Vec<Zpool> = stream::iter(physical_disks)
-            .then(|disk| {
-                let pool_id_future =
-                    create_test_zpool(&datastore, disk.sled_id, disk.disk_id);
-                async move {
-                    let pool_id = pool_id_future.await;
-                    Zpool { sled_id: disk.sled_id, pool_id }
+            // Set up the ineligible sleds. (We're guaranteed that
+            // IneligibleSledKind::COUNT is the same as the number of next()
+            // calls below.)
+            let ineligible_sleds = IneligibleSleds {
+                non_provisionable: *ineligible_sled_ids.next().unwrap(),
+                expunged: *ineligible_sled_ids.next().unwrap(),
+                decommissioned: *ineligible_sled_ids.next().unwrap(),
+                illegal_decommissioned: *ineligible_sled_ids.next().unwrap(),
+            };
+
+            eprintln!("Setting up ineligible sleds: {:?}", ineligible_sleds);
+
+            ineligible_sleds
+                .setup(opctx, &datastore)
+                .await
+                .expect("error setting up ineligible sleds");
+
+            // Build a map of dataset IDs to their ineligible kind.
+            let mut ineligible_dataset_ids = HashMap::new();
+            for (kind, sled_id) in ineligible_sleds.iter() {
+                for dataset_id in ineligible.get(&sled_id).unwrap() {
+                    ineligible_dataset_ids.insert(*dataset_id, kind);
                 }
-            })
-            .collect()
-            .await;
+            }
 
-        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            Self {
+                eligible,
+                eligible_dataset_ids,
+                ineligible,
+                ineligible_dataset_ids,
+            }
+        }
 
-        let datasets: Vec<TestDataset> = stream::iter(zpools)
-            .map(|zpool| {
-                // 3 datasets per zpool, to test that pools are distinct
-                let zpool_iter: Vec<Zpool> = (0..3).map(|_| zpool).collect();
-                stream::iter(zpool_iter).then(|zpool| {
-                    let id = Uuid::new_v4();
-                    let dataset = Dataset::new(
-                        id,
-                        zpool.pool_id,
-                        bogus_addr,
-                        DatasetKind::Crucible,
+        // Returns a map of sled ID to dataset IDs.
+        async fn create_impl(
+            opctx: &OpContext,
+            datastore: Arc<DataStore>,
+            number_of_sleds: usize,
+        ) -> SledToDatasetMap {
+            // Create sleds...
+            let sled_ids: Vec<Uuid> = stream::iter(0..number_of_sleds)
+                .then(|_| create_test_sled(&datastore))
+                .collect()
+                .await;
+
+            struct PhysicalDisk {
+                sled_id: Uuid,
+                disk_id: Uuid,
+            }
+
+            // create 9 disks on each sled
+            let physical_disks: Vec<PhysicalDisk> = stream::iter(sled_ids)
+                .map(|sled_id| {
+                    let sled_id_iter: Vec<Uuid> =
+                        (0..9).map(|_| sled_id).collect();
+                    stream::iter(sled_id_iter).then(|sled_id| {
+                        let disk_id_future = create_test_physical_disk(
+                            &datastore,
+                            opctx,
+                            sled_id,
+                            PhysicalDiskKind::U2,
+                        );
+                        async move {
+                            let disk_id = disk_id_future.await;
+                            PhysicalDisk { sled_id, disk_id }
+                        }
+                    })
+                })
+                .flatten()
+                .collect()
+                .await;
+
+            #[derive(Copy, Clone)]
+            struct Zpool {
+                sled_id: Uuid,
+                pool_id: Uuid,
+            }
+
+            // 1 pool per disk
+            let zpools: Vec<Zpool> = stream::iter(physical_disks)
+                .then(|disk| {
+                    let pool_id_future = create_test_zpool(
+                        &datastore,
+                        disk.sled_id,
+                        disk.disk_id,
                     );
-
-                    let datastore = datastore.clone();
                     async move {
-                        datastore.dataset_upsert(dataset).await.unwrap();
-
-                        TestDataset { sled_id: zpool.sled_id, dataset_id: id }
+                        let pool_id = pool_id_future.await;
+                        Zpool { sled_id: disk.sled_id, pool_id }
                     }
                 })
-            })
-            .flatten()
-            .collect()
-            .await;
+                .collect()
+                .await;
 
-        datasets
+            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+
+            let datasets = stream::iter(zpools)
+                .map(|zpool| {
+                    // 3 datasets per zpool, to test that pools are distinct
+                    let zpool_iter: Vec<Zpool> =
+                        (0..3).map(|_| zpool).collect();
+                    stream::iter(zpool_iter).then(|zpool| {
+                        let dataset_id = Uuid::new_v4();
+                        let dataset = Dataset::new(
+                            dataset_id,
+                            zpool.pool_id,
+                            bogus_addr,
+                            DatasetKind::Crucible,
+                        );
+
+                        let datastore = datastore.clone();
+                        async move {
+                            datastore.dataset_upsert(dataset).await.unwrap();
+
+                            (zpool.sled_id, dataset_id)
+                        }
+                    })
+                })
+                .flatten()
+                .fold(
+                    SledToDatasetMap::new(),
+                    |mut map, (sled_id, dataset_id)| {
+                        // Build a map of sled ID to dataset IDs.
+                        map.entry(sled_id)
+                            .or_insert_with(Vec::new)
+                            .push(dataset_id);
+                        async move { map }
+                    },
+                )
+                .await;
+
+            datasets
+        }
     }
 
     #[tokio::test]
@@ -841,21 +873,12 @@ mod test {
         let logctx = dev::test_setup_log("test_region_allocation_strat_random");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let test_datasets = create_test_datasets_for_region_allocation(
+        let test_datasets = TestDatasets::create(
             &opctx,
             datastore.clone(),
-            // Even though we're going to mark one sled as non-provisionable to
-            // test that logic, we aren't forcing the datasets to be on
-            // distinct sleds, so REGION_REDUNDANCY_THRESHOLD is enough.
-            REGION_REDUNDANCY_THRESHOLD,
-        )
-        .await;
-
-        let non_provisionable_dataset_id = test_datasets[0].dataset_id;
-        mark_sled_non_provisionable(
-            &datastore,
-            &opctx,
-            test_datasets[0].sled_id,
+            // We aren't forcing the datasets to be on distinct sleds, so we
+            // just need one eligible sled.
+            1,
         )
         .await;
 
@@ -891,8 +914,16 @@ mod test {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
 
-                // Dataset must not be non-provisionable.
-                assert_ne!(dataset.id(), non_provisionable_dataset_id);
+                // Dataset must not be eligible for provisioning.
+                if let Some(kind) =
+                    test_datasets.ineligible_dataset_ids.get(&dataset.id())
+                {
+                    panic!(
+                        "Dataset {} was ineligible for provisioning: {:?}",
+                        dataset.id(),
+                        kind
+                    );
+                }
 
                 // Must be 3 unique zpools
                 assert!(disk_zpools.insert(dataset.pool_id));
@@ -923,30 +954,15 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create a rack with enough sleds for a successful allocation when we
-        // require 3 distinct provisionable sleds.
-        let test_datasets = create_test_datasets_for_region_allocation(
+        // require 3 distinct eligible sleds.
+        let test_datasets = TestDatasets::create(
             &opctx,
             datastore.clone(),
-            // We're going to mark one sled as non-provisionable to test that
-            // logic, and we *are* forcing the datasets to be on distinct
-            // sleds: hence threshold + 1.
-            REGION_REDUNDANCY_THRESHOLD + 1,
+            // We're forcing the datasets to be on distinct sleds, hence the
+            // full REGION_REDUNDANCY_THRESHOLD.
+            REGION_REDUNDANCY_THRESHOLD,
         )
         .await;
-
-        let non_provisionable_dataset_id = test_datasets[0].dataset_id;
-        mark_sled_non_provisionable(
-            &datastore,
-            &opctx,
-            test_datasets[0].sled_id,
-        )
-        .await;
-
-        // We need to check that our datasets end up on 3 distinct sleds, but the query doesn't return the sled ID, so we need to reverse map from dataset ID to sled ID
-        let sled_id_map: HashMap<Uuid, Uuid> = test_datasets
-            .into_iter()
-            .map(|test_dataset| (test_dataset.dataset_id, test_dataset.sled_id))
-            .collect();
 
         // Allocate regions from the datasets for this disk. Do it a few times
         // for good measure.
@@ -980,14 +996,25 @@ mod test {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
 
-                // Dataset must not be non-provisionable.
-                assert_ne!(dataset.id(), non_provisionable_dataset_id);
+                // Dataset must not be eligible for provisioning.
+                if let Some(kind) =
+                    test_datasets.ineligible_dataset_ids.get(&dataset.id())
+                {
+                    panic!(
+                        "Dataset {} was ineligible for provisioning: {:?}",
+                        dataset.id(),
+                        kind
+                    );
+                }
 
                 // Must be 3 unique zpools
                 assert!(disk_zpools.insert(dataset.pool_id));
 
                 // Must be 3 unique sleds
-                let sled_id = sled_id_map.get(&dataset.id()).unwrap();
+                let sled_id = test_datasets
+                    .eligible_dataset_ids
+                    .get(&dataset.id())
+                    .unwrap();
                 assert!(disk_sleds.insert(*sled_id));
 
                 assert_eq!(volume_id, region.volume_id());
@@ -1016,21 +1043,12 @@ mod test {
 
         // Create a rack without enough sleds for a successful allocation when
         // we require 3 distinct provisionable sleds.
-        let test_datasets = create_test_datasets_for_region_allocation(
+        TestDatasets::create(
             &opctx,
             datastore.clone(),
-            // Here, we need to have REGION_REDUNDANCY_THRESHOLD - 1
-            // provisionable sleds to test this failure condition. We're going
-            // to mark one sled as non-provisionable to test that logic, so we
-            // need to add 1 to that number.
-            REGION_REDUNDANCY_THRESHOLD,
-        )
-        .await;
-
-        mark_sled_non_provisionable(
-            &datastore,
-            &opctx,
-            test_datasets[0].sled_id,
+            // Here, we need to have REGION_REDUNDANCY_THRESHOLD - 1 eligible
+            // sleds to test this failure condition.
+            REGION_REDUNDANCY_THRESHOLD - 1,
         )
         .await;
 
@@ -1075,7 +1093,7 @@ mod test {
             dev::test_setup_log("test_region_allocation_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        create_test_datasets_for_region_allocation(
+        TestDatasets::create(
             &opctx,
             datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
@@ -1220,7 +1238,7 @@ mod test {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        create_test_datasets_for_region_allocation(
+        TestDatasets::create(
             &opctx,
             datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
@@ -1321,7 +1339,7 @@ mod test {
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled1).await.unwrap();
+        datastore.sled_upsert(sled1).await.unwrap().unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
@@ -1332,7 +1350,7 @@ mod test {
             sled_system_hardware_for_test(),
             rack_id,
         );
-        datastore.sled_upsert(sled2).await.unwrap();
+        datastore.sled_upsert(sled2).await.unwrap().unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);

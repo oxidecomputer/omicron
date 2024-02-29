@@ -844,7 +844,7 @@ mod test {
     use std::num::NonZeroU32;
 
     use crate::authz;
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::model::{IpPool, IpPoolResource, IpPoolResourceType};
     use assert_matches::assert_matches;
     use nexus_test_utils::db::test_setup_database;

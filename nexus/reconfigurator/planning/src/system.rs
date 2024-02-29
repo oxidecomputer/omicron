@@ -13,7 +13,9 @@ use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
-use nexus_types::external_api::views::SledProvisionState;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PowerState;
@@ -253,7 +255,10 @@ impl SystemDescription {
             .iter()
             .map(|sled| {
                 let sled_resources = SledResources {
-                    provision_state: SledProvisionState::Provisionable,
+                    policy: SledPolicy::InService {
+                        provision_policy: SledProvisionPolicy::Provisionable,
+                    },
+                    state: SledState::Active,
                     zpools: sled.zpools.iter().cloned().collect(),
                     subnet: sled.sled_subnet,
                 };

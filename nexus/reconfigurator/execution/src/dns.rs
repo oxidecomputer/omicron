@@ -320,15 +320,16 @@ mod test {
     use crate::Sled;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
-    use nexus_deployment::blueprint_builder::BlueprintBuilder;
     use nexus_inventory::CollectionBuilder;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::ZpoolName;
-    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
     use nexus_types::internal_api::params::DnsRecord;
@@ -409,7 +410,8 @@ mod test {
             .zip(possible_sled_subnets)
             .map(|(sled_id, subnet)| {
                 let sled_resources = SledResources {
-                    provision_state: SledProvisionState::Provisionable,
+                    policy: SledPolicy::provisionable(),
+                    state: SledState::Active,
                     zpools: BTreeSet::from([ZpoolName::from_str(&format!(
                         "oxp_{}",
                         Uuid::new_v4()

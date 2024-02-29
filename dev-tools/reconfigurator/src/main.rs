@@ -10,9 +10,9 @@ use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::{Args, Parser, Subcommand};
 use indexmap::IndexMap;
-use nexus_deployment::blueprint_builder::BlueprintBuilder;
-use nexus_deployment::planner::Planner;
-use nexus_deployment::system::{
+use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
