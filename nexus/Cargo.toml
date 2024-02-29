@@ -77,13 +77,13 @@ tough.workspace = true
 trust-dns-resolver.workspace = true
 uuid.workspace = true
 
-nexus-blueprint-execution.workspace = true
 nexus-capabilities.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
-nexus-deployment.workspace = true
 nexus-inventory.workspace = true
+nexus-reconfigurator-execution.workspace = true
+nexus-reconfigurator-planning.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true

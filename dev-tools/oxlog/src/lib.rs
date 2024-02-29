@@ -351,8 +351,7 @@ fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
 
             let is_current = filename.ends_with(".log");
 
-            let svc_logs =
-                logs.entry(svc_name.to_string()).or_insert(SvcLogs::default());
+            let svc_logs = logs.entry(svc_name.to_string()).or_default();
 
             if is_current {
                 svc_logs.current = Some(logfile.clone());
@@ -374,8 +373,7 @@ fn load_extra_logs(
         return;
     };
 
-    let svc_logs =
-        logs.entry(svc_name.to_string()).or_insert(SvcLogs::default());
+    let svc_logs = logs.entry(svc_name.to_string()).or_default();
 
     for entry in entries {
         let Ok(entry) = entry else {

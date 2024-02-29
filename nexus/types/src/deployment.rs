@@ -4,12 +4,13 @@
 
 //! Types representing deployed software and configuration
 //!
-//! For more on this, see the crate-level documentation for `nexus/deployment`.
+//! For more on this, see the crate-level documentation for
+//! `nexus/reconfigurator/planning`.
 //!
 //! This lives in nexus/types because it's used by both nexus/db-model and
-//! nexus/deployment.  (It could as well just live in nexus/db-model, but
-//! nexus/deployment does not currently know about nexus/db-model and it's
-//! convenient to separate these concerns.)
+//! nexus/reconfigurator/planning.  (It could as well just live in
+//! nexus/db-model, but nexus/reconfigurator/planning does not currently know
+//! about nexus/db-model and it's convenient to separate these concerns.)
 
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledState;
@@ -98,8 +99,8 @@ impl SledResources {
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
 // blueprint completely describes all of the software and configuration
-// that the control plane manages.  See the nexus/deployment crate-level
-// documentation for details.
+// that the control plane manages.  See the nexus/reconfigurator/planning
+// crate-level documentation for details.
 //
 // Blueprints are different from policy.  Policy describes the things that an
 // operator would generally want to control.  The blueprint describes the
