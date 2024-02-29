@@ -4,7 +4,7 @@
 
 //! Execution of Nexus blueprints
 //!
-//! See `nexus_deployment` crate-level docs for background.
+//! See `nexus_reconfigurator_planning` crate-level docs for background.
 
 use anyhow::{anyhow, Context};
 use nexus_db_queries::context::OpContext;

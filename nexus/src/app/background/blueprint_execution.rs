@@ -69,7 +69,7 @@ impl BackgroundTask for BlueprintExecutor {
                 });
             }
 
-            let result = nexus_blueprint_execution::realize_blueprint(
+            let result = nexus_reconfigurator_execution::realize_blueprint(
                 opctx,
                 &self.datastore,
                 blueprint,
@@ -258,7 +258,7 @@ mod test {
 
         // Make sure that requests get made to the sled agent.  This is not a
         // careful check of exactly what gets sent.  For that, see the tests in
-        // nexus-blueprint-execution.
+        // nexus-reconfigurator-execution.
         for s in [&mut s1, &mut s2] {
             s.expect(
                 Expectation::matching(all_of![request::method_path(
