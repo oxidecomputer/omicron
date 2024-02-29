@@ -643,6 +643,33 @@ async fn test_external_ip_live_attach_detach(
             "instance does not have an ephemeral IP attached".to_string()
         );
     }
+
+    // Finally, attach to an instance by instance ID to make sure that works
+    let floating_ip_name = fips[0].identity.name.as_str();
+    let instance_name = instances[0].identity.name.as_str();
+    let instance_id = instances[0].identity.id;
+    let url = attach_floating_ip_url(floating_ip_name, PROJECT_NAME);
+    let body = params::FloatingIpAttach {
+        kind: params::FloatingIpParentKind::Instance,
+        parent: instance_id.into(),
+    };
+    let attached: views::FloatingIp = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(attached.identity.name.as_str(), floating_ip_name);
+    let eip_list =
+        fetch_instance_external_ips(client, instance_name, PROJECT_NAME).await;
+    assert_eq!(eip_list.len(), 1);
+    assert_eq!(eip_list[0].ip(), fips[0].ip);
 }
 
 #[nexus_test]

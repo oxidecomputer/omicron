@@ -147,7 +147,12 @@ impl super::Nexus {
         match target.kind {
             params::FloatingIpParentKind::Instance => {
                 let instance_selector = params::InstanceSelector {
-                    project: fip_selector.project,
+                    // only include the project if the instance is specified by
+                    // name. lookup by ID fails if project if present
+                    project: match target.parent {
+                        NameOrId::Name(_) => fip_selector.project,
+                        NameOrId::Id(_) => None,
+                    },
                     instance: target.parent,
                 };
                 let instance =
