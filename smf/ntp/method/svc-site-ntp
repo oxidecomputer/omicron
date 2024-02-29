@@ -22,7 +22,7 @@ function config { die $SMF_EXIT_ERR_CONFIG "$@"; }
 typeset -r action=${1:?action parameter not specified}
 typeset -r contract=$2	# For the refresh and stop methods
 
-for var in file boundary server allow domain; do
+for var in file boundary server allow domain dns_server; do
 	nameref _var=$var
 
 	typeset _var=`svcprop -p config/$var $SMF_FMRI`
@@ -117,7 +117,7 @@ function configure_dns_client {
 			echo "domain $domain" >> /etc/resolv.conf
 		fi
 
-		for s in $server; do
+		for s in $dns_server; do
 			echo "nameserver $s" >> /etc/resolv.conf
 		done
 

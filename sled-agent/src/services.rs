@@ -1944,7 +1944,10 @@ impl ServiceManager {
                     OmicronZoneConfig {
                         zone_type:
                             OmicronZoneType::BoundaryNtp {
-                                ntp_servers, domain, ..
+                                dns_servers,
+                                ntp_servers,
+                                domain,
+                                ..
                             },
                         underlay_address,
                         ..
@@ -1956,7 +1959,9 @@ impl ServiceManager {
                     OmicronZoneConfig {
                         zone_type:
                             OmicronZoneType::InternalNtp {
-                                ntp_servers, domain, ..
+                                dns_servers,
+                                ntp_servers,
+                                domain, ..
                             },
                         underlay_address,
                         ..
@@ -1995,16 +2000,27 @@ impl ServiceManager {
                 .to_string();
 
                 let domain = if let Some(d) = domain { d } else { "unknown" };
-                let servers = ntp_servers.clone().join(",");
 
-                let ntp_config = PropertyGroupBuilder::new("config")
+                let mut ntp_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
                     .add_property("domain", "astring", domain)
-                    .add_property("server", "astring", &servers)
                     .add_property("boundary", "boolean", &is_boundary);
 
+                
+                for s in ntp_servers {
+                    ntp_config = ntp_config
+                        .clone()
+                        .add_property("server", "astring", &s.to_string());
+                };
+
+                for s in dns_servers.clone() {
+                    ntp_config = ntp_config
+                        .clone()
+                        .add_property("dns_server", "astring", &s.to_string());
+                };
+
                 let dns_client_service;
-                if ntp_servers.is_empty() {
+                if dns_servers.is_empty() {
                     dns_client_service =
                         ServiceBuilder::new("network/dns/client").add_instance(
                             ServiceInstanceBuilder::new("default").disable(),
