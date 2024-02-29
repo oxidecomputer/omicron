@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{anyhow, bail, ensure, Context};
+use anyhow::{anyhow, bail, Context};
+use camino::Utf8PathBuf;
 use clap::CommandFactory;
 use clap::FromArgMatches;
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
 use nexus_deployment::system::{
@@ -229,6 +230,19 @@ enum Commands {
 
     /// list all blueprints
     BlueprintList,
+
+    /// load state from a file
+    Load(LoadArgs),
+}
+
+#[derive(Debug, Args)]
+struct LoadArgs {
+    /// input file
+    filename: Utf8PathBuf,
+
+    /// id of inventory collection to use for sled details
+    /// (may be omitted only if the file contains only one collection)
+    collection_id: Option<Uuid>,
 }
 
 enum LoopResult {
@@ -267,6 +281,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
+        Commands::Load(args) => cmd_load(sim, args),
     };
 
     match cmd_result {
@@ -558,159 +573,161 @@ fn cmd_blueprint_list(
 //     )))
 // }
 //
-// fn read_file(
-//     input_path: &camino::Utf8Path,
-// ) -> anyhow::Result<UnstableReconfiguratorState> {
-//     let file = std::fs::File::open(input_path)
-//         .with_context(|| format!("open {:?}", input_path))?;
-//     serde_json::from_reader(file)
-//         .with_context(|| format!("read {:?}", input_path))
-// }
-//
-// fn cmd_load(
-//     args: ArgMatches,
-//     sim: &mut ReconfiguratorSim,
-// ) -> anyhow::Result<Option<String>> {
-//     let input_path_str: &String = args
-//         .get_one::<String>("filename")
-//         .ok_or_else(|| anyhow!("missing filename"))?;
-//     let input_path = camino::Utf8Path::new(input_path_str);
-//     let collection_id = args
-//         .get_one::<String>("collection_id")
-//         .map(|s| s.parse::<Uuid>())
-//         .transpose()
-//         .context("parsing \"collection_id\" as uuid")?;
-//     let loaded = read_file(input_path)?;
-//
-//     let mut s = String::new();
-//
-//     let collection_id = match collection_id {
-//         Some(s) => s,
-//         None => {
-//             ensure!(
-//                 loaded.collections.len() == 1,
-//                 "no collection_id specified and file contains {} collections",
-//                 loaded.collections.len()
-//             );
-//             loaded.collections[0].id
-//         }
-//     };
-//
-//     swriteln!(
-//         s,
-//         "using collection {} as source of sled inventory data",
-//         collection_id
-//     );
-//     let primary_collection =
-//         loaded.collections.iter().find(|c| c.id == collection_id).ok_or_else(
-//             || {
-//                 anyhow!(
-//                     "collection {} not found in file {:?}",
-//                     collection_id,
-//                     input_path
-//                 )
-//             },
-//         )?;
-//
-//     let current_policy = sim.system.to_policy().context("generating policy")?;
-//     for (sled_id, sled_resources) in loaded.policy.sleds {
-//         if current_policy.sleds.contains_key(&sled_id) {
-//             swriteln!(
-//                 s,
-//                 "saved sled {}: skipped (one with \
-//                 the same id is already loaded)",
-//                 sled_id
-//             );
-//             continue;
-//         }
-//
-//         let Some(inventory_sled_agent) =
-//             primary_collection.sled_agents.get(&sled_id)
-//         else {
-//             swriteln!(
-//                 s,
-//                 "error: saved sled {}: no inventory found for sled agent in \
-//                 collection {}",
-//                 sled_id,
-//                 collection_id
-//             );
-//             continue;
-//         };
-//
-//         let inventory_sp = match &inventory_sled_agent.baseboard_id {
-//             Some(baseboard_id) => {
-//                 let inv_sp = primary_collection
-//                     .sps
-//                     .get(baseboard_id)
-//                     .ok_or_else(|| {
-//                         anyhow!(
-//                             "error: saved sled {}: missing SP inventory",
-//                             sled_id
-//                         )
-//                     })?;
-//                 let inv_rot = primary_collection
-//                     .rots
-//                     .get(baseboard_id)
-//                     .ok_or_else(|| {
-//                         anyhow!(
-//                             "error: saved sled {}: missing RoT inventory",
-//                             sled_id
-//                         )
-//                     })?;
-//                 Some(SledHwInventory { baseboard_id, sp: inv_sp, rot: inv_rot })
-//             }
-//             None => None,
-//         };
-//
-//         let result = sim.system.sled_full(
-//             sled_id,
-//             sled_resources,
-//             inventory_sp,
-//             inventory_sled_agent,
-//         );
-//
-//         match result {
-//             Ok(_) => swriteln!(s, "saved sled {}: loaded", sled_id),
-//             Err(error) => {
-//                 swriteln!(s, "error: saved sled {}: {:#}", sled_id, error)
-//             }
-//         };
-//     }
-//
-//     // XXX-dap O(n^2)
-//     for collection in loaded.collections {
-//         if sim.collections.iter().any(|c| c.id == collection.id) {
-//             swriteln!(
-//                 s,
-//                 "saved collection {}: skipped (one with the \
-//                 same id is already loaded)",
-//                 collection.id
-//             );
-//         } else {
-//             swriteln!(s, "saved collection {}: loaded", collection.id);
-//             sim.collections.push(collection);
-//         }
-//     }
-//
-//     // XXX-dap O(n^2)
-//     for blueprint in loaded.blueprints {
-//         if sim.blueprints.iter().any(|b| b.id == blueprint.id) {
-//             swriteln!(
-//                 s,
-//                 "saved blueprint {}: skipped (one with the \
-//                 same id is already loaded)",
-//                 blueprint.id
-//             );
-//         } else {
-//             swriteln!(s, "saved blueprint {}: loaded", blueprint.id);
-//             sim.blueprints.push(blueprint);
-//         }
-//     }
-//
-//     swriteln!(s, "loaded data from {:?}", input_path);
-//     Ok(Some(s))
-// }
-//
+fn read_file(
+    input_path: &camino::Utf8Path,
+) -> anyhow::Result<UnstableReconfiguratorState> {
+    let file = std::fs::File::open(input_path)
+        .with_context(|| format!("open {:?}", input_path))?;
+    serde_json::from_reader(file)
+        .with_context(|| format!("read {:?}", input_path))
+}
+
+fn cmd_load(
+    sim: &mut ReconfiguratorSim,
+    args: LoadArgs,
+) -> anyhow::Result<Option<String>> {
+    let input_path = args.filename;
+    let collection_id = args.collection_id;
+    let loaded = read_file(&input_path)?;
+
+    let mut s = String::new();
+
+    let collection_id = match collection_id {
+        Some(s) => s,
+        None => match loaded.collections.len() {
+            1 => loaded.collections[0].id,
+            0 => bail!(
+                "no collection_id specified and file contains 0 collections"
+            ),
+            count => bail!(
+                "no collection_id specified and file contains {} \
+                    collections: {}",
+                count,
+                loaded
+                    .collections
+                    .iter()
+                    .map(|c| c.id.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        },
+    };
+
+    swriteln!(
+        s,
+        "using collection {} as source of sled inventory data",
+        collection_id
+    );
+    let primary_collection =
+        loaded.collections.iter().find(|c| c.id == collection_id).ok_or_else(
+            || {
+                anyhow!(
+                    "collection {} not found in file {:?}",
+                    collection_id,
+                    input_path
+                )
+            },
+        )?;
+
+    let current_policy = sim.system.to_policy().context("generating policy")?;
+    for (sled_id, sled_resources) in loaded.policy.sleds {
+        if current_policy.sleds.contains_key(&sled_id) {
+            swriteln!(
+                s,
+                "saved sled {}: skipped (one with \
+                the same id is already loaded)",
+                sled_id
+            );
+            continue;
+        }
+
+        let Some(inventory_sled_agent) =
+            primary_collection.sled_agents.get(&sled_id)
+        else {
+            swriteln!(
+                s,
+                "error: saved sled {}: no inventory found for sled agent in \
+                collection {}",
+                sled_id,
+                collection_id
+            );
+            continue;
+        };
+
+        let inventory_sp = match &inventory_sled_agent.baseboard_id {
+            Some(baseboard_id) => {
+                let inv_sp = primary_collection
+                    .sps
+                    .get(baseboard_id)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "error: saved sled {}: missing SP inventory",
+                            sled_id
+                        )
+                    })?;
+                let inv_rot = primary_collection
+                    .rots
+                    .get(baseboard_id)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "error: saved sled {}: missing RoT inventory",
+                            sled_id
+                        )
+                    })?;
+                Some(SledHwInventory { baseboard_id, sp: inv_sp, rot: inv_rot })
+            }
+            None => None,
+        };
+
+        let result = sim.system.sled_full(
+            sled_id,
+            sled_resources,
+            inventory_sp,
+            inventory_sled_agent,
+        );
+
+        match result {
+            Ok(_) => swriteln!(s, "saved sled {}: loaded", sled_id),
+            Err(error) => {
+                swriteln!(s, "error: saved sled {}: {:#}", sled_id, error)
+            }
+        };
+    }
+
+    // XXX-dap O(n^2)
+    for collection in loaded.collections {
+        if sim.collections.iter().any(|c| c.id == collection.id) {
+            swriteln!(
+                s,
+                "saved collection {}: skipped (one with the \
+                same id is already loaded)",
+                collection.id
+            );
+        } else {
+            swriteln!(s, "saved collection {}: loaded", collection.id);
+            sim.collections.push(collection);
+        }
+    }
+
+    // XXX-dap O(n^2)
+    for blueprint in loaded.blueprints {
+        if sim.blueprints.iter().any(|b| b.id == blueprint.id) {
+            swriteln!(
+                s,
+                "saved blueprint {}: skipped (one with the \
+                same id is already loaded)",
+                blueprint.id
+            );
+        } else {
+            swriteln!(s, "saved blueprint {}: loaded", blueprint.id);
+            sim.blueprints.push(blueprint);
+        }
+    }
+
+    swriteln!(s, "loaded data from {:?}", input_path);
+    Ok(Some(s))
+}
+
 // fn cmd_file_contents(
 //     args: ArgMatches,
 //     _sim: &mut ReconfiguratorSim,
