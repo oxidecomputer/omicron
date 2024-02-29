@@ -123,6 +123,10 @@ function configure_dns_client {
 
 		echo "* Copying nsswitch.dns to nsswitch.conf"
 		cp /etc/nsswitch.dns /etc/nsswitch.conf
+
+		# TODO: Perhaps we keep these?
+		# svcadm refresh -t svc:/network/dns/client
+		# svcadm enable -t svc:/network/dns/client
 	fi
 }
 

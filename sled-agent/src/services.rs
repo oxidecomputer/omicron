@@ -1338,61 +1338,61 @@ impl ServiceManager {
     }
 
     // TODO: Set up a new service for this
-//    async fn configure_dns_client(
-//        &self,
-//        running_zone: &RunningZone,
-//        dns_servers: &[IpAddr],
-//        domain: &Option<String>,
-//    ) -> Result<(), Error> {
-//        struct DnsClient {}
-//
-//        impl crate::smf_helper::Service for DnsClient {
-//            fn service_name(&self) -> String {
-//                "dns_client".to_string()
-//            }
-//            fn smf_name(&self) -> String {
-//                "svc:/network/dns/client".to_string()
-//            }
-//            fn should_import(&self) -> bool {
-//                false
-//            }
-//        }
-//
-//        let service = DnsClient {};
-//        let smfh = SmfHelper::new(&running_zone, &service);
-//
-//        let etc = running_zone.root().join("etc");
-//        let resolv_conf = etc.join("resolv.conf");
-//        let nsswitch_conf = etc.join("nsswitch.conf");
-//        let nsswitch_dns = etc.join("nsswitch.dns");
-//
-//        if dns_servers.is_empty() {
-//            // Disable the dns/client service
-//            smfh.disable()?;
-//        } else {
-//            debug!(self.inner.log, "enabling {:?}", service.service_name());
-//            let mut config = String::new();
-//            if let Some(d) = domain {
-//                config.push_str(&format!("domain {d}\n"));
-//            }
-//            for s in dns_servers {
-//                config.push_str(&format!("nameserver {s}\n"));
-//            }
-//
-//            debug!(self.inner.log, "creating {resolv_conf}");
-//            tokio::fs::write(&resolv_conf, config)
-//                .await
-//                .map_err(|err| Error::io_path(&resolv_conf, err))?;
-//
-//            tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
-//                .await
-//                .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
-//
-//            smfh.refresh()?;
-//            smfh.enable()?;
-//        }
-//        Ok(())
-//    }
+    //    async fn configure_dns_client(
+    //        &self,
+    //        running_zone: &RunningZone,
+    //        dns_servers: &[IpAddr],
+    //        domain: &Option<String>,
+    //    ) -> Result<(), Error> {
+    //        struct DnsClient {}
+    //
+    //        impl crate::smf_helper::Service for DnsClient {
+    //            fn service_name(&self) -> String {
+    //                "dns_client".to_string()
+    //            }
+    //            fn smf_name(&self) -> String {
+    //                "svc:/network/dns/client".to_string()
+    //            }
+    //            fn should_import(&self) -> bool {
+    //                false
+    //            }
+    //        }
+    //
+    //        let service = DnsClient {};
+    //        let smfh = SmfHelper::new(&running_zone, &service);
+    //
+    //        let etc = running_zone.root().join("etc");
+    //        let resolv_conf = etc.join("resolv.conf");
+    //        let nsswitch_conf = etc.join("nsswitch.conf");
+    //        let nsswitch_dns = etc.join("nsswitch.dns");
+    //
+    //        if dns_servers.is_empty() {
+    //            // Disable the dns/client service
+    //            smfh.disable()?;
+    //        } else {
+    //            debug!(self.inner.log, "enabling {:?}", service.service_name());
+    //            let mut config = String::new();
+    //            if let Some(d) = domain {
+    //                config.push_str(&format!("domain {d}\n"));
+    //            }
+    //            for s in dns_servers {
+    //                config.push_str(&format!("nameserver {s}\n"));
+    //            }
+    //
+    //            debug!(self.inner.log, "creating {resolv_conf}");
+    //            tokio::fs::write(&resolv_conf, config)
+    //                .await
+    //                .map_err(|err| Error::io_path(&resolv_conf, err))?;
+    //
+    //            tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
+    //                .await
+    //                .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
+    //
+    //            smfh.refresh()?;
+    //            smfh.enable()?;
+    //        }
+    //        Ok(())
+    //    }
 
     async fn dns_install(
         info: &SledAgentInfo,
