@@ -16,8 +16,8 @@ use db_macros::Resource;
 use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
-use nexus_types::external_api::shared;
 use nexus_types::external_api::params;
+use nexus_types::external_api::shared;
 use nexus_types::external_api::views;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
@@ -556,7 +556,6 @@ impl From<params::FloatingIpUpdate> for FloatingIpUpdate {
         }
     }
 }
-
 
 impl TryFrom<ExternalIp> for InstanceExternalIpBody {
     type Error = Error;

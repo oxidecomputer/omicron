@@ -410,19 +410,20 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
         },
     };
 
-    let new_fip = NexusRequest::object_put(client, &floating_ip_url, Some(&updates)).authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .expect("")
-    .parsed_body::<FloatingIp>()
-    .unwrap();
+    let new_fip =
+        NexusRequest::object_put(client, &floating_ip_url, Some(&updates))
+            .authn_as(AuthnMode::PrivilegedUser)
+            .execute()
+            .await
+            .expect("")
+            .parsed_body::<FloatingIp>()
+            .unwrap();
 
     assert_eq!(new_fip.identity.name.as_str(), new_fip_name);
     assert_eq!(new_fip.identity.description, new_fip_desc);
     assert_eq!(new_fip.project_id, project.identity.id);
     assert_eq!(new_fip.identity.time_created, fip.identity.time_created);
     assert_ne!(new_fip.identity.time_modified, fip.identity.time_modified);
-
 }
 
 #[nexus_test]

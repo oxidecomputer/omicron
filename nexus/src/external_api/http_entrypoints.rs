@@ -7,10 +7,10 @@
 use super::{
     console_api, device_auth, params,
     views::{
-        self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
-        Sled, Snapshot, SshKey, User, UserBuiltin, Utilization, Vpc, VpcRouter,
-        VpcSubnet,
+        self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
+        IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
+        SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
+        Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -1941,11 +1941,18 @@ async fn floating_ip_update(
         let query = query_params.into_inner();
         let updated_floating_ip_params = updated_floating_ip.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        let floating_ip_selector =
-            params::FloatingIpSelector { project: query.project, floating_ip: path.floating_ip };
-        let floating_ip_lookup = nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+        let floating_ip_selector = params::FloatingIpSelector {
+            project: query.project,
+            floating_ip: path.floating_ip,
+        };
+        let floating_ip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
         let floating_ip = nexus
-            .floating_ip_update(&opctx, floating_ip_lookup, updated_floating_ip_params)
+            .floating_ip_update(
+                &opctx,
+                floating_ip_lookup,
+                updated_floating_ip_params,
+            )
             .await?;
         Ok(HttpResponseOk(floating_ip.into()))
     };
