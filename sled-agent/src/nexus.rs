@@ -190,6 +190,7 @@ pub struct NexusNotifierTaskStatus {
     pub total_get_requests_completed: u64,
     pub total_put_requests_started: u64,
     pub total_put_requests_completed: u64,
+    pub cancelled_pending_notifications: u64,
 }
 
 #[derive(Debug)]
@@ -232,7 +233,7 @@ enum NexusSuccess {
 
 /// What sled-agent has confirmed that Nexus knows about this sled-agent
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum NexusKnownInfo {
+pub enum NexusKnownInfo {
     // CRDB doesn't contain a record for this sled-agent
     NotFound,
     Found(SledAgentInfo),
@@ -311,6 +312,7 @@ pub struct NexusNotifierTask {
     total_put_requests_started: u64,
     total_get_requests_completed: u64,
     total_put_requests_completed: u64,
+    cancelled_pending_notifications: u64,
 }
 
 impl NexusNotifierTask {
@@ -365,6 +367,7 @@ impl NexusNotifierTask {
                 total_put_requests_started: 0,
                 total_get_requests_completed: 0,
                 total_put_requests_completed: 0,
+                cancelled_pending_notifications: 0,
             },
             NexusNotifierHandle { tx },
         )
@@ -395,6 +398,7 @@ impl NexusNotifierTask {
                 total_put_requests_started: 0,
                 total_get_requests_completed: 0,
                 total_put_requests_completed: 0,
+                cancelled_pending_notifications: 0,
             },
             NexusNotifierHandle { tx },
         )
@@ -428,6 +432,7 @@ impl NexusNotifierTask {
                                 total_put_requests_started: self.total_put_requests_started,
                                 total_get_requests_completed: self.total_get_requests_completed,
                                 total_put_requests_completed: self.total_put_requests_completed,
+                                cancelled_pending_notifications: self.cancelled_pending_notifications
                             });
                         }
 
@@ -474,6 +479,7 @@ impl NexusNotifierTask {
                     // nexus knows
                     if info == *known {
                         self.pending_notification = false;
+                        self.cancelled_pending_notifications += 1;
                         return;
                     }
 
@@ -574,7 +580,7 @@ mod test {
 
     use super::*;
     use omicron_common::api::external::{
-        ByteCount, Error, Generation, LookupType, ResourceType,
+        ByteCount, Error, Generation, LookupType, MessagePair, ResourceType,
     };
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware::Baseboard;
@@ -585,9 +591,15 @@ mod test {
         info: Arc<std::sync::Mutex<Option<SledAgentInfo>>>,
     }
 
+    // A mechanism for injecting errors into nexus responses from the test
+    enum NexusErrorInjection {
+        DbConflict,
+    }
+
     // Puts and Gets with our magical fake nexus
     struct NexusServer {
         fake_crdb: FakeCrdb,
+        error: Option<NexusErrorInjection>,
     }
     impl FakeNexusServer for NexusServer {
         fn sled_agent_get(
@@ -607,9 +619,18 @@ mod test {
             _sled_id: Uuid,
             info: SledAgentInfo,
         ) -> Result<(), Error> {
-            let mut crdb_info = self.fake_crdb.info.lock().unwrap();
-            *crdb_info = Some(info);
-            Ok(())
+            match self.error {
+                None => {
+                    let mut crdb_info = self.fake_crdb.info.lock().unwrap();
+                    *crdb_info = Some(info);
+                    Ok(())
+                }
+                Some(NexusErrorInjection::DbConflict) => Err(Error::Conflict {
+                    message: MessagePair::new(
+                        "I don't like the cut of your jib".into(),
+                    ),
+                }),
+            }
         }
     }
 
@@ -623,7 +644,7 @@ mod test {
 
         let nexus_server = crate::fakes::nexus::start_test_server(
             log.clone(),
-            Box::new(NexusServer { fake_crdb: fake_crdb.clone() }),
+            Box::new(NexusServer { fake_crdb: fake_crdb.clone(), error: None }),
         );
         let nexus_client = NexusClient::new(
             &format!("http://{}", nexus_server.local_addr()),
@@ -702,6 +723,37 @@ mod test {
         .await
         .expect("Failed to get status from Nexus");
 
+        assert_eq!(status.total_get_requests_started, 1u64);
+        assert_eq!(status.total_put_requests_started, 1u64);
+        assert_eq!(status.total_get_requests_completed, 1u64);
+        assert_eq!(status.total_put_requests_completed, 1u64);
+        assert_eq!(status.has_outstanding_request, false);
+        assert_eq!(status.cancelled_pending_notifications, 1);
+        let expected = latest_sled_agent_info.lock().unwrap().clone();
+        assert_eq!(
+            status.nexus_known_info,
+            Some(NexusKnownInfo::Found(expected)),
+        );
+
+        // Trigger another update notification
+        //
+        // We haven't changed the underlying `SledAgentInfo` so this request
+        // should be cancelled without a request going to nexus.
+        handle.notify_nexus_about_self(log).await;
+        let status = wait_for::<_, (), _, _>(
+            || async {
+                let status = handle.get_status().await.unwrap();
+                if status.cancelled_pending_notifications == 2 {
+                    Ok(status)
+                } else {
+                    Err(CondCheckError::NotYet)
+                }
+            },
+            &Duration::from_millis(2),
+            &Duration::from_secs(15),
+        )
+        .await
+        .expect("Failed to get status from Nexus");
         assert_eq!(status.total_get_requests_started, 1u64);
         assert_eq!(status.total_put_requests_started, 1u64);
         assert_eq!(status.total_get_requests_completed, 1u64);
