@@ -1995,17 +1995,13 @@ impl ServiceManager {
                 .to_string();
 
                 let domain = if let Some(d) = domain { d } else { "unknown" };
+                let servers = ntp_servers.clone().join(",");
 
                 let ntp_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
                     .add_property("domain", "astring", domain)
+                    .add_property("server", "astring", &servers)
                     .add_property("boundary", "boolean", &is_boundary);
-
-                for server in ntp_servers.clone() {
-                    ntp_config
-                        .clone()
-                        .add_property("server", "astring", &server);
-                }
 
                 let dns_client_service;
                 if ntp_servers.is_empty() {
@@ -2042,13 +2038,6 @@ impl ServiceManager {
                         Error::io("Failed to setup NTP profile", err)
                     })?;
 
-                // TODO: set up a service for this
-                // self.configure_dns_client(
-                //                            &running_zone,
-                //                            &dns_servers,
-                //                            &domain,
-                //                        )
-                //                        .await?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
             _ => {}
