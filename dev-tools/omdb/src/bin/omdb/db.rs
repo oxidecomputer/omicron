@@ -35,6 +35,7 @@ use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
+use dropshot::PaginationOrder;
 use futures::StreamExt;
 use gateway_client::types::SpType;
 use ipnetwork::IpNetwork;
@@ -77,6 +78,7 @@ use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
 use nexus_deployment::policy_from_db;
 use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
@@ -87,6 +89,7 @@ use nexus_types::inventory::RotPageWhich;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MacAddr;
 use omicron_common::postgres_config::PostgresConfigWithUrl;
 use sled_agent_client::types::VolumeConstructionRequest;
@@ -482,6 +485,7 @@ impl DbArgs {
                 cmd_db_reconfigurator_save(
                     &opctx,
                     &datastore,
+                    &self.fetch_opts,
                     reconfig_save_args,
                 )
                 .await
@@ -3132,6 +3136,7 @@ impl LongStringFormatter {
 async fn cmd_db_reconfigurator_save(
     opctx: &OpContext,
     datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
     reconfig_save_args: &ReconfiguratorSaveArgs,
 ) -> Result<(), anyhow::Error> {
     // See Nexus::blueprint_planning_context().
@@ -3185,7 +3190,38 @@ async fn cmd_db_reconfigurator_save(
     eprintln!("done.");
 
     eprint!("loading blueprints ... ");
-    let blueprints = vec![]; // XXX-dap
+    let limit = fetch_opts.fetch_limit;
+    let pagparams = DataPageParams {
+        marker: None,
+        direction: PaginationOrder::Ascending,
+        limit,
+    };
+    let blueprint_ids = datastore
+        .blueprints_list(opctx, &pagparams)
+        .await
+        .context("listing blueprints")?;
+    check_limit(&blueprint_ids, limit, || "listing blueprint ids");
+    let blueprints = futures::stream::iter(blueprint_ids)
+        .filter_map(|bpm| async move {
+            let blueprint_id = bpm.id;
+            let read = datastore
+                .blueprint_read(
+                    opctx,
+                    &nexus_db_queries::authz::Blueprint::new(
+                        nexus_db_queries::authz::FLEET,
+                        blueprint_id,
+                        LookupType::ById(blueprint_id),
+                    ),
+                )
+                .await
+                .with_context(|| format!("reading blueprint {}", blueprint_id));
+            if let Err(error) = &read {
+                eprintln!("warning: {}", error);
+            }
+            read.ok()
+        })
+        .collect::<Vec<Blueprint>>()
+        .await;
     eprintln!("done.");
 
     let state =

@@ -124,13 +124,13 @@ use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::identity::Asset;
+use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
-use omicron_common::address::IpRange;
 
 // XXX-dap move
 pub fn policy_from_db(

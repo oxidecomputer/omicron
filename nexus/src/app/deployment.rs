@@ -9,6 +9,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
+use nexus_deployment::policy_from_db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
@@ -27,7 +28,6 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
-use nexus_deployment::policy_from_db;
 
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
