@@ -15,8 +15,8 @@ use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
 use crate::nexus::{
-    ConvertInto, NexusClientWithResolver, NexusNotifierHandle,
-    NexusNotifierInput, NexusNotifierTask,
+    NexusClientWithResolver, NexusNotifierHandle, NexusNotifierInput,
+    NexusNotifierTask,
 };
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
@@ -47,7 +47,6 @@ use illumos_utils::zone::ZONE_PREFIX;
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
-use omicron_common::api::external::Generation;
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
@@ -62,7 +61,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_notify_ext, retry_policy_internal_service,
+    retry_notify, retry_policy_internal_service,
     retry_policy_internal_service_aggressive, BackoffError,
 };
 use oximeter::types::ProducerRegistry;
