@@ -23,9 +23,6 @@ use uuid::Uuid;
 // Current status:
 // - starting to flesh out the basic CRUD stuff.  it kind of works.  it's hard
 //   to really see it because I haven't fleshed out "show".  save/load works.
-// - I think it's finally time to switch to using the derive version of clap +
-//   reedline directly.  This is in my way right now because I'm getting back
-//   errors that I cannot see.  See item below.
 // - in a bit of a dead end in the demo flow because SystemDescription does
 //   not put any zones onto anything, and build-blueprint-from-inventory
 //   requires that there are zones.  options here include:
@@ -139,28 +136,6 @@ fn main() -> anyhow::Result<()> {
 }
 
 //        .with_command(
-//            Command::new("sled-show")
-//                .about("show details about a sled")
-//                .arg(Arg::new("sled_id").required(true)),
-//            cmd_sled_show,
-//        )
-//        .with_command(
-//            Command::new("inventory-list")
-//                .about("lists all inventory collections"),
-//            cmd_inventory_list,
-//        )
-//        .with_command(
-//            Command::new("inventory-generate").about(
-//                "generates an inventory collection from the configured \
-//                    sleds",
-//            ),
-//            cmd_inventory_generate,
-//        )
-//        .with_command(
-//            Command::new("blueprint-list").about("lists all blueprints"),
-//            cmd_blueprint_list,
-//        )
-//        .with_command(
 //            Command::new("blueprint-from-inventory")
 //                .about("generate an initial blueprint from inventory")
 //                .arg(Arg::new("collection_id").required(true)),
@@ -193,21 +168,11 @@ fn main() -> anyhow::Result<()> {
 //            cmd_save,
 //        )
 //        .with_command(
-//            Command::new("load")
-//                .about("load state from a file")
-//                .arg(Arg::new("filename").required(true))
-//                .arg(Arg::new("collection_id")),
-//            cmd_load,
-//        )
-//        .with_command(
 //            Command::new("file-contents")
 //                .about("show the contents of a given file")
 //                .arg(Arg::new("filename").required(true)),
 //            cmd_file_contents,
 //        );
-//
-//    repl.run().context("unexpected failure")
-//
 
 /// reconfigurator-sim: simulate blueprint planning and execution
 #[derive(Debug, Parser)]
@@ -222,6 +187,8 @@ enum Commands {
     SledList,
     /// add a new sled
     SledAdd,
+    /// show details about one sled
+    SledShow(SledArgs),
 
     /// list all inventory collections
     InventoryList,
@@ -233,6 +200,12 @@ enum Commands {
 
     /// load state from a file
     Load(LoadArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledArgs {
+    /// id of the sled
+    sled_id: Uuid,
 }
 
 #[derive(Debug, Args)]
@@ -278,6 +251,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
     let cmd_result = match subcommand {
         Commands::SledList => cmd_sled_list(sim),
         Commands::SledAdd => cmd_sled_add(sim),
+        Commands::SledShow(args) => cmd_sled_show(sim, args),
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
@@ -323,30 +297,26 @@ fn cmd_sled_add(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     Ok(Some(String::from("added sled")))
 }
 
-// fn cmd_sled_show(
-//     args: ArgMatches,
-//     sim: &mut ReconfiguratorSim,
-// ) -> anyhow::Result<Option<String>> {
-//     let policy = sim.system.to_policy().context("failed to generate policy")?;
-//     let sled_id: Uuid = args
-//         .get_one::<String>("sled_id")
-//         .ok_or_else(|| anyhow!("missing sled_id"))?
-//         .parse()
-//         .context("sled_id")?;
-//     let sled_resources = policy
-//         .sleds
-//         .get(&sled_id)
-//         .ok_or_else(|| anyhow!("no sled with id {:?}", sled_id))?;
-//     let mut s = String::new();
-//     swriteln!(s, "sled {}", sled_id);
-//     swriteln!(s, "subnet {}", sled_resources.subnet.net());
-//     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
-//     for z in &sled_resources.zpools {
-//         swriteln!(s, "    {:?}", z);
-//     }
-//     Ok(Some(s))
-// }
-//
+fn cmd_sled_show(
+    sim: &mut ReconfiguratorSim,
+    args: SledArgs,
+) -> anyhow::Result<Option<String>> {
+    let policy = sim.system.to_policy().context("failed to generate policy")?;
+    let sled_id = args.sled_id;
+    let sled_resources = policy
+        .sleds
+        .get(&sled_id)
+        .ok_or_else(|| anyhow!("no sled with id {:?}", sled_id))?;
+    let mut s = String::new();
+    swriteln!(s, "sled {}", sled_id);
+    swriteln!(s, "subnet {}", sled_resources.subnet.net());
+    swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
+    for z in &sled_resources.zpools {
+        swriteln!(s, "    {:?}", z);
+    }
+    Ok(Some(s))
+}
+
 fn cmd_inventory_list(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
