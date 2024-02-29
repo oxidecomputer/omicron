@@ -17,7 +17,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
-reedline-repl-rs.workspace = true
+reedline.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 slog-error-chain.workspace = true
