@@ -127,6 +127,22 @@ impl super::Nexus {
             .unwrap())
     }
 
+    pub(crate) async fn floating_ip_update(
+        &self,
+        opctx: &OpContext,
+        ip_lookup: lookup::FloatingIp<'_>,
+        params: params::FloatingIpUpdate,
+    ) -> UpdateResult<FloatingIp> {
+        let (.., authz_fip) =
+            ip_lookup.lookup_for(authz::Action::Modify).await?;
+        Ok(self
+            .db_datastore
+            .floating_ip_update(opctx, &authz_fip, params.clone().into())
+            .await?
+            .try_into()
+            .unwrap())
+    }
+
     pub(crate) async fn floating_ip_delete(
         &self,
         opctx: &OpContext,

@@ -17,6 +17,7 @@ use diesel::Queryable;
 use diesel::Selectable;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
@@ -537,6 +538,25 @@ impl From<FloatingIp> for views::FloatingIp {
         }
     }
 }
+
+#[derive(AsChangeset)]
+#[diesel(table_name = external_ip)]
+pub struct FloatingIpUpdate {
+    pub name: Option<Name>,
+    pub description: Option<String>,
+    pub time_modified: DateTime<Utc>,
+}
+
+impl From<params::FloatingIpUpdate> for FloatingIpUpdate {
+    fn from(params: params::FloatingIpUpdate) -> Self {
+        Self {
+            name: params.identity.name.map(Name),
+            description: params.identity.description,
+            time_modified: Utc::now(),
+        }
+    }
+}
+
 
 impl TryFrom<ExternalIp> for InstanceExternalIpBody {
     type Error = Error;
