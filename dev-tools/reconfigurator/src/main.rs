@@ -105,6 +105,8 @@ enum Commands {
     BlueprintShow(BlueprintArgs),
     /// show differences between two blueprints
     BlueprintDiff(BlueprintDiffArgs),
+    /// show differences between a blueprint and an inventory collection
+    BlueprintDiffInventory(BlueprintDiffInventoryArgs),
 
     /// save state to a file
     Save(SaveArgs),
@@ -136,6 +138,14 @@ struct BlueprintPlanArgs {
 
 #[derive(Debug, Args)]
 struct BlueprintArgs {
+    /// id of the blueprint
+    blueprint_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintDiffInventoryArgs {
+    /// id of the inventory collection
+    collection_id: Uuid,
     /// id of the blueprint
     blueprint_id: Uuid,
 }
@@ -213,6 +223,9 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
+        Commands::BlueprintDiffInventory(args) => {
+            cmd_blueprint_diff_inventory(sim, args)
+        }
         Commands::Load(args) => cmd_load(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
@@ -427,6 +440,27 @@ fn cmd_blueprint_diff(
     Ok(Some(diff.to_string()))
 }
 
+fn cmd_blueprint_diff_inventory(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintDiffInventoryArgs,
+) -> anyhow::Result<Option<String>> {
+    let collection_id = args.collection_id;
+    let blueprint_id = args.blueprint_id;
+    let collection =
+        sim.collections.iter().find(|c| c.id == collection_id).ok_or_else(
+            || anyhow!("no such inventory collection: {}", collection_id),
+        )?;
+    let blueprint = sim
+        .blueprints
+        .iter()
+        .find(|b| b.id == blueprint_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
+
+    let zones = collection.all_omicron_zones().map(|z| z.id).collect();
+    let diff = blueprint.diff_sleds_from_collection(&collection, &zones);
+    Ok(Some(diff.to_string()))
+}
+
 fn cmd_save(
     sim: &mut ReconfiguratorSim,
     args: SaveArgs,
@@ -535,7 +569,7 @@ fn cmd_load(
         if current_policy.sleds.contains_key(&sled_id) {
             swriteln!(
                 s,
-                "saved sled {}: skipped (one with \
+                "sled {}: skipped (one with \
                 the same id is already loaded)",
                 sled_id
             );
@@ -547,7 +581,7 @@ fn cmd_load(
         else {
             swriteln!(
                 s,
-                "error: saved sled {}: no inventory found for sled agent in \
+                "error: load sled {}: no inventory found for sled agent in \
                 collection {}",
                 sled_id,
                 collection_id
@@ -562,7 +596,7 @@ fn cmd_load(
                     .get(baseboard_id)
                     .ok_or_else(|| {
                         anyhow!(
-                            "error: saved sled {}: missing SP inventory",
+                            "error: load sled {}: missing SP inventory",
                             sled_id
                         )
                     })?;
@@ -571,7 +605,7 @@ fn cmd_load(
                     .get(baseboard_id)
                     .ok_or_else(|| {
                         anyhow!(
-                            "error: saved sled {}: missing RoT inventory",
+                            "error: load sled {}: missing RoT inventory",
                             sled_id
                         )
                     })?;
@@ -588,9 +622,9 @@ fn cmd_load(
         );
 
         match result {
-            Ok(_) => swriteln!(s, "saved sled {}: loaded", sled_id),
+            Ok(_) => swriteln!(s, "sled {} loaded", sled_id),
             Err(error) => {
-                swriteln!(s, "error: saved sled {}: {:#}", sled_id, error)
+                swriteln!(s, "error: load sled {}: {:#}", sled_id, error)
             }
         };
     }
@@ -600,12 +634,12 @@ fn cmd_load(
         if sim.collections.iter().any(|c| c.id == collection.id) {
             swriteln!(
                 s,
-                "saved collection {}: skipped (one with the \
+                "collection {}: skipped (one with the \
                 same id is already loaded)",
                 collection.id
             );
         } else {
-            swriteln!(s, "saved collection {}: loaded", collection.id);
+            swriteln!(s, "collection {} loaded", collection.id);
             sim.collections.push(collection);
         }
     }
@@ -615,12 +649,12 @@ fn cmd_load(
         if sim.blueprints.iter().any(|b| b.id == blueprint.id) {
             swriteln!(
                 s,
-                "saved blueprint {}: skipped (one with the \
+                "blueprint {}: skipped (one with the \
                 same id is already loaded)",
                 blueprint.id
             );
         } else {
-            swriteln!(s, "saved blueprint {}: loaded", blueprint.id);
+            swriteln!(s, "blueprint {} loaded", blueprint.id);
             sim.blueprints.push(blueprint);
         }
     }
