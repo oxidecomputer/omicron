@@ -83,7 +83,8 @@ impl super::Nexus {
         id: Uuid,
     ) -> Result<(), Error> {
         info!(self.log, "requesting firewall rules"; "sled_uuid" => id.to_string());
-        self.plumb_service_firewall_rules(opctx, &[id]).await?;
+        self.plumb_service_firewall_rules(opctx, &[id], &self.opctx_alloc)
+            .await?;
         Ok(())
     }
 

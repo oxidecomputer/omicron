@@ -240,7 +240,8 @@ impl super::Nexus {
             .await?;
 
         // Plumb the firewall rules for the built-in services
-        self.plumb_service_firewall_rules(opctx, &[]).await?;
+        self.plumb_service_firewall_rules(opctx, &[], &self.opctx_alloc)
+            .await?;
 
         // We've potentially updated the list of DNS servers and the DNS
         // configuration for both internal and external DNS, plus the Silo

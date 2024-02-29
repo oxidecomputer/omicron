@@ -13,6 +13,8 @@ use http::method::Method;
 use http::StatusCode;
 use itertools::Itertools;
 use nexus_capabilities::SledAgent as NexusSledAgentCapabilities;
+use nexus_db_queries::authn;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::fixed_data::silo::SILO_ID;
@@ -4677,8 +4679,15 @@ async fn instance_simulate_on_sled(
     sled_id: Uuid,
     instance_id: Uuid,
 ) {
-    info!(&cptestctx.logctx.log, "Poking simulated instance on sled";
+    let log = &cptestctx.logctx.log;
+    info!(log, "Poking simulated instance on sled";
           "instance_id" => %instance_id, "sled_id" => %sled_id);
-    let sa = nexus.sled_client_by_id(sled_id).await.unwrap();
+    let opctx = OpContext::for_background(
+        log.clone(),
+        Arc::new(authz::Authz::new(log)),
+        authn::Context::internal_read(),
+        nexus.datastore().clone(),
+    );
+    let sa = nexus.sled_client_by_id(&opctx, sled_id).await.unwrap();
     sa.instance_finish_transition(instance_id).await;
 }

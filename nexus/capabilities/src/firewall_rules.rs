@@ -49,6 +49,7 @@ pub trait FirewallRules: SledAgent {
         &self,
         opctx: &OpContext,
         sleds_filter: &[Uuid],
+        sled_lookup_opctx: &OpContext,
     ) -> Result<(), Error> {
         let svcs_vpc = LookupPath::new(opctx, self.datastore())
             .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
@@ -60,6 +61,7 @@ pub trait FirewallRules: SledAgent {
             &svcs_vpc,
             &svcs_fw_rules,
             sleds_filter,
+            sled_lookup_opctx,
         )
         .await?;
         Ok(())
@@ -71,6 +73,7 @@ pub trait FirewallRules: SledAgent {
         vpc: &db::model::Vpc,
         rules: &[db::model::VpcFirewallRule],
         sleds_filter: &[Uuid],
+        sled_lookup_opctx: &OpContext,
     ) -> Result<(), Error> {
         let rules_for_sled = self
             .resolve_firewall_rules_for_sled_agent(opctx, vpc, rules)
@@ -97,7 +100,7 @@ pub trait FirewallRules: SledAgent {
             let vpc_id = vpc.id();
             let sled_rules_request = sled_rules_request.clone();
             sled_requests.push(async move {
-                self.sled_client_by_id(sled_id)
+                self.sled_client_by_id(sled_lookup_opctx, sled_id)
                     .await?
                     .vpc_firewall_rules_put(&vpc_id, &sled_rules_request)
                     .await

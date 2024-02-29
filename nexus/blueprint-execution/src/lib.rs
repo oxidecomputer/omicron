@@ -66,12 +66,7 @@ impl Base for NexusContext<'_> {
     }
 }
 
-impl nexus_capabilities::SledAgent for NexusContext<'_> {
-    fn opctx_sled_client(&self) -> &OpContext {
-        &self.opctx
-    }
-}
-
+impl nexus_capabilities::SledAgent for NexusContext<'_> {}
 impl nexus_capabilities::FirewallRules for NexusContext<'_> {}
 
 /// Make one attempt to realize the given blueprint, meaning to take actions to
@@ -129,7 +124,7 @@ where
     // to optimize out calling it in unnecessary cases, although we expect
     // _most_ cases this is not needed.
     nexusctx
-        .plumb_service_firewall_rules(&nexusctx.opctx, &[])
+        .plumb_service_firewall_rules(&nexusctx.opctx, &[], &nexusctx.opctx)
         .await
         .context("failed to plumb service firewall rules to sleds")
         .map_err(|err| vec![err])?;

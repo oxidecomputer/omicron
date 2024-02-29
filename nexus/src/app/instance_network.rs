@@ -135,7 +135,9 @@ impl super::Nexus {
                 }
 
                 for nic in &instance_nics {
-                    let client = self.sled_client_by_id(sled.id()).await?;
+                    let client = self
+                        .sled_client_by_id(&self.opctx_alloc, sled.id())
+                        .await?;
                     let nic_id = nic.id;
                     let mapping = SetVirtualNetworkInterfaceHost {
                         virtual_ip: nic.ip,
@@ -224,7 +226,9 @@ impl super::Nexus {
 
             for sled in &sleds_page {
                 for nic in &instance_nics {
-                    let client = self.sled_client_by_id(sled.id()).await?;
+                    let client = self
+                        .sled_client_by_id(&self.opctx_alloc, sled.id())
+                        .await?;
                     let nic_id = nic.id;
                     let mapping = DeleteVirtualNetworkInterfaceHost {
                         virtual_ip: nic.ip,

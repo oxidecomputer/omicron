@@ -18,12 +18,5 @@ impl nexus_capabilities::Base for Nexus {
 
 // `Nexus` proper has all capabilities. Other contexts (background tasks, sagas)
 // may choose to implement objects with a subset.
-impl nexus_capabilities::SledAgent for Nexus {
-    fn opctx_sled_client(&self) -> &nexus_db_queries::context::OpContext {
-        // This is a bit of an historical artifact. We use the "instance
-        // allocation" op context to create sled-agent clients.
-        &self.opctx_alloc
-    }
-}
-
+impl nexus_capabilities::SledAgent for Nexus { }
 impl nexus_capabilities::FirewallRules for Nexus {}

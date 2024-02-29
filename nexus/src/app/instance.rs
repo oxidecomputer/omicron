@@ -538,7 +538,7 @@ impl super::Nexus {
             .lookup_for(authz::Action::Modify)
             .await?;
 
-        let sa = self.sled_client_by_id(sled_id).await?;
+        let sa = self.sled_client_by_id(&self.opctx_alloc, sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
                 &instance_id,
@@ -609,7 +609,7 @@ impl super::Nexus {
         assert!(prev_instance_runtime.migration_id.is_some());
         assert!(prev_instance_runtime.dst_propolis_id.is_some());
 
-        let sa = self.sled_client_by_id(sled_id).await?;
+        let sa = self.sled_client_by_id(&self.opctx_alloc, sled_id).await?;
         let instance_put_result = sa
             .instance_put_migration_ids(
                 &instance_id,
@@ -800,7 +800,7 @@ impl super::Nexus {
     ) -> Result<Option<nexus::SledInstanceState>, InstanceStateChangeError>
     {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
-        let sa = self.sled_client_by_id(*sled_id).await?;
+        let sa = self.sled_client_by_id(&self.opctx_alloc, *sled_id).await?;
         sa.instance_unregister(&authz_instance.id())
             .await
             .map(|res| res.into_inner().updated_runtime.map(Into::into))
@@ -972,7 +972,8 @@ impl super::Nexus {
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
             InstanceStateChangeRequestAction::SendToSled(sled_id) => {
-                let sa = self.sled_client_by_id(sled_id).await?;
+                let sa =
+                    self.sled_client_by_id(&self.opctx_alloc, sled_id).await?;
                 let instance_put_result = sa
                     .instance_put_state(
                         &instance_id,
@@ -1214,7 +1215,9 @@ impl super::Nexus {
             )),
         };
 
-        let sa = self.sled_client_by_id(initial_vmm.sled_id).await?;
+        let sa = self
+            .sled_client_by_id(&self.opctx_alloc, initial_vmm.sled_id)
+            .await?;
         let instance_register_result = sa
             .instance_register(
                 &db_instance.id(),

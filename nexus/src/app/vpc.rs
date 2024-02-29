@@ -173,8 +173,14 @@ impl super::Nexus {
             .db_datastore
             .vpc_update_firewall_rules(opctx, &authz_vpc, rules)
             .await?;
-        self.send_sled_agents_firewall_rules(opctx, &db_vpc, &rules, &[])
-            .await?;
+        self.send_sled_agents_firewall_rules(
+            opctx,
+            &db_vpc,
+            &rules,
+            &[],
+            &self.opctx_alloc,
+        )
+        .await?;
         Ok(rules)
     }
 

@@ -433,7 +433,13 @@ async fn svc_notify_sleds(
 
     osagactx
         .nexus()
-        .send_sled_agents_firewall_rules(&opctx, &db_vpc, &rules, &[])
+        .send_sled_agents_firewall_rules(
+            &opctx,
+            &db_vpc,
+            &rules,
+            &[],
+            &osagactx.nexus().opctx_alloc,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
