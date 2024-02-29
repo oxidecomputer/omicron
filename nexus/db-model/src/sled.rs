@@ -157,6 +157,9 @@ impl DatastoreCollectionConfig<super::Service> for Sled {
 
 /// Form of `Sled` used for updates from sled-agent. This is missing some
 /// columns that are present in `Sled` because sled-agent doesn't control them.
+///
+/// TODO: Add rcgen here: sled-agent always puts this information and so also
+/// owns rcgen
 #[derive(Debug, Clone)]
 pub struct SledUpdate {
     id: Uuid,

@@ -5246,7 +5246,6 @@ dependencies = [
  "guppy",
  "hex",
  "http 0.2.11",
- "httptest",
  "hyper 0.14.27",
  "hyper-staticfile",
  "illumos-utils",

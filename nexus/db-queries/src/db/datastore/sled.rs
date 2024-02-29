@@ -32,6 +32,8 @@ use uuid::Uuid;
 
 impl DataStore {
     /// Stores a new sled in the database.
+    ///
+    /// TODO: We need to make this conditional on rcgen
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
