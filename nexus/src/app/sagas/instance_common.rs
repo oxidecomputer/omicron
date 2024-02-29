@@ -24,6 +24,9 @@ use uuid::Uuid;
 
 use super::NexusActionContext;
 
+/// The port propolis-server listens on inside the propolis zone.
+const DEFAULT_PROPOLIS_PORT: u16 = 12400;
+
 /// Reserves resources for a new VMM whose instance has `ncpus` guest logical
 /// processors and `guest_memory` bytes of guest RAM. The selected sled is
 /// random within the set of sleds allowed by the supplied `constraints`.
@@ -98,6 +101,7 @@ pub async fn create_and_insert_vmm_record(
         instance_id,
         sled_id,
         IpAddr::V6(propolis_ip).into(),
+        DEFAULT_PROPOLIS_PORT,
         initial_state,
     );
 
