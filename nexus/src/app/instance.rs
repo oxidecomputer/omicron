@@ -1222,7 +1222,7 @@ impl super::Nexus {
                     propolis_id: *propolis_id,
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
-                        initial_vmm.propolis_port as u16,
+                        initial_vmm.propolis_port.into(),
                     )
                     .to_string(),
                 },
@@ -1761,7 +1761,7 @@ impl super::Nexus {
                 | InstanceState::Rebooting
                 | InstanceState::Migrating
                 | InstanceState::Repairing => {
-                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port as u16))
+                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
                 }
                 InstanceState::Creating
                 | InstanceState::Starting

@@ -14,6 +14,7 @@
 
 use super::{Generation, InstanceState};
 use crate::schema::vmm;
+use crate::SqlU16;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -44,7 +45,7 @@ pub struct Vmm {
     pub propolis_ip: ipnetwork::IpNetwork,
 
     /// The socket port on which this VMM is serving the Propolis server API.
-    pub propolis_port: i32,
+    pub propolis_port: SqlU16,
 
     /// Runtime state for the VMM.
     #[diesel(embed)]
@@ -82,7 +83,7 @@ impl Vmm {
             instance_id,
             sled_id,
             propolis_ip,
-            propolis_port: propolis_port as i32,
+            propolis_port: SqlU16(propolis_port),
             runtime: VmmRuntimeState {
                 state: InstanceState::new(api_state),
                 time_state_updated: now,

@@ -425,7 +425,7 @@ async fn sim_instance_migrate(
 
     let src_vmm_addr = SocketAddr::new(
         params.src_vmm.propolis_ip.ip(),
-        params.src_vmm.propolis_port as u16,
+        params.src_vmm.propolis_port.into(),
     );
 
     let src_propolis_id = db_instance.runtime().propolis_id.unwrap();
