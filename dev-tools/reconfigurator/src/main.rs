@@ -20,76 +20,15 @@ use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
 
-// Current status:
-// - starting to flesh out the basic CRUD stuff.  it kind of works.  it's hard
-//   to really see it because I haven't fleshed out "show".  save/load works.
-// - in a bit of a dead end in the demo flow because SystemDescription does
-//   not put any zones onto anything, and build-blueprint-from-inventory
-//   requires that there are zones.  options here include:
-//   - create a function to create an initial Blueprint from a *blank* inventory
-//     (or maybe a SystemBuilder? since RSS won't have an inventory) that does
-//     what RSS would do (maybe even have RSS use this?)
-//   - add support to SystemDescription for putting zones onto things
-//     (not sure this is worth doing)
-//   - only support loading *saved* stuff from existing systems (nope)
+// XXX-dap current status:
+// - works okay
+// - kind of stuck on *simulation* step.  Really want to be able to ask what a
+//   multi-step process would do on a production system.  How to answer this?
 // - flesh out:
-//   - "inventory show"
-//   - "inventory-diff-zones"
+//   - "inventory show" (not sure how easy this is, or how detailed we even
+//     want/need here)
+//   - "inventory-diff-zones" (needs new library support)
 //   - "blueprint-diff-zones-from-inventory"
-// - after I've done that, I should be able to walk through a pretty nice demo
-//   of the form:
-//   - configure some sleds
-//   - generate inventory
-//   - generate a "rack setup" blueprint over those sleds
-//     - show it
-//     - diff inventory -> blueprint
-//
-// At this point I'll want to be able to walk through multiple steps.  To do
-// this, I need a way to generate an inventory from the result of _executing_ a
-// blueprint.  I could:
-//
-// - call the real deployment code against simulated stuff
-//   (sled agents + database)
-//   This is appealing but in the limit may require quite a lot of Nexus to
-//   work.  But can you even create a fake datastore outside the
-//   nexus-db-queries crate?  If so, how much does this stuff assume stuff has
-//   been set up by a real Nexus?  I'm fairly sure that DNS does assume this.
-//   Plus, the sled info is stored in the database, so that means the sled
-//   addresses would need to all be "localhost" instead of the more
-//   realistic-looking addresses.
-// - implement dry-run deployment code
-//   - we have a basic idea how this might work
-//     - dns: can directly report what it would do
-//     - zones: can report what requests it would make
-//     - external IP/NIC stuff: ??
-//   - but then we also need a way to fake up an inventory from the result
-//   - seems like this would require the alternate approach of implementing
-//     methods on SystemBuilder to specify zones?  or would we use an
-//     InventoryBuilder directly?
-//
-// With this in place, though, the demo could proceed:
-//
-// - generate inventory after initial setup
-// - add sled
-// - generate "add sled" blueprint
-// - execute
-// - regenerate inventory
-// - repeat for multi-step process
-//
-// We could have a similar flow where we start not by generating a "rack setup"
-// blueprint but by starting with an inventory that has zones in it.  (We might
-// _get_ that through the above simulation.)
-//
-// With the omdb command, we can see what would happen when we make changes to a
-// production system by saving its state and loading it here.
-//
-// XXX-dap reedline-repl-rs nits
-// - cannot turn off the date banner
-// - cannot use structopt version of command definitions
-// - when it prints errors, it doesn't print messages from causes, which is
-//   terrible when it comes to anyhow
-// - commands in help are not listed in alphabetical order nor the order in
-//   which I added them
 
 #[derive(Debug)]
 struct ReconfiguratorSim {
@@ -135,45 +74,6 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-//        .with_command(
-//            Command::new("blueprint-from-inventory")
-//                .about("generate an initial blueprint from inventory")
-//                .arg(Arg::new("collection_id").required(true)),
-//            cmd_blueprint_from_inventory,
-//        )
-//        .with_command(
-//            Command::new("blueprint-plan")
-//                .about("run planner to generate a new blueprint")
-//                .arg(Arg::new("parent_blueprint_id").required(true))
-//                .arg(Arg::new("collection_id").required(true)),
-//            cmd_blueprint_plan,
-//        )
-//        .with_command(
-//            Command::new("blueprint-show")
-//                .about("show details about one blueprint")
-//                .arg(Arg::new("blueprint_id").required(true)),
-//            cmd_blueprint_show,
-//        )
-//        .with_command(
-//            Command::new("blueprint-diff")
-//                .about("diff two blueprints")
-//                .arg(Arg::new("blueprint1_id").required(true))
-//                .arg(Arg::new("blueprint2_id").required(true)),
-//            cmd_blueprint_diff,
-//        )
-//        .with_command(
-//            Command::new("save")
-//                .about("save all state to a file")
-//                .arg(Arg::new("filename").required(true)),
-//            cmd_save,
-//        )
-//        .with_command(
-//            Command::new("file-contents")
-//                .about("show the contents of a given file")
-//                .arg(Arg::new("filename").required(true)),
-//            cmd_file_contents,
-//        );
-
 /// reconfigurator-sim: simulate blueprint planning and execution
 #[derive(Debug, Parser)]
 struct TopLevelArgs {
@@ -197,15 +97,55 @@ enum Commands {
 
     /// list all blueprints
     BlueprintList,
+    /// generate a blueprint that represents the contents of an inventory
+    BlueprintFromInventory(InventoryArgs),
+    /// run planner to generate a new blueprint
+    BlueprintPlan(BlueprintPlanArgs),
+    /// show details about a blueprint
+    BlueprintShow(BlueprintArgs),
+    /// show differences between two blueprints
+    BlueprintDiff(BlueprintDiffArgs),
 
+    /// save state to a file
+    Save(SaveArgs),
     /// load state from a file
     Load(LoadArgs),
+    /// show information about what's in a saved file
+    FileContents(FileContentsArgs),
 }
 
 #[derive(Debug, Args)]
 struct SledArgs {
     /// id of the sled
     sled_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct InventoryArgs {
+    /// id of the inventory collection to use in planning
+    collection_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintPlanArgs {
+    /// id of the blueprint on which this one will be based
+    parent_blueprint_id: Uuid,
+    /// id of the inventory collection to use in planning
+    collection_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintArgs {
+    /// id of the blueprint
+    blueprint_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintDiffArgs {
+    /// id of the first blueprint
+    blueprint1_id: Uuid,
+    /// id of the second blueprint
+    blueprint2_id: Uuid,
 }
 
 #[derive(Debug, Args)]
@@ -216,6 +156,18 @@ struct LoadArgs {
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
     collection_id: Option<Uuid>,
+}
+
+#[derive(Debug, Args)]
+struct FileContentsArgs {
+    /// input file
+    filename: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
+struct SaveArgs {
+    /// output file
+    filename: Utf8PathBuf,
 }
 
 enum LoopResult {
@@ -255,7 +207,15 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
+        Commands::BlueprintFromInventory(args) => {
+            cmd_blueprint_from_inventory(sim, args)
+        }
+        Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
+        Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
+        Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
         Commands::Load(args) => cmd_load(sim, args),
+        Commands::FileContents(args) => cmd_file_contents(args),
+        Commands::Save(args) => cmd_save(sim, args),
     };
 
     match cmd_result {
@@ -370,179 +330,150 @@ fn cmd_blueprint_list(
     Ok(Some(table))
 }
 
-// fn cmd_blueprint_from_inventory(
-//     args: ArgMatches,
-//     sim: &mut ReconfiguratorSim,
-// ) -> anyhow::Result<Option<String>> {
-//     let collection_id: Uuid = args
-//         .get_one::<String>("collection_id")
-//         .ok_or_else(|| anyhow!("missing collection_id"))?
-//         .parse()
-//         .context("collection_id")?;
-//     let collection = sim
-//         .collections
-//         .iter()
-//         .find(|c| c.id == collection_id)
-//         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
-//     let dns_version = Generation::new();
-//     let policy = sim.system.to_policy().context("generating policy")?;
-//     let creator = "reconfigurator-sim";
-//     let blueprint = BlueprintBuilder::build_initial_from_collection(
-//         collection,
-//         dns_version,
-//         &policy,
-//         creator,
-//     )
-//     .context("building collection")?;
-//     let rv = format!(
-//         "generated blueprint {} from inventory collection {}",
-//         blueprint.id, collection_id
-//     );
-//     sim.blueprints.push(blueprint);
-//     Ok(Some(rv))
-// }
-//
-// fn cmd_blueprint_plan(
-//     args: ArgMatches,
-//     sim: &mut ReconfiguratorSim,
-// ) -> anyhow::Result<Option<String>> {
-//     let parent_blueprint_id: Uuid = args
-//         .get_one::<String>("parent_blueprint_id")
-//         .ok_or_else(|| anyhow!("missing parent_blueprint_id"))?
-//         .parse()
-//         .context("parent_blueprint_id")?;
-//     let collection_id: Uuid = args
-//         .get_one::<String>("collection_id")
-//         .ok_or_else(|| anyhow!("missing collection_id"))?
-//         .parse()
-//         .context("collection_id")?;
-//     let parent_blueprint = sim
-//         .blueprints
-//         .iter()
-//         .find(|b| b.id == parent_blueprint_id)
-//         .ok_or_else(|| anyhow!("no such blueprint: {}", parent_blueprint_id))?;
-//     let collection = sim
-//         .collections
-//         .iter()
-//         .find(|c| c.id == collection_id)
-//         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
-//     let dns_version = Generation::new();
-//     let policy = sim.system.to_policy().context("generating policy")?;
-//     let creator = "reconfigurator-sim";
-//     let planner = Planner::new_based_on(
-//         sim.log.clone(),
-//         parent_blueprint,
-//         dns_version,
-//         &policy,
-//         creator,
-//         collection,
-//     )
-//     .context("creating planner")?;
-//     let blueprint = planner.plan().context("generating blueprint")?;
-//     let rv = format!(
-//         "generated blueprint {} based on parent blueprint {}",
-//         blueprint.id, parent_blueprint_id,
-//     );
-//     sim.blueprints.push(blueprint);
-//     Ok(Some(rv))
-// }
-//
-// fn cmd_blueprint_show(
-//     args: ArgMatches,
-//     sim: &mut ReconfiguratorSim,
-// ) -> anyhow::Result<Option<String>> {
-//     let blueprint_id: Uuid = args
-//         .get_one::<String>("blueprint_id")
-//         .ok_or_else(|| anyhow!("missing blueprint_id"))?
-//         .parse()
-//         .context("blueprint_id")?;
-//     let blueprint = sim
-//         .blueprints
-//         .iter()
-//         .find(|b| b.id == blueprint_id)
-//         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
-//     Ok(Some(format!("{:?}", blueprint)))
-// }
-//
-// fn cmd_blueprint_diff(
-//     args: ArgMatches,
-//     sim: &mut ReconfiguratorSim,
-// ) -> anyhow::Result<Option<String>> {
-//     let blueprint1_id: Uuid = args
-//         .get_one::<String>("blueprint1_id")
-//         .ok_or_else(|| anyhow!("missing blueprint1_id"))?
-//         .parse()
-//         .context("blueprint1_id")?;
-//     let blueprint2_id: Uuid = args
-//         .get_one::<String>("blueprint2_id")
-//         .ok_or_else(|| anyhow!("missing blueprint2_id"))?
-//         .parse()
-//         .context("blueprint2_id")?;
-//     let blueprint1 = sim
-//         .blueprints
-//         .iter()
-//         .find(|b| b.id == blueprint1_id)
-//         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint1_id))?;
-//     let blueprint2 = sim
-//         .blueprints
-//         .iter()
-//         .find(|b| b.id == blueprint2_id)
-//         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
-//
-//     let diff = blueprint1.diff_sleds(&blueprint2);
-//     Ok(Some(diff.to_string()))
-// }
-//
-// fn cmd_save(
-//     args: ArgMatches,
-//     sim: &mut ReconfiguratorSim,
-// ) -> anyhow::Result<Option<String>> {
-//     let policy = sim.system.to_policy().context("creating policy")?;
-//     let saved = UnstableReconfiguratorState {
-//         policy,
-//         collections: sim.collections.clone(),
-//         blueprints: sim.blueprints.clone(),
-//     };
-//
-//     let output_path_str: &String = args
-//         .get_one::<String>("filename")
-//         .ok_or_else(|| anyhow!("missing filename"))?;
-//     let output_path = camino::Utf8Path::new(output_path_str);
-//
-//     // Check up front if the output path exists so that we don't clobber it.
-//     // This is not perfect because there's a time-of-check-to-time-of-use race,
-//     // but it seems better than nothing.
-//     match std::fs::metadata(&output_path) {
-//         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-//         Err(e) => {
-//             bail!("stat {:?}: {:#}", output_path, e);
-//         }
-//         Ok(_) => {
-//             bail!("error: file {:?} already exists", output_path);
-//         }
-//     };
-//
-//     let output_path_basename = output_path
-//         .file_name()
-//         .ok_or_else(|| anyhow!("unsupported path (no filename part)"))?;
-//     let tmppath =
-//         output_path.with_file_name(format!("{}.tmp", output_path_basename));
-//     let tmpfile = std::fs::OpenOptions::new()
-//         .create_new(true)
-//         .write(true)
-//         .open(&tmppath)
-//         .with_context(|| format!("open {:?}", tmppath))?;
-//     serde_json::to_writer_pretty(&tmpfile, &saved)
-//         .with_context(|| format!("writing to {:?}", tmppath))
-//         .unwrap_or_else(|e| panic!("{:#}", e));
-//     std::fs::rename(&tmppath, &output_path)
-//         .with_context(|| format!("mv {:?} {:?}", &tmppath, &output_path))?;
-//     Ok(Some(format!(
-//         "saved policy, collections, and blueprints to {:?}",
-//         output_path
-//     )))
-// }
-//
+fn cmd_blueprint_from_inventory(
+    sim: &mut ReconfiguratorSim,
+    args: InventoryArgs,
+) -> anyhow::Result<Option<String>> {
+    let collection_id = args.collection_id;
+    let collection = sim
+        .collections
+        .iter()
+        .find(|c| c.id == collection_id)
+        .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
+    let dns_version = Generation::new();
+    let policy = sim.system.to_policy().context("generating policy")?;
+    let creator = "reconfigurator-sim";
+    let blueprint = BlueprintBuilder::build_initial_from_collection(
+        collection,
+        dns_version,
+        &policy,
+        creator,
+    )
+    .context("building collection")?;
+    let rv = format!(
+        "generated blueprint {} from inventory collection {}",
+        blueprint.id, collection_id
+    );
+    sim.blueprints.push(blueprint);
+    Ok(Some(rv))
+}
+
+fn cmd_blueprint_plan(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintPlanArgs,
+) -> anyhow::Result<Option<String>> {
+    let parent_blueprint_id = args.parent_blueprint_id;
+    let collection_id = args.collection_id;
+    let parent_blueprint = sim
+        .blueprints
+        .iter()
+        .find(|b| b.id == parent_blueprint_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", parent_blueprint_id))?;
+    let collection = sim
+        .collections
+        .iter()
+        .find(|c| c.id == collection_id)
+        .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
+    let dns_version = Generation::new();
+    let policy = sim.system.to_policy().context("generating policy")?;
+    let creator = "reconfigurator-sim";
+    let planner = Planner::new_based_on(
+        sim.log.clone(),
+        parent_blueprint,
+        dns_version,
+        &policy,
+        creator,
+        collection,
+    )
+    .context("creating planner")?;
+    let blueprint = planner.plan().context("generating blueprint")?;
+    let rv = format!(
+        "generated blueprint {} based on parent blueprint {}",
+        blueprint.id, parent_blueprint_id,
+    );
+    sim.blueprints.push(blueprint);
+    Ok(Some(rv))
+}
+
+fn cmd_blueprint_show(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintArgs,
+) -> anyhow::Result<Option<String>> {
+    let blueprint =
+        sim.blueprints.iter().find(|b| b.id == args.blueprint_id).ok_or_else(
+            || anyhow!("no such blueprint: {}", args.blueprint_id),
+        )?;
+    Ok(Some(format!("{:?}", blueprint)))
+}
+
+fn cmd_blueprint_diff(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintDiffArgs,
+) -> anyhow::Result<Option<String>> {
+    let blueprint1_id = args.blueprint1_id;
+    let blueprint2_id = args.blueprint2_id;
+    let blueprint1 = sim
+        .blueprints
+        .iter()
+        .find(|b| b.id == blueprint1_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint1_id))?;
+    let blueprint2 = sim
+        .blueprints
+        .iter()
+        .find(|b| b.id == blueprint2_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
+
+    let diff = blueprint1.diff_sleds(&blueprint2);
+    Ok(Some(diff.to_string()))
+}
+
+fn cmd_save(
+    sim: &mut ReconfiguratorSim,
+    args: SaveArgs,
+) -> anyhow::Result<Option<String>> {
+    let policy = sim.system.to_policy().context("creating policy")?;
+    let saved = UnstableReconfiguratorState {
+        policy,
+        collections: sim.collections.clone(),
+        blueprints: sim.blueprints.clone(),
+    };
+
+    let output_path = args.filename;
+
+    // Check up front if the output path exists so that we don't clobber it.
+    // This is not perfect because there's a time-of-check-to-time-of-use race,
+    // but it seems better than nothing.
+    match std::fs::metadata(&output_path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            bail!("stat {:?}: {:#}", output_path, e);
+        }
+        Ok(_) => {
+            bail!("error: file {:?} already exists", output_path);
+        }
+    };
+
+    let output_path_basename = output_path
+        .file_name()
+        .ok_or_else(|| anyhow!("unsupported path (no filename part)"))?;
+    let tmppath =
+        output_path.with_file_name(format!("{}.tmp", output_path_basename));
+    let tmpfile = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&tmppath)
+        .with_context(|| format!("open {:?}", tmppath))?;
+    serde_json::to_writer_pretty(&tmpfile, &saved)
+        .with_context(|| format!("writing to {:?}", tmppath))
+        .unwrap_or_else(|e| panic!("{:#}", e));
+    std::fs::rename(&tmppath, &output_path)
+        .with_context(|| format!("mv {:?} {:?}", &tmppath, &output_path))?;
+    Ok(Some(format!(
+        "saved policy, collections, and blueprints to {:?}",
+        output_path
+    )))
+}
+
 fn read_file(
     input_path: &camino::Utf8Path,
 ) -> anyhow::Result<UnstableReconfiguratorState> {
@@ -698,35 +629,39 @@ fn cmd_load(
     Ok(Some(s))
 }
 
-// fn cmd_file_contents(
-//     args: ArgMatches,
-//     _sim: &mut ReconfiguratorSim,
-// ) -> anyhow::Result<Option<String>> {
-//     let input_path_str: &String = args
-//         .get_one::<String>("filename")
-//         .ok_or_else(|| anyhow!("missing filename"))?;
-//     let input_path = camino::Utf8Path::new(input_path_str);
-//     let loaded = read_file(input_path)?;
-//
-//     let mut s = String::new();
-//
-//     for (sled_id, sled_resources) in loaded.policy.sleds {
-//         swriteln!(
-//             s,
-//             "sled: {} (subnet: {}, zpools: {})",
-//             sled_id,
-//             sled_resources.subnet.net(),
-//             sled_resources.zpools.len()
-//         );
-//     }
-//
-//     for collection in loaded.collections {
-//         swriteln!(s, "collection: {}", collection.id);
-//     }
-//
-//     for blueprint in loaded.blueprints {
-//         swriteln!(s, "blueprint:  {}", blueprint.id);
-//     }
-//
-//     Ok(Some(s))
-// }
+fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
+    let loaded = read_file(&args.filename)?;
+
+    let mut s = String::new();
+
+    for (sled_id, sled_resources) in loaded.policy.sleds {
+        swriteln!(
+            s,
+            "sled: {} (subnet: {}, zpools: {})",
+            sled_id,
+            sled_resources.subnet.net(),
+            sled_resources.zpools.len()
+        );
+    }
+
+    for collection in loaded.collections {
+        swriteln!(
+            s,
+            "collection: {} (errors: {}, completed at: {})",
+            collection.id,
+            collection.errors.len(),
+            collection.time_done.to_rfc3339()
+        );
+    }
+
+    for blueprint in loaded.blueprints {
+        swriteln!(
+            s,
+            "blueprint:  {} (created at: {})",
+            blueprint.id,
+            blueprint.time_created
+        );
+    }
+
+    Ok(Some(s))
+}
