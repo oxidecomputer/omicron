@@ -722,7 +722,7 @@ async fn find_clickhouse_port_in_log(
 pub async fn wait_for_ready(
     log_path: Utf8PathBuf,
     timeout: Duration,
-    needle: &'static str,
+    needle: &str,
 ) -> Result<(), anyhow::Error> {
     let p = poll::wait_for_condition(
         || async {
@@ -758,7 +758,7 @@ pub async fn wait_for_ready(
 async fn discover_ready(
     path: &Utf8Path,
     timeout: Duration,
-    needle: &'static str,
+    needle: &str,
 ) -> Result<(), ClickHouseError> {
     let timeout = Instant::now() + timeout;
     tokio::time::timeout_at(timeout, clickhouse_ready_from_log(path, needle))
@@ -772,7 +772,7 @@ async fn discover_ready(
 // should be run under a timeout, or some other mechanism for cancelling it.
 async fn clickhouse_ready_from_log(
     path: &Utf8Path,
-    needle: &'static str,
+    needle: &str,
 ) -> Result<(), ClickHouseError> {
     let mut reader = BufReader::new(File::open(path).await?);
     let mut lines = reader.lines();
