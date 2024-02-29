@@ -89,6 +89,7 @@ assert_matches.workspace = true
 expectorate.workspace = true
 guppy.workspace = true
 http.workspace = true
+httptest.workspace = true
 hyper.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true

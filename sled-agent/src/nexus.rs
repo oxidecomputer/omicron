@@ -14,7 +14,7 @@ use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use uuid::Uuid;
 
@@ -171,11 +171,20 @@ impl ConvertInto<nexus_client::types::DatasetKind>
 // Somewhat arbitrary bound size, large enough that we should never hit it.
 const QUEUE_SIZE: usize = 256;
 
-pub enum NexusNotifierMsg {
+enum NexusNotifierMsg {
     // Inform nexus about a change to this sled-agent. This is just a
     // notification to perform a send. The request is constructed inside
     // `NexusNotifierTask`.
     NotifyNexusAboutSelf,
+
+    // Return status of the `NexusNotifierTask`
+    Status(oneshot::Sender<NexusNotifierTaskStatus>),
+}
+
+struct NexusNotifierTaskStatus {
+    nexus_known_info: Option<NexusKnownInfo>,
+    has_pending_notification: bool,
+    has_outstanding_request: bool,
 }
 
 #[derive(Debug)]
@@ -203,6 +212,7 @@ enum NexusSuccess {
 }
 
 /// What sled-agent has confirmed that Nexus knows about this sled-agent
+#[derive(Debug, Clone)]
 enum NexusKnownInfo {
     // CRDB doesn't contain a record for this sled-agent
     NotFound,
@@ -217,6 +227,9 @@ impl NexusKnownInfo {
         }
     }
 }
+
+/// Return the latest sled-agent info. Boxed for use in testing.
+type GetSledAgentInfo = Box<dyn Fn(Generation) -> SledAgentInfo + Send>;
 
 // A mechanism owned by the `NexusNotifierTask` that allows it to access
 // enough information to send a `SledAgentInfo` to Nexus.
@@ -243,7 +256,11 @@ pub struct NexusNotifierInput {
 ///     since we are not sure if the last update succeeded. This will
 ///     trigger a get request to get the latest state.
 pub struct NexusNotifierTask {
-    input: NexusNotifierInput,
+    sled_id: Uuid,
+    sled_address: SocketAddrV6,
+    nexus_client: NexusClient,
+    get_sled_agent_info: GetSledAgentInfo,
+
     log: Logger,
     rx: mpsc::Receiver<NexusNotifierMsg>,
 
@@ -256,8 +273,10 @@ pub struct NexusNotifierTask {
     pending_notification: bool,
 
     // We only have one outstanding nexus request at a time.
-    // We spawn a task to manage this request so we don't block our main notifier task.
-    // We wait for a response on a channel.
+    //
+    // We spawn a task to manage this request so we don't block our main
+    // notifier task. We wait for a notification on `outstanding_req_ready`
+    // and then get the result from the `JoinHandle`.
     outstanding_request: Option<
         tokio::task::JoinHandle<
             Result<
@@ -275,10 +294,41 @@ impl NexusNotifierTask {
         input: NexusNotifierInput,
         log: &Logger,
     ) -> (NexusNotifierTask, NexusNotifierHandle) {
+        let NexusNotifierInput {
+            sled_id,
+            sled_address,
+            nexus_client,
+            hardware,
+            vmm_reservoir_manager,
+        } = input;
+
+        // Box a function that can return the latest `SledAgentInfo`
+        let get_sled_agent_info = Box::new(move |generation| {
+            let role = if hardware.is_scrimlet() {
+                nexus_client::types::SledRole::Scrimlet
+            } else {
+                nexus_client::types::SledRole::Gimlet
+            };
+            SledAgentInfo {
+                sa_address: sled_address.to_string(),
+                role,
+                baseboard: hardware.baseboard().convert(),
+                usable_hardware_threads: hardware.online_processor_count(),
+                usable_physical_ram: hardware
+                    .usable_physical_ram_bytes()
+                    .into(),
+                reservoir_size: vmm_reservoir_manager.reservoir_size().into(),
+                generation,
+            }
+        });
+
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         (
             NexusNotifierTask {
-                input,
+                sled_id: sled_id,
+                sled_address: sled_address,
+                nexus_client: nexus_client,
+                get_sled_agent_info,
                 log: log.new(o!("component" => "NexusNotifierTask")),
                 rx,
                 nexus_known_info: None,
@@ -312,6 +362,14 @@ impl NexusNotifierTask {
                             // We'll contact nexus on the next timeout
                             self.pending_notification = true;
                         }
+                        NexusNotifierMsg::Status(reply_tx) => {
+                            let _ = reply_tx.send(NexusNotifierTaskStatus {
+                                nexus_known_info: self.nexus_known_info.clone(),
+                                has_outstanding_request: self.outstanding_request.is_some(),
+                                has_pending_notification: self.pending_notification
+                            });
+                        }
+
                     }
                 }
                 _ =  self.outstanding_req_ready.notified() => {
@@ -338,36 +396,12 @@ impl NexusNotifierTask {
             return;
         }
 
-        let client = self.input.nexus_client.clone();
-        let sled_id = self.input.sled_id;
+        let client = self.nexus_client.clone();
+        let sled_id = self.sled_id;
 
         // Have we learned about any generations stored in CRDB yet?
         if let Some(known_info) = &self.nexus_known_info {
-            let role = if self.input.hardware.is_scrimlet() {
-                nexus_client::types::SledRole::Scrimlet
-            } else {
-                nexus_client::types::SledRole::Gimlet
-            };
-            let mut info = SledAgentInfo {
-                sa_address: self.input.sled_address.to_string(),
-                role,
-                baseboard: self.input.hardware.baseboard().convert(),
-                usable_hardware_threads: self
-                    .input
-                    .hardware
-                    .online_processor_count(),
-                usable_physical_ram: self
-                    .input
-                    .hardware
-                    .usable_physical_ram_bytes()
-                    .into(),
-                reservoir_size: self
-                    .input
-                    .vmm_reservoir_manager
-                    .reservoir_size()
-                    .into(),
-                generation: known_info.generation(),
-            };
+            let mut info = (self.get_sled_agent_info)(known_info.generation());
 
             // Does CRDB actually contain an existing record for this sled?
             match known_info {
@@ -452,5 +486,57 @@ impl NexusNotifierTask {
                 warn!(self.log, "Received Error from Nexus: {:?}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::params::SledRole;
+    use crate::vmm_reservoir::VmmReservoirManager;
+
+    use super::*;
+    use httptest::matchers::{all_of, json_decoded, request};
+    use httptest::responders::status_code;
+    use httptest::Expectation;
+    use omicron_common::api::external::{ByteCount, Generation};
+    use omicron_test_utils::dev::test_setup_log;
+    use sled_hardware::Baseboard;
+
+    /// Pretend to be CRDB storing info about a sled-agent
+    #[derive(Default)]
+    struct FakeCrdb {
+        info: Option<SledAgentInfo>,
+    }
+
+    // Pretend we are retrieving the latest `SledAgentInfo` from hardware and
+    // the VMM reservoir.
+    struct LatestSledAgentInfo {
+        data: Arc<std::sync::Mutex<SledAgentInfo>>,
+    }
+
+    #[tokio::test]
+    async fn nexus_self_notification_test() {
+        let logctx = test_setup_log("nexus_notification_test");
+        let log = &logctx.log;
+        let sa_address = "::1".to_string();
+        let latest_sled_agent_info =
+            Arc::new(std::sync::Mutex::new(SledAgentInfo {
+                sa_address: sa_address.clone(),
+                role: nexus_client::types::SledRole::Gimlet,
+                baseboard: Baseboard::new_pc("test".into(), "test".into())
+                    .convert(),
+                usable_hardware_threads: 16,
+                usable_physical_ram: ByteCount::from(1024 * 1024 * 1024u32)
+                    .into(),
+                reservoir_size: ByteCount::from(0u32).into(),
+                generation: Generation::new(),
+            }));
+        let latest_sled_agent_info2 = latest_sled_agent_info.clone();
+        let get_sled_agent_info: GetSledAgentInfo =
+            Box::new(move |generation| {
+                let mut info = latest_sled_agent_info2.lock().unwrap().clone();
+                info.generation = generation;
+                info
+            });
     }
 }
