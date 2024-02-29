@@ -9,6 +9,7 @@ use camino::Utf8PathBuf;
 use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::{Args, Parser, Subcommand};
+use indexmap::IndexMap;
 use nexus_deployment::blueprint_builder::BlueprintBuilder;
 use nexus_deployment::planner::Planner;
 use nexus_deployment::system::{
@@ -33,16 +34,10 @@ struct ReconfiguratorSim {
     system: SystemDescription,
 
     /// inventory collections created by the user
-    ///
-    /// This is stored as a `Vec` to preserve the order in which they were
-    /// created.
-    collections: Vec<Collection>,
+    collections: IndexMap<Uuid, Collection>,
 
     /// blueprints created by the user
-    ///
-    /// This is stored as a `Vec` to preserve the order in which they were
-    /// created.
-    blueprints: Vec<Blueprint>,
+    blueprints: IndexMap<Uuid, Blueprint>,
 
     log: slog::Logger,
 }
@@ -57,8 +52,8 @@ fn main() -> anyhow::Result<()> {
     .context("creating logger")?;
     let mut sim = ReconfiguratorSim {
         system: SystemDescription::new(),
-        collections: vec![],
-        blueprints: vec![],
+        collections: IndexMap::new(),
+        blueprints: IndexMap::new(),
         log,
     };
 
@@ -333,12 +328,15 @@ fn cmd_inventory_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct InventoryRow {
         id: Uuid,
+        nerrors: usize,
+        time_done: String,
     }
 
-    let rows = sim
-        .collections
-        .iter()
-        .map(|collection| InventoryRow { id: collection.id });
+    let rows = sim.collections.values().map(|collection| InventoryRow {
+        id: collection.id,
+        nerrors: collection.errors.len(),
+        time_done: collection.time_done.to_rfc3339(),
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -355,7 +353,7 @@ fn cmd_inventory_generate(
         "generated inventory collection {} from configured sleds",
         inventory.id
     );
-    sim.collections.push(inventory);
+    sim.collections.insert(inventory.id, inventory);
     Ok(Some(rv))
 }
 
@@ -370,7 +368,7 @@ fn cmd_blueprint_list(
 
     let rows = sim
         .blueprints
-        .iter()
+        .values()
         .map(|blueprint| BlueprintRow { id: blueprint.id });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -386,8 +384,7 @@ fn cmd_blueprint_from_inventory(
     let collection_id = args.collection_id;
     let collection = sim
         .collections
-        .iter()
-        .find(|c| c.id == collection_id)
+        .get(&collection_id)
         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
     let dns_version = Generation::new();
     let policy = sim.system.to_policy().context("generating policy")?;
@@ -403,7 +400,7 @@ fn cmd_blueprint_from_inventory(
         "generated blueprint {} from inventory collection {}",
         blueprint.id, collection_id
     );
-    sim.blueprints.push(blueprint);
+    sim.blueprints.insert(blueprint.id, blueprint);
     Ok(Some(rv))
 }
 
@@ -415,13 +412,11 @@ fn cmd_blueprint_plan(
     let collection_id = args.collection_id;
     let parent_blueprint = sim
         .blueprints
-        .iter()
-        .find(|b| b.id == parent_blueprint_id)
+        .get(&parent_blueprint_id)
         .ok_or_else(|| anyhow!("no such blueprint: {}", parent_blueprint_id))?;
     let collection = sim
         .collections
-        .iter()
-        .find(|c| c.id == collection_id)
+        .get(&collection_id)
         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
     let dns_version = Generation::new();
     let policy = sim.system.to_policy().context("generating policy")?;
@@ -440,7 +435,7 @@ fn cmd_blueprint_plan(
         "generated blueprint {} based on parent blueprint {}",
         blueprint.id, parent_blueprint_id,
     );
-    sim.blueprints.push(blueprint);
+    sim.blueprints.insert(blueprint.id, blueprint);
     Ok(Some(rv))
 }
 
@@ -448,10 +443,10 @@ fn cmd_blueprint_show(
     sim: &mut ReconfiguratorSim,
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
-    let blueprint =
-        sim.blueprints.iter().find(|b| b.id == args.blueprint_id).ok_or_else(
-            || anyhow!("no such blueprint: {}", args.blueprint_id),
-        )?;
+    let blueprint = sim
+        .blueprints
+        .get(&args.blueprint_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", args.blueprint_id))?;
     Ok(Some(format!("{:?}", blueprint)))
 }
 
@@ -463,13 +458,11 @@ fn cmd_blueprint_diff(
     let blueprint2_id = args.blueprint2_id;
     let blueprint1 = sim
         .blueprints
-        .iter()
-        .find(|b| b.id == blueprint1_id)
+        .get(&blueprint1_id)
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint1_id))?;
     let blueprint2 = sim
         .blueprints
-        .iter()
-        .find(|b| b.id == blueprint2_id)
+        .get(&blueprint2_id)
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
 
     let diff = blueprint1.diff_sleds(&blueprint2);
@@ -482,14 +475,12 @@ fn cmd_blueprint_diff_inventory(
 ) -> anyhow::Result<Option<String>> {
     let collection_id = args.collection_id;
     let blueprint_id = args.blueprint_id;
-    let collection =
-        sim.collections.iter().find(|c| c.id == collection_id).ok_or_else(
-            || anyhow!("no such inventory collection: {}", collection_id),
-        )?;
+    let collection = sim.collections.get(&collection_id).ok_or_else(|| {
+        anyhow!("no such inventory collection: {}", collection_id)
+    })?;
     let blueprint = sim
         .blueprints
-        .iter()
-        .find(|b| b.id == blueprint_id)
+        .get(&blueprint_id)
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
 
     let zones = collection.all_omicron_zones().map(|z| z.id).collect();
@@ -504,8 +495,8 @@ fn cmd_save(
     let policy = sim.system.to_policy().context("creating policy")?;
     let saved = UnstableReconfiguratorState {
         policy,
-        collections: sim.collections.clone(),
-        blueprints: sim.blueprints.clone(),
+        collections: sim.collections.values().cloned().collect(),
+        blueprints: sim.blueprints.values().cloned().collect(),
     };
 
     let output_path = args.filename;
@@ -665,9 +656,8 @@ fn cmd_load(
         };
     }
 
-    // XXX-dap O(n^2)
     for collection in loaded.collections {
-        if sim.collections.iter().any(|c| c.id == collection.id) {
+        if sim.collections.contains_key(&collection.id) {
             swriteln!(
                 s,
                 "collection {}: skipped (one with the \
@@ -676,13 +666,12 @@ fn cmd_load(
             );
         } else {
             swriteln!(s, "collection {} loaded", collection.id);
-            sim.collections.push(collection);
+            sim.collections.insert(collection.id, collection);
         }
     }
 
-    // XXX-dap O(n^2)
     for blueprint in loaded.blueprints {
-        if sim.blueprints.iter().any(|b| b.id == blueprint.id) {
+        if sim.blueprints.contains_key(&blueprint.id) {
             swriteln!(
                 s,
                 "blueprint {}: skipped (one with the \
@@ -691,7 +680,7 @@ fn cmd_load(
             );
         } else {
             swriteln!(s, "blueprint {} loaded", blueprint.id);
-            sim.blueprints.push(blueprint);
+            sim.blueprints.insert(blueprint.id, blueprint);
         }
     }
 

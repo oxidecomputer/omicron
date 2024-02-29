@@ -6981,6 +6981,7 @@ dependencies = [
  "camino",
  "clap 4.5.0",
  "dropshot",
+ "indexmap 2.2.3",
  "nexus-deployment",
  "nexus-types",
  "omicron-common",
