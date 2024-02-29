@@ -1961,7 +1961,8 @@ impl ServiceManager {
                             OmicronZoneType::InternalNtp {
                                 dns_servers,
                                 ntp_servers,
-                                domain, ..
+                                domain,
+                                ..
                             },
                         underlay_address,
                         ..
@@ -2006,18 +2007,21 @@ impl ServiceManager {
                     .add_property("domain", "astring", domain)
                     .add_property("boundary", "boolean", &is_boundary);
 
-                
                 for s in ntp_servers {
-                    ntp_config = ntp_config
-                        .clone()
-                        .add_property("server", "astring", &s.to_string());
-                };
+                    ntp_config = ntp_config.clone().add_property(
+                        "server",
+                        "astring",
+                        &s.to_string(),
+                    );
+                }
 
                 for s in dns_servers.clone() {
-                    ntp_config = ntp_config
-                        .clone()
-                        .add_property("dns_server", "astring", &s.to_string());
-                };
+                    ntp_config = ntp_config.clone().add_property(
+                        "dns_server",
+                        "astring",
+                        &s.to_string(),
+                    );
+                }
 
                 let dns_client_service;
                 if dns_servers.is_empty() {
