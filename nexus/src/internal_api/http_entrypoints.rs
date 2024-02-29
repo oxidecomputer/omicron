@@ -105,7 +105,7 @@ struct SledAgentPathParam {
     sled_id: Uuid,
 }
 
-/// Report that the sled agent for the specified sled has come online.
+/// Return information about the given sled agent
 #[endpoint {
      method = GET,
      path = "/sled-agents/{sled_id}",

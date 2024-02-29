@@ -799,7 +799,7 @@
     },
     "/sled-agents/{sled_id}": {
       "get": {
-        "summary": "Report that the sled agent for the specified sled has come online.",
+        "summary": "Return information about the given sled agent",
         "operationId": "sled_agent_get",
         "parameters": [
           {
