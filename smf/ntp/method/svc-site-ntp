@@ -107,6 +107,10 @@ function update_logadm {
 }
 
 function configure_dns_client {
+	# TODO: It seems svc:/network/dns/client:default is enabled before this file 
+	# gets a chance to be populated. The service only starts if I git it an empty
+	# resolv.conf file in advance.
+	# TODO: Remove the empty resolve.conf file
 	if [[ $boundary == true ]]; then
 		echo "* Generating resolv.conf file"
 		if [[ $domain != "unknown" ]]; then
