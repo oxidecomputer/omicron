@@ -1975,10 +1975,8 @@ mod test {
         let sled_id = instance_state
             .sled_id()
             .expect("starting instance should have a sled");
-        let sa = nexus
-            .sled_client_by_id(&nexus.opctx_alloc, sled_id)
-            .await
-            .unwrap();
+        let sa =
+            nexus.sled_client_by_id(&nexus.opctx_alloc, sled_id).await.unwrap();
 
         sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus

@@ -18,5 +18,5 @@ impl nexus_capabilities::Base for Nexus {
 
 // `Nexus` proper has all capabilities. Other contexts (background tasks, sagas)
 // may choose to implement objects with a subset.
-impl nexus_capabilities::SledAgent for Nexus { }
+impl nexus_capabilities::SledAgent for Nexus {}
 impl nexus_capabilities::FirewallRules for Nexus {}
