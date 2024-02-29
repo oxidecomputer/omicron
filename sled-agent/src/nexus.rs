@@ -870,6 +870,92 @@ mod test {
             Some(NexusKnownInfo::Found(expected)),
         );
 
+        // Inject a get error and trigger a put to nexus after updating the VMM
+        // reservoir size. We shouldn't end up calling Get at all since we know our state.
+        get_error.store(true, Ordering::SeqCst);
+        {
+            let mut info = latest_sled_agent_info.lock().unwrap();
+            info.reservoir_size = (3 * 1024 * 1024u64).into();
+            info.generation = info.generation.next();
+        }
+        handle.notify_nexus_about_self(log).await;
+        // Wait for a steady state, when the the latest info has been put to nexus.
+        // Ensure the second get request has been sent.
+        let status = wait_for::<_, (), _, _>(
+            || async {
+                let status = handle.get_status().await.unwrap();
+                if !status.has_pending_notification
+                    && status.total_put_requests_started == 5
+                {
+                    Ok(status)
+                } else {
+                    Err(CondCheckError::NotYet)
+                }
+            },
+            &Duration::from_millis(2),
+            &Duration::from_secs(15),
+        )
+        .await
+        .expect("Failed to get status from Nexus");
+
+        // Get wasn't called
+        assert_eq!(status.total_get_requests_started, 2u64);
+        assert_eq!(status.total_get_requests_completed, 2u64);
+
+        assert_eq!(status.total_put_requests_started, 5u64);
+        assert_eq!(status.total_put_requests_completed, 5u64);
+        assert_eq!(status.has_outstanding_request, false);
+        assert_eq!(status.cancelled_pending_notifications, 5);
+        let expected = latest_sled_agent_info.lock().unwrap().clone();
+        assert_eq!(
+            status.nexus_known_info,
+            Some(NexusKnownInfo::Found(expected)),
+        );
+
+        // Now inject a put error. This will trigger the put error and
+        // previously injected get error.
+        put_error.store(true, Ordering::SeqCst);
+        {
+            let mut info = latest_sled_agent_info.lock().unwrap();
+            info.reservoir_size = (4 * 1024 * 1024u64).into();
+            info.generation = info.generation.next();
+        }
+        handle.notify_nexus_about_self(log).await;
+        // Wait for a steady state, when the the latest info has been put to nexus.
+        // Ensure the second get request has been sent.
+        let status = wait_for::<_, (), _, _>(
+            || async {
+                let status = handle.get_status().await.unwrap();
+                if !status.has_pending_notification
+                    && status.total_put_requests_started > 5
+                {
+                    Ok(status)
+                } else {
+                    Err(CondCheckError::NotYet)
+                }
+            },
+            &Duration::from_millis(2),
+            &Duration::from_secs(15),
+        )
+        .await
+        .expect("Failed to get status from Nexus");
+
+        // Get was called twice, once for error, once for success
+        assert_eq!(status.total_get_requests_started, 4u64);
+        assert_eq!(status.total_get_requests_completed, 4u64);
+
+        // Put was called twice, once for error, once for success
+        assert_eq!(status.total_put_requests_started, 7u64);
+        assert_eq!(status.total_put_requests_completed, 7u64);
+
+        assert_eq!(status.has_outstanding_request, false);
+        assert_eq!(status.cancelled_pending_notifications, 6);
+        let expected = latest_sled_agent_info.lock().unwrap().clone();
+        assert_eq!(
+            status.nexus_known_info,
+            Some(NexusKnownInfo::Found(expected)),
+        );
+
         logctx.cleanup_successful();
     }
 }
