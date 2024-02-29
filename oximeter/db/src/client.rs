@@ -50,6 +50,10 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+const CLICKHOUSE_DB_MISSING: &'static str = "Database oximeter does not exist";
+const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
+    "Table oximeter.version does not exist";
+
 #[usdt::provider(provider = "clickhouse_client")]
 mod probes {
     fn query__start(_: &usdt::UniqueId, sql: &str) {}
@@ -856,12 +860,10 @@ impl Client {
             })?,
             Err(Error::Database(err))
                 // Case 1: The database has not been created.
-                if err.contains("Database oximeter doesn't exist") ||
-                    err.contains("Database oximeter does not exist") ||
+                if err.contains(CLICKHOUSE_DB_MISSING) ||
                 // Case 2: The database has been created, but it's old (exists
                 // prior to the version table).
-                    err.contains("Table oximeter.version doesn't exist") ||
-                    err.contains("Table oximeter.version does not exist") =>
+                    err.contains(CLICKHOUSE_DB_VERSION_MISSING) =>
             {
                 warn!(self.log, "oximeter database does not exist, or is out-of-date");
                 0
