@@ -146,20 +146,20 @@ impl super::Nexus {
     ) -> UpdateResult<views::FloatingIp> {
         match target.kind {
             params::FloatingIpParentKind::Instance => {
-                // This is surprisingly complicated in order to handle the
-                // case where floating IP is specified by name (and therefore
-                // a project is given) but instance is specified by ID (and
-                // therefore the lookup doesn't want a project), as well as
-                // the converse: floating IP specified by ID (and no project
+                // Handle the case where floating IP is specified by name (and
+                // therefore a project is given) but instance is specified by
+                // ID (and therefore the lookup doesn't want a project), as well
+                // as the converse: floating IP specified by ID (and no project
                 // given) but instance specified by name, and therefore needs
                 // a project. In the latter case, we have to fetch the floating
                 // IP by its ID in order to get the project to include with
                 // the instance.
-                let project = match target.parent {
-                    NameOrId::Id(_) => None,
-                    NameOrId::Name(_) => match fip_selector.project {
-                        Some(p) => Some(p),
-                        None => {
+                let project =
+                    match (target.parent.clone(), fip_selector.clone().project)
+                    {
+                        (NameOrId::Id(_), _) => None,
+                        (NameOrId::Name(_), Some(p)) => Some(p),
+                        (NameOrId::Name(_), None) => {
                             let fip_lookup = self.floating_ip_lookup(
                                 opctx,
                                 fip_selector.clone(),
@@ -167,8 +167,7 @@ impl super::Nexus {
                             let (.., fip) = fip_lookup.fetch().await?;
                             Some(fip.project_id.into())
                         }
-                    },
-                };
+                    };
 
                 let instance_selector = params::InstanceSelector {
                     project,
