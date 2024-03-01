@@ -4891,6 +4891,7 @@ dependencies = [
  "once_cell",
  "parse-display",
  "progenitor",
+ "progenitor-client",
  "proptest",
  "rand 0.8.5",
  "regress",
