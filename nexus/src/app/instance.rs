@@ -29,7 +29,6 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_types::external_api::views;
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::CreateResult;
@@ -202,7 +201,7 @@ impl super::Nexus {
                 ..
             } => {
                 Err(Error::invalid_request(
-                    "when providing instance as an ID project should not be specified",
+                    "when providing instance as an ID, project should not be specified",
                 ))
             }
             _ => {
@@ -1223,7 +1222,7 @@ impl super::Nexus {
                     propolis_id: *propolis_id,
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
-                        PROPOLIS_PORT,
+                        initial_vmm.propolis_port.into(),
                     )
                     .to_string(),
                 },
@@ -1762,7 +1761,7 @@ impl super::Nexus {
                 | InstanceState::Rebooting
                 | InstanceState::Migrating
                 | InstanceState::Repairing => {
-                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), PROPOLIS_PORT))
+                    Ok(SocketAddr::new(vmm.propolis_ip.ip(), vmm.propolis_port.into()))
                 }
                 InstanceState::Creating
                 | InstanceState::Starting

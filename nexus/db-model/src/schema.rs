@@ -380,6 +380,7 @@ table! {
         instance_id -> Uuid,
         sled_id -> Uuid,
         propolis_ip -> Inet,
+        propolis_port -> Int4,
         state -> crate::InstanceStateEnum,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
