@@ -17,6 +17,7 @@ floating_ip_create                       POST     /v1/floating-ips
 floating_ip_delete                       DELETE   /v1/floating-ips/{floating_ip}
 floating_ip_detach                       POST     /v1/floating-ips/{floating_ip}/detach
 floating_ip_list                         GET      /v1/floating-ips
+floating_ip_update                       PUT      /v1/floating-ips/{floating_ip}
 floating_ip_view                         GET      /v1/floating-ips/{floating_ip}
 
 API operations found with tag "hidden"

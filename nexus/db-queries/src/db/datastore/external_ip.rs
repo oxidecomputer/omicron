@@ -35,6 +35,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use nexus_db_model::FloatingIpUpdate;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
 use nexus_types::identity::Resource;
@@ -822,6 +823,32 @@ impl DataStore {
         .get_results_async(&*self.pool_connection_authorized(opctx).await?)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Update a Floating IP
+    pub async fn floating_ip_update(
+        &self,
+        opctx: &OpContext,
+        authz_fip: &authz::FloatingIp,
+        update: FloatingIpUpdate,
+    ) -> UpdateResult<ExternalIp> {
+        use db::schema::external_ip::dsl;
+
+        opctx.authorize(authz::Action::Modify, authz_fip).await?;
+
+        diesel::update(dsl::external_ip)
+            .filter(dsl::id.eq(authz_fip.id()))
+            .filter(dsl::time_deleted.is_null())
+            .set(update)
+            .returning(ExternalIp::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_fip),
+                )
+            })
     }
 
     /// Delete a Floating IP, verifying first that it is not in use.

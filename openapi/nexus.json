@@ -964,6 +964,60 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "Update floating IP",
+        "operationId": "floating_ip_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FloatingIpUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "floating-ips"
@@ -11918,6 +11972,24 @@
         "required": [
           "items"
         ]
+      },
+      "FloatingIpUpdate": {
+        "description": "Updateable identity-related parameters",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
       },
       "Group": {
         "description": "View of a Group",

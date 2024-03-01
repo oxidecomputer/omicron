@@ -7,10 +7,10 @@
 use super::{
     console_api, device_auth, params,
     views::{
-        self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
-        Sled, Snapshot, SshKey, User, UserBuiltin, Utilization, Vpc, VpcRouter,
-        VpcSubnet,
+        self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
+        IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
+        SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
+        Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -141,6 +141,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(floating_ip_list)?;
         api.register(floating_ip_create)?;
         api.register(floating_ip_view)?;
+        api.register(floating_ip_update)?;
         api.register(floating_ip_delete)?;
         api.register(floating_ip_attach)?;
         api.register(floating_ip_detach)?;
@@ -1917,6 +1918,43 @@ async fn floating_ip_create(
             .floating_ip_create(&opctx, &project_lookup, floating_params)
             .await?;
         Ok(HttpResponseCreated(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update floating IP
+#[endpoint {
+    method = PUT,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    updated_floating_ip: TypedBody<params::FloatingIpUpdate>,
+) -> Result<HttpResponseOk<FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let updated_floating_ip_params = updated_floating_ip.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let floating_ip_selector = params::FloatingIpSelector {
+            project: query.project,
+            floating_ip: path.floating_ip,
+        };
+        let floating_ip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+        let floating_ip = nexus
+            .floating_ip_update(
+                &opctx,
+                floating_ip_lookup,
+                updated_floating_ip_params,
+            )
+            .await?;
+        Ok(HttpResponseOk(floating_ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
