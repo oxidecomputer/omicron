@@ -1161,8 +1161,7 @@ impl ServiceManager {
             zone_args.omicron_type(),
             Some(OmicronZoneType::ExternalDns { .. })
                 | Some(OmicronZoneType::Nexus { .. })
-                | Some(OmicronZoneType::BoundaryNtp { .. }) // TODO: Add if necessary
-                                                            // | Some(OmicronZoneType::InternalNtp { .. })
+                | Some(OmicronZoneType::BoundaryNtp { .. })
         ) {
             return Ok(vec![]);
         }
@@ -1336,63 +1335,6 @@ impl ServiceManager {
         }
         needed
     }
-
-    // TODO: Set up a new service for this
-    //    async fn configure_dns_client(
-    //        &self,
-    //        running_zone: &RunningZone,
-    //        dns_servers: &[IpAddr],
-    //        domain: &Option<String>,
-    //    ) -> Result<(), Error> {
-    //        struct DnsClient {}
-    //
-    //        impl crate::smf_helper::Service for DnsClient {
-    //            fn service_name(&self) -> String {
-    //                "dns_client".to_string()
-    //            }
-    //            fn smf_name(&self) -> String {
-    //                "svc:/network/dns/client".to_string()
-    //            }
-    //            fn should_import(&self) -> bool {
-    //                false
-    //            }
-    //        }
-    //
-    //        let service = DnsClient {};
-    //        let smfh = SmfHelper::new(&running_zone, &service);
-    //
-    //        let etc = running_zone.root().join("etc");
-    //        let resolv_conf = etc.join("resolv.conf");
-    //        let nsswitch_conf = etc.join("nsswitch.conf");
-    //        let nsswitch_dns = etc.join("nsswitch.dns");
-    //
-    //        if dns_servers.is_empty() {
-    //            // Disable the dns/client service
-    //            smfh.disable()?;
-    //        } else {
-    //            debug!(self.inner.log, "enabling {:?}", service.service_name());
-    //            let mut config = String::new();
-    //            if let Some(d) = domain {
-    //                config.push_str(&format!("domain {d}\n"));
-    //            }
-    //            for s in dns_servers {
-    //                config.push_str(&format!("nameserver {s}\n"));
-    //            }
-    //
-    //            debug!(self.inner.log, "creating {resolv_conf}");
-    //            tokio::fs::write(&resolv_conf, config)
-    //                .await
-    //                .map_err(|err| Error::io_path(&resolv_conf, err))?;
-    //
-    //            tokio::fs::copy(&nsswitch_dns, &nsswitch_conf)
-    //                .await
-    //                .map_err(|err| Error::io_path(&nsswitch_dns, err))?;
-    //
-    //            smfh.refresh()?;
-    //            smfh.enable()?;
-    //        }
-    //        Ok(())
-    //    }
 
     async fn dns_install(
         info: &SledAgentInfo,
@@ -2034,7 +1976,7 @@ impl ServiceManager {
                     );
 
                 for s in ntp_servers {
-                    ntp_config = ntp_config.clone().add_property(
+                    ntp_config = ntp_config.add_property(
                         "server",
                         "astring",
                         &s.to_string(),
@@ -2397,69 +2339,6 @@ impl ServiceManager {
                         // service is enabled.
                         smfh.refresh()?;
                     }
-                    // TODO: Remove this section once implemented
-                    //                    OmicronZoneType::BoundaryNtp {
-                    //                        ntp_servers,
-                    //                        dns_servers,
-                    //                        domain,
-                    //                        ..
-                    //                    }
-                    //                    | OmicronZoneType::InternalNtp {
-                    //                        ntp_servers,
-                    //                        dns_servers,
-                    //                        domain,
-                    //                        ..
-                    //                    } => {
-                    //                        let boundary = matches!(
-                    //                            &zone_config.zone.zone_type,
-                    //                            OmicronZoneType::BoundaryNtp { .. }
-                    //                        );
-                    //                        info!(
-                    //                            self.inner.log,
-                    //                            "Set up NTP service boundary={}, Servers={:?}",
-                    //                            boundary,
-                    //                            ntp_servers
-                    //                        );
-                    //
-                    //                        let sled_info =
-                    //                            if let Some(info) = self.inner.sled_info.get() {
-                    //                                info
-                    //                            } else {
-                    //                                return Err(Error::SledAgentNotReady);
-                    //                            };
-                    //
-                    //                        // TODO: Left off here
-                    //                        let rack_net = Ipv6Subnet::<RACK_PREFIX>::new(
-                    //                            sled_info.underlay_address,
-                    //                        )
-                    //                        .net();
-                    //
-                    //                        smfh.setprop("config/allow", &format!("{}", rack_net))?;
-                    //                        smfh.setprop(
-                    //                            "config/boundary",
-                    //                            if boundary { "true" } else { "false" },
-                    //                        )?;
-                    //
-                    //                        if boundary {
-                    //                            // Configure OPTE port for boundary NTP
-                    //                            running_zone
-                    //                                .ensure_address_for_port("public", 0)
-                    //                                .await?;
-                    //                        }
-                    //
-                    //                        smfh.delpropvalue("config/server", "*")?;
-                    //                        for server in ntp_servers {
-                    //                            smfh.addpropvalue("config/server", server)?;
-                    //                        }
-                    //                        self.configure_dns_client(
-                    //                            &running_zone,
-                    //                            &dns_servers,
-                    //                            &domain,
-                    //                        )
-                    //                        .await?;
-                    //
-                    //                        smfh.refresh()?;
-                    //                    }
                     OmicronZoneType::BoundaryNtp { .. }
                     | OmicronZoneType::Clickhouse { .. }
                     | OmicronZoneType::ClickhouseKeeper { .. }

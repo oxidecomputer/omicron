@@ -11,7 +11,6 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-#[derive(Clone)]
 pub struct ProfileBuilder {
     name: String,
     services: Vec<ServiceBuilder>,
@@ -59,7 +58,6 @@ impl Display for ProfileBuilder {
     }
 }
 
-#[derive(Clone)]
 pub struct ServiceBuilder {
     name: String,
     instances: Vec<ServiceInstanceBuilder>,
@@ -116,7 +114,6 @@ impl Display for ServiceBuilder {
     }
 }
 
-#[derive(Clone)]
 pub struct ServiceInstanceBuilder {
     name: String,
     enabled: bool,
@@ -166,7 +163,6 @@ impl Display for ServiceInstanceBuilder {
     }
 }
 
-#[derive(Clone)]
 pub struct PropertyGroupBuilder {
     name: String,
     /// names of the properties that were added, in the order they were added
