@@ -141,7 +141,7 @@ impl super::Nexus {
     pub(crate) async fn floating_ip_attach(
         self: &Arc<Self>,
         opctx: &OpContext,
-        fip_selector: params::FloatingIpSelector,
+        mut fip_selector: params::FloatingIpSelector,
         target: params::FloatingIpAttach,
     ) -> UpdateResult<views::FloatingIp> {
         match target.kind {
@@ -154,6 +154,7 @@ impl super::Nexus {
                 // a project. In the latter case, we have to fetch the floating
                 // IP by its ID in order to get the project to include with
                 // the instance.
+                let mut floating_ip = None;
                 let project =
                     match (target.parent.clone(), fip_selector.clone().project)
                     {
@@ -164,25 +165,49 @@ impl super::Nexus {
                                 opctx,
                                 fip_selector.clone(),
                             )?;
-                            let (.., fip) = fip_lookup.fetch().await?;
-                            Some(fip.project_id.into())
+                            let (.., authz_project, authz_fip) = fip_lookup
+                                .lookup_for(authz::Action::Modify)
+                                .await?;
+                            let id = authz_project.id().into();
+                            floating_ip = Some((authz_project, authz_fip));
+                            Some(id)
                         }
                     };
 
                 let instance_selector = params::InstanceSelector {
-                    project,
+                    project: project.clone(),
                     instance: target.parent,
                 };
 
+                if matches!(
+                    fip_selector,
+                    params::FloatingIpSelector {
+                        project: None,
+                        floating_ip: NameOrId::Name(_)
+                    }
+                ) {
+                    fip_selector.project = project;
+                }
+
                 let instance =
                     self.instance_lookup(opctx, instance_selector)?;
-                let attach_params = &params::ExternalIpCreate::Floating {
-                    floating_ip: fip_selector.floating_ip,
-                };
-                self.instance_attach_external_ip(
+
+                let (authz_fip_project, authz_fip) =
+                    if let Some(f) = floating_ip {
+                        f
+                    } else {
+                        let (.., authz_project, authz_fip) = self
+                            .floating_ip_lookup(opctx, fip_selector)?
+                            .lookup_for(authz::Action::Modify)
+                            .await?;
+                        (authz_project, authz_fip)
+                    };
+
+                self.instance_attach_floating_ip(
                     opctx,
                     &instance,
-                    attach_params,
+                    authz_fip,
+                    authz_fip_project,
                 )
                 .await
                 .and_then(FloatingIp::try_from)

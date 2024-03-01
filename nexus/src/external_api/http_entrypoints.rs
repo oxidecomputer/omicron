@@ -4088,12 +4088,10 @@ async fn instance_ephemeral_ip_attach(
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
         let ip = nexus
-            .instance_attach_external_ip(
+            .instance_attach_ephemeral_ip(
                 &opctx,
                 &instance_lookup,
-                &params::ExternalIpCreate::Ephemeral {
-                    pool: ip_to_create.into_inner().pool,
-                },
+                ip_to_create.into_inner().pool,
             )
             .await?;
         Ok(HttpResponseAccepted(ip))
