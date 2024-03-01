@@ -3159,6 +3159,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_target (
     time_made_target TIMESTAMPTZ NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS lookup_bp_target_by_id ON omicron.public.bp_target (
+    blueprint_id
+);
+
 -- see inv_sled_omicron_zones, which is identical except it references a
 -- collection whereas this table references a blueprint
 CREATE TABLE IF NOT EXISTS omicron.public.bp_sled_omicron_zones (
@@ -3552,7 +3556,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '38.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '39.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
