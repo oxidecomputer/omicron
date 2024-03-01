@@ -968,7 +968,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "Update a Floating IP",
+        "summary": "Update floating IP",
         "operationId": "floating_ip_update",
         "parameters": [
           {
