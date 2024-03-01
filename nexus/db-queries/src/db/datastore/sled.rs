@@ -39,6 +39,7 @@ impl DataStore {
         sled_update: SledUpdate,
     ) -> CreateResult<Sled> {
         use db::schema::sled::dsl;
+        use diesel::query_dsl::methods::FilterDsl;
         diesel::insert_into(dsl::sled)
             .values(sled_update.clone().into_insertable())
             .on_conflict(dsl::id)
@@ -53,7 +54,9 @@ impl DataStore {
                     .eq(sled_update.usable_hardware_threads),
                 dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
                 dsl::reservoir_size.eq(sled_update.reservoir_size),
+                dsl::rcgen.eq(sled_update.rcgen),
             ))
+            .filter(dsl::rcgen.lt(sled_update.rcgen))
             .returning(Sled::as_returning())
             .get_result_async(&*self.pool_connection_unauthorized().await?)
             .await
@@ -313,6 +316,7 @@ mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
+    use nexus_db_model::Generation;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
@@ -360,6 +364,9 @@ mod test {
             .unwrap(),
         );
 
+        // Bump the gneration number so the insert succeeds.
+        sled_update.rcgen.0 = sled_update.rcgen.0.next();
+
         // Test that upserting the sled propagates those changes to the DB.
         let observed_sled = datastore
             .sled_upsert(sled_update.clone())
@@ -373,6 +380,66 @@ mod test {
             observed_sled.usable_physical_ram,
             sled_update.usable_physical_ram
         );
+        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn upsert_sled_updates_fails_with_stale_rcgen() {
+        let logctx = dev::test_setup_log("upsert_sled");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let mut sled_update = test_new_sled_update();
+        let observed_sled =
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+
+        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
+
+        // Modify the reservoir size
+        const MIB: u64 = 1024 * 1024;
+        sled_update.reservoir_size = ByteCount::from(
+            external::ByteCount::try_from(
+                sled_update.reservoir_size.0.to_bytes() + MIB,
+            )
+            .unwrap(),
+        );
+
+        // Fail the update, since the generation number didn't change.
+        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+
+        // Bump the gneration number so the next insert succeeds.
+        sled_update.rcgen.0 = sled_update.rcgen.0.next();
+
+        // Test that upserting the sled propagates those changes to the DB.
+        let observed_sled = datastore
+            .sled_upsert(sled_update.clone())
+            .await
+            .expect("Could not upsert sled during test prep");
+        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
+
+        // Now reset the generation to a lower value and try again.
+        // This should fail.
+        let current_gen = sled_update.rcgen.clone();
+        sled_update.rcgen = Generation::new();
+        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+
+        // Now bump the generation from the saved `current_gen`
+        // Change the reservoir value again. This should succeed.
+        sled_update.reservoir_size = ByteCount::from(
+            external::ByteCount::try_from(
+                sled_update.reservoir_size.0.to_bytes() + MIB,
+            )
+            .unwrap(),
+        );
+        sled_update.rcgen.0 = current_gen.0.next();
+        // Test that upserting the sled propagates those changes to the DB.
+        let observed_sled = datastore
+            .sled_upsert(sled_update.clone())
+            .await
+            .expect("Could not upsert sled during test prep");
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
         db.cleanup().await.unwrap();
@@ -481,6 +548,7 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id(),
+            Generation::new(),
         )
     }
 

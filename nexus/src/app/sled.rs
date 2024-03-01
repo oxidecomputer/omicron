@@ -67,6 +67,7 @@ impl super::Nexus {
                 reservoir_size: info.reservoir_size.into(),
             },
             self.rack_id,
+            info.generation.into(),
         );
         self.db_datastore.sled_upsert(sled).await?;
 

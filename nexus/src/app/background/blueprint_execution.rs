@@ -182,6 +182,7 @@ mod test {
                     reservoir_size: ByteCount(999.into()),
                 },
                 rack_id,
+                nexus_db_model::Generation::new(),
             );
             datastore
                 .sled_upsert(update)

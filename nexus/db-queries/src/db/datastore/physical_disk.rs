@@ -143,6 +143,7 @@ mod test {
     };
     use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
     use dropshot::PaginationOrder;
+    use nexus_db_model::Generation;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_test_utils::dev;
@@ -159,6 +160,7 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
         db.sled_upsert(sled_update)
             .await

@@ -178,6 +178,9 @@ pub struct SledUpdate {
     // ServiceAddress (Sled Agent).
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
+
+    // Generation number - owned and incremented by sled-agent
+    pub rcgen: Generation,
 }
 
 impl SledUpdate {
@@ -187,6 +190,7 @@ impl SledUpdate {
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
         rack_id: Uuid,
+        rcgen: Generation,
     ) -> Self {
         Self {
             id,
@@ -202,6 +206,7 @@ impl SledUpdate {
             reservoir_size: hardware.reservoir_size,
             ip: addr.ip().into(),
             port: addr.port().into(),
+            rcgen,
         }
     }
 
@@ -220,7 +225,7 @@ impl SledUpdate {
         };
         Sled {
             identity: SledIdentity::new(self.id),
-            rcgen: Generation::new(),
+            rcgen: self.rcgen,
             time_deleted: None,
             rack_id: self.rack_id,
             is_scrimlet: self.is_scrimlet,

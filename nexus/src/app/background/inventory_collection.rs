@@ -194,6 +194,7 @@ mod test {
     use crate::app::background::common::BackgroundTask;
     use crate::app::background::inventory_collection::DbSledAgentEnumerator;
     use crate::app::background::inventory_collection::InventoryCollector;
+    use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
@@ -337,6 +338,7 @@ mod test {
                     reservoir_size: ByteCount::from_gibibytes_u32(8).into(),
                 },
                 rack_id,
+                Generation::new(),
             );
             sleds.push(datastore.sled_upsert(sled).await.unwrap());
         }

@@ -421,6 +421,7 @@ mod test {
     use chrono::{Duration, Utc};
     use futures::stream;
     use futures::StreamExt;
+    use nexus_db_model::Generation;
     use nexus_db_model::IpAttachState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
@@ -647,6 +648,7 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
         datastore.sled_upsert(sled_update).await.unwrap();
         sled_id
@@ -1320,6 +1322,7 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
         datastore.sled_upsert(sled1).await.unwrap();
 
@@ -1331,6 +1334,7 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
         datastore.sled_upsert(sled2).await.unwrap();
 
