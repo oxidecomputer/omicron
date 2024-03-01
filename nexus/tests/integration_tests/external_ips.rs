@@ -28,6 +28,8 @@ use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils::resource_helpers::object_create_error;
 use nexus_test_utils::resource_helpers::object_delete;
 use nexus_test_utils::resource_helpers::object_delete_error;
+use nexus_test_utils::resource_helpers::object_get;
+use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
@@ -389,6 +391,7 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
     create_default_ip_pool(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
+    // Create the Floating IP
     let fip = create_floating_ip(
         client,
         FIP_NAMES[0],
@@ -400,9 +403,15 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
 
     let floating_ip_url = get_floating_ip_by_id_url(&fip.identity.id);
 
+    // Verify that the Floating IP was created correctly
+    let fetched_floating_ip: FloatingIp =
+        object_get(client, &floating_ip_url).await;
+
+    assert_floating_ips_eq(&fip, &fetched_floating_ip);
+
+    // Set up the updated values
     let new_fip_name: &str = "updated";
     let new_fip_desc: &str = "updated description";
-
     let updates: params::FloatingIpUpdate = params::FloatingIpUpdate {
         identity: IdentityMetadataUpdateParams {
             name: Some(String::from(new_fip_name).parse().unwrap()),
@@ -410,20 +419,21 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
         },
     };
 
-    let new_fip =
-        NexusRequest::object_put(client, &floating_ip_url, Some(&updates))
-            .authn_as(AuthnMode::PrivilegedUser)
-            .execute()
-            .await
-            .expect("")
-            .parsed_body::<FloatingIp>()
-            .unwrap();
+    // Update the Floating IP
+    let new_fip: FloatingIp =
+        object_put(client, &floating_ip_url, &updates).await;
 
     assert_eq!(new_fip.identity.name.as_str(), new_fip_name);
     assert_eq!(new_fip.identity.description, new_fip_desc);
     assert_eq!(new_fip.project_id, project.identity.id);
     assert_eq!(new_fip.identity.time_created, fip.identity.time_created);
     assert_ne!(new_fip.identity.time_modified, fip.identity.time_modified);
+
+    // Verify that the Floating IP was updated correctly
+    let fetched_modified_floating_ip: FloatingIp =
+        object_get(client, &floating_ip_url).await;
+
+    assert_floating_ips_eq(&new_fip, &fetched_modified_floating_ip);
 }
 
 #[nexus_test]
@@ -1009,4 +1019,8 @@ async fn floating_ip_detach(
     .unwrap()
     .parsed_body()
     .unwrap()
+}
+
+fn assert_floating_ips_eq(first: &FloatingIp, second: &FloatingIp) {
+    assert_eq!(first.identity, second.identity);
 }
