@@ -2021,13 +2021,12 @@ impl ServiceManager {
                         .net()
                         .to_string();
 
-                let dns_install_service = Self::dns_install(info, Some(dns_servers.to_vec()), domain).await?;
-//                let domain = if let Some(d) = domain { d } else { "unknown" };
+                let dns_install_service =
+                    Self::dns_install(info, Some(dns_servers.to_vec()), domain)
+                        .await?;
 
                 let mut ntp_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
-                    // TODO: perhaps remove this property
-                    .add_property("domain", "astring", "domain")
                     .add_property(
                         "boundary",
                         "boolean",
@@ -2037,15 +2036,6 @@ impl ServiceManager {
                 for s in ntp_servers {
                     ntp_config = ntp_config.clone().add_property(
                         "server",
-                        "astring",
-                        &s.to_string(),
-                    );
-                }
-
-                // TODO: Remove these
-                for s in dns_servers.clone() {
-                    ntp_config = ntp_config.clone().add_property(
-                        "dns_server",
                         "astring",
                         &s.to_string(),
                     );
