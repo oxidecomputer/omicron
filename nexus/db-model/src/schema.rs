@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(38, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(39, 0, 0);
 
 table! {
     disk (id) {
@@ -1549,6 +1549,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
+    bp_omicron_zone,
+    bp_target,
     dataset,
     disk,
     image,
