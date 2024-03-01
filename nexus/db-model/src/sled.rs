@@ -44,7 +44,7 @@ pub struct Sled {
     #[diesel(embed)]
     identity: SledIdentity,
     time_deleted: Option<DateTime<Utc>>,
-    rcgen: Generation,
+    pub rcgen: Generation,
 
     pub rack_id: Uuid,
 

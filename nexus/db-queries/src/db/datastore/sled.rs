@@ -441,6 +441,7 @@ mod test {
             .await
             .expect("Could not upsert sled during test prep");
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
+        assert_eq!(observed_sled.rcgen, sled_update.rcgen);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
