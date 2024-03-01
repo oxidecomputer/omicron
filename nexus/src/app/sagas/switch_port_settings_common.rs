@@ -13,11 +13,7 @@ use std::collections::HashMap;
 pub(crate) fn api_to_dpd_port_settings(
     settings: &SwitchPortSettingsCombinedResult,
 ) -> Result<PortSettings, String> {
-    let mut dpd_port_settings = PortSettings {
-        links: HashMap::new(),
-        v4_routes: HashMap::new(),
-        v6_routes: HashMap::new(),
-    };
+    let mut dpd_port_settings = PortSettings { links: HashMap::new() };
 
     //TODO breakouts
     let link_id = LinkId(0);

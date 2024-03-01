@@ -3499,7 +3499,7 @@ FROM interleaved_versions;
 
 -- Table for optionally enabling / disbling background tasks or
 -- subsections of background tasks at runtime
-CREATE TABLE IF NOT EXISTS background_task_toggles (
+CREATE TABLE IF NOT EXISTS omicron.public.background_task_toggles (
     id UUID NOT NULL DEFAULT uuid_generate_v4(),
     name STRING NOT NULL,
     enabled BOOLEAN NOT NULL,
@@ -3509,7 +3509,7 @@ CREATE TABLE IF NOT EXISTS background_task_toggles (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS background_task_toggles_name
-ON background_task_toggles (name)
+ON omicron.public.background_task_toggles (name)
 STORING (enabled);
 
 INSERT INTO omicron.public.db_metadata (
