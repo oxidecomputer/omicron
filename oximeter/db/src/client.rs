@@ -1944,19 +1944,22 @@ mod tests {
         let sql = String::from(
             "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
         );
-        client_2.execute_with_body(sql).await.unwrap();
+        let result = client_2.execute_with_body(sql.clone()).await.unwrap();
+        info!(log, "Inserted datum to client #2"; "sql" => sql, "result" => result);
 
         // Make sure replicas are synched
         let sql = String::from(
             "SYSTEM SYNC REPLICA oximeter.measurements_string_local;",
         );
-        client_1.execute_with_body(sql).await.unwrap();
+        let result = client_1.execute_with_body(sql.clone()).await.unwrap();
+        info!(log, "Synced replicas via client #1"; "sql" => sql, "result" => result);
 
         // Make sure data exists in the other replica
         let sql = String::from(
             "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
         );
-        let result = client_1.execute_with_body(sql).await.unwrap();
+        let result = client_1.execute_with_body(sql.clone()).await.unwrap();
+        info!(log, "Retrieved values via client #1"; "sql" => sql, "result" => result.clone());
         assert!(result.contains("hiya"));
 
         client_1.wipe_replicated_db().await?;
