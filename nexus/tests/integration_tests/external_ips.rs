@@ -36,8 +36,10 @@ use nexus_types::external_api::views::FloatingIp;
 use nexus_types::identity::Resource;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use uuid::Uuid;
@@ -744,6 +746,39 @@ async fn test_floating_ip_attach_fail_between_projects(
     .unwrap()
     .parsed_body()
     .unwrap();
+    assert_eq!(
+        error.message,
+        "floating IP must be in the same project as the instance".to_string()
+    );
+
+    // Create a new instance with a FIP, referenced by ID.
+    let url = format!("/v1/instances?project={PROJECT_NAME}");
+    let error = object_create_error(
+        client,
+        &url,
+        &params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: INSTANCE_NAMES[1].parse().unwrap(),
+                description: "".into(),
+            },
+            ncpus: InstanceCpuCount(4),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: "the-host".parse().unwrap(),
+            user_data:
+                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                    .to_vec(),
+            ssh_public_keys: Some(Vec::new()),
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![params::ExternalIpCreate::Floating {
+                floating_ip: fip.identity.id.into(),
+            }],
+            disks: vec![],
+            start: true,
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
     assert_eq!(
         error.message,
         "floating IP must be in the same project as the instance".to_string()
