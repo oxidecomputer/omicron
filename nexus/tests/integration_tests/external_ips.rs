@@ -36,8 +36,10 @@ use nexus_types::external_api::views::FloatingIp;
 use nexus_types::identity::Resource;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv4Range;
+use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use uuid::Uuid;
@@ -68,6 +70,10 @@ pub fn attach_floating_ip_url(
     project_name: &str,
 ) -> String {
     format!("/v1/floating-ips/{floating_ip_name}/attach?project={project_name}")
+}
+
+pub fn attach_floating_ip_uuid(floating_ip_uuid: &Uuid) -> String {
+    format!("/v1/floating-ips/{floating_ip_uuid}/attach")
 }
 
 pub fn detach_floating_ip_url(
@@ -705,7 +711,82 @@ async fn test_external_ip_live_attach_detach(
 }
 
 #[nexus_test]
-async fn test_external_ip_attach_detach_fail_if_in_use_by_other(
+async fn test_floating_ip_attach_fail_between_projects(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.apictx();
+    let _nexus = &apictx.nexus;
+
+    create_default_ip_pool(&client).await;
+    let _project = create_project(client, PROJECT_NAME).await;
+    let _project2 = create_project(client, "proj2").await;
+
+    // Create a floating IP in another project.
+    let fip =
+        create_floating_ip(client, FIP_NAMES[0], "proj2", None, None).await;
+
+    // Create a new instance *then* bind the FIP to it, both by ID.
+    let instance =
+        instance_for_external_ips(client, INSTANCE_NAMES[0], true, false, &[])
+            .await;
+
+    let url = attach_floating_ip_uuid(&fip.identity.id);
+    let error: HttpErrorResponseBody = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&params::FloatingIpAttach {
+                kind: params::FloatingIpParentKind::Instance,
+                parent: instance.identity.id.into(),
+            }))
+            .expect_status(Some(StatusCode::BAD_REQUEST)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+    assert_eq!(
+        error.message,
+        "floating IP must be in the same project as the instance".to_string()
+    );
+
+    // Create a new instance with a FIP, referenced by ID.
+    let url = format!("/v1/instances?project={PROJECT_NAME}");
+    let error = object_create_error(
+        client,
+        &url,
+        &params::InstanceCreate {
+            identity: IdentityMetadataCreateParams {
+                name: INSTANCE_NAMES[1].parse().unwrap(),
+                description: "".into(),
+            },
+            ncpus: InstanceCpuCount(4),
+            memory: ByteCount::from_gibibytes_u32(1),
+            hostname: "the-host".parse().unwrap(),
+            user_data:
+                b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                    .to_vec(),
+            ssh_public_keys: Some(Vec::new()),
+            network_interfaces:
+                params::InstanceNetworkInterfaceAttachment::Default,
+            external_ips: vec![params::ExternalIpCreate::Floating {
+                floating_ip: fip.identity.id.into(),
+            }],
+            disks: vec![],
+            start: true,
+        },
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert_eq!(
+        error.message,
+        "floating IP must be in the same project as the instance".to_string()
+    );
+}
+
+#[nexus_test]
+async fn test_external_ip_attach_fail_if_in_use_by_other(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;

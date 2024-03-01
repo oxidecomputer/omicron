@@ -37,12 +37,12 @@ use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::Instance;
 use nexus_db_model::IpAttachState;
-use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
@@ -227,7 +227,8 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         project_id: Uuid,
-        params: params::FloatingIpCreate,
+        identity: IdentityMetadataCreateParams,
+        ip: Option<IpAddr>,
         pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
@@ -256,11 +257,11 @@ impl DataStore {
 
         let pool_id = pool.id();
 
-        let data = if let Some(ip) = params.ip {
+        let data = if let Some(ip) = ip {
             IncompleteExternalIp::for_floating_explicit(
                 ip_id,
-                &Name(params.identity.name),
-                &params.identity.description,
+                &Name(identity.name),
+                &identity.description,
                 project_id,
                 ip,
                 pool_id,
@@ -268,8 +269,8 @@ impl DataStore {
         } else {
             IncompleteExternalIp::for_floating(
                 ip_id,
-                &Name(params.identity.name),
-                &params.identity.description,
+                &Name(identity.name),
+                &identity.description,
                 project_id,
                 pool_id,
             )

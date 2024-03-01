@@ -733,7 +733,7 @@ async fn sic_allocate_instance_external_ip(
         }
         // Set the parent of an existing floating IP to the new instance's ID.
         params::ExternalIpCreate::Floating { floating_ip } => {
-            let (.., authz_fip) = match floating_ip {
+            let (.., authz_project, authz_fip) = match floating_ip {
                 NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
                     .project_id(saga_params.project_id)
                     .floating_ip_name(db::model::Name::ref_cast(name)),
@@ -744,6 +744,12 @@ async fn sic_allocate_instance_external_ip(
             .lookup_for(authz::Action::Modify)
             .await
             .map_err(ActionError::action_failed)?;
+
+            if authz_project.id() != saga_params.project_id {
+                return Err(ActionError::action_failed(Error::invalid_request(
+                    "floating IP must be in the same project as the instance"
+                )));
+            }
 
             datastore
                 .floating_ip_begin_attach(&opctx, &authz_fip, instance_id, true)
