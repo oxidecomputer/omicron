@@ -87,7 +87,7 @@
       <loctext xml:lang="C">Network Time Protocol (NTP)</loctext>
     </common_name>
     <description>
-      <loctext xml:lang='C'>Oxide's External DNS Service</loctext>
+      <loctext xml:lang='C'>Oxide's Network Time Protocol Service</loctext>
     </description>
   </template>
   </service>

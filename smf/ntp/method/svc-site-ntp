@@ -132,13 +132,13 @@ function configure_dns_client {
 
 case $action in
 	start)
-		configure_dns_client
+		# configure_dns_client
 		generate_config_file
 		update_logadm
 		start_daemon
 		;;
 	refresh)
-		configure_dns_client
+		# configure_dns_client
 		generate_config_file && stop_daemon
 		# SMF will restart the service since the contract is now empty.
 		;;

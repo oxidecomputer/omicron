@@ -1396,6 +1396,8 @@ impl ServiceManager {
 
     async fn dns_install(
         info: &SledAgentInfo,
+        ip_addrs: Option<Vec<IpAddr>>,
+        domain: &Option<String>,
     ) -> Result<ServiceBuilder, Error> {
         // We want to configure the dns/install SMF service inside the
         // zone with the list of DNS nameservers.  This will cause
@@ -1408,18 +1410,45 @@ impl ServiceManager {
         // supplying values for an existing property group on the SMF
         // *service*.  We're not creating a new property group, nor are
         // we configuring a property group on the instance.
-        let all_nameservers = info
-            .resolver
-            .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
-            .await?;
+
+        // Users may decide to provide specific addresses to set as
+        // nameservers, or this information can be retrieved from
+        // from SledAgentInfo.
+        let nameservers = match ip_addrs {
+            None => {
+                let addrs = info
+                    .resolver
+                    .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
+                    .await?;
+
+                let mut servers: Vec<IpAddr> = vec![];
+                for a in addrs {
+                    let ip = IpAddr::V6(a);
+                    servers.push(ip);
+                }
+
+                servers
+            }
+            Some(servers) => servers,
+        };
+
         let mut dns_config_builder = PropertyGroupBuilder::new("install_props");
-        for ns_addr in &all_nameservers {
+        for ns_addr in &nameservers {
             dns_config_builder = dns_config_builder.add_property(
                 "nameserver",
                 "net_address",
                 &ns_addr.to_string(),
             );
         }
+
+        match domain {
+            Some(d) => {
+                dns_config_builder =
+                    dns_config_builder.add_property("domain", "astring", &d)
+            }
+            None => (),
+        }
+
         Ok(ServiceBuilder::new("network/dns/install")
             .add_property_group(dns_config_builder)
             // We do need to enable the default instance of the
@@ -1597,7 +1626,7 @@ impl ServiceManager {
                     listen_addr,
                 )?;
 
-                let dns_service = Self::dns_install(info).await?;
+                let dns_service = Self::dns_install(info, None, &None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("listen_addr", "astring", listen_addr)
@@ -1645,7 +1674,7 @@ impl ServiceManager {
                     listen_addr,
                 )?;
 
-                let dns_service = Self::dns_install(info).await?;
+                let dns_service = Self::dns_install(info, None, &None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property("listen_addr", "astring", listen_addr)
@@ -1700,7 +1729,7 @@ impl ServiceManager {
                     listen_addr,
                 )?;
 
-                let dns_service = Self::dns_install(info).await?;
+                let dns_service = Self::dns_install(info, None, &None).await?;
 
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
@@ -1992,11 +2021,13 @@ impl ServiceManager {
                         .net()
                         .to_string();
 
-                let domain = if let Some(d) = domain { d } else { "unknown" };
+                let dns_install_service = Self::dns_install(info, Some(dns_servers.to_vec()), domain).await?;
+//                let domain = if let Some(d) = domain { d } else { "unknown" };
 
                 let mut ntp_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
-                    .add_property("domain", "astring", domain)
+                    // TODO: perhaps remove this property
+                    .add_property("domain", "astring", "domain")
                     .add_property(
                         "boundary",
                         "boolean",
@@ -2011,6 +2042,7 @@ impl ServiceManager {
                     );
                 }
 
+                // TODO: Remove these
                 for s in dns_servers.clone() {
                     ntp_config = ntp_config.clone().add_property(
                         "dns_server",
@@ -2041,6 +2073,7 @@ impl ServiceManager {
                 let mut profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
+                    .add_service(dns_install_service)
                     .add_service(dns_client_service)
                     .add_service(ntp_service);
 
