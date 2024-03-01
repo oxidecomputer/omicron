@@ -1922,7 +1922,7 @@ async fn floating_ip_create(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Update a Floating IP
+/// Update floating IP
 #[endpoint {
     method = PUT,
     path = "/v1/floating-ips/{floating_ip}",
