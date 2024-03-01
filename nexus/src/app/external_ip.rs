@@ -158,16 +158,11 @@ impl super::Nexus {
                 // given) but instance specified by name, and therefore needs
                 // a project. In the latter case, we need to place the floating
                 // IP's project ID into the instance selector.
-                let project = match (&target.parent, fip_selector.project) {
-                    (NameOrId::Id(_), _) => None,
-                    (NameOrId::Name(_), Some(p)) => Some(p),
-                    (NameOrId::Name(_), None) => {
-                        Some(authz_project.id().into())
-                    }
-                };
-
                 let instance_selector = params::InstanceSelector {
-                    project,
+                    project: match &target.parent {
+                        NameOrId::Id(_) => None,
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                    },
                     instance: target.parent,
                 };
 
