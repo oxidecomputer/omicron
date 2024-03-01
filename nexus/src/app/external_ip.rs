@@ -144,20 +144,16 @@ impl super::Nexus {
         fip_selector: params::FloatingIpSelector,
         target: params::FloatingIpAttach,
     ) -> UpdateResult<views::FloatingIp> {
-        let fip_lookup =
-            self.floating_ip_lookup(opctx, fip_selector.clone())?;
+        let fip_lookup = self.floating_ip_lookup(opctx, fip_selector)?;
         let (.., authz_project, authz_fip) =
             fip_lookup.lookup_for(authz::Action::Modify).await?;
 
         match target.kind {
             params::FloatingIpParentKind::Instance => {
-                // Handle the case where floating IP is specified by name (and
-                // therefore a project is given) but instance is specified by
-                // ID (and therefore the lookup doesn't want a project), as well
-                // as the converse: floating IP specified by ID (and no project
-                // given) but instance specified by name, and therefore needs
-                // a project. In the latter case, we need to place the floating
-                // IP's project ID into the instance selector.
+                // Handle the cases where the FIP and instance are specified by
+                // name and ID (or ID and name) respectively. We remove the project
+                // from the instance lookup if using the instance's ID, and insert
+                // the floating IP's project ID otherwise.
                 let instance_selector = params::InstanceSelector {
                     project: match &target.parent {
                         NameOrId::Id(_) => None,
