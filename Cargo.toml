@@ -621,6 +621,11 @@ opt-level = 3
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
 
+# See https://github.com/oxidecomputer/security-operations/issues/43.
+[patch.crates-io.whoami]
+git = "https://github.com/oxidecomputer/whoami"
+branch = "use-nix"
+
 # Using the workspace-hack via this patch directive means that it only applies
 # while building within this workspace. If another workspace imports a crate
 # from here via a git dependency, it will not have the workspace-hack applied
