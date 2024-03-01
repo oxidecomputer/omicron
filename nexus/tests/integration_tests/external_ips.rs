@@ -407,7 +407,7 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
     let fetched_floating_ip: FloatingIp =
         object_get(client, &floating_ip_url).await;
 
-    assert_floating_ips_eq(&fip, &fetched_floating_ip);
+    assert_eq!(fip.identity, fetched_floating_ip.identity);
 
     // Set up the updated values
     let new_fip_name: &str = "updated";
@@ -433,7 +433,7 @@ async fn test_floating_ip_update(cptestctx: &ControlPlaneTestContext) {
     let fetched_modified_floating_ip: FloatingIp =
         object_get(client, &floating_ip_url).await;
 
-    assert_floating_ips_eq(&new_fip, &fetched_modified_floating_ip);
+    assert_eq!(new_fip.identity, fetched_modified_floating_ip.identity);
 }
 
 #[nexus_test]
@@ -1078,8 +1078,4 @@ async fn floating_ip_detach(
     .unwrap()
     .parsed_body()
     .unwrap()
-}
-
-fn assert_floating_ips_eq(first: &FloatingIp, second: &FloatingIp) {
-    assert_eq!(first.identity, second.identity);
 }
