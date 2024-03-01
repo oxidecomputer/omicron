@@ -141,9 +141,14 @@ impl super::Nexus {
     pub(crate) async fn floating_ip_attach(
         self: &Arc<Self>,
         opctx: &OpContext,
-        mut fip_selector: params::FloatingIpSelector,
+        fip_selector: params::FloatingIpSelector,
         target: params::FloatingIpAttach,
     ) -> UpdateResult<views::FloatingIp> {
+        let fip_lookup =
+            self.floating_ip_lookup(opctx, fip_selector.clone())?;
+        let (.., authz_project, authz_fip) =
+            fip_lookup.lookup_for(authz::Action::Modify).await?;
+
         match target.kind {
             params::FloatingIpParentKind::Instance => {
                 // Handle the case where floating IP is specified by name (and
@@ -151,63 +156,29 @@ impl super::Nexus {
                 // ID (and therefore the lookup doesn't want a project), as well
                 // as the converse: floating IP specified by ID (and no project
                 // given) but instance specified by name, and therefore needs
-                // a project. In the latter case, we have to fetch the floating
-                // IP by its ID in order to get the project to include with
-                // the instance.
-                let mut floating_ip = None;
-                let project =
-                    match (target.parent.clone(), fip_selector.clone().project)
-                    {
-                        (NameOrId::Id(_), _) => None,
-                        (NameOrId::Name(_), Some(p)) => Some(p),
-                        (NameOrId::Name(_), None) => {
-                            let fip_lookup = self.floating_ip_lookup(
-                                opctx,
-                                fip_selector.clone(),
-                            )?;
-                            let (.., authz_project, authz_fip) = fip_lookup
-                                .lookup_for(authz::Action::Modify)
-                                .await?;
-                            let id = authz_project.id().into();
-                            floating_ip = Some((authz_project, authz_fip));
-                            Some(id)
-                        }
-                    };
+                // a project. In the latter case, we need to place the floating
+                // IP's project ID into the instance selector.
+                let project = match (&target.parent, fip_selector.project) {
+                    (NameOrId::Id(_), _) => None,
+                    (NameOrId::Name(_), Some(p)) => Some(p),
+                    (NameOrId::Name(_), None) => {
+                        Some(authz_project.id().into())
+                    }
+                };
 
                 let instance_selector = params::InstanceSelector {
-                    project: project.clone(),
+                    project,
                     instance: target.parent,
                 };
 
-                if matches!(
-                    fip_selector,
-                    params::FloatingIpSelector {
-                        project: None,
-                        floating_ip: NameOrId::Name(_)
-                    }
-                ) {
-                    fip_selector.project = project;
-                }
-
                 let instance =
                     self.instance_lookup(opctx, instance_selector)?;
-
-                let (authz_fip_project, authz_fip) =
-                    if let Some(f) = floating_ip {
-                        f
-                    } else {
-                        let (.., authz_project, authz_fip) = self
-                            .floating_ip_lookup(opctx, fip_selector)?
-                            .lookup_for(authz::Action::Modify)
-                            .await?;
-                        (authz_project, authz_fip)
-                    };
 
                 self.instance_attach_floating_ip(
                     opctx,
                     &instance,
                     authz_fip,
-                    authz_fip_project,
+                    authz_project,
                 )
                 .await
                 .and_then(FloatingIp::try_from)
