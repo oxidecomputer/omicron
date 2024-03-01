@@ -167,7 +167,7 @@ pub struct OptionalProjectSelector {
     pub project: Option<NameOrId>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Clone)]
 pub struct FloatingIpSelector {
     /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
     pub project: Option<NameOrId>,
