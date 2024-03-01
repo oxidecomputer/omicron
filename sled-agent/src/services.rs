@@ -1981,31 +1981,27 @@ impl ServiceManager {
                     &static_addr.clone(),
                 )?;
 
-                // Boundary NTP requires to be reachable externally but internal NTP does not
-                // TODO: Currently this is a service that the NTP service depends on,
-                // but it shouldn't be if this is an internal NTP zone. Figure out how to
-                // handle this in a better way.
-                let opte_interface_setup =
-                    Self::opte_interface_set_up_install(&installed_zone)?;
+                let is_boundary = matches!(
+                    // It's safe to unwrap here as we already know it's one of InternalNTP or BoundaryNtp.
+                    request.omicron_type().unwrap(),
+                    OmicronZoneType::BoundaryNtp { .. }
+                );
 
                 let rack_net =
                     Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
                         .net()
                         .to_string();
 
-                // It's safe to unwrap here as we already know it's one of InternalNTP or BoundaryNtp.
-                let is_boundary = matches!(
-                    request.omicron_type().unwrap(),
-                    OmicronZoneType::BoundaryNtp { .. }
-                )
-                .to_string();
-
                 let domain = if let Some(d) = domain { d } else { "unknown" };
 
                 let mut ntp_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
                     .add_property("domain", "astring", domain)
-                    .add_property("boundary", "boolean", &is_boundary);
+                    .add_property(
+                        "boundary",
+                        "boolean",
+                        &is_boundary.to_string(),
+                    );
 
                 for s in ntp_servers {
                     ntp_config = ntp_config.clone().add_property(
@@ -2042,14 +2038,18 @@ impl ServiceManager {
                             .add_property_group(ntp_config),
                     );
 
-                let profile = ProfileBuilder::new("omicron")
+                let mut profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
-                    // TODO: perhaps only add the service if it's a boundary ntp?
-                    // But then I can't make the service depend on it (≖_≖ )
-                    .add_service(opte_interface_setup)
                     .add_service(disabled_ssh_service)
                     .add_service(dns_client_service)
                     .add_service(ntp_service);
+
+                // Only Boundary NTP needs an OPTE interface and port configured.
+                if is_boundary {
+                    let opte_interface_setup =
+                        Self::opte_interface_set_up_install(&installed_zone)?;
+                    profile = profile.add_service(opte_interface_setup)
+                }
 
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
@@ -4336,6 +4336,16 @@ mod test {
             std::fs::write(dir.join("oximeter.tar.gz"), "Not a real file")
                 .unwrap();
             std::fs::write(dir.join("ntp.tar.gz"), "Not a real file").unwrap();
+            // TODO: This still fails as the contents of the ledger zones are different to the request zones.
+            // Need to find a way to create these ledgers while the test is running.
+            // The test_old_ledger_migration_bad test can provide some help with this perhaps?
+            std::fs::write(
+                dir.join("omicron-zones.json"),
+                include_str!(
+                    "../tests/output/new-zones-ledgers/rack2-sled10.json"
+                ),
+            )
+            .unwrap();
         }
     }
 

@@ -40,23 +40,20 @@
   </dependency>
 
   <!-- 
-    TODO: Only Boundary NTP needs the opte interface. Might have to remove this 
-    and call the zone networking CLI direclty from the method script.
+    Only Boundary NTP needs the opte interface. This means we cannot make the
+    'oxide/opte_interface_setup' service a dependency here. The service is
+    started solely through the sled-agent/src/services.file
   -->
-  <dependency name='opte_interface_setup' grouping='require_all' restart_on='none'
-    type='service'>
-  <service_fmri value='svc:/oxide/opte-interface-setup:default' />
-  </dependency>
 
   <!--
-      The service is started as root, but with only the privileges it
-      requires. The chrony daemon forks a privileged helper and then the
-      main daemon drops everything it does not need, leaving it with
-      completely minimal privileges (it even divests the privilege to
-      fork/exec).
+    The service is started as root, but with only the privileges it
+    requires. The chrony daemon forks a privileged helper and then the
+    main daemon drops everything it does not need, leaving it with
+    completely minimal privileges (it even divests the privilege to
+    fork/exec).
 
-      The service also always starts the binary with ASLR enabled,
-      regardless of whether it was linked with -zaslr
+    The service also always starts the binary with ASLR enabled,
+    regardless of whether it was linked with -zaslr
   -->
   <exec_method type="method" name="start" exec="/var/svc/method/svc-site-ntp %m"
     timeout_seconds="60">
