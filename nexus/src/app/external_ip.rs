@@ -146,15 +146,35 @@ impl super::Nexus {
     ) -> UpdateResult<views::FloatingIp> {
         match target.kind {
             params::FloatingIpParentKind::Instance => {
-                let instance_selector = params::InstanceSelector {
-                    // only include the project if the instance is specified by
-                    // name. lookup by ID fails if project if present
-                    project: match target.parent {
-                        NameOrId::Name(_) => fip_selector.project,
-                        NameOrId::Id(_) => None,
+                // This is surprisingly complicated in order to handle the
+                // case where floating IP is specified by name (and therefore
+                // a project is given) but instance is specified by ID (and
+                // therefore the lookup doesn't want a project), as well as
+                // the converse: floating IP specified by ID (and no project
+                // given) but instance specified by name, and therefore needs
+                // a project. In the latter case, we have to fetch the floating
+                // IP by its ID in order to get the project to include with
+                // the instance.
+                let project = match target.parent {
+                    NameOrId::Id(_) => None,
+                    NameOrId::Name(_) => match fip_selector.project {
+                        Some(p) => Some(p),
+                        None => {
+                            let fip_lookup = self.floating_ip_lookup(
+                                opctx,
+                                fip_selector.clone(),
+                            )?;
+                            let (.., fip) = fip_lookup.fetch().await?;
+                            Some(fip.project_id.into())
+                        }
                     },
+                };
+
+                let instance_selector = params::InstanceSelector {
+                    project,
                     instance: target.parent,
                 };
+
                 let instance =
                     self.instance_lookup(opctx, instance_selector)?;
                 let attach_params = &params::ExternalIpCreate::Floating {

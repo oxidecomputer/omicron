@@ -202,7 +202,7 @@ impl super::Nexus {
                 ..
             } => {
                 Err(Error::invalid_request(
-                    "when providing instance as an ID project should not be specified",
+                    "when providing instance as an ID, project should not be specified",
                 ))
             }
             _ => {

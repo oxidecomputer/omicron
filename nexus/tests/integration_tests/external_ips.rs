@@ -644,9 +644,12 @@ async fn test_external_ip_live_attach_detach(
         );
     }
 
-    // Finally, attach to an instance by instance ID to make sure that works
+    // Finally, two kind of funny tests. There is special logic in the handler
+    // for the case where the floating IP is specified by name but the instance
+    // by ID and vice versa, so we want to test both combinations.
+
+    // Attach to an instance by instance ID with floating IP selected by name
     let floating_ip_name = fips[0].identity.name.as_str();
-    let instance_name = instances[0].identity.name.as_str();
     let instance_id = instances[0].identity.id;
     let url = attach_floating_ip_url(floating_ip_name, PROJECT_NAME);
     let body = params::FloatingIpAttach {
@@ -666,10 +669,39 @@ async fn test_external_ip_live_attach_detach(
     .unwrap();
 
     assert_eq!(attached.identity.name.as_str(), floating_ip_name);
+
+    let instance_name = instances[0].identity.name.as_str();
     let eip_list =
         fetch_instance_external_ips(client, instance_name, PROJECT_NAME).await;
     assert_eq!(eip_list.len(), 1);
     assert_eq!(eip_list[0].ip(), fips[0].ip);
+
+    // now the other way: floating IP by ID and instance by name
+    let floating_ip_id = fips[1].identity.id;
+    let instance_name = instances[1].identity.name.as_str();
+    let url = format!("/v1/floating-ips/{floating_ip_id}/attach");
+    let body = params::FloatingIpAttach {
+        kind: params::FloatingIpParentKind::Instance,
+        parent: instance_name.parse::<Name>().unwrap().into(),
+    };
+    let attached: views::FloatingIp = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &url)
+            .body(Some(&body))
+            .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    assert_eq!(attached.identity.id, floating_ip_id);
+
+    let eip_list =
+        fetch_instance_external_ips(client, instance_name, PROJECT_NAME).await;
+    assert_eq!(eip_list.len(), 1);
+    assert_eq!(eip_list[0].ip(), fips[1].ip);
 }
 
 #[nexus_test]
