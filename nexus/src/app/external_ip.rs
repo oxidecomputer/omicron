@@ -109,9 +109,11 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
-        let pool = match &params.pool {
+        let params::FloatingIpCreate { identity, pool, ip } = params;
+
+        let pool = match pool {
             Some(pool) => Some(
-                self.ip_pool_lookup(opctx, pool)?
+                self.ip_pool_lookup(opctx, &pool)?
                     .lookup_for(authz::Action::Read)
                     .await?
                     .0,
@@ -121,7 +123,7 @@ impl super::Nexus {
 
         Ok(self
             .db_datastore
-            .allocate_floating_ip(opctx, authz_project.id(), params, pool)
+            .allocate_floating_ip(opctx, authz_project.id(), identity, ip, pool)
             .await?
             .try_into()
             .unwrap())
