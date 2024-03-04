@@ -482,8 +482,9 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!("{} service vNIC", service.kind),
                     },
-                    Some(nic.ip),
-                    Some(nic.mac),
+                    nic.ip,
+                    nic.mac,
+                    nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
                 Some((db_ip, db_nic))
@@ -504,8 +505,9 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!("{} service vNIC", service.kind),
                     },
-                    Some(nic.ip),
-                    Some(nic.mac),
+                    nic.ip,
+                    nic.mac,
+                    nic.slot,
                 )
                 .map_err(|e| RackInitError::AddingNic(e))?;
                 Some((db_ip, db_nic))
@@ -851,10 +853,10 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::datastore_test;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
+    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::Discoverability;
     use crate::db::lookup::LookupPath;
     use crate::db::model::ExternalIp;
@@ -1067,6 +1069,7 @@ mod test {
         db.sled_upsert(sled_update)
             .await
             .expect("Could not upsert sled during test prep")
+            .unwrap()
     }
 
     // Hacky macro helper to:
@@ -1159,6 +1162,7 @@ mod test {
                         name: "external-dns".parse().unwrap(),
                         ip: external_dns_pip.into(),
                         mac: macs.next().unwrap(),
+                        slot: 0,
                     },
                 },
             },
@@ -1178,6 +1182,7 @@ mod test {
                         name: "ntp1".parse().unwrap(),
                         ip: ntp1_pip.into(),
                         mac: macs.next().unwrap(),
+                        slot: 0,
                     },
                 },
             },
@@ -1193,6 +1198,7 @@ mod test {
                         name: "nexus".parse().unwrap(),
                         ip: nexus_pip.into(),
                         mac: macs.next().unwrap(),
+                        slot: 0,
                     },
                 },
             },
@@ -1212,6 +1218,7 @@ mod test {
                         name: "ntp2".parse().unwrap(),
                         ip: ntp2_pip.into(),
                         mac: macs.next().unwrap(),
+                        slot: 0,
                     },
                 },
             },
@@ -1406,6 +1413,7 @@ mod test {
                         name: "nexus1".parse().unwrap(),
                         ip: nexus_pip1.into(),
                         mac: macs.next().unwrap(),
+                        slot: 0,
                     },
                 },
             },
@@ -1421,6 +1429,7 @@ mod test {
                         name: "nexus2".parse().unwrap(),
                         ip: nexus_pip2.into(),
                         mac: macs.next().unwrap(),
+                        slot: 0,
                     },
                 },
             },
@@ -1603,6 +1612,7 @@ mod test {
                     name: "nexus".parse().unwrap(),
                     ip: nexus_pip.into(),
                     mac: macs.next().unwrap(),
+                    slot: 0,
                 },
             },
         }];
@@ -1662,6 +1672,7 @@ mod test {
                         name: "external-dns".parse().unwrap(),
                         ip: external_dns_pip.into(),
                         mac: macs.next().unwrap(),
+                        slot: 0,
                     },
                 },
             },
@@ -1677,6 +1688,7 @@ mod test {
                         name: "nexus".parse().unwrap(),
                         ip: nexus_pip.into(),
                         mac: macs.next().unwrap(),
+                        slot: 0,
                     },
                 },
             },

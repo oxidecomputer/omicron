@@ -608,6 +608,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .unwrap()
                         .into(),
                     mac,
+                    slot: 0,
                 },
             },
             internal_dns::ServiceName::Nexus,
@@ -780,25 +781,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
     }
 
-    pub async fn scrimlet_dns_setup(&mut self) {
-        let sled_agent = self
-            .sled_agent
-            .as_ref()
-            .expect("Cannot set up scrimlet DNS without sled agent");
-
-        let sa = match sled_agent.http_server.local_addr() {
-            SocketAddr::V6(sa) => sa,
-            SocketAddr::V4(_) => panic!("expected SocketAddrV6 for sled agent"),
-        };
-
-        for loc in [SwitchLocation::Switch0, SwitchLocation::Switch1] {
-            self.rack_init_builder
-                .internal_dns_config
-                .host_scrimlet(loc, sa)
-                .expect("add switch0 scrimlet dns entry");
-        }
-    }
-
     // Set up an external DNS server.
     pub async fn start_external_dns(&mut self) {
         let log = self.logctx.log.new(o!("component" => "external_dns_server"));
@@ -831,6 +813,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                         .unwrap()
                         .into(),
                     mac,
+                    slot: 0,
                 },
             },
             internal_dns::ServiceName::ExternalDns,
@@ -1060,10 +1043,6 @@ async fn setup_with_config_impl<N: NexusServer>(
                 (
                     "start_crucible_pantry",
                     Box::new(|builder| builder.start_crucible_pantry().boxed()),
-                ),
-                (
-                    "scrimlet_dns_setup",
-                    Box::new(|builder| builder.scrimlet_dns_setup().boxed()),
                 ),
                 (
                     "populate_internal_dns",

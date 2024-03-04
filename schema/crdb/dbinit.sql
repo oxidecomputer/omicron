@@ -73,11 +73,41 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
  * Sleds
  */
 
-CREATE TYPE IF NOT EXISTS omicron.public.sled_provision_state AS ENUM (
-    -- New resources can be provisioned onto the sled
-    'provisionable',
-    -- New resources must not be provisioned onto the sled
-    'non_provisionable'
+-- The disposition for a particular sled. This is updated solely by the
+-- operator, and not by Nexus.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_policy AS ENUM (
+    -- The sled is in service, and new resources can be provisioned onto it.
+    'in_service',
+    -- The sled is in service, but the operator has indicated that new
+    -- resources should not be provisioned onto it.
+    'no_provision',
+    -- The operator has marked that the sled has, or will be, removed from the
+    -- rack, and it should be assumed that any resources currently on it are
+    -- now permanently missing.
+    'expunged'
+);
+
+-- The actual state of the sled. This is updated exclusively by Nexus.
+--
+-- Nexus's goal is to match the sled's state with the operator-indicated
+-- policy. For example, if the sled_policy is "expunged" and the sled_state is
+-- "active", Nexus will assume that the sled is gone. Based on that, Nexus will
+-- reallocate resources currently on the expunged sled to other sleds, etc.
+-- Once the expunged sled no longer has any resources attached to it, Nexus
+-- will mark it as decommissioned.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_state AS ENUM (
+    -- The sled has resources of any kind allocated on it, or, is available for
+    -- new resources.
+    --
+    -- The sled can be in this state and have a different sled policy, e.g.
+    -- "expunged".
+    'active',
+
+    -- The sled no longer has resources allocated on it, now or in the future.
+    --
+    -- This is a terminal state. This state is only valid if the sled policy is
+    -- 'expunged'.
+    'decommissioned'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
@@ -111,8 +141,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* The last address allocated to a propolis instance on this sled. */
     last_used_address INET NOT NULL,
 
-    /* The state of whether resources should be provisioned onto the sled */
-    provision_state omicron.public.sled_provision_state NOT NULL,
+    /* The policy for the sled, updated exclusively by the operator */
+    sled_policy omicron.public.sled_policy NOT NULL,
+
+    /* The actual state of the sled, updated exclusively by Nexus */
+    sled_state omicron.public.sled_state NOT NULL,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.
@@ -1459,6 +1492,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_name_kind_key ON o
     kind
 )
 STORING (vpc_id, subnet_id, is_primary)
+WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index used to verify that all interfaces for a resource (e.g. Instance,
+ * Service) have unique slots.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_slot_key ON omicron.public.network_interface (
+    parent_id,
+    slot
+)
 WHERE
     time_deleted IS NULL;
 
@@ -3085,7 +3129,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- These fields are for debugging only.
     time_created TIMESTAMPTZ NOT NULL,
     creator TEXT NOT NULL,
-    comment TEXT NOT NULL
+    comment TEXT NOT NULL,
+
+    -- identifies the latest internal DNS version when blueprint planning began
+    internal_dns_version INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -3263,7 +3310,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     sled_id UUID NOT NULL,
-    propolis_ip INET NOT NULL
+    propolis_ip INET NOT NULL,
+    propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
 );
 
 /*
@@ -3519,7 +3567,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '34.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '39.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

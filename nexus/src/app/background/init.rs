@@ -174,30 +174,6 @@ impl BackgroundTasks {
             )
         };
 
-        // Background task: inventory collector
-        let task_inventory_collection = {
-            let collector = inventory_collection::InventoryCollector::new(
-                datastore.clone(),
-                resolver.clone(),
-                &nexus_id.to_string(),
-                config.inventory.nkeep,
-                config.inventory.disable,
-            );
-            let task = driver.register(
-                String::from("inventory_collection"),
-                String::from(
-                    "collects hardware and software inventory data from the \
-                    whole system",
-                ),
-                config.inventory.period_secs,
-                Box::new(collector),
-                opctx.child(BTreeMap::new()),
-                vec![],
-            );
-
-            task
-        };
-
         // Background task: phantom disk detection
         let task_phantom_disks = {
             let detector =
@@ -232,7 +208,9 @@ impl BackgroundTasks {
         let blueprint_executor = blueprint_execution::BlueprintExecutor::new(
             datastore.clone(),
             rx_blueprint.clone(),
+            nexus_id.to_string(),
         );
+        let rx_blueprint_exec = blueprint_executor.watcher();
         let task_blueprint_executor = driver.register(
             String::from("blueprint_executor"),
             String::from("Executes the target blueprint"),
@@ -241,6 +219,37 @@ impl BackgroundTasks {
             opctx.child(BTreeMap::new()),
             vec![Box::new(rx_blueprint)],
         );
+
+        // Background task: inventory collector
+        //
+        // This currently depends on the "output" of the blueprint executor in
+        // order to automatically trigger inventory collection whenever the
+        // blueprint executor runs.  In the limit, this could become a problem
+        // because the blueprint executor might also depend indirectly on the
+        // inventory collector.  In that case, we may need to do something more
+        // complicated.  But for now, this works.
+        let task_inventory_collection = {
+            let collector = inventory_collection::InventoryCollector::new(
+                datastore.clone(),
+                resolver.clone(),
+                &nexus_id.to_string(),
+                config.inventory.nkeep,
+                config.inventory.disable,
+            );
+            let task = driver.register(
+                String::from("inventory_collection"),
+                String::from(
+                    "collects hardware and software inventory data from the \
+                    whole system",
+                ),
+                config.inventory.period_secs,
+                Box::new(collector),
+                opctx.child(BTreeMap::new()),
+                vec![Box::new(rx_blueprint_exec)],
+            );
+
+            task
+        };
 
         let task_service_zone_nat_tracker = {
             driver.register(
@@ -647,7 +656,7 @@ pub mod test {
     ) {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         info!(opctx.log, "writing DNS update...");
-        datastore.dns_update(opctx, &conn, update).await.unwrap();
+        datastore.dns_update_incremental(opctx, &conn, update).await.unwrap();
     }
 
     pub(crate) async fn write_test_dns_generation(

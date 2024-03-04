@@ -4,14 +4,16 @@
 
 //! Types representing deployed software and configuration
 //!
-//! For more on this, see the crate-level documentation for `nexus/deployment`.
+//! For more on this, see the crate-level documentation for
+//! `nexus/reconfigurator/planning`.
 //!
 //! This lives in nexus/types because it's used by both nexus/db-model and
-//! nexus/deployment.  (It could as well just live in nexus/db-model, but
-//! nexus/deployment does not currently know about nexus/db-model and it's
-//! convenient to separate these concerns.)
+//! nexus/reconfigurator/planning.  (It could as well just live in
+//! nexus/db-model, but nexus/reconfigurator/planning does not currently know
+//! about nexus/db-model and it's convenient to separate these concerns.)
 
-use crate::external_api::views::SledProvisionState;
+use crate::external_api::views::SledPolicy;
+use crate::external_api::views::SledState;
 use crate::inventory::Collection;
 pub use crate::inventory::NetworkInterface;
 pub use crate::inventory::NetworkInterfaceKind;
@@ -64,8 +66,11 @@ pub struct Policy {
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone)]
 pub struct SledResources {
-    /// provision state of this sled
-    pub provision_state: SledProvisionState,
+    /// current sled policy
+    pub policy: SledPolicy,
+
+    /// current sled state
+    pub state: SledState,
 
     /// zpools on this sled
     ///
@@ -80,11 +85,22 @@ pub struct SledResources {
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
+impl SledResources {
+    /// Returns true if the sled can have services provisioned on it that
+    /// aren't required to be on every sled.
+    ///
+    /// For example, NTP must exist on every sled, but Nexus does not have to.
+    pub fn is_eligible_for_discretionary_services(&self) -> bool {
+        self.policy.is_provisionable()
+            && self.state.is_eligible_for_discretionary_services()
+    }
+}
+
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
 // blueprint completely describes all of the software and configuration
-// that the control plane manages.  See the nexus/deployment crate-level
-// documentation for details.
+// that the control plane manages.  See the nexus/reconfigurator/planning
+// crate-level documentation for details.
 //
 // Blueprints are different from policy.  Policy describes the things that an
 // operator would generally want to control.  The blueprint describes the
@@ -135,6 +151,10 @@ pub struct Blueprint {
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
 
+    /// internal DNS version when this blueprint was created
+    // See blueprint generation for more on this.
+    pub internal_dns_version: Generation,
+
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
     /// identity of the component that generated the blueprint (for debugging)
@@ -161,8 +181,11 @@ impl Blueprint {
         self.omicron_zones.keys().copied()
     }
 
-    /// Summarize the difference between two blueprints
-    pub fn diff<'a>(&'a self, other: &'a Blueprint) -> OmicronZonesDiff<'a> {
+    /// Summarize the difference between sleds and zones between two blueprints
+    pub fn diff_sleds<'a>(
+        &'a self,
+        other: &'a Blueprint,
+    ) -> OmicronZonesDiff<'a> {
         OmicronZonesDiff {
             before_label: format!("blueprint {}", self.id),
             before_zones: self.omicron_zones.clone(),
@@ -173,14 +196,15 @@ impl Blueprint {
         }
     }
 
-    /// Summarize the difference between a collection and a blueprint
+    /// Summarize the differences in sleds and zones between a collection and a
+    /// blueprint
     ///
     /// This gives an idea about what would change about a running system if one
     /// were to execute the blueprint.
     ///
     /// Note that collections do not currently include information about what
     /// zones are in-service, so the caller must provide that information.
-    pub fn diff_from_collection<'a>(
+    pub fn diff_sleds_from_collection<'a>(
         &'a self,
         collection: &'a Collection,
         before_zones_in_service: &'a BTreeSet<Uuid>,
@@ -212,6 +236,8 @@ pub struct BlueprintMetadata {
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
+    /// internal DNS version when this blueprint was created
+    pub internal_dns_version: Generation,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -256,6 +282,7 @@ pub struct OmicronZonesDiff<'a> {
 }
 
 /// Describes a sled that appeared on both sides of a diff (possibly changed)
+#[derive(Debug)]
 pub struct DiffSledCommon<'a> {
     /// id of the sled
     pub sled_id: Uuid,
@@ -615,8 +642,8 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                     f,
                     "+        zone {} type {} underlay IP {} (added)",
                     zone.id,
-                    zone.underlay_address,
                     zone.zone_type.label(),
+                    zone.underlay_address,
                 )?;
             }
         }

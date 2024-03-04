@@ -25,6 +25,4 @@ mod sync_service_zone_nat;
 mod sync_switch_port_settings;
 // mod sync_switch_zone_smf;
 
-pub use common::Driver;
-pub use common::TaskHandle;
 pub use init::BackgroundTasks;

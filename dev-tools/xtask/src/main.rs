@@ -26,26 +26,41 @@ enum Cmds {
     /// workspace
     CheckWorkspaceDeps,
     /// Run configured clippy checks
-    Clippy,
+    Clippy(ClippyArgs),
+}
+
+#[derive(Parser)]
+struct ClippyArgs {
+    /// Automatically apply lint suggestions.
+    #[clap(long)]
+    fix: bool,
 }
 
 fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
-        Cmds::Clippy => cmd_clippy(),
+        Cmds::Clippy(args) => cmd_clippy(args),
         Cmds::CheckWorkspaceDeps => cmd_check_workspace_deps(),
     }
 }
 
-fn cmd_clippy() -> Result<()> {
+fn cmd_clippy(args: ClippyArgs) -> Result<()> {
     let cargo =
         std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
     let mut command = Command::new(&cargo);
+    command.arg("clippy");
+
+    if args.fix {
+        command.arg("--fix");
+    }
+
     command
-        .arg("clippy")
         // Make sure we check everything.
         .arg("--all-targets")
         .arg("--")
+        // For a list of lints, see
+        // https://rust-lang.github.io/rust-clippy/master.
+        //
         // We disallow warnings by default.
         .arg("--deny")
         .arg("warnings")
@@ -53,7 +68,19 @@ fn cmd_clippy() -> Result<()> {
         // override belongs in src/lib.rs, and it is there, but that doesn't
         // reliably work due to rust-lang/rust-clippy#6610.
         .arg("--allow")
-        .arg("clippy::style");
+        .arg("clippy::style")
+        // But continue to warn on anything in the "disallowed_" namespace.
+        // (These will be turned into errors by `--deny warnings` above.)
+        .arg("--warn")
+        .arg("clippy::disallowed_macros")
+        .arg("--warn")
+        .arg("clippy::disallowed_methods")
+        .arg("--warn")
+        .arg("clippy::disallowed_names")
+        .arg("--warn")
+        .arg("clippy::disallowed_script_idents")
+        .arg("--warn")
+        .arg("clippy::disallowed_types");
 
     eprintln!(
         "running: {:?} {}",

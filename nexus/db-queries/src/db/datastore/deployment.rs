@@ -233,7 +233,13 @@ impl DataStore {
 
         // Read the metadata from the primary blueprint row, and ensure that it
         // exists.
-        let (parent_blueprint_id, time_created, creator, comment) = {
+        let (
+            parent_blueprint_id,
+            internal_dns_version,
+            time_created,
+            creator,
+            comment,
+        ) = {
             use db::schema::blueprint::dsl;
 
             let Some(blueprint) = dsl::blueprint
@@ -251,6 +257,7 @@ impl DataStore {
 
             (
                 blueprint.parent_blueprint_id,
+                *blueprint.internal_dns_version,
                 blueprint.time_created,
                 blueprint.creator,
                 blueprint.comment,
@@ -479,6 +486,7 @@ impl DataStore {
             omicron_zones,
             zones_in_service,
             parent_blueprint_id,
+            internal_dns_version,
             time_created,
             creator,
             comment,
@@ -1046,16 +1054,18 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::datastore_test;
-    use nexus_deployment::blueprint_builder::BlueprintBuilder;
-    use nexus_deployment::blueprint_builder::Ensure;
+    use crate::db::datastore::test_utils::datastore_test;
     use nexus_inventory::now_db_precision;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
-    use nexus_types::external_api::views::SledProvisionState;
+    use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use rand::thread_rng;
     use rand::Rng;
@@ -1117,7 +1127,8 @@ mod tests {
             .collect();
         let ip = ip.unwrap_or_else(|| thread_rng().gen::<u128>().into());
         SledResources {
-            provision_state: SledProvisionState::Provisionable,
+            policy: SledPolicy::provisionable(),
+            state: SledState::Active,
             zpools,
             subnet: Ipv6Subnet::new(ip),
         }
@@ -1174,6 +1185,7 @@ mod tests {
         let policy = policy_from_collection(&collection);
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
             &policy,
             "test",
         )
@@ -1207,6 +1219,7 @@ mod tests {
             nexus_inventory::CollectionBuilder::new("test").build();
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
             &EMPTY_POLICY,
             "test",
         )
@@ -1332,10 +1345,16 @@ mod tests {
         policy.sleds.insert(new_sled_id, fake_sled_resources(None));
         let new_sled_zpools = &policy.sleds.get(&new_sled_id).unwrap().zpools;
 
-        // Create a builder for a child blueprint.
-        let mut builder =
-            BlueprintBuilder::new_based_on(&blueprint1, &policy, "test")
-                .expect("failed to create builder");
+        // Create a builder for a child blueprint.  While we're at it, use a
+        // different DNS version to test that that works.
+        let new_dns_version = blueprint1.internal_dns_version.next();
+        let mut builder = BlueprintBuilder::new_based_on(
+            &blueprint1,
+            new_dns_version,
+            &policy,
+            "test",
+        )
+        .expect("failed to create builder");
 
         // Add zones to our new sled.
         assert_eq!(
@@ -1381,8 +1400,9 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        println!("diff: {}", blueprint2.diff(&blueprint_read));
+        println!("diff: {}", blueprint2.diff_sleds(&blueprint_read));
         assert_eq!(blueprint2, blueprint_read);
+        assert_eq!(blueprint2.internal_dns_version, new_dns_version);
         {
             let mut expected_ids = [blueprint1.id, blueprint2.id];
             expected_ids.sort();
@@ -1474,18 +1494,27 @@ mod tests {
             nexus_inventory::CollectionBuilder::new("test").build();
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
             &EMPTY_POLICY,
             "test1",
         )
         .unwrap();
-        let blueprint2 =
-            BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test2")
-                .expect("failed to create builder")
-                .build();
-        let blueprint3 =
-            BlueprintBuilder::new_based_on(&blueprint1, &EMPTY_POLICY, "test3")
-                .expect("failed to create builder")
-                .build();
+        let blueprint2 = BlueprintBuilder::new_based_on(
+            &blueprint1,
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test2",
+        )
+        .expect("failed to create builder")
+        .build();
+        let blueprint3 = BlueprintBuilder::new_based_on(
+            &blueprint1,
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test3",
+        )
+        .expect("failed to create builder")
+        .build();
         assert_eq!(blueprint1.parent_blueprint_id, None);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
         assert_eq!(blueprint3.parent_blueprint_id, Some(blueprint1.id));
@@ -1574,10 +1603,14 @@ mod tests {
 
         // Create a child of blueprint3, and ensure when we set it as the target
         // with enabled=false, that status is serialized.
-        let blueprint4 =
-            BlueprintBuilder::new_based_on(&blueprint3, &EMPTY_POLICY, "test3")
-                .expect("failed to create builder")
-                .build();
+        let blueprint4 = BlueprintBuilder::new_based_on(
+            &blueprint3,
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test3",
+        )
+        .expect("failed to create builder")
+        .build();
         assert_eq!(blueprint4.parent_blueprint_id, Some(blueprint3.id));
         datastore.blueprint_insert(&opctx, &blueprint4).await.unwrap();
         let bp4_target = BlueprintTarget {

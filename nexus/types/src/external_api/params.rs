@@ -96,21 +96,21 @@ pub struct SledSelector {
     pub sled: Uuid,
 }
 
-/// Parameters for `sled_set_provision_state`.
+/// Parameters for `sled_set_provision_policy`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SledProvisionStateParams {
+pub struct SledProvisionPolicyParams {
     /// The provision state.
-    pub state: super::views::SledProvisionState,
+    pub state: super::views::SledProvisionPolicy,
 }
 
-/// Response to `sled_set_provision_state`.
+/// Response to `sled_set_provision_policy`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SledProvisionStateResponse {
+pub struct SledProvisionPolicyResponse {
     /// The old provision state.
-    pub old_state: super::views::SledProvisionState,
+    pub old_state: super::views::SledProvisionPolicy,
 
     /// The new provision state.
-    pub new_state: super::views::SledProvisionState,
+    pub new_state: super::views::SledProvisionPolicy,
 }
 
 pub struct SwitchSelector {
@@ -167,7 +167,7 @@ pub struct OptionalProjectSelector {
     pub project: Option<NameOrId>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Clone)]
 pub struct FloatingIpSelector {
     /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
     pub project: Option<NameOrId>,
@@ -883,11 +883,17 @@ pub struct FloatingIpCreate {
     /// An IP address to reserve for use as a floating IP. This field is
     /// optional: when not set, an address will be automatically chosen from
     /// `pool`. If set, then the IP must be available in the resolved `pool`.
-    pub address: Option<IpAddr>,
+    pub ip: Option<IpAddr>,
 
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 /// The type of resource that a floating IP is attached to

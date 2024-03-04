@@ -59,9 +59,10 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "router_route_kind",
     "saga_state",
     "service_kind",
-    "sled_provision_state",
+    "sled_policy",
     "sled_resource_kind",
     "sled_role",
+    "sled_state",
     "snapshot_state",
     "sp_type",
     "switch_interface_kind",
@@ -78,7 +79,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
 ];
 const CUSTOM_TYPE_SCHEMA: &'static str = "public";
 
-const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
+pub const DISALLOW_FULL_TABLE_SCAN_SQL: &str =
     "set disallow_full_table_scans = on; set large_full_scan_rows = 0;";
 
 #[derive(Debug)]

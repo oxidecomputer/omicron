@@ -1,5 +1,5 @@
 [package]
-name = "nexus-blueprint-execution"
+name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,12 +8,18 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+dns-service-client.workspace = true
 futures.workspace = true
+illumos-utils.workspace = true
+internal-dns.workspace = true
+nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
 nexus-types.workspace = true
+omicron-common.workspace = true
 reqwest.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 uuid.workspace = true
 
 # See omicron-rpaths for more about the "pq-sys" dependency.  This is needed
@@ -26,9 +32,11 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 chrono.workspace = true
 httptest.workspace = true
-nexus-db-model.workspace = true
+ipnet.workspace = true
+nexus-reconfigurator-planning.workspace = true
+nexus-inventory.workspace = true
 nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
-omicron-common.workspace = true
 omicron-nexus.workspace = true
+omicron-test-utils.workspace = true
 tokio.workspace = true

@@ -43,9 +43,10 @@ sled-agent-client.workspace = true
 slog.workspace = true
 static_assertions.workspace = true
 steno.workspace = true
+strum.workspace = true
 swrite.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
+tokio = { workspace = true, features = ["full"] }
 uuid.workspace = true
 usdt.workspace = true
 
@@ -55,6 +56,7 @@ nexus-db-model.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+omicron-uuid-kinds.workspace = true
 oximeter.workspace = true
 omicron-workspace-hack.workspace = true
 
@@ -67,18 +69,18 @@ gateway-client.workspace = true
 illumos-utils.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
-nexus-deployment.workspace = true
 nexus-inventory.workspace = true
+nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 openapiv3.workspace = true
 pem.workspace = true
 petgraph.workspace = true
+predicates.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 rustls.workspace = true
-strum.workspace = true
 subprocess.workspace = true
 term.workspace = true

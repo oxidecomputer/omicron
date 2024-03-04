@@ -17,11 +17,14 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
+use nexus_db_model::to_db_typed_uuid;
 use nexus_types::external_api::params::LoopbackAddressCreate;
 use omicron_common::api::external::{
     CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, ResourceType,
 };
+use omicron_uuid_kinds::LoopbackAddressKind;
+use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
 
 impl DataStore {
@@ -29,7 +32,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         params: &LoopbackAddressCreate,
-        id: Option<Uuid>,
+        id: Option<TypedUuid<LoopbackAddressKind>>,
         authz_address_lot: &authz::AddressLot,
     ) -> CreateResult<LoopbackAddress> {
         use db::schema::loopback_address::dsl;
@@ -130,7 +133,7 @@ impl DataStore {
         self.transaction_retry_wrapper("loopback_address_delete")
             .transaction(&conn, |conn| async move {
                 let la = diesel::delete(dsl::loopback_address)
-                    .filter(dsl::id.eq(id))
+                    .filter(dsl::id.eq(to_db_typed_uuid(id)))
                     .returning(LoopbackAddress::as_returning())
                     .get_result_async(&conn)
                     .await?;
@@ -159,7 +162,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         loopback_dsl::loopback_address
-            .filter(loopback_address::id.eq(id))
+            .filter(loopback_address::id.eq(to_db_typed_uuid(id)))
             .select(LoopbackAddress::as_select())
             .limit(1)
             .first_async::<LoopbackAddress>(&*conn)
