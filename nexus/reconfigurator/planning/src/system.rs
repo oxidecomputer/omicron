@@ -5,13 +5,11 @@
 //! Builders for constructing descriptions of systems (real or synthetic) and
 //! associated inventory collections and blueprints
 
-use crate::blueprint_builder::BlueprintBuilder;
 use anyhow::{anyhow, bail, ensure, Context};
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
-use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::external_api::views::SledPolicy;
@@ -31,7 +29,6 @@ use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
-use omicron_common::api::external::Generation;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
@@ -44,6 +41,22 @@ impl<T> SubnetIterator for T where
 {
 }
 
+/// Describes an actual or synthetic Oxide rack for planning and testing
+///
+/// From this description, you can extract a `Policy` or inventory `Collection`.
+/// There are a few intended purposes here:
+///
+/// 1. to easily construct fake racks in automated tests for the Planner and
+///    other parts of Reconfigurator
+///
+/// 2. to explore the Planner's behavior via the `reconfigurator-cli` tool
+///
+/// 3. eventually: to commonize code between Reconfigurator and RSS.  This is
+///    more speculative at this point, but the idea here is that RSS itself
+///    could construct a `SystemDescription` and then use the facilities here to
+///    assign subnets and maybe even lay out the initial set of zones (which
+///    does not exist here yet).  This way Reconfigurator and RSS are using the
+///    same code to do this.
 #[derive(Debug)]
 pub struct SystemDescription {
     collector: Option<String>,
@@ -157,6 +170,7 @@ impl SystemDescription {
         self
     }
 
+    /// Add a sled to the system, as described by a SledBuilder
     pub fn sled(&mut self, sled: SledBuilder) -> anyhow::Result<&mut Self> {
         let sled_id = sled.id.unwrap_or_else(Uuid::new_v4);
         ensure!(
@@ -205,6 +219,8 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Add a sled to the system based on information that came from the
+    /// database of an existing system
     pub fn sled_full(
         &mut self,
         sled_id: Uuid,
@@ -281,16 +297,6 @@ impl SystemDescription {
             target_nexus_zone_count: self.target_nexus_zone_count,
         })
     }
-
-    pub fn to_blueprint(&self, creator: &str) -> anyhow::Result<Blueprint> {
-        BlueprintBuilder::build_initial_from_collection(
-            &self.to_collection()?,
-            Generation::new(),
-            &self.to_policy()?,
-            creator,
-        )
-        .context("building blueprint for synthetic system")
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -312,6 +318,7 @@ pub struct SledBuilder {
 }
 
 impl SledBuilder {
+    /// Begin describing a sled to be added to a `SystemDescription`
     pub fn new() -> Self {
         SledBuilder {
             id: None,
@@ -323,11 +330,18 @@ impl SledBuilder {
         }
     }
 
+    /// Set the id of the sled
+    ///
+    /// Default: randomly generated
     pub fn id(mut self, id: Uuid) -> Self {
         self.id = Some(id);
         self
     }
 
+    /// Set a unique string used to generate the serial number and other
+    /// identifiers
+    ///
+    /// Default: randomly generated
     pub fn unique<S>(mut self, unique: S) -> Self
     where
         String: From<S>,
@@ -336,27 +350,39 @@ impl SledBuilder {
         self
     }
 
+    /// Set the number of U.2 (external) pools this sled should have
+    ///
+    /// Default is currently `10` based on the typical value for a Gimlet
     pub fn npools(mut self, npools: u8) -> Self {
         self.npools = npools;
         self
     }
 
+    /// Sets what type of hardware this sled uses
+    ///
+    /// Default: `SledHarware::Gimlet`
     pub fn hardware(mut self, hardware: SledHardware) -> Self {
         self.hardware = hardware;
         self
     }
 
+    /// Sets which cubby in the rack the sled is in
+    ///
+    /// Default: determined based on sled role and unused slots
     pub fn hardware_slot(mut self, hardware_slot: u16) -> Self {
         self.hardware_slot = Some(hardware_slot);
         self
     }
 
+    /// Sets whether this sled is attached to a switch (`SledRole::Scrimlet`) or
+    /// not (`SledRole::Gimlet`)
     pub fn sled_role(mut self, sled_role: SledRole) -> Self {
         self.sled_role = sled_role;
         self
     }
 }
 
+/// Convenience structure summarizing `Sled` inputs that come from inventory
 #[derive(Debug)]
 pub struct SledHwInventory<'a> {
     pub baseboard_id: &'a BaseboardId,
@@ -364,6 +390,9 @@ pub struct SledHwInventory<'a> {
     pub rot: &'a nexus_types::inventory::RotState,
 }
 
+/// Our abstract description of a `Sled`
+///
+/// This needs to be rich enough to generate a Policy and inventory Collection.
 #[derive(Clone, Debug)]
 struct Sled {
     sled_id: Uuid,
@@ -375,6 +404,7 @@ struct Sled {
 }
 
 impl Sled {
+    /// Create a `Sled` using faked-up information based on a `SledBuilder`
     fn new_simulated(
         sled_id: Uuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
@@ -461,6 +491,8 @@ impl Sled {
         }
     }
 
+    /// Create a `Sled` based on real information from another `Policy` and
+    /// inventory `Collection`
     fn new_full(
         sled_id: Uuid,
         sled_resources: SledResources,

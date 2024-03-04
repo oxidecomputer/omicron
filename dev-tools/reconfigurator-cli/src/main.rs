@@ -29,7 +29,7 @@ struct ReconfiguratorSim {
     /// describes the sleds in the system
     ///
     /// This resembles what we get from the `sled` table in a real system.  It
-    /// also contains enough information to generate inventory collectinos that
+    /// also contains enough information to generate inventory collections that
     /// describe the system.
     system: SystemDescription,
 

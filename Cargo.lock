@@ -4488,7 +4488,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "gateway-client",
- "illumos-utils",
  "indexmap 2.2.3",
  "internal-dns",
  "ipnet",
