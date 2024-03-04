@@ -18,12 +18,10 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 reedline.workspace = true
 serde_json.workspace = true
-serde.workspace = true
 slog-error-chain.workspace = true
 slog.workspace = true
 swrite.workspace = true
 tabled.workspace = true
-textwrap.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
