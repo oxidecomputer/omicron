@@ -266,9 +266,7 @@ impl SystemDescription {
             .values()
             .map(|sled| {
                 let sled_resources = SledResources {
-                    policy: SledPolicy::InService {
-                        provision_policy: SledProvisionPolicy::Provisionable,
-                    },
+                    policy: sled.policy,
                     state: SledState::Active,
                     zpools: sled.zpools.iter().cloned().collect(),
                     subnet: sled.sled_subnet,
@@ -373,6 +371,7 @@ struct Sled {
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: sled_agent_client::types::Inventory,
     zpools: Vec<ZpoolName>,
+    policy: SledPolicy,
 }
 
 impl Sled {
@@ -456,6 +455,9 @@ impl Sled {
             inventory_sp,
             inventory_sled_agent,
             zpools,
+            policy: SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            },
         }
     }
 
@@ -465,13 +467,14 @@ impl Sled {
         inventory_sp: Option<SledHwInventory<'_>>,
         inv_sled_agent: &nexus_types::inventory::SledAgent,
     ) -> Sled {
-        // XXX-dap ignoring the provision state here
-
-        // XXX-dap kind of janky that we have to work backwards here: faking up
-        // sled_agent_client types for given inventory types.  This process is
-        // also lossy, though it doesn't matter since we're only trying to go
-        // back to the inventory type anyway.
-
+        // Elsewhere, the user gives us some rough parameters (like a unique
+        // string) that we use to construct fake `sled_agent_client` types that
+        // we can provide to the inventory builder so that _it_ can construct
+        // the corresponding inventory types.  Here, we're working backwards,
+        // which is a little weird: we're given inventory types and we construct
+        // the fake `sled_agent_client` types, again so that we can later pass
+        // them to the inventory builder so that it can construct the same
+        // inventory types again.  This is a little goofy.
         let baseboard = inventory_sp
             .as_ref()
             .map(|sledhw| sled_agent_client::types::Baseboard::Gimlet {
@@ -530,6 +533,7 @@ impl Sled {
             zpools: sled_resources.zpools.into_iter().collect(),
             inventory_sp,
             inventory_sled_agent,
+            policy: sled_resources.policy,
         }
     }
 
