@@ -4,7 +4,7 @@
 
 //! Execution of Nexus blueprints
 //!
-//! See `nexus_deployment` crate-level docs for background.
+//! See `nexus_reconfigurator_planning` crate-level docs for background.
 
 use anyhow::{anyhow, Context};
 use nexus_db_queries::context::OpContext;
@@ -19,6 +19,7 @@ use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
+mod datasets;
 mod dns;
 mod omicron_zones;
 mod resource_allocation;
@@ -89,6 +90,14 @@ where
     omicron_zones::deploy_zones(&opctx, &sleds_by_id, &blueprint.omicron_zones)
         .await?;
 
+    datasets::ensure_crucible_dataset_records_exist(
+        &opctx,
+        datastore,
+        blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
+    )
+    .await
+    .map_err(|err| vec![err])?;
+
     dns::deploy_dns(
         &opctx,
         datastore,
@@ -97,5 +106,7 @@ where
         &sleds_by_id,
     )
     .await
-    .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])
+    .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;
+
+    Ok(())
 }

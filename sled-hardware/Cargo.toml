@@ -19,6 +19,7 @@ rand.workspace = true
 schemars.workspace = true
 serde.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 thiserror.workspace = true
 tofino.workspace = true
 tokio.workspace = true

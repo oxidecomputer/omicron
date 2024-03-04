@@ -1914,8 +1914,8 @@ impl DataStoreInventoryTest for DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::datastore_test;
     use crate::db::datastore::inventory::DataStoreInventoryTest;
+    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::DataStoreConnection;
     use crate::db::schema;
     use anyhow::Context;

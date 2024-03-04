@@ -9,8 +9,8 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
-use nexus_deployment::blueprint_builder::BlueprintBuilder;
-use nexus_deployment::planner::Planner;
+use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::planner::Planner;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
@@ -160,7 +160,8 @@ impl super::Nexus {
                     .remove(&sled_id)
                     .unwrap_or_else(BTreeSet::new);
                 let sled_info = SledResources {
-                    provision_state: sled_row.provision_state().into(),
+                    policy: sled_row.policy(),
+                    state: sled_row.state().into(),
                     subnet,
                     zpools,
                 };

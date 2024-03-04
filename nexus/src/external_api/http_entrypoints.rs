@@ -7,10 +7,10 @@
 use super::{
     console_api, device_auth, params,
     views::{
-        self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
-        Sled, Snapshot, SshKey, User, UserBuiltin, Utilization, Vpc, VpcRouter,
-        VpcSubnet,
+        self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
+        IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
+        SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
+        Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
@@ -141,6 +141,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(floating_ip_list)?;
         api.register(floating_ip_create)?;
         api.register(floating_ip_view)?;
+        api.register(floating_ip_update)?;
         api.register(floating_ip_delete)?;
         api.register(floating_ip_attach)?;
         api.register(floating_ip_detach)?;
@@ -225,7 +226,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(rack_view)?;
         api.register(sled_list)?;
         api.register(sled_view)?;
-        api.register(sled_set_provision_state)?;
+        api.register(sled_set_provision_policy)?;
         api.register(sled_instance_list)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
@@ -1917,6 +1918,43 @@ async fn floating_ip_create(
             .floating_ip_create(&opctx, &project_lookup, floating_params)
             .await?;
         Ok(HttpResponseCreated(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update floating IP
+#[endpoint {
+    method = PUT,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    updated_floating_ip: TypedBody<params::FloatingIpUpdate>,
+) -> Result<HttpResponseOk<FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let updated_floating_ip_params = updated_floating_ip.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let floating_ip_selector = params::FloatingIpSelector {
+            project: query.project,
+            floating_ip: path.floating_ip,
+        };
+        let floating_ip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+        let floating_ip = nexus
+            .floating_ip_update(
+                &opctx,
+                floating_ip_lookup,
+                updated_floating_ip_params,
+            )
+            .await?;
+        Ok(HttpResponseOk(floating_ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4088,12 +4126,10 @@ async fn instance_ephemeral_ip_attach(
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
         let ip = nexus
-            .instance_attach_external_ip(
+            .instance_attach_ephemeral_ip(
                 &opctx,
                 &instance_lookup,
-                &params::ExternalIpCreate::Ephemeral {
-                    pool: ip_to_create.into_inner().pool,
-                },
+                ip_to_create.into_inner().pool,
             )
             .await?;
         Ok(HttpResponseAccepted(ip))
@@ -5166,38 +5202,34 @@ async fn sled_view(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Set sled provision state
+/// Set sled provision policy
 #[endpoint {
     method = PUT,
-    path = "/v1/system/hardware/sleds/{sled_id}/provision-state",
+    path = "/v1/system/hardware/sleds/{sled_id}/provision-policy",
     tags = ["system/hardware"],
 }]
-async fn sled_set_provision_state(
+async fn sled_set_provision_policy(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<params::SledPath>,
-    new_provision_state: TypedBody<params::SledProvisionStateParams>,
-) -> Result<HttpResponseOk<params::SledProvisionStateResponse>, HttpError> {
+    new_provision_state: TypedBody<params::SledProvisionPolicyParams>,
+) -> Result<HttpResponseOk<params::SledProvisionPolicyResponse>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.nexus;
 
         let path = path_params.into_inner();
-        let provision_state = new_provision_state.into_inner().state;
+        let new_state = new_provision_state.into_inner().state;
 
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        // Convert the external `SledProvisionState` into our internal data model.
-        let new_state = db::model::SledProvisionState::from(provision_state);
 
         let sled_lookup = nexus.sled_lookup(&opctx, &path.sled_id)?;
 
         let old_state = nexus
-            .sled_set_provision_state(&opctx, &sled_lookup, new_state)
+            .sled_set_provision_policy(&opctx, &sled_lookup, new_state)
             .await?;
 
-        let response = params::SledProvisionStateResponse {
-            old_state: old_state.into(),
-            new_state: new_state.into(),
-        };
+        let response =
+            params::SledProvisionPolicyResponse { old_state, new_state };
 
         Ok(HttpResponseOk(response))
     };

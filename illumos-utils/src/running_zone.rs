@@ -888,7 +888,7 @@ impl RunningZone {
 
     /// Return references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
-        self.inner.opte_ports.iter().map(|(port, _)| port)
+        self.inner.opte_ports()
     }
 
     /// Remove the OPTE ports on this zone from the port manager.
@@ -1129,6 +1129,11 @@ impl InstalledZone {
         let mut path: Utf8PathBuf = self.zonepath().into();
         path.push("root/var/svc/profile/site.xml");
         path
+    }
+
+    /// Returns references to the OPTE ports for this zone.
+    pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
+        self.opte_ports.iter().map(|(port, _)| port)
     }
 }
 

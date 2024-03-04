@@ -137,10 +137,10 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::datastore_test;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
+    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
     use dropshot::PaginationOrder;
     use nexus_db_model::Generation;
@@ -165,6 +165,7 @@ mod test {
         db.sled_upsert(sled_update)
             .await
             .expect("Could not upsert sled during test prep")
+            .unwrap()
     }
 
     fn list_disk_params() -> DataPageParams<'static, Uuid> {

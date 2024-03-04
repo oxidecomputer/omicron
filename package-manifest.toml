@@ -120,7 +120,7 @@ setup_hint = """
 service_name = "oximeter"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 [package.oximeter-collector]
@@ -140,7 +140,12 @@ output.intermediate_only = true
 service_name = "clickhouse"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "clickhouse_svc.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [
+  "clickhouse_svc.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
 output.type = "zone"
 
 [package.clickhouse_svc]
@@ -161,7 +166,12 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "clickhouse_keeper"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "clickhouse_keeper_svc.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [
+  "clickhouse_keeper_svc.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
 output.type = "zone"
 
 [package.clickhouse_keeper_svc]
@@ -182,7 +192,12 @@ setup_hint = "Run `./tools/ci_download_clickhouse` to download the necessary bin
 service_name = "cockroachdb"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "cockroachdb-service.tar.gz", "internal-dns-cli.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ 
+  "cockroachdb-service.tar.gz",
+  "internal-dns-cli.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
 output.type = "zone"
 
 [package.cockroachdb-service]
@@ -220,7 +235,13 @@ output.type = "zone"
 service_name = "external_dns"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "dns-server.tar.gz", "external-dns-customizations.tar.gz" ]
+source.packages = [ 
+  "dns-server.tar.gz",
+  "external-dns-customizations.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz",
+  "opte-interface-setup.tar.gz"
+]
 output.type = "zone"
 
 [package.dns-server]
@@ -393,7 +414,7 @@ output.intermediate_only = true
 service_name = "crucible"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "crucible.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ "crucible.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 
@@ -401,7 +422,7 @@ output.type = "zone"
 service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "crucible-pantry.tar.gz", "zone-network-setup.tar.gz" ]
+source.packages = [ "crucible-pantry.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 # Packages not built within Omicron, but which must be imported.
@@ -420,10 +441,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "fe0c5c7909707a0f826025be4fe2bbf5f6e0206f"
+source.commit = "1c1574fb721f98f2df1b23e3fd27d83be018882e"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "5da4f93b16fc7c0f3cc3a67919dbaa3f143cc07b703183a236f5c98b61504d15"
+source.sha256 = "a14ce9d6b17c6c8427d526e044bb1196ee81316674936873ac9dc1d7ca51459d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -432,10 +453,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "fe0c5c7909707a0f826025be4fe2bbf5f6e0206f"
+source.commit = "1c1574fb721f98f2df1b23e3fd27d83be018882e"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "ed5027cc37c5ba4f2b9a568528f5bb49deedccaaa60bd770311c7bface6aa02b"
+source.sha256 = "8839a3748cd2926f61244c99344d0802e59ea4673a5f31a2aaad5d759176aa80"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -447,10 +468,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d"
+source.commit = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "0203b7f702377c877c4132851ca102d68cd8fd2c20e4fd5b59d950cbb07fd9ff"
+source.sha256 = "7998a71c4e905a4bf9ef2d2863b7695d0bb4d1b34322aa3ce20d173d4a7ee77a"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -463,10 +484,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "41a69a11db6cfa8fc0c8686dc2d725708e0586ce"
+source.commit = "4b0e584eec455a43c36af08ae207086965cef833"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
-source.sha256 = "19d5eaa744257c32ccdca52af79d718aeb88a0af188345d33a4564a69b259632"
+source.sha256 = "f1407cb9aac188d6493d2b0f948c75aad2c36668ddf4ae2a1ed80e9dd395b35d"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -479,10 +500,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "41a69a11db6cfa8fc0c8686dc2d725708e0586ce"
+source.commit = "4b0e584eec455a43c36af08ae207086965cef833"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "ffb647b3297ec616d3d9ea93396ad9edd16ed146048a660b34e9b86e85d466b7"
+source.sha256 = "fae53cb39536dc92d97cb9610de65b0acbce285e685d7167b719ea6311844fec"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -494,10 +515,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "41a69a11db6cfa8fc0c8686dc2d725708e0586ce"
+source.commit = "4b0e584eec455a43c36af08ae207086965cef833"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "26d34f61589f63be64eaa77a6e9e2db4c95d6675798386a1d61721c1ccc59d4d"
+source.sha256 = "22996a6f3353296b848be729f14e78a42e7d3d6e62a4a918a5c2358ae011c8eb"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -643,14 +664,31 @@ source.packages = [
 ]
 output.type = "zone"
 
-[package.zone-network-setup]
+[package.zone-network-install]
 service_name = "zone-network-setup"
+only_for_targets.image = "standard"
+source.type = "local"
+source.paths = [
+    { from = "smf/zone-network-setup/manifest.xml", to = "/var/svc/manifest/site/zone-network-setup/manifest.xml" },
+]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.zone-network-setup]
+service_name = "zone-network-cli"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["zone-networking"]
 source.rust.release = true
+output.type = "zone"
+output.intermediate_only = true
+
+[package.opte-interface-setup]
+service_name = "opte-interface-setup"
+only_for_targets.image = "standard"
+source.type = "local"
 source.paths = [
-    { from = "smf/zone-network-setup/manifest.xml", to = "/var/svc/manifest/site/zone-network-setup/manifest.xml" },
+    { from = "smf/opte-interface-setup/manifest.xml", to = "/var/svc/manifest/site/opte-interface-setup/manifest.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true

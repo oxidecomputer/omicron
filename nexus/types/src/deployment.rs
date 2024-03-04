@@ -4,14 +4,16 @@
 
 //! Types representing deployed software and configuration
 //!
-//! For more on this, see the crate-level documentation for `nexus/deployment`.
+//! For more on this, see the crate-level documentation for
+//! `nexus/reconfigurator/planning`.
 //!
 //! This lives in nexus/types because it's used by both nexus/db-model and
-//! nexus/deployment.  (It could as well just live in nexus/db-model, but
-//! nexus/deployment does not currently know about nexus/db-model and it's
-//! convenient to separate these concerns.)
+//! nexus/reconfigurator/planning.  (It could as well just live in
+//! nexus/db-model, but nexus/reconfigurator/planning does not currently know
+//! about nexus/db-model and it's convenient to separate these concerns.)
 
-use crate::external_api::views::SledProvisionState;
+use crate::external_api::views::SledPolicy;
+use crate::external_api::views::SledState;
 use crate::inventory::Collection;
 pub use crate::inventory::NetworkInterface;
 pub use crate::inventory::NetworkInterfaceKind;
@@ -64,8 +66,11 @@ pub struct Policy {
 /// Describes the resources available on each sled for the planner
 #[derive(Debug, Clone)]
 pub struct SledResources {
-    /// provision state of this sled
-    pub provision_state: SledProvisionState,
+    /// current sled policy
+    pub policy: SledPolicy,
+
+    /// current sled state
+    pub state: SledState,
 
     /// zpools on this sled
     ///
@@ -80,11 +85,22 @@ pub struct SledResources {
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
+impl SledResources {
+    /// Returns true if the sled can have services provisioned on it that
+    /// aren't required to be on every sled.
+    ///
+    /// For example, NTP must exist on every sled, but Nexus does not have to.
+    pub fn is_eligible_for_discretionary_services(&self) -> bool {
+        self.policy.is_provisionable()
+            && self.state.is_eligible_for_discretionary_services()
+    }
+}
+
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
 // blueprint completely describes all of the software and configuration
-// that the control plane manages.  See the nexus/deployment crate-level
-// documentation for details.
+// that the control plane manages.  See the nexus/reconfigurator/planning
+// crate-level documentation for details.
 //
 // Blueprints are different from policy.  Policy describes the things that an
 // operator would generally want to control.  The blueprint describes the
@@ -266,6 +282,7 @@ pub struct OmicronZonesDiff<'a> {
 }
 
 /// Describes a sled that appeared on both sides of a diff (possibly changed)
+#[derive(Debug)]
 pub struct DiffSledCommon<'a> {
     /// id of the sled
     pub sled_id: Uuid,
