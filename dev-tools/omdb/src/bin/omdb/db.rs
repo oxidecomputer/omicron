@@ -3133,6 +3133,8 @@ impl LongStringFormatter {
 
 // Reconfigurator
 
+/// Packages up database state that's used as input to the Reconfigurator
+/// planner into a file so that it can be loaded into `reconfigurator-cli`
 async fn cmd_db_reconfigurator_save(
     opctx: &OpContext,
     datastore: &DataStore,

@@ -5129,6 +5129,7 @@ dependencies = [
  "anyhow",
  "async-bb8-diesel",
  "camino",
+ "camino-tempfile",
  "chrono",
  "clap 4.5.0",
  "crossterm",
@@ -6937,13 +6938,11 @@ dependencies = [
  "omicron-rpaths",
  "omicron-workspace-hack",
  "reedline",
- "serde",
  "serde_json",
  "slog",
  "slog-error-chain",
  "swrite",
  "tabled",
- "textwrap 0.16.1",
  "uuid",
 ]
 
