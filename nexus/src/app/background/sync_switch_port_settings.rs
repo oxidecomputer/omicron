@@ -243,7 +243,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     .await
                 {
                     Ok(addrs) => addrs,
-                    Err(_) => todo!("handle error"),
+                    Err(e) => {
+                        error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                        continue;
+                    },
                 };
 
                 // TODO in the future this will need to be need to be done per rack
@@ -264,7 +267,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 let port_list = match self.switch_ports(opctx, log).await {
                     Ok(value) => value,
-                    Err(_) => todo!("handle error"),
+                    Err(e) => {
+                        error!(log, "failed to generate switchports for rack"; "error" => %e);
+                        continue;
+                    },
                 };
 
                 //
@@ -273,7 +279,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 let changes = match self.changes(port_list, opctx, log).await {
                     Ok(value) => value,
-                    Err(_) => todo!("handle error"),
+                    Err(e) => {
+                        error!(log, "failed to generate changeset for switchport settings"; "error" => %e);
+                        continue;
+                    },
                 };
 
                 apply_switch_port_changes(dpd_clients, &changes, log).await;
@@ -323,7 +332,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     let client: &sled_agent_client::Client =
                         match sled_agent_clients.get(location) {
                             Some(client) => client,
-                            None => todo!("handle missing client"),
+                            None => {
+                                error!(log, "sled-agent client is missing, cannot send updates"; "location" => %location);
+                                continue;
+                            },
                         };
 
                     info!(
@@ -332,13 +344,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         "switch_location" => ?location,
                         "config" => ?config,
                     );
-                    if let Err(_) = client
+                    if let Err(e) = client
                         .uplink_ensure(&sled_agent_client::types::SwitchPorts {
                             uplinks: config.clone(),
                         })
                         .await
                     {
-                        todo!("handle error")
+                        error!(
+                            log,
+                            "error while applying smf updates to switch zone";
+                            "location" => %location,
+                            "error" => %e,
+                        );
                     }
                 }
 
@@ -398,7 +415,16 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                     .await
                                 {
                                     Ok(config) => config,
-                                    Err(_) => todo!(),
+                                    Err(e) => {
+                                        error!(
+                                            log,
+                                            "error while fetching bgp peer config from db";
+                                            "location" => %location,
+                                            "port_name" => %port.port_name,
+                                            "error" => %e,
+                                        );
+                                        continue;
+                                    },
                                 };
                                 vacant_entry.insert((bgp_config_id, config.clone()));
                                 config
@@ -425,7 +451,16 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 .await
                             {
                                 Ok(a) => a,
-                                Err(_) => todo!(),
+                                Err(e) => {
+                                    error!(
+                                        log,
+                                        "error while fetching bgp announcements from db";
+                                        "location" => %location,
+                                        "bgp_announce_set_id" => %bgp_config.bgp_announce_set_id,
+                                        "error" => %e,
+                                    );
+                                    continue;
+                                },
                             };
 
                             let mut prefixes: Vec<Prefix4> = vec![];
@@ -600,7 +635,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }).collect();
 
-                // TODO: This is what is remaining to build the message
                 let mut ports: Vec<PortConfigV1> = vec![];
 
                 for (location, port, change) in &changes {
@@ -692,7 +726,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         .bump_bootstore_generation(opctx, NETWORK_KEY.into())
                         .await {
                         Ok(value) => value,
-                            Err(_) => todo!(),
+                            Err(e) => {
+                                error!(
+                                    log,
+                                    "error while fetching next bootstore generation from db";
+                                    "key" => %NETWORK_KEY,
+                                    "error" => %e,
+                                );
+                                continue;
+                            },
                         };
 
                     upstream_config.generation = generation as u64;
@@ -705,9 +747,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
-                    for (_location, client) in &sled_agent_clients {
-                        if let Err(_) = client.write_network_bootstore_config(&upstream_config).await {
-                            todo!()
+                    for (location, client) in &sled_agent_clients {
+                        if let Err(e) = client.write_network_bootstore_config(&upstream_config).await {
+                            error!(
+                                log,
+                                "error updating bootstore";
+                                "location" => %location,
+                                "config" => ?upstream_config,
+                                "error" => %e,
+                            )
                         }
                     }
                 }
@@ -752,25 +800,28 @@ fn build_mgd_clients(
     mappings: HashMap<SwitchLocation, std::net::Ipv6Addr>,
     log: &slog::Logger,
 ) -> HashMap<SwitchLocation, mg_admin_client::Client> {
-    let mgd_clients: HashMap<SwitchLocation, mg_admin_client::Client> =
-        mappings
-            .iter()
-            .map(|(location, addr)| {
-                let port = MGD_PORT;
-                let socketaddr = std::net::SocketAddr::V6(SocketAddrV6::new(
-                    *addr, port, 0, 0,
-                ));
-                let client = match mg_admin_client::Client::new(
-                    &log.clone(),
-                    socketaddr,
-                ) {
-                    Ok(client) => client,
-                    Err(_) => todo!(),
-                };
-                (*location, client)
-            })
-            .collect();
-    mgd_clients
+    let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> = vec![];
+    for (location, addr) in &mappings {
+        let port = MGD_PORT;
+        let socketaddr =
+            std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
+        let client =
+            match mg_admin_client::Client::new(&log.clone(), socketaddr) {
+                Ok(client) => client,
+                Err(e) => {
+                    error!(
+                        log,
+                        "error building mgd client";
+                        "location" => %location,
+                        "addr" => %addr,
+                        "error" => %e,
+                    );
+                    continue;
+                }
+            };
+        clients.push((*location, client));
+    }
+    clients.into_iter().collect::<HashMap<_, _>>()
 }
 
 fn build_dpd_clients(
