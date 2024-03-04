@@ -9,7 +9,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
-use nexus_reconfigurator_planning::policy_from_db;
+use nexus_reconfigurator_preparation::policy_from_db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;

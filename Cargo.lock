@@ -4492,7 +4492,6 @@ dependencies = [
  "internal-dns",
  "ipnet",
  "ipnetwork",
- "nexus-db-model",
  "nexus-inventory",
  "nexus-types",
  "omicron-common",
@@ -4502,6 +4501,17 @@ dependencies = [
  "slog",
  "thiserror",
  "uuid",
+]
+
+[[package]]
+name = "nexus-reconfigurator-preparation"
+version = "0.1.0"
+dependencies = [
+ "illumos-utils",
+ "nexus-db-model",
+ "nexus-types",
+ "omicron-common",
+ "omicron-workspace-hack",
 ]
 
 [[package]]
@@ -5042,6 +5052,7 @@ dependencies = [
  "nexus-inventory",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
+ "nexus-reconfigurator-preparation",
  "nexus-test-interface",
  "nexus-test-utils",
  "nexus-test-utils-macros",
@@ -5137,7 +5148,7 @@ dependencies = [
  "nexus-client",
  "nexus-db-model",
  "nexus-db-queries",
- "nexus-reconfigurator-planning",
+ "nexus-reconfigurator-preparation",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",
@@ -6924,7 +6935,6 @@ dependencies = [
  "omicron-common",
  "omicron-rpaths",
  "omicron-workspace-hack",
- "pq-sys",
  "reedline",
  "serde",
  "serde_json",

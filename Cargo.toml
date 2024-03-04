@@ -46,6 +46,7 @@ members = [
     "nexus/macros-common",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
+    "nexus/reconfigurator/preparation",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -124,6 +125,7 @@ default-members = [
     "nexus/inventory",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
+    "nexus/reconfigurator/preparation",
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
@@ -263,6 +265,7 @@ nexus-inventory = { path = "nexus/inventory" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
+nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"

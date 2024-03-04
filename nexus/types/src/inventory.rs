@@ -50,10 +50,6 @@ use uuid::Uuid;
 /// database.
 ///
 /// See the documentation in the database schema for more background.
-// XXX-dap when we deserialize one of these, do we wind up with duplicate
-// BaseboardIds that should be referencing the same Arc<BaseboardId>?
-// XXX-dap does this serde_as thing work the way we think for the cases with
-// nested maps
 #[serde_as]
 #[derive(Debug, Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct Collection {
