@@ -6923,7 +6923,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "reconfigurator"
+name = "reconfigurator-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",

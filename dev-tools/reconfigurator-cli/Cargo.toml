@@ -1,5 +1,5 @@
 [package]
-name = "reconfigurator"
+name = "reconfigurator-cli"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -30,5 +30,5 @@ omicron-workspace-hack.workspace = true
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.
 [[bin]]
-name = "reconfigurator"
+name = "reconfigurator-cli"
 doc = false
