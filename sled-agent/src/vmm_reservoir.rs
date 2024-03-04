@@ -75,7 +75,7 @@ pub struct VmmReservoirManagerHandle {
     reservoir_size: Arc<AtomicU64>,
     tx: flume::Sender<ReservoirManagerMsg>,
     // A notification channel indicating that the size of the VMM reservoir has
-    // changed We use a broadcast channel instead of a `Notify` to prevent lost
+    // changed. We use a broadcast channel instead of a `Notify` to prevent lost
     // updates with multiple receivers. Importantly, a `RecvError::Lagged` is
     // just as valuable as an `Ok(())`, and so this acts as a pure notification
     // channel.
