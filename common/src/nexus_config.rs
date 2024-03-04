@@ -405,7 +405,9 @@ pub struct SyncServiceZoneNatConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SwitchPortSettingsManagerConfig {
-    /// period (in seconds) for periodic activations of this background task
+    /// Interval (in seconds) for periodic activations of this background task.
+    /// This task is also activated on-demand when any of the switch port settings
+    /// api endpoints are called.
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
 }

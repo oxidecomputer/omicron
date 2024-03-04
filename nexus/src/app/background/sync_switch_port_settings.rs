@@ -706,14 +706,12 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                // check to see if our config is different(?)
                 // we currently are not caching the last sent bootstore config, so we have to build
                 // it every time and compare.
 
                 let bootstore_needs_update = {
                     match downstream_config {
                         Some(ref existing_config) => {
-                            existing_config.schema_version != upstream_config.schema_version ||
                             existing_config.body.ntp_servers != upstream_config.body.ntp_servers ||
                             existing_config.body.rack_network_config != upstream_config.body.rack_network_config
                         },
