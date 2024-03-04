@@ -6,9 +6,10 @@
 //! associated inventory collections and blueprints
 
 use crate::blueprint_builder::BlueprintBuilder;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{anyhow, bail, ensure, Context};
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
+use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
@@ -46,7 +47,7 @@ impl<T> SubnetIterator for T where
 #[derive(Debug)]
 pub struct SystemDescription {
     collector: Option<String>,
-    sleds: Vec<Sled>,
+    sleds: IndexMap<Uuid, Sled>,
     sled_subnets: Box<dyn SubnetIterator>,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
@@ -71,7 +72,6 @@ impl SystemDescription {
         //
         // We use `BTreeSet` because it efficiently expresses what we want,
         // though the set sizes are small enough that it doesn't much matter.
-        // XXX-dap are these constants defined somewhere?
         let available_scrimlet_slots: BTreeSet<u16> = BTreeSet::from([14, 16]);
         let available_non_scrimlet_slots: BTreeSet<u16> = (0..=31)
             .collect::<BTreeSet<_>>()
@@ -85,8 +85,8 @@ impl SystemDescription {
         let rack_subnet =
             ipnet::Ipv6Net::new(rack_subnet_base, RACK_PREFIX).unwrap();
         // Skip the initial DNS subnet.
-        // XXX-dap should this be documented somewhere with a constant?  RSS
-        // seems to hardcode it in sled-agent/src/rack_setup/plan/sled.rs.
+        // (The same behavior is replicated in RSS in `Plan::create()` in
+        // sled-agent/src/rack_setup/plan/sled.rs.)
         let sled_subnets = Box::new(
             rack_subnet
                 .subnets(SLED_PREFIX)
@@ -105,7 +105,7 @@ impl SystemDescription {
         .unwrap()];
 
         SystemDescription {
-            sleds: Vec::new(),
+            sleds: IndexMap::new(),
             collector: None,
             sled_subnets,
             available_non_scrimlet_slots,
@@ -158,6 +158,12 @@ impl SystemDescription {
     }
 
     pub fn sled(&mut self, sled: SledBuilder) -> anyhow::Result<&mut Self> {
+        let sled_id = sled.id.unwrap_or_else(Uuid::new_v4);
+        ensure!(
+            !self.sleds.contains_key(&sled_id),
+            "attempted to add sled with the same id as an existing one: {}",
+            sled_id
+        );
         let sled_subnet = self
             .sled_subnets
             .next()
@@ -186,7 +192,6 @@ impl SystemDescription {
                 .ok_or_else(|| anyhow!("ran out of slots for non-Scrimlets"))?
         };
 
-        let sled_id = sled.id.unwrap_or_else(Uuid::new_v4);
         let sled = Sled::new_simulated(
             sled_id,
             sled_subnet,
@@ -196,12 +201,10 @@ impl SystemDescription {
             hardware_slot,
             sled.npools,
         );
-        // XXX-dap what if one by this id already exists
-        self.sleds.push(sled);
+        self.sleds.insert(sled_id, sled);
         Ok(self)
     }
 
-    // XXX-dap what if one by this id already exists
     pub fn sled_full(
         &mut self,
         sled_id: Uuid,
@@ -209,12 +212,20 @@ impl SystemDescription {
         inventory_sp: Option<SledHwInventory<'_>>,
         inventory_sled_agent: &nexus_types::inventory::SledAgent,
     ) -> anyhow::Result<&mut Self> {
-        self.sleds.push(Sled::new_full(
+        ensure!(
+            !self.sleds.contains_key(&sled_id),
+            "attempted to add sled with the same id as an existing one: {}",
+            sled_id
+        );
+        self.sleds.insert(
             sled_id,
-            sled_resources,
-            inventory_sp,
-            inventory_sled_agent,
-        ));
+            Sled::new_full(
+                sled_id,
+                sled_resources,
+                inventory_sp,
+                inventory_sled_agent,
+            ),
+        );
         Ok(self)
     }
 
@@ -226,7 +237,7 @@ impl SystemDescription {
             .unwrap_or_else(|| String::from("example"));
         let mut builder = CollectionBuilder::new(collector_label);
 
-        for s in &self.sleds {
+        for s in self.sleds.values() {
             if let Some((slot, sp_state)) = s.sp_state() {
                 builder
                     .found_sp_state(
@@ -252,7 +263,7 @@ impl SystemDescription {
     pub fn to_policy(&self) -> anyhow::Result<Policy> {
         let sleds = self
             .sleds
-            .iter()
+            .values()
             .map(|sled| {
                 let sled_resources = SledResources {
                     policy: SledPolicy::InService {

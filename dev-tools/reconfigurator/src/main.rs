@@ -296,8 +296,7 @@ fn cmd_sled_list(
 }
 
 fn cmd_sled_add(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
-    let mut sled = SledBuilder::new();
-    let _ = sim.system.sled(sled).context("adding sled")?;
+    let _ = sim.system.sled(SledBuilder::new()).context("adding sled")?;
     Ok(Some(String::from("added sled")))
 }
 
