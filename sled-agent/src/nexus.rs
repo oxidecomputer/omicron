@@ -14,7 +14,7 @@ use sled_hardware::HardwareManager;
 use slog::Logger;
 use std::net::SocketAddrV6;
 use std::sync::Arc;
-use tokio::sync::{mpsc, oneshot, Notify};
+use tokio::sync::{broadcast, mpsc, oneshot, Notify};
 use tokio::time::{interval, Duration, MissedTickBehavior};
 use uuid::Uuid;
 
@@ -286,6 +286,13 @@ pub struct NexusNotifierTask {
     nexus_client: NexusClient,
     get_sled_agent_info: GetSledAgentInfo,
 
+    // Notifies when the VMM reservoir size changes.
+    //
+    // This is an option, since we don't use a reservoir during testing. There
+    // really isn't a better place to put this in sled-agent, and this task is
+    // the only one that cares about updates.
+    vmm_reservoir_size_updated: Option<broadcast::Receiver<()>>,
+
     log: Logger,
     rx: mpsc::Receiver<NexusNotifierMsg>,
 
@@ -335,6 +342,9 @@ impl NexusNotifierTask {
             vmm_reservoir_manager,
         } = input;
 
+        let vmm_reservoir_size_updated =
+            Some(vmm_reservoir_manager.subscribe_for_size_updates());
+
         // Box a function that can return the latest `SledAgentInfo`
         let get_sled_agent_info = Box::new(move |generation| {
             let role = if hardware.is_scrimlet() {
@@ -361,6 +371,7 @@ impl NexusNotifierTask {
                 sled_id,
                 nexus_client,
                 get_sled_agent_info,
+                vmm_reservoir_size_updated,
                 log: log.new(o!("component" => "NexusNotifierTask")),
                 rx,
                 nexus_known_info: None,
@@ -387,11 +398,16 @@ impl NexusNotifierTask {
         log: &Logger,
     ) -> (NexusNotifierTask, NexusNotifierHandle) {
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
+
+        // During testing we don't actually have a reservoir. Just dummy it out.
+        let vmm_reservoir_size_updated = None;
+
         (
             NexusNotifierTask {
                 sled_id,
                 nexus_client,
                 get_sled_agent_info,
+                vmm_reservoir_size_updated,
                 log: log.new(o!("component" => "NexusNotifierTask")),
                 rx,
                 nexus_known_info: None,
@@ -415,6 +431,16 @@ impl NexusNotifierTask {
     ///
     /// This should be spawned into a tokio task
     pub async fn run(mut self) {
+        let (_tx, mut vmm_size_updated) = if let Some(vmm_size_updated) =
+            self.vmm_reservoir_size_updated.take()
+        {
+            (None, vmm_size_updated)
+        } else {
+            // Dummy channel for testing
+            let (tx, rx) = broadcast::channel(1);
+            (Some(tx), rx)
+        };
+
         loop {
             const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
             let mut interval = interval(RETRY_TIMEOUT);
@@ -444,6 +470,9 @@ impl NexusNotifierTask {
                         }
 
                     }
+                }
+                _ = vmm_size_updated.recv() => {
+                    self.pending_notification = true;
                 }
                 _ =  self.outstanding_req_ready.notified() => {
                     // Our request task has completed. Let's check the result.

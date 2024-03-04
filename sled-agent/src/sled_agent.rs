@@ -28,7 +28,9 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
 use crate::updates::{ConfigUpdates, UpdateManager};
-use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
+use crate::vmm_reservoir::{
+    ReservoirMode, VmmReservoirManager, VmmReservoirManagerHandle,
+};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
@@ -71,7 +73,7 @@ use slog::Logger;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::sync::Arc;
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot};
 use uuid::Uuid;
 
 use illumos_utils::running_zone::ZoneBuilderFactory;
@@ -305,6 +307,10 @@ struct SledAgentInner {
 
     // Handle to the traffic manager for writing OS updates to our boot disks.
     boot_disk_os_writer: BootDiskOsWriter,
+
+    // Handle to the VMM Reservoir Manager. Used for notifications about
+    // reservoir size updates.
+    vmm_reservoir_manager: VmmReservoirManagerHandle,
 }
 
 impl SledAgentInner {
@@ -550,7 +556,7 @@ impl SledAgent {
             sled_address: get_sled_address(request.body.subnet),
             nexus_client: nexus_client.client().clone(),
             hardware: long_running_task_handles.hardware_manager.clone(),
-            vmm_reservoir_manager,
+            vmm_reservoir_manager: vmm_reservoir_manager.clone(),
         };
         let (nexus_notifier_task, nexus_notifier_handle) =
             NexusNotifierTask::new(nexus_notifier_input, &log);
@@ -577,6 +583,7 @@ impl SledAgent {
                 bootstore: long_running_task_handles.bootstore.clone(),
                 metrics_manager,
                 boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
+                vmm_reservoir_manager,
             }),
             log: log.clone(),
         };
@@ -667,6 +674,13 @@ impl SledAgent {
     /// with information about the existing set of hardware.
     pub(crate) async fn notify_nexus_about_self(&self, log: &Logger) {
         self.inner.nexus_notifier.notify_nexus_about_self(log).await;
+    }
+
+    // Subscribe for notifications about whether the VMM size has changed or not.
+    pub(crate) fn subscribe_for_vmm_size_updates(
+        &self,
+    ) -> broadcast::Receiver<()> {
+        self.inner.vmm_reservoir_manager.subscribe_for_size_updates()
     }
 
     /// List all zone bundles on the system, for any zones live or dead.

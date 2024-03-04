@@ -10,7 +10,7 @@ use slog::Logger;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot};
 
 use sled_hardware::HardwareManager;
 
@@ -74,6 +74,12 @@ enum ReservoirManagerMsg {
 pub struct VmmReservoirManagerHandle {
     reservoir_size: Arc<AtomicU64>,
     tx: flume::Sender<ReservoirManagerMsg>,
+    // A notification channel indicating that the size of the VMM reservoir has
+    // changed We use a broadcast channel instead of a `Notify` to prevent lost
+    // updates with multiple receivers. Importantly, a `RecvError::Lagged` is
+    // just as valuable as an `Ok(())`, and so this acts as a pure notification
+    // channel.
+    size_updated_tx: broadcast::Sender<()>,
     _manager_handle: Arc<thread::JoinHandle<()>>,
 }
 
@@ -81,6 +87,14 @@ impl VmmReservoirManagerHandle {
     /// Returns the last-set size of the reservoir
     pub fn reservoir_size(&self) -> ByteCount {
         self.reservoir_size.load(Ordering::SeqCst).try_into().unwrap()
+    }
+
+    // Return the receiver that notifies us about a size update. The value
+    // itself is held in an atomic. While we could have replaced both of these
+    // with a `watch`, that is not the semantics all callers want. Sometimes
+    // they just want to "read" the latest size of the reservoir.
+    pub fn subscribe_for_size_updates(&self) -> broadcast::Receiver<()> {
+        self.size_updated_tx.subscribe()
     }
 
     /// Tell the [`VmmReservoirManager`] to set the reservoir size and wait for
@@ -111,6 +125,9 @@ impl VmmReservoirManagerHandle {
 pub struct VmmReservoirManager {
     reservoir_size: Arc<AtomicU64>,
     rx: flume::Receiver<ReservoirManagerMsg>,
+    size_updated_tx: broadcast::Sender<()>,
+    // We maintain a copy of the receiver so sends never fail.
+    _size_updated_rx: broadcast::Receiver<()>,
     log: Logger,
 }
 
@@ -121,6 +138,7 @@ impl VmmReservoirManager {
         reservoir_mode: Option<ReservoirMode>,
     ) -> VmmReservoirManagerHandle {
         let log = log.new(o!("component" => "VmmReservoirManager"));
+        let (size_updated_tx, _size_updated_rx) = broadcast::channel(1);
         // We use a rendevous channel to only allow one request at a time.
         // Resizing a reservoir may block the thread for up to two minutes, so
         // we want to ensure it is complete before allowing another call.
@@ -128,13 +146,20 @@ impl VmmReservoirManager {
         let reservoir_size = Arc::new(AtomicU64::new(0));
         let manager = VmmReservoirManager {
             reservoir_size: reservoir_size.clone(),
+            size_updated_tx: size_updated_tx.clone(),
+            _size_updated_rx,
             rx,
             log,
         };
         let _manager_handle = Arc::new(thread::spawn(move || {
             manager.run(hardware_manager, reservoir_mode)
         }));
-        VmmReservoirManagerHandle { reservoir_size, tx, _manager_handle }
+        VmmReservoirManagerHandle {
+            reservoir_size,
+            tx,
+            size_updated_tx,
+            _manager_handle,
+        }
     }
 
     fn run(
@@ -240,6 +265,7 @@ impl VmmReservoirManager {
             self.log,
             "Finished setting reservoir size to {reservoir_size} bytes"
         );
+        self.size_updated_tx.send(()).unwrap();
 
         Ok(())
     }
