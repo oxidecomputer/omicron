@@ -178,8 +178,8 @@ impl ConvertInto<nexus_client::types::PhysicalDiskKind>
 impl ConvertInto<nexus_client::types::Baseboard> for sled_hardware::Baseboard {
     fn convert(self) -> nexus_client::types::Baseboard {
         nexus_client::types::Baseboard {
-            serial_number: self.identifier().to_string(),
-            part_number: self.model().to_string(),
+            serial: self.identifier().to_string(),
+            part: self.model().to_string(),
             revision: self.revision(),
         }
     }
