@@ -867,6 +867,7 @@ mod test {
     use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_params::DnsRecord;
+    use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, SledUpdate};
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::shared::SiloIdentityMode;
@@ -880,7 +881,6 @@ mod test {
         IdentityMetadataCreateParams, MacAddr,
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
-    use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use omicron_test_utils::dev;
     use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};

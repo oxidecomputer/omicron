@@ -36,6 +36,7 @@ members = [
     "ipcc",
     "key-manager",
     "nexus",
+    "nexus-config",
     "nexus/authz-macros",
     "nexus/db-macros",
     "nexus/db-model",
@@ -113,6 +114,7 @@ default-members = [
     "ipcc",
     "key-manager",
     "nexus",
+    "nexus-config",
     "nexus/authz-macros",
     "nexus/macros-common",
     "nexus/db-macros",
@@ -231,7 +233,7 @@ hyper = "0.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
-indexmap = "2.2.3"
+indexmap = "2.2.5"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
@@ -254,6 +256,7 @@ newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
 multimap = "0.10.0"
 nexus-client = { path = "clients/nexus-client" }
+nexus-config = { path = "nexus-config" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
@@ -620,11 +623,6 @@ opt-level = 3
 [patch.crates-io.pq-sys]
 git = 'https://github.com/oxidecomputer/pq-sys'
 branch = "oxide/omicron"
-
-# See https://github.com/oxidecomputer/security-operations/issues/43.
-[patch.crates-io.whoami]
-git = "https://github.com/oxidecomputer/whoami"
-branch = "use-nix"
 
 # Using the workspace-hack via this patch directive means that it only applies
 # while building within this workspace. If another workspace imports a crate

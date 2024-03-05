@@ -6,6 +6,8 @@ use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
+use nexus_config::NexusConfig;
+use nexus_config::SchemaConfig;
 use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_queries::db::datastore::{
     all_sql_for_version_migration, EARLIEST_SUPPORTED_VERSION,
@@ -14,8 +16,6 @@ use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::Config;
-use omicron_common::nexus_config::SchemaConfig;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
@@ -45,7 +45,7 @@ async fn test_setup_just_crdb<'a>(
 // Helper to ensure we perform the same setup for the positive and negative test
 // cases.
 async fn test_setup<'a>(
-    config: &'a mut Config,
+    config: &'a mut NexusConfig,
     name: &'static str,
 ) -> ControlPlaneTestContextBuilder<'a, omicron_nexus::Server> {
     let mut builder =

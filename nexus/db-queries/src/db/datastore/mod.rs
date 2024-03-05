@@ -33,6 +33,7 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
+use nexus_config::SchemaConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -41,7 +42,6 @@ use omicron_common::api::external::SemverVersion;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service, BackoffError,
 };
-use omicron_common::nexus_config::SchemaConfig;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::num::NonZeroU32;
@@ -391,6 +391,7 @@ mod test {
     use chrono::{Duration, Utc};
     use futures::stream;
     use futures::StreamExt;
+    use nexus_config::RegionAllocationStrategy;
     use nexus_db_model::Generation;
     use nexus_db_model::IpAttachState;
     use nexus_test_utils::db::test_setup_database;
@@ -399,7 +400,6 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
-    use omicron_common::nexus_config::RegionAllocationStrategy;
     use omicron_test_utils::dev;
     use std::collections::HashMap;
     use std::collections::HashSet;
