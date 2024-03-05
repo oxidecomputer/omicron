@@ -1541,6 +1541,14 @@ impl ServiceManager {
         let disabled_ssh_service = ServiceBuilder::new("network/ssh")
             .add_instance(ServiceInstanceBuilder::new("default").disable());
 
+        let disabled_dns_client_service =
+            ServiceBuilder::new("network/dns/client")
+                .add_instance(ServiceInstanceBuilder::new("default").disable());
+
+        let enabled_dns_client_service =
+            ServiceBuilder::new("network/dns/client")
+                .add_instance(ServiceInstanceBuilder::new("default"));
+
         // TODO(https://github.com/oxidecomputer/omicron/issues/1898):
         //
         // These zones are self-assembling -- after they boot, there should
@@ -1985,15 +1993,9 @@ impl ServiceManager {
 
                 let dns_client_service;
                 if dns_servers.is_empty() {
-                    dns_client_service =
-                        ServiceBuilder::new("network/dns/client").add_instance(
-                            ServiceInstanceBuilder::new("default").disable(),
-                        );
+                    dns_client_service = disabled_dns_client_service;
                 } else {
-                    dns_client_service = ServiceBuilder::new(
-                        "network/dns/client",
-                    )
-                    .add_instance(ServiceInstanceBuilder::new("default"));
+                    dns_client_service = enabled_dns_client_service;
                 }
 
                 let ntp_service = ServiceBuilder::new("oxide/ntp")
@@ -2020,7 +2022,7 @@ impl ServiceManager {
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
                     .map_err(|err| {
-                        Error::io("Failed to setup NTP profile", err)
+                        Error::io("Failed to set up NTP profile", err)
                     })?;
 
                 return Ok(RunningZone::boot(installed_zone).await?);
