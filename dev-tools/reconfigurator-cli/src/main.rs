@@ -17,6 +17,7 @@ use nexus_reconfigurator_planning::system::{
 };
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::OmicronZonesConfig;
 use omicron_common::api::external::Generation;
 use reedline::{Reedline, Signal};
 use swrite::{swriteln, SWrite};
@@ -346,8 +347,24 @@ fn cmd_inventory_list(
 fn cmd_inventory_generate(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
-    let inventory =
-        sim.system.to_collection().context("generating inventory")?;
+    let mut builder =
+        sim.system.to_collection_builder().context("generating inventory")?;
+    // For an inventory we just generated from thin air, pretend like each sled
+    // has no zones on it.
+    let sled_ids = sim.system.to_policy().unwrap().sleds.into_keys();
+    for sled_id in sled_ids {
+        builder
+            .found_sled_omicron_zones(
+                "fake sled agent",
+                sled_id,
+                OmicronZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![],
+                },
+            )
+            .context("recording Omicron zones")?;
+    }
+    let inventory = builder.build();
     let rv = format!(
         "generated inventory collection {} from configured sleds",
         inventory.id

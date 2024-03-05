@@ -318,8 +318,8 @@ impl<'a> Planner<'a> {
 mod test {
     use super::Planner;
     use crate::blueprint_builder::test::example;
-    use crate::blueprint_builder::test::policy_add_sled;
     use crate::blueprint_builder::test::verify_blueprint;
+    use crate::blueprint_builder::test::ExampleSystem;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
     use nexus_inventory::now_db_precision;
@@ -330,6 +330,7 @@ mod test {
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
+    use crate::system::SledBuilder;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -340,14 +341,14 @@ mod test {
         let internal_dns_version = Generation::new();
 
         // Use our example inventory collection.
-        let (mut collection, mut policy) = example(DEFAULT_N_SLEDS);
+        let mut example = ExampleSystem::new(DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.  We don't bother verifying it here
         // because there's a separate test for that.
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
+            &example.collection,
             internal_dns_version,
-            &policy,
+            &example.policy,
             "the_test",
         )
         .expect("failed to create initial blueprint");
@@ -360,9 +361,9 @@ mod test {
             logctx.log.clone(),
             &blueprint1,
             internal_dns_version,
-            &policy,
+            &example.policy,
             "no-op?",
-            &collection,
+            &example.collection,
         )
         .expect("failed to create planner")
         .plan()
@@ -378,7 +379,9 @@ mod test {
         // Now add a new sled.
         let new_sled_id =
             "7097f5b3-5896-4fff-bd97-63a9a69563a9".parse().unwrap();
-        let _ = policy_add_sled(&mut policy, new_sled_id);
+        let _ =
+            example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
+        let policy = example.system.to_policy().unwrap();
 
         // Check that the first step is to add an NTP zone
         let blueprint3 = Planner::new_based_on(
@@ -387,7 +390,7 @@ mod test {
             internal_dns_version,
             &policy,
             "test: add NTP?",
-            &collection,
+            &example.collection,
         )
         .expect("failed to create planner")
         .plan()
@@ -420,7 +423,7 @@ mod test {
             internal_dns_version,
             &policy,
             "test: add nothing more",
-            &collection,
+            &example.collection,
         )
         .expect("failed to create planner")
         .plan()
@@ -433,6 +436,7 @@ mod test {
         verify_blueprint(&blueprint4);
 
         // Now update the inventory to have the requested NTP zone.
+        let mut collection = example.collection.clone();
         assert!(collection
             .omicron_zones
             .insert(
@@ -478,7 +482,7 @@ mod test {
         assert_eq!(sled_changes.zones_removed().count(), 0);
         assert_eq!(sled_changes.zones_changed().count(), 0);
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
-        assert_eq!(zones.len(), 3);
+        assert_eq!(zones.len(), 10);
         for zone in &zones {
             let OmicronZoneType::Crucible { .. } = zone.zone_type else {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");

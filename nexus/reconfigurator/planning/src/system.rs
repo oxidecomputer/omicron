@@ -16,7 +16,6 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::BaseboardId;
-use nexus_types::inventory::Collection;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
 use nexus_types::inventory::SledRole;
@@ -245,7 +244,7 @@ impl SystemDescription {
         Ok(self)
     }
 
-    pub fn to_collection(&self) -> anyhow::Result<Collection> {
+    pub fn to_collection_builder(&self) -> anyhow::Result<CollectionBuilder> {
         let collector_label = self
             .collector
             .as_ref()
@@ -273,7 +272,7 @@ impl SystemDescription {
                 .context("recording sled agent")?;
         }
 
-        Ok(builder.build())
+        Ok(builder)
     }
 
     pub fn to_policy(&self) -> anyhow::Result<Policy> {
