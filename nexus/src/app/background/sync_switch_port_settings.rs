@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task for propagating switch port settings to downstream switch
-//! management daemons (dendrite)
+//! Background task for propagating per-port switch settings to management daemons
+//! (dendrite, mgd, etc.)
 
 use crate::app::{
     map_switch_zone_addrs,
@@ -192,7 +192,22 @@ impl BackgroundTask for SwitchPortSettingsManager {
             // otherwise there is a race where Nexus has not finished populating the DB with
             // information from the handoff message but the RPW is attempting to reconcile against
             // information in the DB. This happens because RPWs are initialized *before* Nexus is
-            // initialized.
+            // initialized. The exact details of this race are as follows:
+            //
+            // 1. sled-agents perform "early networking" and configure the switches with essential
+            //    settings needed for external communication
+            // 2. Cockroachdb is deployed
+            // 3. Nexus begins initialization
+            //    3a. Background tasks are initialized and begin running
+            //    3b. Nexus "proper" is initialized and begins running (this includes the API)
+            // 4. Nexus receives the handoff message from RSS
+            // 5. Nexus begins populating the database with information from the handoff message
+            //
+            // The race occurs because this RPW is already running at step 3a, but information we
+            // need to perform the reonciliation is not present in the database until step 5.
+            // Without that information, we accidentally erase the settings that were applied in
+            // step 1.
+
             match self.datastore.get_background_task_toggle(opctx, SYNC_SWITCH_PORT_SETTINGS.into()).await {
                 Ok(BackgroundTaskToggle {enabled, ..}) if enabled => {
                     info!(log, "task is enabled");
@@ -229,14 +244,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 },
             };
 
-            // TODO: correctness (multi-rack)
+            // TODO: https://github.com/oxidecomputer/omicron/issues/3090
             // Here we're iterating over racks because that's technically the correct thing to do,
             // but our logic for pulling switch ports and their related configurations
             // *isn't* per-rack, so that's something we'll need to revisit in the future.
             for rack in &racks {
 
                 // lookup switch zones via DNS
-                // TODO in the future this will need to be need to be done per rack
+                // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 let switch_zone_addresses = match self
                     .resolver
                     .lookup_all_ipv6(ServiceName::Dendrite)
@@ -249,19 +264,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                // TODO in the future this will need to be need to be done per rack
+                // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 let mappings =
                     map_switch_zone_addrs(log, switch_zone_addresses).await;
 
-                // TODO in the future this will need to be need to be done per rack
+                // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build sled agent clients
                 let sled_agent_clients = build_sled_agent_clients(&mappings, log);
 
-                // TODO in the future this will need to be need to be done per rack
+                // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build dpd clients
                 let dpd_clients = build_dpd_clients(&mappings, log);
 
-                // TODO in the future this will need to be need to be done per rack
+                // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build mgd clients
                 let mgd_clients = build_mgd_clients(mappings, log);
 
@@ -292,29 +307,31 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 //
 
                 // get the static routes on each switch
-                let downstream_static_routes =
-                    downstream_static_routes(&mgd_clients, log).await;
-                info!(&log, "retrieved existing routes"; "routes" => ?downstream_static_routes);
+                let current_static_routes =
+                    static_routes_on_switch(&mgd_clients, log).await;
+                info!(&log, "retrieved existing routes"; "routes" => ?current_static_routes);
 
                 // generate the complete set of static routes that should be on a given switch
-                let upstream_static_routes = upstream_static_routes(&changes);
-                info!(&log, "retrieved desired routes"; "routes" => ?upstream_static_routes);
+                let desired_static_routes = static_routes_in_db(&changes);
+                info!(&log, "retrieved desired routes"; "routes" => ?desired_static_routes);
 
-                // diff the downstream and upstream routes. Add what is missing from downstream, remove what is not present in upstream.
+                // diff the current and desired routes.
+                // Add what is missing from current, remove what is not present in desired.
                 let routes_to_add = static_routes_to_add(
-                    &upstream_static_routes,
-                    &downstream_static_routes,
+                    &desired_static_routes,
+                    &current_static_routes,
                     log,
                 );
                 info!(&log, "calculated static routes to add"; "routes" => ?routes_to_add);
 
                 let routes_to_del = static_routes_to_del(
-                    downstream_static_routes,
-                    upstream_static_routes,
+                    current_static_routes,
+                    desired_static_routes,
                 );
                 info!(&log, "calculated static routes to delete"; "routes" => ?routes_to_del);
 
-                // delete the unneeded routes first, just in case there is a conflicting route for one we need to add
+                // delete the unneeded routes first, just in case there is a conflicting route for
+                // one we need to add
                 info!(&log, "deleting static routes"; "routes" => ?routes_to_del);
                 delete_static_routes(&mgd_clients, routes_to_del, log).await;
 
@@ -574,8 +591,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                // check downstream bootstore version
-                let mut downstream_config: Option<EarlyNetworkConfig> = None;
+                // find the active sled-agent bootstore config with the highest generation
+                let mut latest_sled_agent_bootstore_config: Option<EarlyNetworkConfig> = None;
 
                 // Since we update the first scrimlet we can reach (we failover to the second one
                 // if updating the first one fails) we need to check them both.
@@ -587,24 +604,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             continue;
                         }
                     };
-                    if let Some(other_config) = downstream_config.as_mut() {
+                    if let Some(other_config) = latest_sled_agent_bootstore_config.as_mut() {
                         if other_config.generation < scrimlet_cfg.generation {
                             *other_config = scrimlet_cfg.clone();
                         }
                     } else {
-                        downstream_config = Some(scrimlet_cfg.clone());
+                        latest_sled_agent_bootstore_config = Some(scrimlet_cfg.clone());
                     }
                 }
 
                 // Move on to the next rack if neither scrimlet is reachable.
                 // if both scrimlets are unreachable we probably have bigger problems on this rack
-                if downstream_config.is_none() {
+                if latest_sled_agent_bootstore_config.is_none() {
                     error!(log, "both scrimlets are unreachable, cannot update bootstore");
                     continue;
                 }
 
-                // get the upstream version
-
+                // build the desired bootstore config from the records we've fetched
                 let subnet = match rack.rack_subnet {
                     Some(IpNetwork::V6(subnet)) => subnet,
                     Some(IpNetwork::V4(_)) => {
@@ -642,7 +658,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         continue;
                     };
 
-                    // do stuff
                     let port_config = PortConfigV1 {
                         addresses: info.addresses.iter().map(|a| a.address).collect(),
                         autoneg: info
@@ -689,7 +704,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     ports.push(port_config);
                 }
 
-                let mut upstream_config = EarlyNetworkConfig {
+                let mut desired_config = EarlyNetworkConfig {
                     generation: 0,
                     schema_version: 1,
                     body: EarlyNetworkConfigBody {
@@ -710,10 +725,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // it every time and compare.
 
                 let bootstore_needs_update = {
-                    match downstream_config {
+                    match latest_sled_agent_bootstore_config {
                         Some(ref existing_config) => {
-                            existing_config.body.ntp_servers != upstream_config.body.ntp_servers ||
-                            existing_config.body.rack_network_config != upstream_config.body.rack_network_config
+                            existing_config.body.ntp_servers != desired_config.body.ntp_servers ||
+                            existing_config.body.rack_network_config != desired_config.body.rack_network_config
                         },
                         _ => true,
                     }
@@ -735,23 +750,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             },
                         };
 
-                    upstream_config.generation = generation as u64;
+                    desired_config.generation = generation as u64;
                     info!(
                         &log,
                         "updating bootstore config";
-                        "old config" => ?downstream_config,
-                        "new config" => ?upstream_config,
+                        "old config" => ?latest_sled_agent_bootstore_config,
+                        "new config" => ?desired_config,
                     );
 
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     for (location, client) in &sled_agent_clients {
-                        if let Err(e) = client.write_network_bootstore_config(&upstream_config).await {
+                        if let Err(e) = client.write_network_bootstore_config(&desired_config).await {
                             error!(
                                 log,
                                 "error updating bootstore";
                                 "location" => %location,
-                                "config" => ?upstream_config,
+                                "config" => ?desired_config,
                                 "error" => %e,
                             )
                         }
@@ -869,20 +884,20 @@ fn build_sled_agent_clients(
 }
 
 fn static_routes_to_del(
-    downstream_static_routes: HashMap<
+    current_static_routes: HashMap<
         SwitchLocation,
         progenitor_client::ResponseValue<StaticRoute4List>,
     >,
-    upstream_static_routes: HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>>,
+    desired_static_routes: HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>>,
 ) -> HashMap<SwitchLocation, DeleteStaticRoute4Request> {
     let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRoute4Request> =
         HashMap::new();
 
     // find routes to remove
-    for (switch_location, routes_on_switch) in &downstream_static_routes {
-        let Some(routes_wanted) = upstream_static_routes.get(switch_location)
+    for (switch_location, routes_on_switch) in &current_static_routes {
+        let Some(routes_wanted) = desired_static_routes.get(switch_location)
         else {
-            // if no upstream routes are present, all downstream routes on this switch should be deleted
+            // if no desired routes are present, all routes on this switch should be deleted
             let req = DeleteStaticRoute4Request {
                 routes: StaticRoute4List {
                     list: routes_on_switch.list.clone(),
@@ -925,8 +940,8 @@ fn static_routes_to_del(
 }
 
 fn static_routes_to_add(
-    upstream_static_routes: &HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>>,
-    downstream_static_routes: &HashMap<
+    desired_static_routes: &HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>>,
+    current_static_routes: &HashMap<
         SwitchLocation,
         progenitor_client::ResponseValue<StaticRoute4List>,
     >,
@@ -936,9 +951,8 @@ fn static_routes_to_add(
         HashMap::new();
 
     // find routes to add
-    for (switch_location, routes_wanted) in upstream_static_routes {
-        let routes_on_switch = match downstream_static_routes
-            .get(&switch_location)
+    for (switch_location, routes_wanted) in desired_static_routes {
+        let routes_on_switch = match current_static_routes.get(&switch_location)
         {
             Some(routes) => &routes.list,
             None => {
@@ -980,17 +994,15 @@ fn static_routes_to_add(
     routes_to_add
 }
 
-fn upstream_static_routes(
+fn static_routes_in_db(
     changes: &[(
         SwitchLocation,
         nexus_db_model::SwitchPort,
         PortSettingsChange,
     )],
 ) -> HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>> {
-    let mut upstream_static_routes: HashMap<
-        SwitchLocation,
-        Vec<(Ipv4Addr, Prefix4)>,
-    > = HashMap::new();
+    let mut routes_from_db: HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>> =
+        HashMap::new();
 
     for (location, _port, change) in changes {
         // we only need to check for ports that have a configuration present. No config == no routes.
@@ -1013,7 +1025,7 @@ fn upstream_static_routes(
             routes.push((nexthop, prefix))
         }
 
-        match upstream_static_routes.entry(*location) {
+        match routes_from_db.entry(*location) {
             Entry::Occupied(mut occupied_entry) => {
                 occupied_entry.get_mut().append(&mut routes);
             }
@@ -1022,7 +1034,7 @@ fn upstream_static_routes(
             }
         }
     }
-    upstream_static_routes
+    routes_from_db
 }
 
 // apply changes for each port
@@ -1137,12 +1149,12 @@ async fn apply_switch_port_changes(
     }
 }
 
-async fn downstream_static_routes<'a>(
+async fn static_routes_on_switch<'a>(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
     log: &slog::Logger,
 ) -> HashMap<SwitchLocation, progenitor_client::ResponseValue<StaticRoute4List>>
 {
-    let mut downstream_static_routes = HashMap::new();
+    let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
         let static_routes = match client.inner.static_list_v4_routes().await {
@@ -1156,9 +1168,9 @@ async fn downstream_static_routes<'a>(
                 continue;
             }
         };
-        downstream_static_routes.insert(*location, static_routes);
+        routes_on_switch.insert(*location, static_routes);
     }
-    downstream_static_routes
+    routes_on_switch
 }
 
 async fn delete_static_routes(
