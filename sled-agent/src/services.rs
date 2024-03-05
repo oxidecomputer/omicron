@@ -1592,7 +1592,8 @@ impl ServiceManager {
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(clickhouse_service)
-                    .add_service(dns_service);
+                    .add_service(dns_service)
+                    .add_service(enabled_dns_client_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1640,7 +1641,8 @@ impl ServiceManager {
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(clickhouse_keeper_service)
-                    .add_service(dns_service);
+                    .add_service(dns_service)
+                    .add_service(enabled_dns_client_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1696,7 +1698,8 @@ impl ServiceManager {
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(cockroachdb_service)
-                    .add_service(dns_service);
+                    .add_service(dns_service)
+                    .add_service(enabled_dns_client_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1743,6 +1746,7 @@ impl ServiceManager {
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
+                    .add_service(disabled_dns_client_service)
                     .add_service(
                         ServiceBuilder::new("oxide/crucible/agent")
                             .add_instance(
@@ -1788,6 +1792,7 @@ impl ServiceManager {
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
+                    .add_service(disabled_dns_client_service)
                     .add_service(
                         ServiceBuilder::new("oxide/crucible/pantry")
                             .add_instance(
@@ -1842,7 +1847,8 @@ impl ServiceManager {
                 let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(disabled_ssh_service)
-                    .add_service(oximeter_service);
+                    .add_service(oximeter_service)
+                    .add_service(disabled_dns_client_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
@@ -1909,7 +1915,8 @@ impl ServiceManager {
                     .add_service(nw_setup_service)
                     .add_service(opte_interface_setup)
                     .add_service(disabled_ssh_service)
-                    .add_service(external_dns_service);
+                    .add_service(external_dns_service)
+                    .add_service(disabled_dns_client_service);
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
                     .await
