@@ -80,6 +80,7 @@ fn main() -> anyhow::Result<()> {
                 LoopResult::Continue => (),
                 LoopResult::Bail(error) => return Err(error),
             }
+            println!("");
         }
     } else {
         let mut ed = Reedline::create();
@@ -371,10 +372,16 @@ fn cmd_inventory_list(
         time_done: String,
     }
 
-    let rows = sim.collections.values().map(|collection| InventoryRow {
-        id: collection.id,
-        nerrors: collection.errors.len(),
-        time_done: collection.time_done.to_rfc3339(),
+    let rows = sim.collections.values().map(|collection| {
+        let id = collection.id;
+        InventoryRow {
+            id,
+            nerrors: collection.errors.len(),
+            time_done: humantime::format_rfc3339_millis(
+                collection.time_done.into(),
+            )
+            .to_string(),
+        }
     });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
@@ -764,7 +771,8 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
             "collection: {} (errors: {}, completed at: {})",
             collection.id,
             collection.errors.len(),
-            collection.time_done.to_rfc3339()
+            humantime::format_rfc3339_millis(collection.time_done.into())
+                .to_string(),
         );
     }
 

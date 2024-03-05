@@ -56,7 +56,6 @@ expectorate.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
-regex.workspace = true
 subprocess.workspace = true
 camino-tempfile.workspace = true
 
