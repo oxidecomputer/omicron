@@ -210,6 +210,7 @@ impl NexusNotifierHandle {
         }
     }
 
+    #[allow(unused)]
     pub async fn get_status(
         &self,
     ) -> Result<NexusNotifierTaskStatus, SenderOrReceiverDropped> {
@@ -220,15 +221,6 @@ impl NexusNotifierHandle {
             .map_err(|_| SenderOrReceiverDropped {})?;
         rx.await.map_err(|_| SenderOrReceiverDropped {})
     }
-}
-
-/// A successful reply from nexus
-enum NexusSuccess {
-    // Contains data returned from Nexus
-    Get(SledAgentInfo),
-
-    // Contains data that was successfully put to Nexus
-    Put(SledAgentInfo),
 }
 
 // The type of operation issued to nexus
@@ -391,6 +383,7 @@ impl NexusNotifierTask {
         )
     }
 
+    #[cfg(test)]
     pub fn new_for_test(
         sled_id: Uuid,
         nexus_client: NexusClient,

@@ -767,7 +767,6 @@ mod test {
         );
 
         // Fail the update, since the generation number didn't change.
-        datastore.sled_upsert(sled_update.clone()).await;
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // Bump the gneration number so the next insert succeeds.
