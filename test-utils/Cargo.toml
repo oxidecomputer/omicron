@@ -15,6 +15,7 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 libc.workspace = true
+nexus-config.workspace = true
 omicron-common.workspace = true
 pem.workspace = true
 regex.workspace = true

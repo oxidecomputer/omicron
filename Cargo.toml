@@ -37,6 +37,7 @@ members = [
     "ipcc",
     "key-manager",
     "nexus",
+    "nexus-config",
     "nexus/authz-macros",
     "nexus/db-macros",
     "nexus/db-model",
@@ -116,6 +117,7 @@ default-members = [
     "ipcc",
     "key-manager",
     "nexus",
+    "nexus-config",
     "nexus/authz-macros",
     "nexus/macros-common",
     "nexus/db-macros",
@@ -186,9 +188,9 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "796dce526dd7ed7b52a0429a486ccba4a9da1ce5" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "796dce526dd7ed7b52a0429a486ccba4a9da1ce5" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "796dce526dd7ed7b52a0429a486ccba4a9da1ce5" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
@@ -235,7 +237,7 @@ hyper = "0.14"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.9.5"
 illumos-utils = { path = "illumos-utils" }
-indexmap = "2.2.3"
+indexmap = "2.2.5"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 installinator = { path = "installinator" }
 installinator-artifactd = { path = "installinator-artifactd" }
@@ -258,6 +260,7 @@ newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
 multimap = "0.10.0"
 nexus-client = { path = "clients/nexus-client" }
+nexus-config = { path = "nexus-config" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
@@ -319,9 +322,9 @@ prettyplease = { version = "0.2.16", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "488a70c644e332dae98447292a95e45074c8107c" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "488a70c644e332dae98447292a95e45074c8107c" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "488a70c644e332dae98447292a95e45074c8107c" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"

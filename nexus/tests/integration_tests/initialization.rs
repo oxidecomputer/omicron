@@ -7,6 +7,8 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 
 use gateway_messages::SpPort;
 use gateway_test_utils::setup as mgs_setup;
+use nexus_config::Database;
+use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::address::MGS_PORT;
@@ -39,17 +41,15 @@ async fn test_nexus_boots_before_cockroach() {
     // This call won't return successfully until we can...
     // 1. Contact the internal DNS system to find Cockroach
     // 2. Contact Cockroach to ensure the database has been populated
-    builder.config.deployment.database =
-        omicron_common::nexus_config::Database::FromDns;
-    builder.config.deployment.internal_dns =
-        omicron_common::nexus_config::InternalDns::FromAddress {
-            address: builder
-                .internal_dns
-                .as_ref()
-                .expect("Must start Internal DNS before acquiring an address")
-                .dns_server
-                .local_address(),
-        };
+    builder.config.deployment.database = Database::FromDns;
+    builder.config.deployment.internal_dns = InternalDns::FromAddress {
+        address: builder
+            .internal_dns
+            .as_ref()
+            .expect("Must start Internal DNS before acquiring an address")
+            .dns_server
+            .local_address(),
+    };
     let nexus_config = builder.config.clone();
     let nexus_log = log.clone();
     let nexus_handle = tokio::task::spawn(async move {
@@ -111,25 +111,23 @@ async fn test_nexus_boots_before_dendrite() {
     // This call won't return successfully until we can...
     // 1. Contact the internal DNS system to find Dendrite
     // 2. Contact Dendrite
-    builder.config.deployment.database =
-        omicron_common::nexus_config::Database::FromUrl {
-            url: builder
-                .database
-                .as_ref()
-                .expect("Must start CRDB first")
-                .pg_config()
-                .clone(),
-        };
+    builder.config.deployment.database = Database::FromUrl {
+        url: builder
+            .database
+            .as_ref()
+            .expect("Must start CRDB first")
+            .pg_config()
+            .clone(),
+    };
     builder.config.pkg.dendrite = HashMap::new();
-    builder.config.deployment.internal_dns =
-        omicron_common::nexus_config::InternalDns::FromAddress {
-            address: builder
-                .internal_dns
-                .as_ref()
-                .expect("Must start Internal DNS before acquiring an address")
-                .dns_server
-                .local_address(),
-        };
+    builder.config.deployment.internal_dns = InternalDns::FromAddress {
+        address: builder
+            .internal_dns
+            .as_ref()
+            .expect("Must start Internal DNS before acquiring an address")
+            .dns_server
+            .local_address(),
+    };
     let nexus_config = builder.config.clone();
     let nexus_log = log.clone();
     let nexus_handle = tokio::task::spawn(async move {

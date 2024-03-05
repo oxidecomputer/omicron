@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+# NOTE:
+#
+# This crate is depended on by several other workspaces! Be careful of adding
+# new regular or build dependencies here, as they will be added to those crates
+# as well. (Dev-dependencies are fine.)
+
 [dependencies]
 anyhow.workspace = true
 api_identity.workspace = true
@@ -32,8 +38,6 @@ strum.workspace = true
 test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tokio-postgres.workspace = true
-toml.workspace = true
 uuid.workspace = true
 parse-display.workspace = true
 progenitor.workspace = true

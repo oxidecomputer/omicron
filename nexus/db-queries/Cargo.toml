@@ -52,6 +52,7 @@ usdt.workspace = true
 
 authz-macros.workspace = true
 db-macros.workspace = true
+nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true

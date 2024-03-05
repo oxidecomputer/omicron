@@ -49,6 +49,7 @@ use propolis_client::support::tungstenite::Message as WebSocketMessage;
 use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
+use sagas::instance_common::ExternalIpAttach;
 use sled_agent_client::types::InstanceMigrationSourceParams;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
@@ -1952,20 +1953,63 @@ impl super::Nexus {
         Ok(())
     }
 
-    /// Attach an external IP to an instance.
-    pub(crate) async fn instance_attach_external_ip(
+    /// Attach an ephemeral IP to an instance.
+    pub(crate) async fn instance_attach_ephemeral_ip(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-        ext_ip: &params::ExternalIpCreate,
+        pool: Option<NameOrId>,
     ) -> UpdateResult<views::ExternalIp> {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
+        self.instance_attach_external_ip(
+            opctx,
+            authz_instance,
+            authz_project.id(),
+            ExternalIpAttach::Ephemeral { pool },
+        )
+        .await
+    }
+
+    /// Attach an ephemeral IP to an instance.
+    pub(crate) async fn instance_attach_floating_ip(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        authz_fip: authz::FloatingIp,
+        authz_fip_project: authz::Project,
+    ) -> UpdateResult<views::ExternalIp> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        if authz_fip_project.id() != authz_project.id() {
+            return Err(Error::invalid_request(
+                "floating IP must be in the same project as the instance",
+            ));
+        }
+
+        self.instance_attach_external_ip(
+            opctx,
+            authz_instance,
+            authz_project.id(),
+            ExternalIpAttach::Floating { floating_ip: authz_fip },
+        )
+        .await
+    }
+
+    /// Attach an external IP to an instance.
+    pub(crate) async fn instance_attach_external_ip(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        authz_instance: authz::Instance,
+        project_id: Uuid,
+        ext_ip: ExternalIpAttach,
+    ) -> UpdateResult<views::ExternalIp> {
         let saga_params = sagas::instance_ip_attach::Params {
             create_params: ext_ip.clone(),
             authz_instance,
-            project_id: authz_project.id(),
+            project_id,
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
         };
 

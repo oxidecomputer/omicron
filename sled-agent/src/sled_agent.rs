@@ -153,8 +153,12 @@ pub enum Error {
 
 impl From<Error> for omicron_common::api::external::Error {
     fn from(err: Error) -> Self {
-        omicron_common::api::external::Error::InternalError {
-            internal_message: err.to_string(),
+        match err {
+            // Service errors can convert themselves into the external error
+            Error::Services(err) => err.into(),
+            _ => omicron_common::api::external::Error::InternalError {
+                internal_message: err.to_string(),
+            },
         }
     }
 }

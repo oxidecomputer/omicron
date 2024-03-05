@@ -24,7 +24,7 @@ pub mod disk_create;
 pub mod disk_delete;
 pub mod finalize_disk;
 pub mod image_delete;
-mod instance_common;
+pub(crate) mod instance_common;
 pub mod instance_create;
 pub mod instance_delete;
 pub mod instance_ip_attach;

@@ -62,6 +62,7 @@ use illumos_utils::zpool::ZpoolName;
 use illumos_utils::{execute, PFEXEC};
 use internal_dns::resolver::Resolver;
 use itertools::Itertools;
+use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
@@ -86,9 +87,6 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
-use omicron_common::nexus_config::{
-    self, ConfigDropshotWithTls, DeploymentConfig as NexusDeploymentConfig,
-};
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;
@@ -2090,7 +2088,7 @@ impl ServiceManager {
                         // Nexus takes a separate config file for parameters
                         // which cannot be known at packaging time.
                         let nexus_port = if *external_tls { 443 } else { 80 };
-                        let deployment_config = NexusDeploymentConfig {
+                        let deployment_config = DeploymentConfig {
                             id: zone_config.zone.id,
                             rack_id: sled_info.rack_id,
                             techport_external_server_port:

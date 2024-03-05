@@ -247,11 +247,20 @@ impl DataStore {
                     }
 
                     sql_function!(fn random() -> diesel::sql_types::Float);
+
+                    // We only actually care about one target here, so this
+                    // query should have a `.limit(1)` attached. We fetch all
+                    // sled targets to leave additional debugging information in
+                    // the logs, for now.
                     let sled_targets = sled_targets
                         .order(random())
-                        .limit(1)
                         .get_results_async::<Uuid>(&conn)
                         .await?;
+                    info!(
+                        opctx.log,
+                        "found {} available sled targets", sled_targets.len();
+                        "sled_ids" => ?sled_targets,
+                    );
 
                     if sled_targets.is_empty() {
                         return Err(err.bail(SledReservationError::NotFound));

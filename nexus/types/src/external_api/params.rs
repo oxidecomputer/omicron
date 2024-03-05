@@ -167,7 +167,7 @@ pub struct OptionalProjectSelector {
     pub project: Option<NameOrId>,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema, Clone)]
 pub struct FloatingIpSelector {
     /// Name or ID of the project, only required if `floating_ip` is provided as a `Name`
     pub project: Option<NameOrId>,
@@ -888,6 +888,12 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 /// The type of resource that a floating IP is attached to

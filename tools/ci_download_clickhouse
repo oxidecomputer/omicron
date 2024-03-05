@@ -19,7 +19,8 @@ DOWNLOAD_DIR="$TARGET_DIR/downloads"
 # Location where the final clickhouse directory should end up.
 DEST_DIR="./$TARGET_DIR/clickhouse"
 
-# If you change this, you must also update the md5sums below
+# If you change the version in clickhouse_version, you must also update the
+# md5sums in clickhouse_checksums
 CIDL_VERSION="$(cat "$SOURCE_DIR/clickhouse_version")"
 source "$SOURCE_DIR/clickhouse_checksums"
 
@@ -113,7 +114,6 @@ function configure_os
 			CIDL_PLATFORM="illumos"
 			CIDL_MD5="$CIDL_MD5_ILLUMOS"
 			CIDL_MD5FUNC="do_md5sum"
-			CIDL_DASHREV=-1
 			;;
 		*)
 			fail "unsupported OS: $1"

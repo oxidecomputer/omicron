@@ -772,6 +772,14 @@ pub static DEMO_FLOAT_IP_CREATE: Lazy<params::FloatingIpCreate> =
         pool: None,
     });
 
+pub static DEMO_FLOAT_IP_UPDATE: Lazy<params::FloatingIpUpdate> =
+    Lazy::new(|| params::FloatingIpUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("an updated Floating IP")),
+        },
+    });
+
 pub static DEMO_FLOAT_IP_ATTACH: Lazy<params::FloatingIpAttach> =
     Lazy::new(|| params::FloatingIpAttach {
         kind: params::FloatingIpParentKind::Instance,
@@ -2277,6 +2285,9 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_UPDATE).unwrap()
+                  ),
                 AllowedMethod::Delete,
             ],
         },
