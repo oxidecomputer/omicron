@@ -1978,7 +1978,7 @@ dependencies = [
  "hostname",
  "http 0.2.11",
  "hyper 0.14.27",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "multer",
  "openapiv3",
  "paste",
@@ -2781,7 +2781,7 @@ dependencies = [
  "debug-ignore",
  "fixedbitset",
  "guppy-workspace-hack",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "itertools 0.12.1",
  "nested",
  "once_cell",
@@ -2813,7 +2813,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.11",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "slab",
  "tokio",
  "tokio-util",
@@ -3408,9 +3408,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.2.3"
+version = "2.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "233cf39063f058ea2caae4091bf4a3ef70a653afbc026f5c4a4135d114e3c177"
+checksum = "7b0b929d511467233429c45a44ac1dcaa21ba0f5ba11e4879e6ed28ddb4f9df4"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.3",
@@ -5397,7 +5397,7 @@ dependencies = [
  "hex",
  "hmac",
  "hyper 0.14.27",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "inout",
  "ipnetwork",
  "itertools 0.10.5",
@@ -5521,7 +5521,7 @@ version = "0.4.0"
 source = "git+https://github.com/oxidecomputer/openapi-lint?branch=main#ef442ee4343e97b6d9c217d3e7533962fe7d7236"
 dependencies = [
  "heck 0.4.1",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "lazy_static",
  "openapiv3",
  "regex",
@@ -5533,7 +5533,7 @@ version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc02deea53ffe807708244e5914f6b099ad7015a207ee24317c22112e17d9c5c"
 dependencies = [
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "serde",
  "serde_json",
 ]
@@ -5790,7 +5790,7 @@ dependencies = [
  "expectorate",
  "futures",
  "highway",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "itertools 0.12.1",
  "omicron-common",
  "omicron-test-utils",
@@ -6179,7 +6179,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1d3afd2628e69da2be385eb6f2fd57c8ac7977ceeff6dc166ff1657b0e386a9"
 dependencies = [
  "fixedbitset",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "serde",
  "serde_derive",
 ]
@@ -6571,7 +6571,7 @@ dependencies = [
  "getopts",
  "heck 0.4.1",
  "http 0.2.11",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "openapiv3",
  "proc-macro2",
  "quote",
@@ -7906,7 +7906,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "serde",
  "serde_derive",
  "serde_json",
@@ -7932,7 +7932,7 @@ version = "0.9.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a49e178e4452f45cb61d0cd8cebc1b0fafd3e41929e996cef79aa3aca91f574"
 dependencies = [
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "itoa",
  "ryu",
  "serde",
@@ -9322,7 +9322,7 @@ version = "0.19.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b5bb770da30e5cbfde35a2d7b9b8a2c4b8ef89548a7a6aeab5c9a576e3e7421"
 dependencies = [
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9335,7 +9335,7 @@ version = "0.22.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c1b5fd4128cc8d3e0cb74d4ed9a9cc7c7284becd4df68f5f940e1ad123606f6"
 dependencies = [
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "serde",
  "serde_spanned",
  "toml_datetime",
@@ -9854,7 +9854,7 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "indicatif",
  "libsw",
  "linear-map",
@@ -10274,7 +10274,7 @@ dependencies = [
  "crossterm",
  "futures",
  "humantime",
- "indexmap 2.2.3",
+ "indexmap 2.2.5",
  "indicatif",
  "itertools 0.12.1",
  "omicron-common",
