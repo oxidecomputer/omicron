@@ -52,7 +52,7 @@ struct FilterArgs {
     extra: bool,
 
     /// Show log files even if they are empty
-    #[arg(short, long, action=ArgAction::SetFalse)]
+    #[arg(short, long, action=ArgAction::SetTrue)]
     show_empty: bool,
 }
 

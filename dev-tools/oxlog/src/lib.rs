@@ -355,7 +355,7 @@ fn load_svc_logs(
             };
 
             logfile.read_metadata(&entry);
-            if logfile.size == Some(0) && show_empty {
+            if logfile.size == Some(0) && !show_empty {
                 // skip 0 size files
                 continue;
             }
@@ -396,7 +396,7 @@ fn load_extra_logs(
         path.push(filename);
         let mut logfile = LogFile::new(path);
         logfile.read_metadata(&entry);
-        if logfile.size == Some(0) && show_empty {
+        if logfile.size == Some(0) && !show_empty {
             // skip 0 size files
             continue;
         }
