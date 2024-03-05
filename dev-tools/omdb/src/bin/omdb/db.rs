@@ -61,6 +61,7 @@ use nexus_db_model::SwRotPage;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::VpcSubnet;
+use nexus_db_model::ZoneType;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -602,7 +603,7 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
     }
 }
 
-/// Helper function to looks up an instance with the given ID.
+/// Helper function to look up an instance with the given ID.
 async fn lookup_instance(
     datastore: &DataStore,
     instance_id: Uuid,
@@ -620,7 +621,67 @@ async fn lookup_instance(
         .with_context(|| format!("loading instance {instance_id}"))
 }
 
-/// Helper function to looks up a project with the given ID.
+/// Helper function to look up the kind of the service with the given ID.
+async fn lookup_service_kind(
+    datastore: &DataStore,
+    service_id: Uuid,
+) -> anyhow::Result<Option<ServiceKind>> {
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    // We need to check the `service` table (populated during rack setup)...
+    {
+        use db::schema::service::dsl;
+        if let Some(kind) = dsl::service
+            .filter(dsl::id.eq(service_id))
+            .limit(1)
+            .select(dsl::kind)
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .with_context(|| format!("loading service {service_id}"))?
+        {
+            return Ok(Some(kind));
+        }
+    }
+
+    // ...and if we don't find the service, check the latest blueprint, because
+    // the service might have been added by Reconfigurator after RSS ran.
+    conn.transaction_async(|conn| async move {
+        let maybe_current_target_id = {
+            use db::schema::bp_target::dsl;
+            dsl::bp_target
+                .order_by(dsl::version.desc())
+                .select(dsl::blueprint_id)
+                .first_async::<Uuid>(&conn)
+                .await
+                .optional()
+                .context("loading current blueprint target")?
+        };
+        let Some(current_target_id) = maybe_current_target_id else {
+            return Ok(None);
+        };
+
+        let maybe_zone_type = {
+            use db::schema::bp_omicron_zone::dsl;
+            dsl::bp_omicron_zone
+                .filter(dsl::blueprint_id.eq(current_target_id))
+                .filter(dsl::id.eq(service_id))
+                .limit(1)
+                .select(dsl::zone_type)
+                .get_result_async::<ZoneType>(&conn)
+                .await
+                .optional()
+                .with_context(|| {
+                    format!("loading service {service_id} from blueprint")
+                })?
+        };
+
+        Ok(maybe_zone_type.map(ServiceKind::from))
+    })
+    .await
+}
+
+/// Helper function to look up a project with the given ID.
 async fn lookup_project(
     datastore: &DataStore,
     project_id: Uuid,
@@ -1767,7 +1828,7 @@ async fn cmd_db_dns_names(
 }
 
 async fn cmd_db_eips(
-    opctx: &OpContext,
+    _opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     verbose: bool,
@@ -1863,23 +1924,12 @@ async fn cmd_db_eips(
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let service = match LookupPath::new(opctx, datastore)
-                    .service_id(owner_id)
-                    .fetch()
-                    .await
-                {
-                    Ok(instance) => instance,
-                    Err(e) => {
-                        eprintln!(
-                            "error looking up service with id {owner_id}: {e}"
-                        );
-                        continue;
-                    }
-                };
-                Owner::Service {
-                    id: owner_id,
-                    kind: format!("{:?}", service.1.kind),
-                }
+                let kind =
+                    match lookup_service_kind(datastore, owner_id).await? {
+                        Some(kind) => format!("{kind:?}"),
+                        None => "UNKNOWN (service ID not found)".to_string(),
+                    };
+                Owner::Service { id: owner_id, kind }
             } else {
                 let instance =
                     match lookup_instance(datastore, owner_id).await? {
