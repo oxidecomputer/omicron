@@ -47,7 +47,7 @@ use sled_agent_client::types::{
     PortConfigV1, RackNetworkConfigV1, RouteConfig as SledRouteConfig,
 };
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, SocketAddrV6},
     str::FromStr,
     sync::Arc,
@@ -886,64 +886,64 @@ fn build_sled_agent_clients(
 fn static_routes_to_del(
     current_static_routes: HashMap<
         SwitchLocation,
-        progenitor_client::ResponseValue<StaticRoute4List>,
+        HashSet<(Ipv4Addr, Prefix4)>,
     >,
-    desired_static_routes: HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>>,
+    desired_static_routes: HashMap<
+        SwitchLocation,
+        HashSet<(Ipv4Addr, Prefix4)>,
+    >,
 ) -> HashMap<SwitchLocation, DeleteStaticRoute4Request> {
     let mut routes_to_del: HashMap<SwitchLocation, DeleteStaticRoute4Request> =
         HashMap::new();
 
     // find routes to remove
     for (switch_location, routes_on_switch) in &current_static_routes {
-        let Some(routes_wanted) = desired_static_routes.get(switch_location)
-        else {
-            // if no desired routes are present, all routes on this switch should be deleted
-            let req = DeleteStaticRoute4Request {
-                routes: StaticRoute4List {
-                    list: routes_on_switch.list.clone(),
+        if let Some(routes_wanted) = desired_static_routes.get(switch_location)
+        {
+            // if it's on the switch but not desired (in our db), it should be removed
+            let stale_routes = routes_on_switch
+                .difference(routes_wanted)
+                .map(|(nexthop, prefix)| StaticRoute4 {
+                    nexthop: *nexthop,
+                    prefix: prefix.clone(),
+                })
+                .collect::<Vec<StaticRoute4>>();
+
+            routes_to_del.insert(
+                *switch_location,
+                DeleteStaticRoute4Request {
+                    routes: StaticRoute4List { list: stale_routes },
                 },
+            );
+        } else {
+            // if no desired routes are present, all routes on this switch should be deleted
+            let stale_routes = routes_on_switch
+                .iter()
+                .map(|(nexthop, prefix)| StaticRoute4 {
+                    nexthop: *nexthop,
+                    prefix: prefix.clone(),
+                })
+                .collect::<Vec<StaticRoute4>>();
+
+            let req = DeleteStaticRoute4Request {
+                routes: StaticRoute4List { list: stale_routes },
             };
+
             routes_to_del.insert(*switch_location, req);
             continue;
         };
-
-        for live_route in &routes_on_switch.list {
-            // move on to the next route if the db says the route should still be there
-            if routes_wanted.iter().any(|(nexthop, prefix)| {
-                live_route.nexthop == *nexthop
-                    && live_route.prefix.value == prefix.value
-                    && live_route.prefix.length == prefix.length
-            }) {
-                continue;
-            }
-            // else, build a struct to remove the route
-            match routes_to_del.entry(*switch_location) {
-                Entry::Occupied(mut occupied_entry) => {
-                    occupied_entry
-                        .get_mut()
-                        .routes
-                        .list
-                        .push(live_route.clone());
-                }
-                Entry::Vacant(vacant_entry) => {
-                    let req = DeleteStaticRoute4Request {
-                        routes: {
-                            StaticRoute4List { list: vec![live_route.clone()] }
-                        },
-                    };
-                    vacant_entry.insert(req);
-                }
-            }
-        }
     }
     routes_to_del
 }
 
 fn static_routes_to_add(
-    desired_static_routes: &HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>>,
+    desired_static_routes: &HashMap<
+        SwitchLocation,
+        HashSet<(Ipv4Addr, Prefix4)>,
+    >,
     current_static_routes: &HashMap<
         SwitchLocation,
-        progenitor_client::ResponseValue<StaticRoute4List>,
+        HashSet<(Ipv4Addr, Prefix4)>,
     >,
     log: &slog::Logger,
 ) -> HashMap<SwitchLocation, AddStaticRoute4Request> {
@@ -954,7 +954,7 @@ fn static_routes_to_add(
     for (switch_location, routes_wanted) in desired_static_routes {
         let routes_on_switch = match current_static_routes.get(&switch_location)
         {
-            Some(routes) => &routes.list,
+            Some(routes) => routes,
             None => {
                 warn!(
                     &log,
@@ -964,32 +964,20 @@ fn static_routes_to_add(
                 continue;
             }
         };
+        let missing_routes = routes_wanted
+            .difference(routes_on_switch)
+            .map(|(nexthop, prefix)| StaticRoute4 {
+                nexthop: *nexthop,
+                prefix: prefix.clone(),
+            })
+            .collect::<Vec<StaticRoute4>>();
 
-        for (nexthop, prefix) in routes_wanted {
-            // move on to the next route if it is already on the switch
-            if routes_on_switch.iter().any(|live_route| {
-                live_route.nexthop == *nexthop
-                    && live_route.prefix.value == prefix.value
-                    && live_route.prefix.length == prefix.length
-            }) {
-                continue;
-            }
-            // build a struct to add the route if not
-
-            let sr = StaticRoute4 { nexthop: *nexthop, prefix: prefix.clone() };
-
-            match routes_to_add.entry(*switch_location) {
-                Entry::Occupied(mut occupied_entry) => {
-                    occupied_entry.get_mut().routes.list.push(sr);
-                }
-                Entry::Vacant(vacant_entry) => {
-                    let req = AddStaticRoute4Request {
-                        routes: { StaticRoute4List { list: vec![sr] } },
-                    };
-                    vacant_entry.insert(req);
-                }
-            }
-        }
+        routes_to_add.insert(
+            *switch_location,
+            AddStaticRoute4Request {
+                routes: StaticRoute4List { list: missing_routes },
+            },
+        );
     }
     routes_to_add
 }
@@ -1000,16 +988,18 @@ fn static_routes_in_db(
         nexus_db_model::SwitchPort,
         PortSettingsChange,
     )],
-) -> HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>> {
-    let mut routes_from_db: HashMap<SwitchLocation, Vec<(Ipv4Addr, Prefix4)>> =
-        HashMap::new();
+) -> HashMap<SwitchLocation, HashSet<(Ipv4Addr, Prefix4)>> {
+    let mut routes_from_db: HashMap<
+        SwitchLocation,
+        HashSet<(Ipv4Addr, Prefix4)>,
+    > = HashMap::new();
 
     for (location, _port, change) in changes {
         // we only need to check for ports that have a configuration present. No config == no routes.
         let PortSettingsChange::Apply(settings) = change else {
             continue;
         };
-        let mut routes = vec![];
+        let mut routes = HashSet::new();
         for route in &settings.routes {
             // convert to appropriate types for comparison and insertion
             let nexthop = match route.gw.ip() {
@@ -1022,12 +1012,12 @@ fn static_routes_in_db(
                 }
                 IpAddr::V6(_) => continue,
             };
-            routes.push((nexthop, prefix))
+            routes.insert((nexthop, prefix));
         }
 
         match routes_from_db.entry(*location) {
             Entry::Occupied(mut occupied_entry) => {
-                occupied_entry.get_mut().append(&mut routes);
+                occupied_entry.get_mut().extend(routes);
             }
             Entry::Vacant(vacant_entry) => {
                 vacant_entry.insert(routes);
@@ -1152,22 +1142,26 @@ async fn apply_switch_port_changes(
 async fn static_routes_on_switch<'a>(
     mgd_clients: &HashMap<SwitchLocation, mg_admin_client::Client>,
     log: &slog::Logger,
-) -> HashMap<SwitchLocation, progenitor_client::ResponseValue<StaticRoute4List>>
-{
+) -> HashMap<SwitchLocation, HashSet<(Ipv4Addr, Prefix4)>> {
     let mut routes_on_switch = HashMap::new();
 
     for (location, client) in mgd_clients {
-        let static_routes = match client.inner.static_list_v4_routes().await {
-            Ok(routes) => routes,
-            Err(_) => {
-                error!(
-                    &log,
-                    "unable to retrieve routes from switch";
-                    "switch_location" => ?location,
-                );
-                continue;
-            }
-        };
+        let static_routes: HashSet<(Ipv4Addr, Prefix4)> =
+            match client.inner.static_list_v4_routes().await {
+                Ok(routes) => routes
+                    .list
+                    .iter()
+                    .map(|r| (r.nexthop, r.prefix.clone()))
+                    .collect(),
+                Err(_) => {
+                    error!(
+                        &log,
+                        "unable to retrieve routes from switch";
+                        "switch_location" => ?location,
+                    );
+                    continue;
+                }
+            };
         routes_on_switch.insert(*location, static_routes);
     }
     routes_on_switch
