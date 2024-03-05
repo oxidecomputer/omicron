@@ -165,7 +165,6 @@ mod test {
         db.sled_upsert(sled_update)
             .await
             .expect("Could not upsert sled during test prep")
-            .unwrap()
     }
 
     fn list_disk_params() -> DataPageParams<'static, Uuid> {

@@ -225,11 +225,7 @@ mod test {
             Uuid::new_v4(),
             Generation::new(),
         );
-        datastore
-            .sled_upsert(sled)
-            .await
-            .expect("failed to upsert sled")
-            .unwrap();
+        datastore.sled_upsert(sled).await.expect("failed to upsert sled");
 
         // Create a fake zpool that backs our fake datasets.
         let zpool_id = Uuid::new_v4();

@@ -11,7 +11,6 @@ use crate::internal_api::params::{
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::SledUpsertOutput;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::DatasetKind;
@@ -71,20 +70,7 @@ impl super::Nexus {
             self.rack_id,
             info.generation.into(),
         );
-        match self.db_datastore.sled_upsert(sled).await? {
-            SledUpsertOutput::Updated(_) => {}
-            SledUpsertOutput::Decommissioned => {
-                // We currently don't bubble up errors for decommissioned sleds
-                // -- if it ever happens, a decommissioned sled-agent doesn't
-                // know about that.
-                warn!(
-                    self.log,
-                    "decommissioned sled-agent reached out for upserts";
-                    "sled_uuid" => id.to_string()
-                );
-            }
-        }
-
+        self.db_datastore.sled_upsert(sled).await?;
         Ok(())
     }
 
