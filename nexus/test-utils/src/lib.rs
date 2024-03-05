@@ -17,6 +17,12 @@ use dropshot::HandlerTaskMode;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use gateway_test_utils::setup::GatewayTestContext;
+use nexus_config::Database;
+use nexus_config::DpdConfig;
+use nexus_config::InternalDns;
+use nexus_config::MgdConfig;
+use nexus_config::NexusConfig;
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_interface::NexusServer;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
@@ -34,8 +40,6 @@ use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config;
-use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
 use oximeter_collector::Oximeter;
@@ -119,7 +123,7 @@ impl<N: NexusServer> ControlPlaneTestContext<N> {
     }
 }
 
-pub fn load_test_config() -> omicron_common::nexus_config::Config {
+pub fn load_test_config() -> NexusConfig {
     // We load as much configuration as we can from the test suite configuration
     // file.  In practice, TestContext requires that:
     //
@@ -136,9 +140,8 @@ pub fn load_test_config() -> omicron_common::nexus_config::Config {
     // configuration options, we expect many of those can be usefully configured
     // (and reconfigured) for the test suite.
     let config_file_path = Utf8Path::new("tests/config.test.toml");
-    let mut config =
-        omicron_common::nexus_config::Config::from_file(config_file_path)
-            .expect("failed to load config.test.toml");
+    let mut config = NexusConfig::from_file(config_file_path)
+        .expect("failed to load config.test.toml");
     config.deployment.id = Uuid::new_v4();
     config
 }
@@ -227,7 +230,7 @@ impl RackInitRequestBuilder {
 }
 
 pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
-    pub config: &'a mut omicron_common::nexus_config::Config,
+    pub config: &'a mut NexusConfig,
     test_name: &'a str,
     rack_init_builder: RackInitRequestBuilder,
 
@@ -269,10 +272,7 @@ type StepInitFn<'a, N> = Box<
 >;
 
 impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
-    pub fn new(
-        test_name: &'a str,
-        config: &'a mut omicron_common::nexus_config::Config,
-    ) -> Self {
+    pub fn new(test_name: &'a str, config: &'a mut NexusConfig) -> Self {
         let start_time = chrono::Utc::now();
         let logctx = LogContext::new(test_name, &config.pkg.log);
 
@@ -463,9 +463,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         // Update the configuration options for Nexus, if it's launched later.
         //
         // NOTE: If dendrite is started after Nexus, this is ignored.
-        let config = omicron_common::nexus_config::DpdConfig {
-            address: std::net::SocketAddr::V6(address),
-        };
+        let config = DpdConfig { address: std::net::SocketAddr::V6(address) };
         self.config.pkg.dendrite.insert(switch_location, config);
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
@@ -489,9 +487,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         debug!(log, "mgd port is {port}");
 
-        let config = omicron_common::nexus_config::MgdConfig {
-            address: std::net::SocketAddr::V6(address),
-        };
+        let config = MgdConfig { address: std::net::SocketAddr::V6(address) };
         self.config.pkg.mgd.insert(switch_location, config);
 
         let sled_id = Uuid::parse_str(SLED_AGENT_UUID).unwrap();
@@ -553,16 +549,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let log = &self.logctx.log;
         debug!(log, "Starting Nexus (internal API)");
 
-        self.config.deployment.internal_dns =
-            nexus_config::InternalDns::FromAddress {
-                address: self
-                    .internal_dns
-                    .as_ref()
-                    .expect("Must initialize internal DNS server first")
-                    .dns_server
-                    .local_address(),
-            };
-        self.config.deployment.database = nexus_config::Database::FromUrl {
+        self.config.deployment.internal_dns = InternalDns::FromAddress {
+            address: self
+                .internal_dns
+                .as_ref()
+                .expect("Must initialize internal DNS server first")
+                .dns_server
+                .local_address(),
+        };
+        self.config.deployment.database = Database::FromUrl {
             url: self
                 .database
                 .as_ref()
@@ -926,7 +921,7 @@ enum PopulateCrdb {
 /// should be done in the `crdb-seed` setup script.
 #[cfg(feature = "omicron-dev")]
 pub async fn omicron_dev_setup_with_config<N: NexusServer>(
-    config: &mut omicron_common::nexus_config::Config,
+    config: &mut NexusConfig,
 ) -> Result<ControlPlaneTestContext<N>> {
     let builder =
         ControlPlaneTestContextBuilder::<N>::new("omicron-dev", config);
@@ -959,7 +954,7 @@ pub async fn omicron_dev_setup_with_config<N: NexusServer>(
 /// Setup routine to use for tests.
 pub async fn test_setup_with_config<N: NexusServer>(
     test_name: &str,
-    config: &mut omicron_common::nexus_config::Config,
+    config: &mut NexusConfig,
     sim_mode: sim::SimMode,
     initial_cert: Option<Certificate>,
 ) -> ControlPlaneTestContext<N> {

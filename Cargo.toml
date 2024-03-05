@@ -36,6 +36,7 @@ members = [
     "ipcc",
     "key-manager",
     "nexus",
+    "nexus-config",
     "nexus/authz-macros",
     "nexus/db-macros",
     "nexus/db-model",
@@ -113,6 +114,7 @@ default-members = [
     "ipcc",
     "key-manager",
     "nexus",
+    "nexus-config",
     "nexus/authz-macros",
     "nexus/macros-common",
     "nexus/db-macros",
@@ -254,6 +256,7 @@ newtype_derive = "0.1.6"
 mg-admin-client = { path = "clients/mg-admin-client" }
 multimap = "0.10.0"
 nexus-client = { path = "clients/nexus-client" }
+nexus-config = { path = "nexus-config" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }

@@ -1,0 +1,22 @@
+[package]
+name = "nexus-config"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+dropshot.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_with.workspace = true
+tokio-postgres.workspace = true
+toml.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+libc.workspace = true
+serde_json.workspace = true

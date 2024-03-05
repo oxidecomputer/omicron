@@ -2,7 +2,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Shared state used by API request handlers
-use super::config;
 use super::Nexus;
 use crate::saga_interface::SagaContext;
 use async_trait::async_trait;
@@ -13,14 +12,15 @@ use authn::external::HttpAuthnScheme;
 use camino::Utf8PathBuf;
 use chrono::Duration;
 use internal_dns::ServiceName;
+use nexus_config::NexusConfig;
+use nexus_config::PostgresConfigWithUrl;
+use nexus_config::SchemeName;
 use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::authn::ConsoleSessionWithSiloId;
 use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
-use omicron_common::nexus_config;
-use omicron_common::postgres_config::PostgresConfigWithUrl;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -69,7 +69,7 @@ impl ServerContext {
     pub async fn new(
         rack_id: Uuid,
         log: Logger,
-        config: &config::Config,
+        config: &NexusConfig,
     ) -> Result<Arc<ServerContext>, String> {
         let nexus_schemes = config
             .pkg
@@ -78,11 +78,11 @@ impl ServerContext {
             .iter()
             .map::<Box<dyn HttpAuthnScheme<ServerContext>>, _>(
                 |name| match name {
-                    config::SchemeName::Spoof => Box::new(HttpAuthnSpoof),
-                    config::SchemeName::SessionCookie => {
+                    SchemeName::Spoof => Box::new(HttpAuthnSpoof),
+                    SchemeName::SessionCookie => {
                         Box::new(HttpAuthnSessionCookie)
                     }
-                    config::SchemeName::AccessToken => Box::new(HttpAuthnToken),
+                    SchemeName::AccessToken => Box::new(HttpAuthnToken),
                 },
             )
             .collect();
