@@ -781,7 +781,7 @@ mod test {
 
         // Now reset the generation to a lower value and try again.
         // This should fail.
-        let current_gen = sled_update.rcgen.clone();
+        let current_gen = sled_update.rcgen;
         sled_update.rcgen = Generation::new();
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 

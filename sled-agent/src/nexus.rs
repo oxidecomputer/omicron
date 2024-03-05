@@ -259,6 +259,12 @@ pub struct NexusNotifierInput {
     pub vmm_reservoir_manager: VmmReservoirManagerHandle,
 }
 
+// Type returned from a join on the "outstanding request" task`
+type NexusRsp = (
+    NexusOp,
+    Result<SledAgentInfo, nexus_client::Error<nexus_client::types::Error>>,
+);
+
 /// A mechanism for notifying nexus about this sled agent
 ///
 /// The semantics are as follows:
@@ -268,11 +274,11 @@ pub struct NexusNotifierInput {
 ///  3. Whenever the state needs to be updated to a value different
 ///     from what nexus has, the generation number is bumped
 ///     and the new state transmitted.
-///  4. If a caller requests an update to be made to nexus it gets and it succeeds
+///  4. If a caller requests an update to be made to nexus and it succeeds
 ///     the known value is set to what was updated.
 ///  5. If the request fails, we go ahead and set the known state to `None`,
 ///     since we are not sure if the last update succeeded. This will
-///     trigger a get request to get the latest state.
+///     trigger a get request for the latest state.
 pub struct NexusNotifierTask {
     sled_id: Uuid,
     nexus_client: NexusClient,
@@ -301,15 +307,8 @@ pub struct NexusNotifierTask {
     // We spawn a task to manage this request so we don't block our main
     // notifier task. We wait for a notification on `outstanding_req_ready`
     // and then get the result from the `JoinHandle`.
-    outstanding_request: Option<
-        tokio::task::JoinHandle<(
-            NexusOp,
-            Result<
-                SledAgentInfo,
-                nexus_client::Error<nexus_client::types::Error>,
-            >,
-        )>,
-    >,
+    outstanding_request: Option<tokio::task::JoinHandle<NexusRsp>>,
+
     // A notification sent from the outstanding task when it has completed.
     outstanding_req_ready: Arc<Notify>,
 
