@@ -16,11 +16,11 @@ use crate::db::model::Region;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use nexus_config::RegionAllocationStrategy;
 use nexus_types::external_api::params;
 use omicron_common::api::external;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
-use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use uuid::Uuid;
 

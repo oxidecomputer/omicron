@@ -4290,6 +4290,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-config"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "dropshot",
+ "expectorate",
+ "libc",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "tokio-postgres",
+ "toml 0.8.10",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-db-model"
 version = "0.1.0"
 dependencies = [
@@ -4303,6 +4323,7 @@ dependencies = [
  "ipnetwork",
  "macaddr",
  "newtype_derive",
+ "nexus-config",
  "nexus-defaults",
  "nexus-types",
  "omicron-certificates",
@@ -4358,6 +4379,7 @@ dependencies = [
  "itertools 0.12.1",
  "macaddr",
  "newtype_derive",
+ "nexus-config",
  "nexus-db-model",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
@@ -4466,6 +4488,7 @@ dependencies = [
  "illumos-utils",
  "internal-dns",
  "ipnet",
+ "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-inventory",
@@ -4496,6 +4519,7 @@ dependencies = [
  "internal-dns",
  "ipnet",
  "ipnetwork",
+ "nexus-config",
  "nexus-inventory",
  "nexus-types",
  "omicron-common",
@@ -4512,6 +4536,7 @@ name = "nexus-test-interface"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "nexus-config",
  "nexus-types",
  "omicron-common",
  "omicron-workspace-hack",
@@ -4539,6 +4564,7 @@ dependencies = [
  "http 0.2.11",
  "hyper 0.14.27",
  "internal-dns",
+ "nexus-config",
  "nexus-db-queries",
  "nexus-test-interface",
  "nexus-types",
@@ -4924,8 +4950,6 @@ dependencies = [
  "test-strategy",
  "thiserror",
  "tokio",
- "tokio-postgres",
- "toml 0.8.10",
  "uuid",
 ]
 
@@ -4943,6 +4967,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "libc",
+ "nexus-config",
  "nexus-test-interface",
  "nexus-test-utils",
  "omicron-common",
@@ -5049,6 +5074,7 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "mime_guess",
+ "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
@@ -5147,6 +5173,7 @@ dependencies = [
  "ipnetwork",
  "multimap",
  "nexus-client",
+ "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-test-utils",
@@ -5277,6 +5304,7 @@ dependencies = [
  "macaddr",
  "mg-admin-client",
  "nexus-client",
+ "nexus-config",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
@@ -5339,6 +5367,7 @@ dependencies = [
  "hex",
  "http 0.2.11",
  "libc",
+ "nexus-config",
  "omicron-common",
  "omicron-workspace-hack",
  "pem",
