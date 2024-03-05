@@ -20,6 +20,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::OmicronZonesConfig;
 use omicron_common::api::external::Generation;
 use reedline::{Reedline, Signal};
+use std::io::BufRead;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
@@ -43,14 +44,23 @@ struct ReconfiguratorSim {
     log: slog::Logger,
 }
 
+/// interactive REPL for exploring the planner
+#[derive(Parser, Debug)]
+struct CmdReconfiguratorSim {
+    input_file: Option<Utf8PathBuf>,
+}
+
 // REPL implementation
 
 fn main() -> anyhow::Result<()> {
+    let cmd = CmdReconfiguratorSim::parse();
+
     let log = dropshot::ConfigLogging::StderrTerminal {
         level: dropshot::ConfigLoggingLevel::Debug,
     }
     .to_logger("reconfigurator-sim")
     .context("creating logger")?;
+
     let mut sim = ReconfiguratorSim {
         system: SystemDescription::new(),
         collections: IndexMap::new(),
@@ -58,22 +68,37 @@ fn main() -> anyhow::Result<()> {
         log,
     };
 
-    let mut ed = Reedline::create();
-    let prompt = reedline::DefaultPrompt::new(
-        reedline::DefaultPromptSegment::Empty,
-        reedline::DefaultPromptSegment::Empty,
-    );
-    loop {
-        match ed.read_line(&prompt) {
-            Ok(Signal::Success(buffer)) => {
-                match process_entry(&mut sim, buffer) {
-                    LoopResult::Continue => (),
-                    LoopResult::Bail(error) => return Err(error),
-                }
+    if let Some(input_file) = cmd.input_file {
+        let file = std::fs::File::open(&input_file)
+            .with_context(|| format!("open {:?}", &input_file))?;
+        let bufread = std::io::BufReader::new(file);
+        for maybe_buffer in bufread.lines() {
+            let buffer = maybe_buffer
+                .with_context(|| format!("read {:?}", &input_file))?;
+            println!("> {}", buffer);
+            match process_entry(&mut sim, buffer) {
+                LoopResult::Continue => (),
+                LoopResult::Bail(error) => return Err(error),
             }
-            Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => break,
-            Err(error) => {
-                bail!("reconfigurator-cli: unexpected error: {:#}", error);
+        }
+    } else {
+        let mut ed = Reedline::create();
+        let prompt = reedline::DefaultPrompt::new(
+            reedline::DefaultPromptSegment::Empty,
+            reedline::DefaultPromptSegment::Empty,
+        );
+        loop {
+            match ed.read_line(&prompt) {
+                Ok(Signal::Success(buffer)) => {
+                    match process_entry(&mut sim, buffer) {
+                        LoopResult::Continue => (),
+                        LoopResult::Bail(error) => return Err(error),
+                    }
+                }
+                Ok(Signal::CtrlD) | Ok(Signal::CtrlC) => break,
+                Err(error) => {
+                    bail!("reconfigurator-cli: unexpected error: {:#}", error);
+                }
             }
         }
     }
@@ -134,7 +159,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
     // Dispatch to the command's handler.
     let cmd_result = match command {
         Commands::SledList => cmd_sled_list(sim),
-        Commands::SledAdd => cmd_sled_add(sim),
+        Commands::SledAdd(args) => cmd_sled_add(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
@@ -176,7 +201,7 @@ enum Commands {
     /// list sleds
     SledList,
     /// add a new sled
-    SledAdd,
+    SledAdd(SledAddArgs),
     /// show details about one sled
     SledShow(SledArgs),
 
@@ -204,6 +229,12 @@ enum Commands {
     Load(LoadArgs),
     /// show information about what's in a saved file
     FileContents(FileContentsArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledAddArgs {
+    /// id of the new sled
+    sled_id: Option<Uuid>,
 }
 
 #[derive(Debug, Args)]
@@ -296,8 +327,16 @@ fn cmd_sled_list(
     Ok(Some(table))
 }
 
-fn cmd_sled_add(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
-    let _ = sim.system.sled(SledBuilder::new()).context("adding sled")?;
+fn cmd_sled_add(
+    sim: &mut ReconfiguratorSim,
+    add: SledAddArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut new_sled = SledBuilder::new();
+    if let Some(sled_id) = add.sled_id {
+        new_sled = new_sled.id(sled_id);
+    }
+
+    let _ = sim.system.sled(new_sled).context("adding sled")?;
     Ok(Some(String::from("added sled")))
 }
 
