@@ -322,6 +322,7 @@ mod test {
     use crate::blueprint_builder::test::ExampleSystem;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
+    use crate::system::SledBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
@@ -330,7 +331,6 @@ mod test {
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
-    use crate::system::SledBuilder;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]

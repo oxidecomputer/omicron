@@ -758,7 +758,7 @@ pub mod test {
         pub fn new(nsleds: usize) -> ExampleSystem {
             let mut system = SystemDescription::new();
             let sled_ids: Vec<_> =
-                (0..nsleds).into_iter().map(|_| Uuid::new_v4()).collect();
+                (0..nsleds).map(|_| Uuid::new_v4()).collect();
             for sled_id in &sled_ids {
                 let _ = system.sled(SledBuilder::new().id(*sled_id)).unwrap();
             }

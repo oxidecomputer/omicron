@@ -102,15 +102,14 @@ fn test_complex() {
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
 
     // This is a much lighter form of redaction than `redact_variable()` does.
-    let stdout_text = regex::Regex::new(
-        r"generated blueprint .* based on parent blueprint",
-    )
-    .unwrap()
-    .replace_all(
-        &stdout_text,
-        "generated blueprint REDACTED_UUID based on parent blueprint",
-    )
-    .to_string();
+    let stdout_text =
+        regex::Regex::new(r"generated blueprint .* based on parent blueprint")
+            .unwrap()
+            .replace_all(
+                &stdout_text,
+                "generated blueprint REDACTED_UUID based on parent blueprint",
+            )
+            .to_string();
 
     assert_contents("tests/output/cmd-complex-stdout", &stdout_text);
 }
