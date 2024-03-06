@@ -712,9 +712,9 @@ impl DataStore {
                 // possible the current target blueprint describes running
                 // services that were added after RSS and therefore wouldn't be
                 // seen in `rss_service_query`.
-                bp_target1.field(bp_target::blueprint_id).eq_any(
+                bp_target1.field(bp_target::version).eq_any(
                     bp_target2
-                        .select(bp_target2.field(bp_target::blueprint_id))
+                        .select(bp_target2.field(bp_target::version))
                         .order_by(bp_target2.field(bp_target::version).desc())
                         .limit(1),
                 ),
