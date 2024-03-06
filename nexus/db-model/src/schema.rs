@@ -1520,17 +1520,6 @@ table! {
 }
 
 table! {
-    background_task_toggles (id) {
-        id -> Uuid,
-        name -> Text,
-        enabled -> Bool,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-        time_deleted -> Nullable<Timestamptz>,
-    }
-}
-
-table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,

@@ -3545,20 +3545,7 @@ SELECT
   deleted
 FROM interleaved_versions;
 
--- Table for optionally enabling / disbling background tasks or
--- subsections of background tasks at runtime
-CREATE TABLE IF NOT EXISTS omicron.public.background_task_toggles (
-    id UUID NOT NULL DEFAULT uuid_generate_v4(),
-    name STRING NOT NULL,
-    enabled BOOLEAN NOT NULL,
-    time_created TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    time_modified TIMESTAMPTZ ON UPDATE NOW() NOT NULL DEFAULT NOW(),
-    time_deleted TIMESTAMPTZ
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS background_task_toggles_name
-ON omicron.public.background_task_toggles (name)
-STORING (enabled);
+CREATE INDEX IF NOT EXISTS rack_initialized ON rack (initialized);
 
 INSERT INTO omicron.public.db_metadata (
     singleton,

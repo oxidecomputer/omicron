@@ -49,7 +49,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod address_lot;
-mod background_task_toggle;
 mod bfd;
 mod bgp;
 mod bootstore;
