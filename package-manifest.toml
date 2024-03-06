@@ -228,7 +228,12 @@ output.intermediate_only = true
 service_name = "internal_dns"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "dns-server.tar.gz", "internal-dns-customizations.tar.gz" ]
+source.packages = [
+  "dns-server.tar.gz",
+  "internal-dns-customizations.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
 output.type = "zone"
 
 [package.external-dns]

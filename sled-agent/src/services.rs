@@ -1400,12 +1400,12 @@ impl ServiceManager {
     }
 
     fn zone_network_setup_install(
-        info: &SledAgentInfo,
+        gw_addr: &Ipv6Addr,
         zone: &InstalledZone,
         static_addr: &String,
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
-        let gateway = &info.underlay_address.to_string();
+        let gateway = &gw_addr.to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
@@ -1575,7 +1575,7 @@ impl ServiceManager {
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1624,7 +1624,7 @@ impl ServiceManager {
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1680,7 +1680,7 @@ impl ServiceManager {
                 let listen_port = &address.port().to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1729,7 +1729,7 @@ impl ServiceManager {
                 let listen_port = &CRUCIBLE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1784,7 +1784,7 @@ impl ServiceManager {
                 let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1834,7 +1834,7 @@ impl ServiceManager {
                 let listen_addr = &address.ip().to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1877,7 +1877,7 @@ impl ServiceManager {
                 let static_addr = underlay_address.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     &static_addr.clone(),
                 )?;
@@ -1966,7 +1966,7 @@ impl ServiceManager {
                 let static_addr = underlay_address.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     &static_addr.clone(),
                 )?;
@@ -2036,6 +2036,86 @@ impl ServiceManager {
                         Error::io("Failed to set up NTP profile", err)
                     })?;
 
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type:
+                            OmicronZoneType::InternalDns {
+                                http_address,
+                                dns_address,
+                                gz_address,
+                                gz_address_index,
+                                ..
+                            },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let nw_setup_service = Self::zone_network_setup_install(
+                    gz_address,
+                    &installed_zone,
+                    &underlay_address.to_string(),
+                )?;
+
+                // Internal DNS zones require a special route through
+                // the global zone, since they are not on the same part
+                // of the underlay as most other services on this sled
+                // (the sled's subnet).
+                //
+                // We create an IP address in the dedicated portion of
+                // the underlay used for internal DNS servers, but we
+                // *also* add a number ("which DNS server is this") to
+                // ensure these addresses are given unique names. In the
+                // unlikely case that two internal DNS servers end up on
+                // the same machine (which is effectively a
+                // developer-only environment -- we wouldn't want this
+                // in prod!), they need to be given distinct names.
+                let addr_name = format!("internaldns{gz_address_index}");
+                Zones::ensure_has_global_zone_v6_address(
+                    self.inner.underlay_vnic.clone(),
+                    *gz_address,
+                    &addr_name,
+                )
+                .map_err(|err| Error::GzAddress {
+                    message: format!(
+                        "Failed to create address {} for Internal DNS zone",
+                        addr_name
+                    ),
+                    err,
+                })?;
+
+                // If this address is in a new ipv6 prefix, notify
+                // maghemite so it can advertise it to other sleds.
+                self.advertise_prefix_of_address(*gz_address).await;
+
+                let http_addr =
+                    format!("[{}]:{}", http_address.ip(), http_address.port());
+                let dns_addr =
+                    format!("[{}]:{}", dns_address.ip(), dns_address.port());
+
+                let internal_dns_config = PropertyGroupBuilder::new("config")
+                    .add_property("http_address", "astring", &http_addr)
+                    .add_property("dns_address", "astring", &dns_addr);
+                let internal_dns_service =
+                    ServiceBuilder::new("oxide/internal_dns").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(internal_dns_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(internal_dns_service)
+                    .add_service(disabled_dns_client_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup Internal DNS profile", err)
+                    })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
             _ => {}
@@ -2278,80 +2358,6 @@ impl ServiceManager {
                             .await
                             .map_err(|err| Error::io_path(&config_path, err))?;
                     }
-                    OmicronZoneType::InternalDns {
-                        http_address,
-                        dns_address,
-                        gz_address,
-                        gz_address_index,
-                        ..
-                    } => {
-                        info!(
-                            self.inner.log,
-                            "Setting up internal-dns service"
-                        );
-
-                        // Internal DNS zones require a special route through
-                        // the global zone, since they are not on the same part
-                        // of the underlay as most other services on this sled
-                        // (the sled's subnet).
-                        //
-                        // We create an IP address in the dedicated portion of
-                        // the underlay used for internal DNS servers, but we
-                        // *also* add a number ("which DNS server is this") to
-                        // ensure these addresses are given unique names. In the
-                        // unlikely case that two internal DNS servers end up on
-                        // the same machine (which is effectively a
-                        // developer-only environment -- we wouldn't want this
-                        // in prod!), they need to be given distinct names.
-                        let addr_name =
-                            format!("internaldns{gz_address_index}");
-                        Zones::ensure_has_global_zone_v6_address(
-                            self.inner.underlay_vnic.clone(),
-                            *gz_address,
-                            &addr_name,
-                        )
-                        .map_err(|err| {
-                            Error::GzAddress {
-                                message: format!(
-                            "Failed to create address {} for Internal DNS zone",
-                            addr_name
-                        ),
-                                err,
-                            }
-                        })?;
-                        // If this address is in a new ipv6 prefix, notify
-                        // maghemite so it can advertise it to other sleds.
-                        self.advertise_prefix_of_address(*gz_address).await;
-
-                        running_zone.add_default_route(*gz_address).map_err(
-                            |err| Error::ZoneCommand {
-                                intent: "Adding Route".to_string(),
-                                err,
-                            },
-                        )?;
-
-                        smfh.setprop(
-                            "config/http_address",
-                            format!(
-                                "[{}]:{}",
-                                http_address.ip(),
-                                http_address.port(),
-                            ),
-                        )?;
-                        smfh.setprop(
-                            "config/dns_address",
-                            &format!(
-                                "[{}]:{}",
-                                dns_address.ip(),
-                                dns_address.port(),
-                            ),
-                        )?;
-
-                        // Refresh the manifest with the new properties we set,
-                        // so they become "effective" properties when the
-                        // service is enabled.
-                        smfh.refresh()?;
-                    }
                     OmicronZoneType::BoundaryNtp { .. }
                     | OmicronZoneType::Clickhouse { .. }
                     | OmicronZoneType::ClickhouseKeeper { .. }
@@ -2359,6 +2365,7 @@ impl ServiceManager {
                     | OmicronZoneType::Crucible { .. }
                     | OmicronZoneType::CruciblePantry { .. }
                     | OmicronZoneType::ExternalDns { .. }
+                    | OmicronZoneType::InternalDns { .. }
                     | OmicronZoneType::InternalNtp { .. }
                     | OmicronZoneType::Oximeter { .. } => {
                         panic!(
