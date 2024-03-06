@@ -904,7 +904,7 @@ impl SledAgent {
 
         self.inner
             .services
-            .ensure_all_omicron_zones_persistent(requested_zones)
+            .ensure_all_omicron_zones_persistent(requested_zones, false)
             .await?;
         Ok(())
     }
