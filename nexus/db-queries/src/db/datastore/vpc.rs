@@ -1219,6 +1219,7 @@ mod tests {
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
+    use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
@@ -1238,7 +1239,6 @@ mod tests {
     use omicron_common::api::external::IpNet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
-    use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use omicron_test_utils::dev;
     use slog::info;
     use std::collections::BTreeMap;
