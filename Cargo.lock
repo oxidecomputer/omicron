@@ -1709,6 +1709,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derror-macro"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
+dependencies = [
+ "darling 0.20.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.51",
+]
+
+[[package]]
 name = "diesel"
 version = "2.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3347,7 +3358,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 
 [[package]]
 name = "illumos-utils"
@@ -3736,7 +3747,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "quote",
  "syn 2.0.51",
@@ -5614,9 +5625,10 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "cfg-if",
+ "derror-macro",
  "dyn-clone",
  "illumos-sys-hdrs",
  "kstat-macro",
@@ -5624,13 +5636,14 @@ dependencies = [
  "postcard",
  "serde",
  "smoltcp 0.11.0",
+ "tabwriter",
  "version_check",
 ]
 
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -5642,7 +5655,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "libc",
  "libnet",
@@ -5716,7 +5729,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -5724,6 +5737,7 @@ dependencies = [
  "poptrie",
  "serde",
  "smoltcp 0.11.0",
+ "tabwriter",
  "zerocopy 0.7.32",
 ]
 
@@ -8860,6 +8874,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "tabwriter"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a327282c4f64f6dc37e3bba4c2b6842cc3a992f204fa58d917696a89f691e5f6"
+dependencies = [
+ "unicode-width",
 ]
 
 [[package]]
