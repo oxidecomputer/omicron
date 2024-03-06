@@ -961,7 +961,7 @@ impl ServiceManager {
         self.ensure_all_omicron_zones(
             &mut existing_zones,
             omicron_zones_config,
-            false,
+            None,
         )
         .await?;
         Ok(())
@@ -1451,7 +1451,7 @@ impl ServiceManager {
         request: ZoneArgs<'_>,
         filesystems: &[zone::Fs],
         data_links: &[String],
-        fake_initialise: bool,
+        fake_install_dir: Option<&String>,
     ) -> Result<RunningZone, Error> {
         let device_names = Self::devices_needed(&request)?;
         let (bootstrap_vnic, bootstrap_name_and_address) =
@@ -1518,9 +1518,9 @@ impl ServiceManager {
         };
 
         // We use the fake initialiser for testing
-        let mut zone_builder = match fake_initialise {
-            false => ZoneBuilderFactory::default().builder(),
-            true => ZoneBuilderFactory::fake().builder(),
+        let mut zone_builder = match fake_install_dir {
+            None => ZoneBuilderFactory::default().builder(),
+            Some(dir) => ZoneBuilderFactory::fake(Some(dir)).builder(),
         };
         if let Some(uuid) = unique_name {
             zone_builder = zone_builder.with_unique_name(uuid);
@@ -2801,7 +2801,7 @@ impl ServiceManager {
         zone: &OmicronZoneConfig,
         time_is_synchronized: bool,
         all_u2_pools: &Vec<ZpoolName>,
-        fake_install: bool,
+        fake_install_dir: Option<&String>,
     ) -> Result<OmicronZone, Error> {
         // Ensure the zone has been fully removed before we try to boot it.
         //
@@ -2828,7 +2828,7 @@ impl ServiceManager {
                 &[],
                 // data_links=
                 &[],
-                fake_install,
+                fake_install_dir,
             )
             .await?;
 
@@ -2848,7 +2848,7 @@ impl ServiceManager {
         requests: impl Iterator<Item = &OmicronZoneConfig> + Clone,
         time_is_synchronized: bool,
         all_u2_pools: &Vec<ZpoolName>,
-        fake_install: bool,
+        fake_install_dir: Option<&String>,
     ) -> Result<StartZonesResult, Error> {
         if let Some(name) =
             requests.clone().map(|zone| zone.zone_name()).duplicates().next()
@@ -2864,7 +2864,7 @@ impl ServiceManager {
                 &zone,
                 time_is_synchronized,
                 all_u2_pools,
-                fake_install,
+                fake_install_dir,
             )
             .await
             .map_err(|err| (zone.zone_name().to_string(), err))
@@ -2949,7 +2949,7 @@ impl ServiceManager {
     pub async fn ensure_all_omicron_zones_persistent(
         &self,
         mut request: OmicronZonesConfig,
-        fake_install: bool,
+        fake_install_dir: Option<&String>,
     ) -> Result<(), Error> {
         let log = &self.inner.log;
 
@@ -3015,7 +3015,7 @@ impl ServiceManager {
         self.ensure_all_omicron_zones(
             &mut existing_zones,
             request,
-            fake_install,
+            fake_install_dir,
         )
         .await?;
         let zones = existing_zones
@@ -3063,7 +3063,7 @@ impl ServiceManager {
         // lock held when calling this function.
         existing_zones: &mut MutexGuard<'_, ZoneMap>,
         new_request: OmicronZonesConfig,
-        fake_install: bool,
+        fake_install_dir: Option<&String>,
     ) -> Result<(), Error> {
         // Do some data-normalization to ensure we can compare the "requested
         // set" vs the "existing set" as HashSets.
@@ -3100,7 +3100,7 @@ impl ServiceManager {
                 zones_to_be_added,
                 time_is_synchronized,
                 &all_u2_pools,
-                fake_install,
+                fake_install_dir,
             )
             .await?;
 
@@ -3916,7 +3916,7 @@ impl ServiceManager {
             SwitchZoneConfigLocal { root, zone: request.clone() };
         let zone_args = ZoneArgs::Switch(&zone_request);
         let zone = self
-            .initialize_zone(zone_args, filesystems, data_links, false)
+            .initialize_zone(zone_args, filesystems, data_links, None)
             .await?;
         *sled_zone = SledLocalZone::Running { request: request.clone(), zone };
         Ok(())
@@ -4159,6 +4159,7 @@ mod test {
         mgr: &ServiceManager,
         id: Uuid,
         generation: Generation,
+        tmp_dir: String,
     ) {
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
@@ -4172,6 +4173,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            tmp_dir,
         )
         .await
         .expect("Could not create service");
@@ -4182,6 +4184,7 @@ mod test {
         id: Uuid,
         generation: Generation,
         zone_type: OmicronZoneType,
+        tmp_dir: String,
     ) -> Result<(), Error> {
         let zone_prefix = format!("oxz_{}", zone_type.zone_type_str());
         let _expectations = expect_new_service(&zone_prefix);
@@ -4194,7 +4197,7 @@ mod test {
                     zone_type,
                 }],
             },
-            true,
+            Some(&tmp_dir),
         )
         .await
     }
@@ -4205,6 +4208,7 @@ mod test {
         mgr: &ServiceManager,
         id: Uuid,
         generation: Generation,
+        tmp_dir: String,
     ) {
         let address =
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
@@ -4222,7 +4226,7 @@ mod test {
                     },
                 }],
             },
-            true,
+            Some(&tmp_dir),
         )
         .await
         .unwrap();
@@ -4394,7 +4398,13 @@ mod test {
 
         let v2 = v1.next();
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id, v2).await;
+        ensure_new_service(
+            &mgr,
+            id,
+            v2,
+            String::from(test_config.config_dir.path().as_str()),
+        )
+        .await;
 
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
@@ -4437,6 +4447,7 @@ mod test {
             id,
             v2,
             OmicronZoneType::Oximeter { address },
+            String::from(test_config.config_dir.path().as_str()),
         )
         .await;
 
@@ -4471,6 +4482,7 @@ mod test {
                 dns_servers: vec![],
                 domain: None,
             },
+            String::from(test_config.config_dir.path().as_str()),
         )
         .await
         .unwrap();
@@ -4492,9 +4504,10 @@ mod test {
 
         let v2 = Generation::new().next();
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id, v2).await;
+        let dir = String::from(test_config.config_dir.path().as_str());
+        ensure_new_service(&mgr, id, v2, dir.clone()).await;
         let v3 = v2.next();
-        ensure_existing_service(&mgr, id, v3).await;
+        ensure_existing_service(&mgr, id, v3, dir).await;
         let found =
             mgr.omicron_zones_list().await.expect("failed to list zones");
         assert_eq!(found.generation, v3);
@@ -4522,7 +4535,13 @@ mod test {
 
         let v2 = Generation::new().next();
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id, v2).await;
+        ensure_new_service(
+            &mgr,
+            id,
+            v2,
+            String::from(test_config.config_dir.path().as_str()),
+        )
+        .await;
         drop_service_manager(mgr);
 
         // Before we re-create the service manager - notably, using the same
@@ -4559,7 +4578,13 @@ mod test {
         let v1 = Generation::new();
         let v2 = v1.next();
         let id = Uuid::new_v4();
-        ensure_new_service(&mgr, id, v2).await;
+        ensure_new_service(
+            &mgr,
+            id,
+            v2,
+            String::from(test_config.config_dir.path().as_str()),
+        )
+        .await;
         drop_service_manager(mgr);
 
         // Next, delete the ledger. This means the zone we just created will not
@@ -4612,9 +4637,11 @@ mod test {
                 domain: None,
             },
         }];
+
+        let tmp_dir = String::from(test_config.config_dir.path().as_str());
         mgr.ensure_all_omicron_zones_persistent(
             OmicronZonesConfig { generation: v2, zones: zones.clone() },
-            true,
+            Some(&tmp_dir),
         )
         .await
         .unwrap();
@@ -4641,10 +4668,11 @@ mod test {
 
         // Now try to apply that list with an older generation number.  This
         // shouldn't work and the reported state should be unchanged.
+        let tmp_dir = String::from(test_config.config_dir.path().as_str());
         let error = mgr
             .ensure_all_omicron_zones_persistent(
                 OmicronZonesConfig { generation: v1, zones: zones.clone() },
-                true,
+                Some(&tmp_dir),
             )
             .await
             .expect_err("unexpectedly went backwards in zones generation");
@@ -4662,7 +4690,7 @@ mod test {
         let error = mgr
             .ensure_all_omicron_zones_persistent(
                 OmicronZonesConfig { generation: v2, zones: zones.clone() },
-                true,
+                Some(&tmp_dir),
             )
             .await
             .expect_err("unexpectedly changed a single zone generation");
@@ -4679,7 +4707,7 @@ mod test {
         let v3 = v2.next();
         mgr.ensure_all_omicron_zones_persistent(
             OmicronZonesConfig { generation: v3, zones: zones.clone() },
-            true,
+            Some(&tmp_dir),
         )
         .await
         .expect("failed to remove all zones in a new generation");

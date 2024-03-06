@@ -35,13 +35,6 @@ impl ProfileBuilder {
 
         let profile_path = installed_zone.site_profile_xml_path();
 
-        // Create the xml profile directory if it doesn't already exist.
-        // All self assembled zones already have this directory;
-        // this is mostly for our testing.
-        let mut path = profile_path.clone();
-        path.pop();
-        tokio::fs::create_dir_all(path).await?;
-
         tokio::fs::write(&profile_path, format!("{self}").as_bytes()).await?;
         Ok(())
     }
