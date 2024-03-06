@@ -640,8 +640,8 @@ impl DataStore {
             })
     }
 
-    /// Return the list of `Sled`s hosting instances with network interfaces
-    /// on the provided VPC.
+    /// Return the list of `Sled`s hosting instances or control plane services
+    /// with network interfaces on the provided VPC.
     pub async fn vpc_resolve_to_sleds(
         &self,
         vpc_id: Uuid,
@@ -653,6 +653,12 @@ impl DataStore {
             bp_omicron_zone, bp_target, instance, instance_network_interface,
             service, service_network_interface, sled, vmm,
         };
+        // Diesel requires us to use aliases in order to refer to the
+        // `bp_target` table twice in the same query.
+        let (bp_target1, bp_target2) = diesel::alias!(
+            db::schema::bp_target as bp_target1,
+            db::schema::bp_target as bp_target2
+        );
 
         let instance_query = instance_network_interface::table
             .inner_join(
@@ -687,17 +693,7 @@ impl DataStore {
             .select(Sled::as_select());
 
         // ... and we also need to query for the current target blueprint to
-        // support systems that _are_ under Reconfigurator control. This query
-        // needs a join with a subquery, which isn't currently supported by
-        // diesel's DSL, so we fall back to a raw SQL string and rely on tests
-        // to ensure that this is valid.
-        //
-        // Diesel requires us to use aliases in order to refer to the
-        // `inv_collection` table twice in the same query.
-        let (bp_target1, bp_target2) = diesel::alias!(
-            db::schema::bp_target as bp_target1,
-            db::schema::bp_target as bp_target2
-        );
+        // support systems that _are_ under Reconfigurator control.
         let reconfig_service_query = service_network_interface::table
             .inner_join(bp_omicron_zone::table.on(
                 bp_omicron_zone::id.eq(service_network_interface::service_id),
@@ -709,7 +705,13 @@ impl DataStore {
             .inner_join(sled::table.on(sled::id.eq(bp_omicron_zone::sled_id)))
             .filter(
                 // This filters us down to the one current target blueprint (if
-                // it exists); i.e., the target with the maximal version.
+                // it exists); i.e., the target with the maximal version. We
+                // could also check that the current target is `enabled`, but
+                // that could very easily be incorrect: if the current target
+                // or any of its blueprint ancestors were _ever_ enabled, it's
+                // possible the current target blueprint describes running
+                // services that were added after RSS and therefore wouldn't be
+                // seen in `rss_service_query`.
                 bp_target1.field(bp_target::blueprint_id).eq_any(
                     bp_target2
                         .select(bp_target2.field(bp_target::blueprint_id))
