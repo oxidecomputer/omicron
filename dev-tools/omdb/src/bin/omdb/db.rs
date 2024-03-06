@@ -62,7 +62,6 @@ use nexus_db_model::SwRotPage;
 use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::VpcSubnet;
-use nexus_db_model::ZoneType;
 use nexus_db_model::Zpool;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -75,6 +74,8 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
 use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::OmicronZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
@@ -622,9 +623,13 @@ async fn lookup_instance(
 }
 
 /// Helper function to look up the kind of the service with the given ID.
+///
+/// Requires the caller to first have fetched the current target blueprint, so
+/// we can find services that have been added by Reconfigurator.
 async fn lookup_service_kind(
     datastore: &DataStore,
     service_id: Uuid,
+    current_target_blueprint: Option<&Blueprint>,
 ) -> anyhow::Result<Option<ServiceKind>> {
     let conn = datastore.pool_connection_for_tests().await?;
 
@@ -646,39 +651,39 @@ async fn lookup_service_kind(
 
     // ...and if we don't find the service, check the latest blueprint, because
     // the service might have been added by Reconfigurator after RSS ran.
-    conn.transaction_async(|conn| async move {
-        let maybe_current_target_id = {
-            use db::schema::bp_target::dsl;
-            dsl::bp_target
-                .order_by(dsl::version.desc())
-                .select(dsl::blueprint_id)
-                .first_async::<Uuid>(&conn)
-                .await
-                .optional()
-                .context("loading current blueprint target")?
-        };
-        let Some(current_target_id) = maybe_current_target_id else {
-            return Ok(None);
-        };
+    let Some(blueprint) = current_target_blueprint else {
+        return Ok(None);
+    };
 
-        let maybe_zone_type = {
-            use db::schema::bp_omicron_zone::dsl;
-            dsl::bp_omicron_zone
-                .filter(dsl::blueprint_id.eq(current_target_id))
-                .filter(dsl::id.eq(service_id))
-                .limit(1)
-                .select(dsl::zone_type)
-                .get_result_async::<ZoneType>(&conn)
-                .await
-                .optional()
-                .with_context(|| {
-                    format!("loading service {service_id} from blueprint")
-                })?
-        };
+    let Some(zone_config) =
+        blueprint.all_omicron_zones().find_map(|(_sled_id, zone_config)| {
+            if zone_config.id == service_id {
+                Some(zone_config)
+            } else {
+                None
+            }
+        })
+    else {
+        return Ok(None);
+    };
 
-        Ok(maybe_zone_type.map(ServiceKind::from))
-    })
-    .await
+    let service_kind = match &zone_config.zone_type {
+        OmicronZoneType::BoundaryNtp { .. }
+        | OmicronZoneType::InternalNtp { .. } => ServiceKind::Ntp,
+        OmicronZoneType::Clickhouse { .. } => ServiceKind::Clickhouse,
+        OmicronZoneType::ClickhouseKeeper { .. } => {
+            ServiceKind::ClickhouseKeeper
+        }
+        OmicronZoneType::CockroachDb { .. } => ServiceKind::Cockroach,
+        OmicronZoneType::Crucible { .. } => ServiceKind::Crucible,
+        OmicronZoneType::CruciblePantry { .. } => ServiceKind::CruciblePantry,
+        OmicronZoneType::ExternalDns { .. } => ServiceKind::ExternalDns,
+        OmicronZoneType::InternalDns { .. } => ServiceKind::InternalDns,
+        OmicronZoneType::Nexus { .. } => ServiceKind::Nexus,
+        OmicronZoneType::Oximeter { .. } => ServiceKind::Oximeter,
+    };
+
+    Ok(Some(service_kind))
 }
 
 /// Helper function to look up a project with the given ID.
@@ -1828,7 +1833,7 @@ async fn cmd_db_dns_names(
 }
 
 async fn cmd_db_eips(
-    _opctx: &OpContext,
+    opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
     verbose: bool,
@@ -1921,14 +1926,25 @@ async fn cmd_db_eips(
 
     let mut rows = Vec::new();
 
+    let current_target_blueprint = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .context("loading current target blueprint")?
+        .map(|(_, blueprint)| blueprint);
+
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let kind =
-                    match lookup_service_kind(datastore, owner_id).await? {
-                        Some(kind) => format!("{kind:?}"),
-                        None => "UNKNOWN (service ID not found)".to_string(),
-                    };
+                let kind = match lookup_service_kind(
+                    datastore,
+                    owner_id,
+                    current_target_blueprint.as_ref(),
+                )
+                .await?
+                {
+                    Some(kind) => format!("{kind:?}"),
+                    None => "UNKNOWN (service ID not found)".to_string(),
+                };
                 Owner::Service { id: owner_id, kind }
             } else {
                 let instance =
