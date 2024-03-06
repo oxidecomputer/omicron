@@ -1591,7 +1591,7 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_vpc_resolve_to_sleds_uses_current_target_blueprint",
         );
-        let db = test_setup_database(&logctx.log).await;
+        let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Helper function to fetch and sort the IDs of sleds we've resolved the
@@ -1841,5 +1841,8 @@ mod tests {
             .await
             .expect("failed to set blueprint target");
         assert_eq!(harness.sled_ids, fetch_service_sled_ids().await);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
