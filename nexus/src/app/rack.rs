@@ -211,46 +211,6 @@ impl super::Nexus {
 
         let rack_network_config = &request.rack_network_config;
 
-        self.db_datastore
-            .rack_set_initialized(
-                opctx,
-                RackInit {
-                    rack_subnet: rack_network_config.rack_subnet.into(),
-                    rack_id,
-                    services: request.services,
-                    datasets,
-                    service_ip_pool_ranges,
-                    internal_dns,
-                    external_dns,
-                    recovery_silo,
-                    recovery_silo_fq_dns_name,
-                    recovery_user_id: request.recovery_silo.user_name,
-                    recovery_user_password_hash: request
-                        .recovery_silo
-                        .user_password_hash
-                        .into(),
-                    dns_update,
-                },
-            )
-            .await?;
-
-        // Plumb the firewall rules for the built-in services
-        self.plumb_service_firewall_rules(opctx, &[]).await?;
-
-        // We've potentially updated the list of DNS servers and the DNS
-        // configuration for both internal and external DNS, plus the Silo
-        // certificates.  Activate the relevant background tasks.
-        for task in &[
-            &self.background_tasks.task_internal_dns_config,
-            &self.background_tasks.task_internal_dns_servers,
-            &self.background_tasks.task_external_dns_config,
-            &self.background_tasks.task_external_dns_servers,
-            &self.background_tasks.task_external_endpoints,
-            &self.background_tasks.task_inventory_collection,
-        ] {
-            self.background_tasks.activate(task);
-        }
-
         // TODO - https://github.com/oxidecomputer/omicron/pull/3359
         // register all switches found during rack initialization
         // identify requested switch from config and associate
@@ -601,17 +561,47 @@ impl super::Nexus {
         } // TODO - https://github.com/oxidecomputer/omicron/issues/3277
           // record port speed
 
-        // enable rpw for network configurations
-        let toggle_values = BackgroundTaskToggleValues {
-            name: SYNC_SWITCH_PORT_SETTINGS.into(),
-            enabled: true,
-        };
+        self.initial_bootstore_sync(&opctx).await?;
 
         self.db_datastore
-            .set_background_task_toggle(opctx, toggle_values)
+            .rack_set_initialized(
+                opctx,
+                RackInit {
+                    rack_subnet: rack_network_config.rack_subnet.into(),
+                    rack_id,
+                    services: request.services,
+                    datasets,
+                    service_ip_pool_ranges,
+                    internal_dns,
+                    external_dns,
+                    recovery_silo,
+                    recovery_silo_fq_dns_name,
+                    recovery_user_id: request.recovery_silo.user_name,
+                    recovery_user_password_hash: request
+                        .recovery_silo
+                        .user_password_hash
+                        .into(),
+                    dns_update,
+                },
+            )
             .await?;
 
-        self.initial_bootstore_sync(&opctx).await?;
+        // Plumb the firewall rules for the built-in services
+        self.plumb_service_firewall_rules(opctx, &[]).await?;
+
+        // We've potentially updated the list of DNS servers and the DNS
+        // configuration for both internal and external DNS, plus the Silo
+        // certificates.  Activate the relevant background tasks.
+        for task in &[
+            &self.background_tasks.task_internal_dns_config,
+            &self.background_tasks.task_internal_dns_servers,
+            &self.background_tasks.task_external_dns_config,
+            &self.background_tasks.task_external_dns_servers,
+            &self.background_tasks.task_external_endpoints,
+            &self.background_tasks.task_inventory_collection,
+        ] {
+            self.background_tasks.activate(task);
+        }
 
         Ok(())
     }

@@ -187,48 +187,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
         async move {
             let log = &opctx.log;
 
-            // Check to see if task has been enabled
-            // This task is not enabled until Nexus completes the rack initialization post-RSS,
-            // otherwise there is a race where Nexus has not finished populating the DB with
-            // information from the handoff message but the RPW is attempting to reconcile against
-            // information in the DB. This happens because RPWs are initialized *before* Nexus is
-            // initialized. The exact details of this race are as follows:
-            //
-            // 1. sled-agents perform "early networking" and configure the switches with essential
-            //    settings needed for external communication
-            // 2. Cockroachdb is deployed
-            // 3. Nexus begins initialization
-            //    3a. Background tasks are initialized and begin running
-            //    3b. Nexus "proper" is initialized and begins running (this includes the API)
-            // 4. Nexus receives the handoff message from RSS
-            // 5. Nexus begins populating the database with information from the handoff message
-            //
-            // The race occurs because this RPW is already running at step 3a, but information we
-            // need to perform the reonciliation is not present in the database until step 5.
-            // Without that information, we accidentally erase the settings that were applied in
-            // step 1.
-
-            match self.datastore.get_background_task_toggle(opctx, SYNC_SWITCH_PORT_SETTINGS.into()).await {
-                Ok(BackgroundTaskToggle {enabled, ..}) if enabled => {
-                    info!(log, "task is enabled");
-                },
-                Ok(_) => {
-                    warn!(log, "task is disabled, skipping this run");
-                    return json!({});
-                }
-                Err(e) => {
-                    error!(log, "Could not determine if task is enabled via db"; "error" => ?e);
-                    return json!({
-                        "error":
-                            format!(
-                                "Could not determine if task is enabled via db: {:#}",
-                                e
-                            )
-                    });
-
-                },
-            }
-
             let racks = match self.datastore.rack_list(opctx, &DataPageParams::max_page()).await {
                 Ok(racks) => racks,
                 Err(e) => {
