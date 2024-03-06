@@ -39,7 +39,7 @@ pub struct NexusArgs {
 enum NexusCommands {
     /// print information about background tasks
     BackgroundTasks(BackgroundTasksArgs),
-    /// print information about blueprints
+    /// interact with blueprints
     Blueprints(BlueprintsArgs),
     /// interact with sleds
     Sleds(SledsArgs),
@@ -192,7 +192,10 @@ impl NexusArgs {
             }) => cmd_nexus_blueprints_diff(&client, args).await,
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Delete(args),
-            }) => cmd_nexus_blueprints_delete(&client, args).await,
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_delete(&client, args).await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command:
                     BlueprintsCommands::Target(BlueprintsTargetArgs {
@@ -204,13 +207,20 @@ impl NexusArgs {
                     BlueprintsCommands::Target(BlueprintsTargetArgs {
                         command: BlueprintTargetCommands::Set(args),
                     }),
-            }) => cmd_nexus_blueprints_target_set(&client, args).await,
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set(&client, args).await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
-            }) => cmd_nexus_blueprints_regenerate(&client).await,
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_regenerate(&client).await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::GenerateFromCollection(args),
             }) => {
+                omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_generate_from_collection(&client, args)
                     .await
             }
@@ -220,7 +230,10 @@ impl NexusArgs {
             }) => cmd_nexus_sleds_list_uninitialized(&client).await,
             NexusCommands::Sleds(SledsArgs {
                 command: SledsCommands::Add(args),
-            }) => cmd_nexus_sled_add(&client, args).await,
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_sled_add(&client, args).await
+            }
         }
     }
 }
