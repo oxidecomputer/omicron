@@ -14,9 +14,6 @@ use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    background_task_toggles::{
-        BackgroundTaskToggle, SYNC_SWITCH_PORT_SETTINGS,
-    },
     BgpConfig, SwitchLinkFec, SwitchLinkSpeed, SwitchPortBgpPeerConfig,
     NETWORK_KEY,
 };
@@ -187,7 +184,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
         async move {
             let log = &opctx.log;
 
-            let racks = match self.datastore.rack_list(opctx, &DataPageParams::max_page()).await {
+            let racks = match self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await {
                 Ok(racks) => racks,
                 Err(e) => {
                     error!(log, "failed to retrieve racks from database"; "error" => ?e);
