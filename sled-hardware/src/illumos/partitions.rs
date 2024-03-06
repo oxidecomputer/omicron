@@ -276,8 +276,10 @@ fn ensure_size_and_formatting(
             // Safe because verified there is exactly one namespace.
             let namespace = namespaces.into_iter().next().unwrap();
 
-            // TODO we need to abstract this detail awway if/when future devices
-            // are not from WDC.
+            // NB: Only some vendors such as WDC support adjusting the size
+            // of the disk to deal with overprovisioning. This will need to be
+            // abstracted away if/when we ever start using another vendor with
+            // this capability.
             let size = controller.wdc_resize_get()?;
 
             // First we need to detach blkdev from the namespace.
@@ -287,7 +289,6 @@ fn ensure_size_and_formatting(
             // durability level in terms of drive writes per day.
             if let Some(wanted_size) = nvme_settings.size {
                 if size != wanted_size {
-                    // TODO this also needs to be abstracted away.
                     controller.wdc_resize_set(wanted_size)?;
                     info!(
                         log,
@@ -328,7 +329,8 @@ fn ensure_size_and_formatting(
 
                 info!(
                     log,
-                    "Formatted {} using LBA with data size of {wanted_data_size}",
+                    "Formatted disk with serial {} to an LBA with data size \
+                    {wanted_data_size}",
                     identity.serial,
                 );
             }
@@ -340,7 +342,7 @@ fn ensure_size_and_formatting(
         info!(
             log,
             "There are no preferred NVMe settings for disk model {}; nothing to\
-            do for disk with serial {}",
+             do for disk with serial {}",
             identity.model,
             identity.serial
         );
