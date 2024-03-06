@@ -486,6 +486,7 @@ impl<'a> ResourceAllocator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneDataset;
@@ -499,7 +500,6 @@ mod tests {
     use omicron_common::api::external::IpNet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
-    use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use std::net::IpAddr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;

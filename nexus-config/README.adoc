@@ -1,0 +1,4 @@
+= Nexus config
+
+This crate contains type definitions for Nexus configuration, as shared by
+Nexus and sled-agent.
