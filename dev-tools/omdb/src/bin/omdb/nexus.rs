@@ -16,6 +16,7 @@ use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
+use nexus_client::types::UninitializedSledId;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -38,8 +39,10 @@ pub struct NexusArgs {
 enum NexusCommands {
     /// print information about background tasks
     BackgroundTasks(BackgroundTasksArgs),
-    /// print information about blueprints
+    /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// interact with sleds
+    Sleds(SledsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -116,6 +119,28 @@ enum BlueprintTargetCommands {
     Set(BlueprintIdArgs),
 }
 
+#[derive(Debug, Args)]
+struct SledsArgs {
+    #[command(subcommand)]
+    command: SledsCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum SledsCommands {
+    /// List all uninitialized sleds
+    ListUninitialized,
+    /// Add an uninitialized sled
+    Add(SledAddArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledAddArgs {
+    /// sled's serial number
+    serial: String,
+    /// sled's part number
+    part: String,
+}
+
 impl NexusArgs {
     /// Run a `omdb nexus` subcommand.
     pub(crate) async fn run_cmd(
@@ -167,7 +192,10 @@ impl NexusArgs {
             }) => cmd_nexus_blueprints_diff(&client, args).await,
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Delete(args),
-            }) => cmd_nexus_blueprints_delete(&client, args).await,
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_delete(&client, args).await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command:
                     BlueprintsCommands::Target(BlueprintsTargetArgs {
@@ -179,15 +207,32 @@ impl NexusArgs {
                     BlueprintsCommands::Target(BlueprintsTargetArgs {
                         command: BlueprintTargetCommands::Set(args),
                     }),
-            }) => cmd_nexus_blueprints_target_set(&client, args).await,
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set(&client, args).await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
-            }) => cmd_nexus_blueprints_regenerate(&client).await,
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_regenerate(&client).await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::GenerateFromCollection(args),
             }) => {
+                omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_generate_from_collection(&client, args)
                     .await
+            }
+
+            NexusCommands::Sleds(SledsArgs {
+                command: SledsCommands::ListUninitialized,
+            }) => cmd_nexus_sleds_list_uninitialized(&client).await,
+            NexusCommands::Sleds(SledsArgs {
+                command: SledsCommands::Add(args),
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_sled_add(&client, args).await
             }
         }
     }
@@ -912,5 +957,63 @@ async fn cmd_nexus_blueprints_regenerate(
     let blueprint =
         client.blueprint_regenerate().await.context("generating blueprint")?;
     eprintln!("generated new blueprint {}", blueprint.id);
+    Ok(())
+}
+
+/// Runs `omdb nexus sleds list-uninitialized`
+async fn cmd_nexus_sleds_list_uninitialized(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let response = client
+        .sled_list_uninitialized()
+        .await
+        .context("listing uninitialized sleds")?;
+    let sleds = response.into_inner();
+    if sleds.next_page.is_some() {
+        eprintln!(
+            "warning: response includes next_page token; \
+             pagination not implemented"
+        );
+    }
+    let mut sleds = sleds.items;
+    sleds.sort_by_key(|sled| sled.cubby);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct UninitializedSledRow {
+        rack_id: Uuid,
+        cubby: u16,
+        serial: String,
+        part: String,
+        revision: i64,
+    }
+    let rows = sleds.into_iter().map(|sled| UninitializedSledRow {
+        rack_id: sled.rack_id,
+        cubby: sled.cubby,
+        serial: sled.baseboard.serial,
+        part: sled.baseboard.part,
+        revision: sled.baseboard.revision,
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{}", table);
+    Ok(())
+}
+
+/// Runs `omdb nexus sleds add`
+async fn cmd_nexus_sled_add(
+    client: &nexus_client::Client,
+    args: &SledAddArgs,
+) -> Result<(), anyhow::Error> {
+    client
+        .sled_add(&UninitializedSledId {
+            part: args.part.clone(),
+            serial: args.serial.clone(),
+        })
+        .await
+        .context("adding sled")?;
+    eprintln!("added sled {} ({})", args.serial, args.part);
     Ok(())
 }

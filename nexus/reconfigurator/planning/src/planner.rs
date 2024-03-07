@@ -48,6 +48,7 @@ impl<'a> Planner<'a> {
         inventory: &'a Collection,
     ) -> anyhow::Result<Planner<'a>> {
         let blueprint = BlueprintBuilder::new_based_on(
+            &log,
             parent_blueprint,
             internal_dns_version,
             policy,
@@ -341,7 +342,7 @@ mod test {
         let internal_dns_version = Generation::new();
 
         // Use our example inventory collection.
-        let mut example = ExampleSystem::new(DEFAULT_N_SLEDS);
+        let mut example = ExampleSystem::new(&logctx.log, DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.  We don't bother verifying it here
         // because there's a separate test for that.
@@ -525,7 +526,8 @@ mod test {
         // Use our example inventory collection as a starting point, but strip
         // it down to just one sled.
         let (sled_id, collection, mut policy) = {
-            let (mut collection, mut policy) = example(DEFAULT_N_SLEDS);
+            let (mut collection, mut policy) =
+                example(&logctx.log, DEFAULT_N_SLEDS);
 
             // Pick one sled ID to keep and remove the rest.
             let keep_sled_id =
@@ -609,7 +611,7 @@ mod test {
         );
 
         // Use our example inventory collection as a starting point.
-        let (collection, mut policy) = example(DEFAULT_N_SLEDS);
+        let (collection, mut policy) = example(&logctx.log, DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
@@ -695,7 +697,7 @@ mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, mut policy) = example(5);
+        let (collection, mut policy) = example(&logctx.log, 5);
 
         // Build the initial blueprint.
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(

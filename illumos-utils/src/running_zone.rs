@@ -404,7 +404,7 @@ impl RunningZone {
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.inner.zonepath.join(Self::ROOT_FS_PATH)
+        self.inner.root()
     }
 
     pub fn control_interface(&self) -> AddrObject {
@@ -1094,6 +1094,9 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
+    /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
+    pub const ROOT_FS_PATH: &'static str = "root";
+
     /// Returns the name of a zone, based on the base zone name plus any unique
     /// identifying info.
     ///
@@ -1135,11 +1138,16 @@ impl InstalledZone {
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
         self.opte_ports.iter().map(|(port, _)| port)
     }
+
+    /// Returns the filesystem path to the zone's root in the GZ.
+    pub fn root(&self) -> Utf8PathBuf {
+        self.zonepath.join(Self::ROOT_FS_PATH)
+    }
 }
 
 #[derive(Clone)]
 pub struct FakeZoneBuilderConfig {
-    temp_dir: Arc<Utf8TempDir>,
+    temp_dir: Arc<Utf8PathBuf>,
 }
 
 #[derive(Clone, Default)]
@@ -1157,10 +1165,14 @@ pub struct ZoneBuilderFactory {
 
 impl ZoneBuilderFactory {
     /// For use in unit tests that don't require actual zone creation to occur.
-    pub fn fake() -> Self {
+    pub fn fake(temp_dir: Option<&String>) -> Self {
+        let temp_dir = match temp_dir {
+            Some(dir) => Utf8PathBuf::from(dir),
+            None => Utf8TempDir::new().unwrap().into_path(),
+        };
         Self {
             fake_cfg: Some(FakeZoneBuilderConfig {
-                temp_dir: Arc::new(Utf8TempDir::new().unwrap()),
+                temp_dir: Arc::new(temp_dir),
             }),
         }
     }
@@ -1280,7 +1292,7 @@ impl<'a> ZoneBuilder<'a> {
             .new_control(None)
             .map_err(move |err| InstallZoneError::CreateVnic { zone, err })?;
         let fake_cfg = self.fake_cfg.unwrap();
-        let temp_dir = fake_cfg.temp_dir.path().to_path_buf();
+        let temp_dir = fake_cfg.temp_dir;
         (|| {
             let full_zone_name = InstalledZone::get_zone_name(
                 self.zone_type?,
