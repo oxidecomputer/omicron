@@ -12,10 +12,11 @@ use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::Policy;
-use nexus_types::external_api::views::SledState;
+use nexus_types::deployment::SledResources;
+use nexus_types::external_api::views::{SledPolicy, SledState};
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
-use slog::{info, warn, Logger};
+use slog::{debug, error, info, o, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -63,9 +64,85 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan(&mut self) -> Result<(), Error> {
+        // XXX fix below comment
         // The only thing this planner currently knows how to do is add services
         // to a sled that's missing them.  So let's see if we're in that case.
 
+        self.do_plan_expunge()?;
+        self.do_plan_add()
+    }
+
+    fn do_plan_expunge(&mut self) -> Result<(), Error> {
+        fn expunge_reason(
+            log: &Logger,
+            sled_info: &SledResources,
+        ) -> Option<&'static str> {
+            // We could in principle have a decommissioned sled which has
+            // resources allocated to it -- if we do, then we should log this
+            // as an error because that is not a legal state, but remove those
+            // zones anyway.
+            match sled_info.state {
+                SledState::Active => {}
+                SledState::Decommissioned => {
+                    error!(
+                        &log,
+                        "sled has state Decommissioned, yet has resources allocated to it; \
+                         removing them here (sled policy is \"{}\")", sled_info.policy;
+                    );
+
+                    return Some("decommissioned");
+                }
+            }
+
+            match sled_info.policy {
+                SledPolicy::InService { .. } => None,
+                SledPolicy::Expunged => Some("expunged"),
+            }
+        }
+
+        // Remove services from sleds marked expunged.
+        for (sled_id, sled_info) in &self.policy.sleds {
+            // If there aren't any resources allocated to this sled, we don't
+            // need to do anything.
+
+            if !self.blueprint.has_resources_for_sled(*sled_id)? {
+                debug!(
+                    &self.log,
+                    "sled has no resources allocated; skipping";
+                    "sled_id" => %sled_id,
+                );
+                continue;
+            }
+
+            let log = self.log.new(o!(
+                "sled_id" => sled_id.to_string(),
+            ));
+            let expunge_reason = match expunge_reason(&log, sled_info) {
+                Some(reason) => reason,
+                None => continue,
+            };
+
+            info!(
+                &self.log,
+                "found sled marked as {expunge_reason} (will expunge all zones)";
+                "sled_id" => %sled_id
+            );
+            let expunged_zones =
+                self.blueprint.sled_expunge_all_zones(*sled_id)?;
+            let expunged_zones_strs: Vec<String> = expunged_zones
+                .iter()
+                .map(|z| format!("{} {}", z.zone_type.label(), z.id))
+                .collect();
+            self.blueprint.comment(&format!(
+                "sled {sled_id}: expunged all zones ({})",
+                expunged_zones_strs.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn do_plan_add(&mut self) -> Result<(), Error> {
         // Internal DNS is a prerequisite for bringing up all other zones.  At
         // this point, we assume that internal DNS (as a service) is already
         // functioning.  At some point, this function will have to grow the
@@ -85,15 +162,23 @@ impl<'a> Planner<'a> {
         let mut sleds_ineligible_for_services = BTreeSet::new();
 
         for (sled_id, sled_info) in &self.policy.sleds {
-            // Decommissioned sleds don't get any services. (This is an
-            // explicit match so that when more states are added, this fails to
-            // compile.)
+            // Decommissioned and expunged sleds don't get any services. (These
+            // are explicit matches so that when more states are added, this
+            // fails to compile.)
             match sled_info.state {
                 SledState::Decommissioned => {
                     sleds_ineligible_for_services.insert(*sled_id);
                     continue;
                 }
                 SledState::Active => {}
+            }
+
+            match sled_info.policy {
+                SledPolicy::InService { .. } => {}
+                SledPolicy::Expunged => {
+                    sleds_ineligible_for_services.insert(*sled_id);
+                    continue;
+                }
             }
 
             // Check for an NTP zone.  Every sled should have one.  If it's not
@@ -681,17 +766,27 @@ mod test {
     /// Check that the planner will skip non-provisionable sleds when allocating
     /// extra Nexus zones
     #[test]
-    fn test_nexus_allocation_skips_nonprovisionable_sleds() {
+    fn test_nexus_allocation_skips_nonprovisionable_handles_expunged_sleds() {
         let logctx = test_setup_log(
-            "planner_nexus_allocation_skips_nonprovisionable_sleds",
+            "planner_nexus_allocation_skips_nonprovisionable_\
+             handles_expunged_sleds",
         );
 
         // Use our example inventory collection as a starting point.
         //
-        // Request two extra sleds here so we test non-provisionable, expunged,
-        // and decommissioned sleds. (When we add more kinds of
-        // non-provisionable states in the future, we'll have to add more
-        // sleds.)
+        // We're going to test a few extra sleds here:
+        //
+        // * non-provisionable
+        // * expunged
+        // * decommissioned
+        //
+        // We expect that the planner will _remove_ Nexus instances from the
+        // expunged and decommissioned sleds (note that decommissioned + Nexus
+        // zone present is an illegal state), but not the non-provisionable
+        // sled.
+        //
+        // We also expect that the planner will add Nexus zones to the other
+        // eligible sleds, including replacements for the removed ones.
         let (collection, mut policy) = example(5);
 
         // Build the initial blueprint.
@@ -742,9 +837,10 @@ mod test {
         // number (16) is chosen such that:
         //
         // * we start with 5 sleds
-        // * we need to add 11 Nexus zones
+        // * we need to add 11 net Nexus zones
+        // * we need to remove 2 zones, meaning we need to add 13 zones overall
         // * there are two sleds eligible for provisioning
-        // * => 5 or 6 new Nexus zones per sled
+        // * => 6 or 7 new Nexus zones per sled
         //
         // When the planner gets smarter about removing zones from expunged
         // and/or removed sleds, we'll have to adjust this number.
@@ -761,19 +857,55 @@ mod test {
         .plan()
         .expect("failed to plan");
 
+        println!("blueprint2 comments: {}", blueprint2.comment);
+
         let diff = blueprint1.diff_sleds(&blueprint2);
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let sleds = diff.sleds_changed().collect::<Vec<_>>();
 
-        // Only 2 of the 3 sleds should get additional Nexus zones. We expect a
-        // total of 12 new Nexus zones, which should be spread evenly across the
-        // two sleds (one gets 6 and the other gets 5), while the
-        // non-provisionable sled should be unchanged.
-        assert_eq!(sleds.len(), 2);
+        let (expect_removed, expect_added): (Vec<_>, Vec<_>) =
+            sleds.into_iter().partition(|(sled_id, _)| {
+                // The expunged and decommissioned sleds should have resources removed from them.
+                *sled_id == expunged_sled_id
+                    || *sled_id == decommissioned_sled_id
+            });
+
+        assert_eq!(
+            expect_removed.len(),
+            2,
+            "exactly 2 sleds (expunged and decommissioned) should have zones removed"
+        );
+
+        for (sled_id, sled_changes) in expect_removed {
+            let previous_zone_count = blueprint1
+                .omicron_zones
+                .get(&sled_id)
+                .expect("missing sled")
+                .zones
+                .len();
+            // Each sled should have all of its zones removed.
+            assert_eq!(
+                sled_changes.zones_removed().count(),
+                previous_zone_count
+            );
+            assert_eq!(sled_changes.zones_changed().count(), 0);
+            assert_eq!(sled_changes.zones_added().count(), 0);
+        }
+
+        // Only 2 of the 5 sleds should get additional Nexus zones. We expect a
+        // total of 13 new Nexus zones, which should be spread evenly across
+        // the two sleds (one gets 7 and the other gets 6). The
+        // non-provisionable sled should be unchanged, and the expunged and
+        // decommissioned sleds should have their Nexus zones removed.
+        assert_eq!(
+            expect_added.len(),
+            2,
+            "exactly 2 sleds (the two in-service ones) should have zones added"
+        );
         let mut total_new_nexus_zones = 0;
-        for (sled_id, sled_changes) in sleds {
+        for (sled_id, sled_changes) in expect_added {
             assert!(sled_id != nonprovisionable_sled_id);
             assert!(sled_id != expunged_sled_id);
             assert!(sled_id != decommissioned_sled_id);
@@ -781,7 +913,7 @@ mod test {
             assert_eq!(sled_changes.zones_changed().count(), 0);
             let zones = sled_changes.zones_added().collect::<Vec<_>>();
             match zones.len() {
-                n @ (5 | 6) => {
+                n @ (6 | 7) => {
                     total_new_nexus_zones += n;
                 }
                 n => {
@@ -794,7 +926,7 @@ mod test {
                 };
             }
         }
-        assert_eq!(total_new_nexus_zones, 11);
+        assert_eq!(total_new_nexus_zones, 13);
 
         logctx.cleanup_successful();
     }

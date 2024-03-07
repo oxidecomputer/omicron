@@ -100,7 +100,6 @@ pub enum EnsureMultiple {
 ///    However, the new blueprint can only be made the system's target if its
 ///    parent is the current target.
 pub struct BlueprintBuilder<'a> {
-    #[allow(dead_code)]
     log: Logger,
 
     /// previous blueprint, on which this one will be based
@@ -115,6 +114,8 @@ pub struct BlueprintBuilder<'a> {
     // corresponding fields in `Blueprint`.
     zones: BlueprintZones<'a>,
     zones_in_service: BTreeSet<Uuid>,
+    expunged_nexus_zones: BTreeSet<Uuid>,
+
     creator: String,
     comments: Vec<String>,
 
@@ -305,6 +306,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZones::new(parent_blueprint),
             zones_in_service: parent_blueprint.zones_in_service.clone(),
+            expunged_nexus_zones: BTreeSet::new(),
             creator: creator.to_owned(),
             comments: Vec::new(),
             nexus_v4_ips,
@@ -340,6 +342,17 @@ impl<'a> BlueprintBuilder<'a> {
         String: From<S>,
     {
         self.comments.push(String::from(comment));
+    }
+
+    /// Returns true if the blueprint has any resources allocated for this sled.
+    ///
+    /// Returns an error if the sled ID is not found in the policy.
+    pub fn has_resources_for_sled(&self, sled_id: Uuid) -> Result<bool, Error> {
+        // XXX: also check for zpools?
+        let _ = self.sled_resources(sled_id)?;
+
+        let mut zones = self.zones.current_sled_zones(sled_id);
+        Ok(zones.next().is_some())
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -565,6 +578,82 @@ impl<'a> BlueprintBuilder<'a> {
 
         Ok(EnsureMultiple::Added(num_nexus_to_add))
     }
+
+    /// Removes all zones for this sled.
+    ///
+    /// Returns the list of removed [`OmicronZoneConfig`] instances, or an
+    /// error if the sled ID wasn't found.
+    pub fn sled_expunge_all_zones(
+        &mut self,
+        sled_id: Uuid,
+    ) -> Result<Vec<OmicronZoneConfig>, Error> {
+        slog::debug!(self.log, "removing all zones for sled"; "sled_id" => %sled_id);
+
+        self.sled_expunge_zones(sled_id, |_| false)
+    }
+
+    /// Removes a set of zones corresponding to this sled ID.
+    ///
+    /// Returns the list of expunged [`OmicronZoneConfig`] instances, or an
+    /// error if the sled ID wasn't found.
+    ///
+    /// `retain_fn` determines whether a zone should be kept -- return true to
+    /// retain a zone, or false to expunge it.
+    pub fn sled_expunge_zones(
+        &mut self,
+        sled_id: Uuid,
+        mut retain_fn: impl FnMut(&OmicronZoneConfig) -> bool,
+    ) -> Result<Vec<OmicronZoneConfig>, Error> {
+        // Check the sled id and return an appropriate error if it's invalid.
+        let _ = self.sled_resources(sled_id)?;
+
+        // Find all the zone IDs to remove in this sled.
+        let sled_zones = self.zones.current_sled_zones(sled_id);
+        let zone_ids_to_remove = sled_zones
+            .filter(|z| !retain_fn(z))
+            .map(|z| z.id)
+            .collect::<BTreeSet<_>>();
+
+        slog::debug!(
+            self.log,
+            "removing zones for sled";
+            "sled_id" => %sled_id,
+            "zone_ids_to_remove" => ?zone_ids_to_remove,
+        );
+
+        // Check that all the zone IDs exist. It is an internal invariant
+        // violation for a zone to be in the list of current sled zones, but
+        // not in zones_in_service.
+        if !zone_ids_to_remove.is_subset(&self.zones_in_service) {
+            return Err(Error::Planner(anyhow!(
+                "zone IDs to remove are not a subset of zones in service: \
+                 zone_ids_to_remove: {:?}, zones_in_service: {:?}",
+                zone_ids_to_remove,
+                self.zones_in_service,
+            )));
+        }
+
+        let sled_zones = self.zones.change_sled_zones(sled_id);
+        let zones = std::mem::replace(&mut sled_zones.zones, Vec::new());
+        let (remove, keep) = zones
+            .into_iter()
+            .partition::<Vec<_>, _>(|z| zone_ids_to_remove.contains(&z.id));
+        sled_zones.zones = keep;
+
+        // Also add the list of expunged Nexus zones to self.expunged_nexus_zones.
+        self.expunged_nexus_zones.extend(remove.iter().filter_map(|z| {
+            match &z.zone_type {
+                OmicronZoneType::Nexus { .. } => Some(z.id),
+                _ => None,
+            }
+        }));
+
+        Ok(remove)
+    }
+
+    // ---
+    // Helper methods
+    // ---
 
     fn sled_add_zone(
         &mut self,
