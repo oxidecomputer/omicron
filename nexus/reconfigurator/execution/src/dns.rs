@@ -9,6 +9,7 @@ use dns_service_client::DnsDiff;
 use internal_dns::DnsConfigBuilder;
 use internal_dns::ServiceName;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::DataStore;
@@ -42,11 +43,15 @@ pub(crate) async fn deploy_dns(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
 ) -> Result<(), Error> {
-    // First, fetch the current DNS config.
-    let dns_config_current = datastore
+    // First, fetch the current DNS configs.
+    let internal_dns_config_current = datastore
         .dns_config_read(opctx, DnsGroup::Internal)
         .await
-        .internal_context("reading current DNS")?;
+        .internal_context("reading current DNS (internal)")?;
+    let external_dns_config_current = datastore
+        .dns_config_read(opctx, DnsGroup::External)
+        .await
+        .internal_context("reading current DNS (external)")?;
 
     // We could check here that the DNS version we found isn't newer than when
     // the blueprint was generated.  But we have to check later when we try to
@@ -55,18 +60,59 @@ pub(crate) async fn deploy_dns(
     // we know it's being hit when we exercise this condition.
 
     // Next, construct the DNS config represented by the blueprint.
-    let dns_config_blueprint = blueprint_dns_config(blueprint, sleds_by_id);
+    let internal_dns_config_blueprint =
+        blueprint_internal_dns_config(blueprint, sleds_by_id);
+    let silos = todo!(); // XXX-dap
+    let external_dns_config_blueprint =
+        blueprint_external_dns_config(blueprint, silos);
+
+    // Deploy the changes.
+    deploy_dns_one(
+        opctx,
+        datastore,
+        creator,
+        blueprint,
+        &internal_dns_config_current,
+        &internal_dns_config_blueprint,
+        DnsGroup::Internal,
+    )
+    .await?;
+    deploy_dns_one(
+        opctx,
+        datastore,
+        creator,
+        blueprint,
+        &external_dns_config_current,
+        &external_dns_config_blueprint,
+        DnsGroup::External,
+    )
+    .await?;
+    Ok(())
+}
+
+pub(crate) async fn deploy_dns_one(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    creator: String,
+    blueprint: &Blueprint,
+    dns_config_current: &DnsConfigParams,
+    dns_config_blueprint: &DnsConfigParams,
+    dns_group: DnsGroup,
+) -> Result<(), Error> {
+    let log = opctx
+        .log
+        .new(o!("blueprint_execution" => format!("dns {:?}", dns_group)));
 
     // Looking at the current contents of DNS, prepare an update that will make
     // it match what it should be.
-    let log = opctx.log.new(o!("blueprint_execution" => "DNS"));
     let comment = format!("blueprint {} ({})", blueprint.id, blueprint.comment);
     let maybe_update = dns_compute_update(
         &log,
+        dns_group,
         comment,
         creator,
-        &dns_config_current,
-        &dns_config_blueprint,
+        dns_config_current,
+        dns_config_blueprint,
     )?;
     let Some(update) = maybe_update else {
         // Nothing to do.
@@ -81,12 +127,11 @@ pub(crate) async fn deploy_dns(
     // executing a newer target blueprint.
     //
     // To avoid this problem, before generating a blueprint, Nexus fetches the
-    // current internal DNS generation and stores that into the blueprint
-    // itself.  Here, when we execute the blueprint, we make our database update
-    // conditional on that still being the current internal DNS generation.
-    // If some other instance has already come along and updated the database,
-    // whether for this same blueprint or a newer one, our attempt to update the
-    // database will fail.
+    // current DNS generation and stores that into the blueprint itself.  Here,
+    // when we execute the blueprint, we make our database update conditional on
+    // that still being the current DNS generation.  If some other instance has
+    // already come along and updated the database, whether for this same
+    // blueprint or a newer one, our attempt to update the database will fail.
     //
     // Let's look at a tricky example.  Suppose:
     //
@@ -100,7 +145,7 @@ pub(crate) async fn deploy_dns(
     //    that's still the current version in DNS.  B3 is made the current
     //    target.
     //
-    //    Assume B2 and B3 specify different internal DNS contents (e.g., have a
+    //    Assume B2 and B3 specify different DNS contents (e.g., have a
     //    different set of Omicron zones in them).
     //
     // 4. Nexus instance N1 finds B2 to be the current target and starts
@@ -121,21 +166,21 @@ pub(crate) async fn deploy_dns(
     // Now, one of two things could happen:
     //
     // 1. N1 wins.  Its database update applies successfully.  In the database,
-    //    the internal DNS version becomes version 4.  In this case, N2 loses.
-    //    Its database operation fails altogether.  At this point, any
-    //    subsequent attempt to execute blueprint B3 will fail because any DNS
-    //    update will be conditional on the database having version 3.  The only
-    //    way out of this is for the planner to generate a new blueprint B4
-    //    that's exactly equivalent to B3 except that the stored internal DNS
-    //    version is 4.  Then we'll be able to execute that.
+    //    the DNS version becomes version 4.  In this case, N2 loses.  Its
+    //    database operation fails altogether.  At this point, any subsequent
+    //    attempt to execute blueprint B3 will fail because any DNS update will
+    //    be conditional on the database having version 3.  The only way out of
+    //    this is for the planner to generate a new blueprint B4 that's exactly
+    //    equivalent to B3 except that the stored DNS version is 4.  Then we'll
+    //    be able to execute that.
     //
     // 2. N2 wins.  Its database update applies successfully.  In the database,
-    //    the internal DNS version becomes version 4.  In this case, N1 loses.
-    //    Its database operation fails altogether.  At this point, any
-    //    subsequent attempt to execute blueprint B3 will fail because any DNS
-    //    update will be conditional on the databae having version 3.  No
-    //    further action is needed, though, because we've successfully executed
-    //    the latest target blueprint.
+    //    the DNS version becomes version 4.  In this case, N1 loses.  Its
+    //    database operation fails altogether.  At this point, any subsequent
+    //    attempt to execute blueprint B3 will fail because any DNS update will
+    //    be conditional on the databae having version 3.  No further action is
+    //    needed, though, because we've successfully executed the latest target
+    //    blueprint.
     //
     // In both cases, the system will (1) converge to having successfully
     // executed the target blueprint, and (2) never have rolled any changes back
@@ -149,7 +194,7 @@ pub(crate) async fn deploy_dns(
     let generation_u32 =
         u32::try_from(dns_config_current.generation).map_err(|e| {
             Error::internal_error(&format!(
-                "internal DNS generation got too large: {}",
+                "DNS generation got too large: {}",
                 e,
             ))
         })?;
@@ -159,7 +204,7 @@ pub(crate) async fn deploy_dns(
 }
 
 /// Returns the expected contents of internal DNS based on the given blueprint
-pub fn blueprint_dns_config(
+pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
 ) -> DnsConfigParams {
@@ -255,15 +300,22 @@ pub fn blueprint_dns_config(
     dns_builder.build()
 }
 
+pub fn blueprint_external_dns_config(
+    blueprint: &Blueprint,
+    silos: Vec<Silo>,
+) -> DnsConfigParams {
+    todo!(); // XXX-dap
+}
+
 fn dns_compute_update(
     log: &slog::Logger,
+    dns_group: DnsGroup,
     comment: String,
     creator: String,
     current_config: &DnsConfigParams,
     new_config: &DnsConfigParams,
 ) -> Result<Option<DnsVersionUpdateBuilder>, Error> {
-    let mut update =
-        DnsVersionUpdateBuilder::new(DnsGroup::Internal, comment, creator);
+    let mut update = DnsVersionUpdateBuilder::new(dns_group, comment, creator);
 
     let diff = DnsDiff::new(&current_config, &new_config)
         .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
@@ -315,11 +367,12 @@ fn dns_compute_update(
 
 #[cfg(test)]
 mod test {
-    use super::blueprint_dns_config;
+    use super::blueprint_internal_dns_config;
     use super::dns_compute_update;
     use crate::Sled;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
+    use nexus_db_model::DnsGroup;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_types::deployment::Blueprint;
@@ -382,7 +435,8 @@ mod test {
     #[test]
     fn test_blueprint_dns_empty() {
         let blueprint = blueprint_empty();
-        let blueprint_dns = blueprint_dns_config(&blueprint, &BTreeMap::new());
+        let blueprint_dns =
+            blueprint_internal_dns_config(&blueprint, &BTreeMap::new());
         assert!(blueprint_dns.sole_zone().unwrap().records.is_empty());
     }
 
@@ -480,7 +534,7 @@ mod test {
             .collect();
 
         let dns_config_blueprint =
-            blueprint_dns_config(&blueprint, &sleds_by_id);
+            blueprint_internal_dns_config(&blueprint, &sleds_by_id);
         assert_eq!(
             dns_config_blueprint.generation,
             u64::from(initial_dns_generation.next())
@@ -666,6 +720,7 @@ mod test {
         let dns_empty = dns_config_empty();
         match dns_compute_update(
             &logctx.log,
+            DnsGroup::Internal,
             "test-suite".to_string(),
             "test-suite".to_string(),
             &dns_empty,
@@ -719,6 +774,7 @@ mod test {
 
         let update = dns_compute_update(
             &logctx.log,
+            DnsGroup::Internal,
             "test-suite".to_string(),
             "test-suite".to_string(),
             &dns_config1,
