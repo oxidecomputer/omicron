@@ -15,7 +15,7 @@ slog = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 uuid = { workspace = true, optional = true }
-omicron-workspace-hack = { workspace = true, optional = true }
+omicron-workspace-hack.workspace = true
 
 [features]
 default = ["http-instruments", "datalink"]
@@ -24,7 +24,6 @@ http-instruments = [
     "dep:dropshot",
     "dep:futures",
     "dep:http",
-    "dep:omicron-workspace-hack",
     "dep:oximeter",
     "dep:uuid"
 ]
@@ -33,7 +32,6 @@ kstat = [
     "dep:chrono",
     "dep:futures",
     "dep:kstat-rs",
-    "dep:omicron-workspace-hack",
     "dep:oximeter",
     "dep:slog",
     "dep:tokio",
