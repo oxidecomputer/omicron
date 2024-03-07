@@ -84,11 +84,24 @@ struct Omdb {
     #[arg(env = "OMDB_DNS_SERVER", long)]
     dns_server: Option<SocketAddr>,
 
+    /// allow potentially-destructive subcommands
+    #[arg(short = 'w', long = "destructive")]
+    allow_destructive: bool,
+
     #[command(subcommand)]
     command: OmdbCommands,
 }
 
 impl Omdb {
+    fn check_allow_destructive(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.allow_destructive,
+            "This command is potentially destructive. \
+             Pass the `-w` / `--destructive` flag to allow it."
+        );
+        Ok(())
+    }
+
     async fn dns_lookup_all(
         &self,
         log: slog::Logger,
