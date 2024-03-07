@@ -29,6 +29,8 @@ use diesel::result::Error as DieselError;
 use diesel::sql_types;
 use diesel::Column;
 use diesel::ExpressionMethods;
+use diesel::Insertable;
+use diesel::IntoSql;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
@@ -641,6 +643,88 @@ impl DataStore {
         Ok(())
     }
 
+    /// Set the current target blueprint's `enabled` field
+    ///
+    /// In order to change the enabled field, `target` must already be the
+    /// current target blueprint
+    pub async fn blueprint_target_set_current_enabled(
+        &self,
+        opctx: &OpContext,
+        target: BlueprintTarget,
+    ) -> Result<(), Error> {
+        use db::schema::bp_target::dsl;
+
+        opctx
+            .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
+            .await?;
+
+        // Diesel requires us to use an alias in order to refer to the
+        // `bp_target` table twice in the same query.
+        let bp_target2 = diesel::alias!(db::schema::bp_target as bp_target1);
+
+        // The following diesel produces this query:
+        //
+        // ```sql
+        // INSERT INTO bp_target
+        //   (SELECT
+        //        version + 1,
+        //        blueprint_id,
+        //        <target.enabled>,
+        //        <target.time_made_target>
+        //    FROM bp_target
+        //    WHERE
+        //        -- This part of the subquery restricts us to only the
+        //        -- current target (i.e., the bp_target with maximal versio)
+        //        version IN (SELECT version FROM bp_target
+        //                    ORDER BY version DESC LIMIT 1)
+        //
+        //        -- ... and that current target must exactly equal the target
+        //        -- blueprint on which we're trying to set `enabled`
+        //        AND blueprint_id = <target.blueprint_id>
+        //   );
+        // ```
+        //
+        // This will either insert one new row (if the filters were satisified)
+        // or no new rows (if the filters were not satisfied).
+        let query = dsl::bp_target
+            .select((
+                dsl::version + 1,
+                dsl::blueprint_id,
+                target.enabled.into_sql::<sql_types::Bool>(),
+                target.time_made_target.into_sql::<sql_types::Timestamptz>(),
+            ))
+            .filter(
+                dsl::version.eq_any(
+                    bp_target2
+                        .select(bp_target2.field(dsl::version))
+                        .order_by(bp_target2.field(dsl::version).desc())
+                        .limit(1),
+                ),
+            )
+            .filter(dsl::blueprint_id.eq(target.target_id))
+            .insert_into(dsl::bp_target);
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let num_inserted = query
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        match num_inserted {
+            0 => Err(Error::invalid_request(format!(
+                "Blueprint {} is not the current target blueprint",
+                target.target_id
+            ))),
+            1 => Ok(()),
+            // This is impossible, not only due to the `.limit(1)` in the
+            // subquery above, but also because we're inserting `version + 1`
+            // which would fail with pkey conflicts if we matched more than one
+            // existing row in the subquery.
+            _ => unreachable!("query inserted more than one row"),
+        }
+    }
+
     /// Get the current target blueprint, if one exists
     ///
     /// Returns both the metadata about the target and the full blueprint
@@ -1201,7 +1285,7 @@ mod tests {
     #[tokio::test]
     async fn test_empty_blueprint() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_empty_blueprint");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -1264,7 +1348,7 @@ mod tests {
     #[tokio::test]
     async fn test_representative_blueprint() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_representative_blueprint");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -1448,7 +1532,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_target() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_set_target");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -1621,6 +1705,121 @@ mod tests {
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
             Some((bp4_target, blueprint4))
         );
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_set_target_enabled() {
+        // Setup
+        let logctx = dev::test_setup_log("test_set_target_enabled");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create an initial blueprint and a child.
+        let collection =
+            nexus_inventory::CollectionBuilder::new("test").build();
+        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test1",
+        )
+        .unwrap();
+        let blueprint2 = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            Generation::new(),
+            &EMPTY_POLICY,
+            "test2",
+        )
+        .expect("failed to create builder")
+        .build();
+        assert_eq!(blueprint1.parent_blueprint_id, None);
+        assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
+
+        // Insert both into the blueprint table.
+        datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap();
+        datastore.blueprint_insert(&opctx, &blueprint2).await.unwrap();
+
+        let mut bp1_target = BlueprintTarget {
+            target_id: blueprint1.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+        let mut bp2_target = BlueprintTarget {
+            target_id: blueprint2.id,
+            enabled: true,
+            time_made_target: now_db_precision(),
+        };
+
+        // Set bp1_target as the current target.
+        datastore
+            .blueprint_target_set_current(&opctx, bp1_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some(bp1_target),
+        );
+
+        // We should be able to toggle its enabled status an arbitrary number of
+        // times.
+        for _ in 0..10 {
+            bp1_target.enabled = !bp1_target.enabled;
+            datastore
+                .blueprint_target_set_current_enabled(&opctx, bp1_target)
+                .await
+                .unwrap();
+            assert_eq!(
+                datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+                Some(bp1_target),
+            );
+        }
+
+        // We cannot use `blueprint_target_set_current_enabled` to make
+        // bp2_target the target...
+        let err = datastore
+            .blueprint_target_set_current_enabled(&opctx, bp2_target)
+            .await
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("is not the current target blueprint"));
+
+        // ...but we can make it the target via `blueprint_target_set_current`.
+        datastore
+            .blueprint_target_set_current(&opctx, bp2_target)
+            .await
+            .unwrap();
+        assert_eq!(
+            datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+            Some(bp2_target),
+        );
+
+        // We can no longer toggle the enabled bit of bp1_target.
+        let err = datastore
+            .blueprint_target_set_current_enabled(&opctx, bp1_target)
+            .await
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("is not the current target blueprint"));
+
+        // We can toggle bp2_target.enabled an arbitrary number of times.
+        for _ in 0..10 {
+            bp2_target.enabled = !bp2_target.enabled;
+            datastore
+                .blueprint_target_set_current_enabled(&opctx, bp2_target)
+                .await
+                .unwrap();
+            assert_eq!(
+                datastore.blueprint_target_get_current(&opctx).await.unwrap(),
+                Some(bp2_target),
+            );
+        }
 
         // Clean up.
         db.cleanup().await.unwrap();
