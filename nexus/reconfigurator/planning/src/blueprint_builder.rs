@@ -101,6 +101,7 @@ pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
     internal_dns_version: Generation,
+    external_dns_version: Generation,
 
     // These fields are used to allocate resources from sleds.
     policy: &'a Policy,
@@ -130,6 +131,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn build_initial_from_collection(
         collection: &'a Collection,
         internal_dns_version: Generation,
+        external_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
     ) -> Result<Blueprint, Error> {
@@ -177,6 +179,7 @@ impl<'a> BlueprintBuilder<'a> {
             zones_in_service,
             parent_blueprint_id: None,
             internal_dns_version,
+            external_dns_version,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("from collection {}", collection.id),
@@ -188,6 +191,7 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn new_based_on(
         parent_blueprint: &'a Blueprint,
         internal_dns_version: Generation,
+        external_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -289,6 +293,7 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(BlueprintBuilder {
             parent_blueprint,
             internal_dns_version,
+            external_dns_version,
             policy,
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZones::new(parent_blueprint),
@@ -313,6 +318,7 @@ impl<'a> BlueprintBuilder<'a> {
             zones_in_service: self.zones_in_service,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self.comments.join(", "),
@@ -950,6 +956,7 @@ pub mod test {
             BlueprintBuilder::build_initial_from_collection(
                 &collection,
                 Generation::new(),
+                Generation::new(),
                 &policy,
                 "the_test",
             )
@@ -973,6 +980,7 @@ pub mod test {
         let builder = BlueprintBuilder::new_based_on(
             &blueprint_initial,
             Generation::new(),
+            Generation::new(),
             &policy,
             "test_basic",
         )
@@ -995,6 +1003,7 @@ pub mod test {
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "the_test",
         )
@@ -1003,6 +1012,7 @@ pub mod test {
 
         let mut builder = BlueprintBuilder::new_based_on(
             &blueprint1,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test_basic",
@@ -1037,6 +1047,7 @@ pub mod test {
         let _ = policy_add_sled(&mut policy, new_sled_id);
         let mut builder = BlueprintBuilder::new_based_on(
             &blueprint2,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test_basic",
@@ -1112,8 +1123,9 @@ pub mod test {
     fn test_add_nexus_with_no_existing_nexus_zones() {
         let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
-        // We don't care about the internal DNS version here.
+        // We don't care about the DNS versions here.
         let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
 
         // Adding a new Nexus zone currently requires copying settings from an
         // existing Nexus zone. If we remove all Nexus zones from the
@@ -1128,6 +1140,7 @@ pub mod test {
         let parent = BlueprintBuilder::build_initial_from_collection(
             &collection,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test",
         )
@@ -1136,6 +1149,7 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &parent,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test",
         )
@@ -1163,8 +1177,9 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
-        // We don't care about the internal DNS version here.
+        // We don't care about the DNS versions here.
         let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
 
         // Remove the Nexus zone from one of the sleds so that
         // `sled_ensure_zone_nexus` can attempt to add a Nexus zone to
@@ -1187,6 +1202,7 @@ pub mod test {
         let parent = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "test",
         )
@@ -1198,6 +1214,7 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &parent,
                 internal_dns_version,
+                external_dns_version,
                 &policy,
                 "test",
             )
@@ -1216,6 +1233,7 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &parent,
                 internal_dns_version,
+                external_dns_version,
                 &policy,
                 "test",
             )
@@ -1248,6 +1266,7 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &parent,
                 internal_dns_version,
+                external_dns_version,
                 &policy,
                 "test",
             )
@@ -1303,6 +1322,7 @@ pub mod test {
         let parent = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "test",
         )
@@ -1310,6 +1330,7 @@ pub mod test {
 
         match BlueprintBuilder::new_based_on(
             &parent,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",
@@ -1352,6 +1373,7 @@ pub mod test {
         let parent = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "test",
         )
@@ -1359,6 +1381,7 @@ pub mod test {
 
         match BlueprintBuilder::new_based_on(
             &parent,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",
@@ -1401,6 +1424,7 @@ pub mod test {
         let parent = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "test",
         )
@@ -1408,6 +1432,7 @@ pub mod test {
 
         match BlueprintBuilder::new_based_on(
             &parent,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",

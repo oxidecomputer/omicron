@@ -131,7 +131,7 @@ mod test {
 
     fn create_blueprint(
         omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-        internal_dns_version: Generation,
+        dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -145,7 +145,8 @@ mod test {
                 omicron_zones,
                 zones_in_service: BTreeSet::new(),
                 parent_blueprint_id: None,
-                internal_dns_version,
+                internal_dns_version: dns_version,
+                external_dns_version: dns_version,
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),

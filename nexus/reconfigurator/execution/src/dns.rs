@@ -360,6 +360,7 @@ mod test {
         BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "test-suite",
         )
@@ -434,6 +435,7 @@ mod test {
         let mut blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
             initial_dns_generation,
+            Generation::new(),
             &policy,
             "test-suite",
         )

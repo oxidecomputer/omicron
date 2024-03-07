@@ -41,6 +41,7 @@ impl<'a> Planner<'a> {
         log: Logger,
         parent_blueprint: &'a Blueprint,
         internal_dns_version: Generation,
+        external_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
         // NOTE: Right now, we just assume that this is the latest inventory
@@ -50,6 +51,7 @@ impl<'a> Planner<'a> {
         let blueprint = BlueprintBuilder::new_based_on(
             parent_blueprint,
             internal_dns_version,
+            external_dns_version,
             policy,
             creator,
         )?;
@@ -336,8 +338,9 @@ mod test {
     fn test_basic_add_sled() {
         let logctx = test_setup_log("planner_basic_add_sled");
 
-        // For our purposes, we don't care about the internal DNS generation.
+        // For our purposes, we don't care about the DNS generations.
         let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
 
         // Use our example inventory collection.
         let (mut collection, mut policy) = example(DEFAULT_N_SLEDS);
@@ -347,6 +350,7 @@ mod test {
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "the_test",
         )
@@ -360,6 +364,7 @@ mod test {
             logctx.log.clone(),
             &blueprint1,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "no-op?",
             &collection,
@@ -385,6 +390,7 @@ mod test {
             logctx.log.clone(),
             &blueprint2,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test: add NTP?",
             &collection,
@@ -418,6 +424,7 @@ mod test {
             logctx.log.clone(),
             &blueprint3,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test: add nothing more",
             &collection,
@@ -455,6 +462,7 @@ mod test {
             logctx.log.clone(),
             &blueprint3,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test: add Crucible zones?",
             &collection,
@@ -491,6 +499,7 @@ mod test {
             logctx.log.clone(),
             &blueprint5,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test: no-op?",
             &collection,
@@ -515,8 +524,9 @@ mod test {
     fn test_add_multiple_nexus_to_one_sled() {
         let logctx = test_setup_log("planner_add_multiple_nexus_to_one_sled");
 
-        // For our purposes, we don't care about the internal DNS generation.
+        // For our purposes, we don't care about the DNS generations.
         let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
 
         // Use our example inventory collection as a starting point, but strip
         // it down to just one sled.
@@ -540,6 +550,7 @@ mod test {
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "the_test",
         )
@@ -567,6 +578,7 @@ mod test {
             logctx.log.clone(),
             &blueprint1,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "add more Nexus",
             &collection,
@@ -611,6 +623,7 @@ mod test {
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "the_test",
         )
@@ -634,6 +647,7 @@ mod test {
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
+            Generation::new(),
             Generation::new(),
             &policy,
             "add more Nexus",
@@ -697,6 +711,7 @@ mod test {
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "the_test",
         )
@@ -751,6 +766,7 @@ mod test {
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
+            Generation::new(),
             Generation::new(),
             &policy,
             "add more Nexus",

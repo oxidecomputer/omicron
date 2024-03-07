@@ -152,8 +152,12 @@ pub struct Blueprint {
     pub parent_blueprint_id: Option<Uuid>,
 
     /// internal DNS version when this blueprint was created
-    // See blueprint generation for more on this.
+    // See blueprint execution for more on this.
     pub internal_dns_version: Generation,
+
+    /// external DNS version when thi blueprint was created
+    // See blueprint execution for more on this.
+    pub external_dns_version: Generation,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -238,6 +242,8 @@ pub struct BlueprintMetadata {
     pub parent_blueprint_id: Option<Uuid>,
     /// internal DNS version when this blueprint was created
     pub internal_dns_version: Generation,
+    /// external DNS version when this blueprint was created
+    pub external_dns_version: Generation,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,

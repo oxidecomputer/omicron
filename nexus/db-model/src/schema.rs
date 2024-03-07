@@ -1425,6 +1425,7 @@ table! {
         comment -> Text,
 
         internal_dns_version -> Int8,
+        external_dns_version -> Int8,
     }
 }
 

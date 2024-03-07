@@ -236,6 +236,7 @@ impl DataStore {
         let (
             parent_blueprint_id,
             internal_dns_version,
+            external_dns_version,
             time_created,
             creator,
             comment,
@@ -258,6 +259,7 @@ impl DataStore {
             (
                 blueprint.parent_blueprint_id,
                 *blueprint.internal_dns_version,
+                *blueprint.external_dns_version,
                 blueprint.time_created,
                 blueprint.creator,
                 blueprint.comment,
@@ -487,6 +489,7 @@ impl DataStore {
             zones_in_service,
             parent_blueprint_id,
             internal_dns_version,
+            external_dns_version,
             time_created,
             creator,
             comment,
@@ -1186,6 +1189,7 @@ mod tests {
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &policy,
             "test",
         )
@@ -1219,6 +1223,7 @@ mod tests {
             nexus_inventory::CollectionBuilder::new("test").build();
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
+            Generation::new(),
             Generation::new(),
             &EMPTY_POLICY,
             "test",
@@ -1347,10 +1352,12 @@ mod tests {
 
         // Create a builder for a child blueprint.  While we're at it, use a
         // different DNS version to test that that works.
-        let new_dns_version = blueprint1.internal_dns_version.next();
+        let new_internal_dns_version = blueprint1.internal_dns_version.next();
+        let new_external_dns_version = new_internal_dns_version.next();
         let mut builder = BlueprintBuilder::new_based_on(
             &blueprint1,
-            new_dns_version,
+            new_internal_dns_version,
+            new_external_dns_version,
             &policy,
             "test",
         )
@@ -1402,7 +1409,8 @@ mod tests {
             .expect("failed to read collection back");
         println!("diff: {}", blueprint2.diff_sleds(&blueprint_read));
         assert_eq!(blueprint2, blueprint_read);
-        assert_eq!(blueprint2.internal_dns_version, new_dns_version);
+        assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
+        assert_eq!(blueprint2.external_dns_version, new_external_dns_version);
         {
             let mut expected_ids = [blueprint1.id, blueprint2.id];
             expected_ids.sort();
@@ -1495,12 +1503,14 @@ mod tests {
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
+            Generation::new(),
             &EMPTY_POLICY,
             "test1",
         )
         .unwrap();
         let blueprint2 = BlueprintBuilder::new_based_on(
             &blueprint1,
+            Generation::new(),
             Generation::new(),
             &EMPTY_POLICY,
             "test2",
@@ -1509,6 +1519,7 @@ mod tests {
         .build();
         let blueprint3 = BlueprintBuilder::new_based_on(
             &blueprint1,
+            Generation::new(),
             Generation::new(),
             &EMPTY_POLICY,
             "test3",
@@ -1605,6 +1616,7 @@ mod tests {
         // with enabled=false, that status is serialized.
         let blueprint4 = BlueprintBuilder::new_based_on(
             &blueprint3,
+            Generation::new(),
             Generation::new(),
             &EMPTY_POLICY,
             "test3",

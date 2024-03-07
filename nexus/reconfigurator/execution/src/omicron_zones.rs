@@ -124,6 +124,7 @@ mod test {
                 zones_in_service: BTreeSet::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
+                external_dns_version: Generation::new(),
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
