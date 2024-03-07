@@ -727,7 +727,8 @@ impl<'a> BlueprintZones<'a> {
     }
 }
 
-#[cfg(test)]
+// XXX-dap need this until my other PR lands
+// #[cfg(test)]
 pub mod test {
     use super::*;
     use nexus_types::external_api::views::SledPolicy;

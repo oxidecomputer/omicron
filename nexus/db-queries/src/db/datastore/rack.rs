@@ -796,6 +796,10 @@ impl DataStore {
     ) -> Result<(Vec<IpAddr>, Vec<DnsZone>), Error> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
 
+        // XXX-dap use the current target blueprint here?
+        // Or maybe do that in the caller, since the other caller is doing
+        // blueprint execution for what might not be the current target.
+
         use crate::db::schema::external_ip::dsl as extip_dsl;
         use crate::db::schema::service::dsl as service_dsl;
 

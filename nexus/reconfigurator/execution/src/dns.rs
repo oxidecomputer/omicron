@@ -72,7 +72,7 @@ pub(crate) async fn deploy_dns(
         .await
         .internal_context("listing Silos (for configuring external DNS)")?;
 
-    let (nexus_external_ips, nexus_external_dns_zones) =
+    let (_, nexus_external_dns_zones) =
         datastore.nexus_external_addresses(opctx).await?;
     let nexus_external_dns_zone_names = nexus_external_dns_zones
         .into_iter()
@@ -80,8 +80,7 @@ pub(crate) async fn deploy_dns(
         .collect::<Vec<_>>();
     let external_dns_config_blueprint = blueprint_external_dns_config(
         blueprint,
-        &silos,
-        &nexus_external_ips,
+        &silos.iter().collect::<Vec<_>>(),
         &nexus_external_dns_zone_names,
     );
 
@@ -321,15 +320,25 @@ pub fn blueprint_internal_dns_config(
 
 pub fn blueprint_external_dns_config(
     blueprint: &Blueprint,
-    silos: &[Silo],
-    nexus_external_ips: &[IpAddr],
+    silos: &[&Silo],
     external_dns_zone_names: &[String],
 ) -> DnsConfigParams {
+    let nexus_external_ips =
+        blueprint.all_omicron_zones().filter_map(|(_, z)| {
+            if blueprint.zones_in_service.contains(&z.id) {
+                if let OmicronZoneType::Nexus { external_ip, .. } = &z.zone_type
+                {
+                    return Some(*external_ip);
+                }
+            }
+
+            None
+        });
     let dns_records: Vec<DnsRecord> = nexus_external_ips
         .into_iter()
         .map(|addr| match addr {
-            IpAddr::V4(addr) => DnsRecord::A(*addr),
-            IpAddr::V6(addr) => DnsRecord::Aaaa(*addr),
+            IpAddr::V4(addr) => DnsRecord::A(addr),
+            IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
         })
         .collect();
 
@@ -415,11 +424,15 @@ fn dns_compute_update(
 mod test {
     use super::blueprint_internal_dns_config;
     use super::dns_compute_update;
+    use crate::dns::blueprint_external_dns_config;
+    use crate::dns::silo_dns_name;
     use crate::Sled;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
     use nexus_db_model::DnsGroup;
+    use nexus_db_model::Silo;
     use nexus_inventory::CollectionBuilder;
+    use nexus_reconfigurator_planning::blueprint_builder::test::example;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::OmicronZoneConfig;
@@ -427,8 +440,11 @@ mod test {
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::ZpoolName;
+    use nexus_types::external_api::params;
+    use nexus_types::external_api::shared;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledState;
+    use nexus_types::identity::Resource;
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
     use nexus_types::internal_api::params::DnsRecord;
@@ -438,10 +454,12 @@ mod test {
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Generation;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
+    use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
@@ -477,9 +495,9 @@ mod test {
         }
     }
 
-    /// test blueprint_dns_config(): trivial case of an empty blueprint
+    /// test blueprint_internal_dns_config(): trivial case of an empty blueprint
     #[test]
-    fn test_blueprint_dns_empty() {
+    fn test_blueprint_internal_dns_empty() {
         let blueprint = blueprint_empty();
         let blueprint_dns =
             blueprint_internal_dns_config(&blueprint, &BTreeMap::new());
@@ -490,7 +508,7 @@ mod test {
     /// - one of each type of zone in service
     /// - some zones not in service
     #[test]
-    fn test_blueprint_dns_basic() {
+    fn test_blueprint_internal_dns_basic() {
         // We'll use the standard representative inventory collection to build a
         // blueprint.  The main thing we care about here is that we have at
         // least one zone of each type.  Later, we'll mark a couple of the sleds
@@ -755,6 +773,112 @@ mod test {
 
         println!("SRV kinds with no records found: {:?}", srv_kinds_expected);
         assert!(srv_kinds_expected.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_blueprint_external_dns_basic() {
+        let (collection, policy) = example(5);
+        let initial_external_dns_generation = Generation::new();
+        let blueprint = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            Generation::new(),
+            initial_external_dns_generation,
+            &policy,
+            "test suite",
+        )
+        .expect("failed to generate initial blueprint");
+
+        let my_silo = Silo::new(params::SiloCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "my-silo".parse().unwrap(),
+                description: String::new(),
+            },
+            quotas: params::SiloQuotasCreate::empty(),
+            discoverable: false,
+            identity_mode: shared::SiloIdentityMode::SamlJit,
+            admin_group_name: None,
+            tls_certificates: vec![],
+            mapped_fleet_roles: Default::default(),
+        })
+        .unwrap();
+
+        // It shouldn't ever be possible to have no Silos at all, but at least
+        // make sure we don't panic.
+        let external_dns_config = blueprint_external_dns_config(
+            &blueprint,
+            &[],
+            &[String::from("oxide.test")],
+        );
+        assert_eq!(
+            external_dns_config.generation,
+            u64::from(initial_external_dns_generation.next())
+        );
+        assert_eq!(external_dns_config.zones.len(), 1);
+        assert_eq!(external_dns_config.zones[0].zone_name, "oxide.test");
+        assert!(external_dns_config.zones[0].records.is_empty());
+
+        // Same with external DNS zones.
+        let external_dns_config =
+            blueprint_external_dns_config(&blueprint, &[&my_silo], &[]);
+        assert_eq!(
+            external_dns_config.generation,
+            u64::from(initial_external_dns_generation.next())
+        );
+        assert!(external_dns_config.zones.is_empty());
+
+        // Now check a more typical case.  (Although we wouldn't normally have
+        // more than one external DNS zone, it's a more general case and pretty
+        // easy to test.)
+        let external_dns_config = blueprint_external_dns_config(
+            &blueprint,
+            &[&my_silo],
+            &[String::from("oxide1.test"), String::from("oxide2.test")],
+        );
+        assert_eq!(
+            external_dns_config.generation,
+            u64::from(initial_external_dns_generation.next())
+        );
+        assert_eq!(external_dns_config.zones.len(), 2);
+        assert_eq!(
+            external_dns_config.zones[0].records,
+            external_dns_config.zones[1].records
+        );
+        assert_eq!(
+            external_dns_config.zones[0].zone_name,
+            String::from("oxide1.test"),
+        );
+        assert_eq!(
+            external_dns_config.zones[1].zone_name,
+            String::from("oxide2.test"),
+        );
+        let records = &external_dns_config.zones[0].records;
+        assert_eq!(records.len(), 1);
+        let silo_records = records
+            .get(&silo_dns_name(my_silo.name()))
+            .expect("missing silo DNS records");
+
+        // Here we're hardcoding the contents of the example blueprint.  It
+        // currently puts one Nexus zone on each sled.  If we change the example
+        // blueprint, change the expected set of IPs here.
+        let mut silo_record_ips: Vec<_> = silo_records
+            .into_iter()
+            .map(|record| match record {
+                DnsRecord::A(v) => IpAddr::V4(*v),
+                DnsRecord::Aaaa(v) => IpAddr::V6(*v),
+                DnsRecord::Srv(_) => panic!("unexpected SRV record"),
+            })
+            .collect();
+        silo_record_ips.sort();
+        assert_eq!(
+            silo_record_ips,
+            &[
+                "192.0.2.2".parse::<IpAddr>().unwrap(),
+                "192.0.2.3".parse::<IpAddr>().unwrap(),
+                "192.0.2.4".parse::<IpAddr>().unwrap(),
+                "192.0.2.5".parse::<IpAddr>().unwrap(),
+                "192.0.2.6".parse::<IpAddr>().unwrap(),
+            ]
+        );
     }
 
     #[test]
