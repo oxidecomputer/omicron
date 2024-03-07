@@ -57,8 +57,8 @@ impl super::Nexus {
             id,
             info.sa_address,
             db::model::SledBaseboard {
-                serial_number: info.baseboard.serial_number,
-                part_number: info.baseboard.part_number,
+                serial_number: info.baseboard.serial,
+                part_number: info.baseboard.part,
                 revision: info.baseboard.revision,
             },
             db::model::SledSystemHardware {

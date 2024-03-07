@@ -13,7 +13,6 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::Rack;
-use nexus_types::internal_api::params::Baseboard;
 use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SledRole;
 use omicron_common::api::external::ByteCount;
@@ -113,11 +112,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
     let sa = SledAgentInfo {
         sa_address: "[fd00:1122:3344:0100::1]:8080".parse().unwrap(),
         role: SledRole::Gimlet,
-        baseboard: Baseboard {
-            serial_number: baseboard.serial,
-            part_number: baseboard.part,
-            revision: baseboard.revision,
-        },
+        baseboard,
         usable_hardware_threads: 32,
         usable_physical_ram: ByteCount::from_gibibytes_u32(100),
         reservoir_size: ByteCount::from_mebibytes_u32(100),

@@ -6,6 +6,7 @@
 
 use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UserId;
+use crate::external_api::shared::Baseboard;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
@@ -34,15 +35,6 @@ pub enum SledRole {
     /// The sled is attached to the network switch, and has additional
     /// responsibilities.
     Scrimlet,
-}
-
-// TODO: We need a unified representation of these hardware identifiers
-/// Describes properties that should uniquely identify Oxide manufactured hardware
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Baseboard {
-    pub serial_number: String,
-    pub part_number: String,
-    pub revision: i64,
 }
 
 /// Sent by a sled agent to Nexus to inform about resources

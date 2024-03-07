@@ -1400,12 +1400,12 @@ impl ServiceManager {
     }
 
     fn zone_network_setup_install(
-        info: &SledAgentInfo,
+        gw_addr: &Ipv6Addr,
         zone: &InstalledZone,
         static_addr: &String,
     ) -> Result<ServiceBuilder, Error> {
         let datalink = zone.get_control_vnic_name();
-        let gateway = &info.underlay_address.to_string();
+        let gateway = &gw_addr.to_string();
 
         let mut config_builder = PropertyGroupBuilder::new("config");
         config_builder = config_builder
@@ -1575,7 +1575,7 @@ impl ServiceManager {
                 let listen_port = &CLICKHOUSE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1624,7 +1624,7 @@ impl ServiceManager {
                 let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1680,7 +1680,7 @@ impl ServiceManager {
                 let listen_port = &address.port().to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1729,7 +1729,7 @@ impl ServiceManager {
                 let listen_port = &CRUCIBLE_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1784,7 +1784,7 @@ impl ServiceManager {
                 let listen_port = &CRUCIBLE_PANTRY_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1834,7 +1834,7 @@ impl ServiceManager {
                 let listen_addr = &address.ip().to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     listen_addr,
                 )?;
@@ -1877,7 +1877,7 @@ impl ServiceManager {
                 let static_addr = underlay_address.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     &static_addr.clone(),
                 )?;
@@ -1966,7 +1966,7 @@ impl ServiceManager {
                 let static_addr = underlay_address.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    info,
+                    &info.underlay_address,
                     &installed_zone,
                     &static_addr.clone(),
                 )?;
@@ -2036,6 +2036,233 @@ impl ServiceManager {
                         Error::io("Failed to set up NTP profile", err)
                     })?;
 
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type:
+                            OmicronZoneType::InternalDns {
+                                http_address,
+                                dns_address,
+                                gz_address,
+                                gz_address_index,
+                                ..
+                            },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let nw_setup_service = Self::zone_network_setup_install(
+                    gz_address,
+                    &installed_zone,
+                    &underlay_address.to_string(),
+                )?;
+
+                // Internal DNS zones require a special route through
+                // the global zone, since they are not on the same part
+                // of the underlay as most other services on this sled
+                // (the sled's subnet).
+                //
+                // We create an IP address in the dedicated portion of
+                // the underlay used for internal DNS servers, but we
+                // *also* add a number ("which DNS server is this") to
+                // ensure these addresses are given unique names. In the
+                // unlikely case that two internal DNS servers end up on
+                // the same machine (which is effectively a
+                // developer-only environment -- we wouldn't want this
+                // in prod!), they need to be given distinct names.
+                let addr_name = format!("internaldns{gz_address_index}");
+                Zones::ensure_has_global_zone_v6_address(
+                    self.inner.underlay_vnic.clone(),
+                    *gz_address,
+                    &addr_name,
+                )
+                .map_err(|err| Error::GzAddress {
+                    message: format!(
+                        "Failed to create address {} for Internal DNS zone",
+                        addr_name
+                    ),
+                    err,
+                })?;
+
+                // If this address is in a new ipv6 prefix, notify
+                // maghemite so it can advertise it to other sleds.
+                self.advertise_prefix_of_address(*gz_address).await;
+
+                let http_addr =
+                    format!("[{}]:{}", http_address.ip(), http_address.port());
+                let dns_addr =
+                    format!("[{}]:{}", dns_address.ip(), dns_address.port());
+
+                let internal_dns_config = PropertyGroupBuilder::new("config")
+                    .add_property("http_address", "astring", &http_addr)
+                    .add_property("dns_address", "astring", &dns_addr);
+                let internal_dns_service =
+                    ServiceBuilder::new("oxide/internal_dns").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(internal_dns_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(internal_dns_service)
+                    .add_service(disabled_dns_client_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup Internal DNS profile", err)
+                    })?;
+                return Ok(RunningZone::boot(installed_zone).await?);
+            }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type:
+                            OmicronZoneType::Nexus {
+                                internal_address,
+                                external_tls,
+                                external_dns_servers,
+                                ..
+                            },
+                        underlay_address,
+                        id,
+                    },
+                ..
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let static_addr = underlay_address.to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    &info.underlay_address,
+                    &installed_zone,
+                    &static_addr.clone(),
+                )?;
+
+                // While Nexus will be reachable via `external_ip`, it
+                // communicates atop an OPTE port which operates on a
+                // VPC private IP. OPTE will map the private IP to the
+                // external IP automatically.
+                let opte_interface_setup =
+                    Self::opte_interface_set_up_install(&installed_zone)?;
+
+                let port_idx = 0;
+                let port = installed_zone
+                    .opte_ports()
+                    .nth(port_idx)
+                    .ok_or_else(|| {
+                        Error::ZoneEnsureAddress(
+                            EnsureAddressError::MissingOptePort {
+                                zone: String::from(installed_zone.name()),
+                                port_idx,
+                            },
+                        )
+                    })?;
+                let opte_ip = port.ip();
+
+                // Nexus takes a separate config file for parameters
+                // which cannot be known at packaging time.
+                let nexus_port = if *external_tls { 443 } else { 80 };
+                let deployment_config = DeploymentConfig {
+                    id: *id,
+                    rack_id: info.rack_id,
+                    techport_external_server_port: NEXUS_TECHPORT_EXTERNAL_PORT,
+
+                    dropshot_external: ConfigDropshotWithTls {
+                        tls: *external_tls,
+                        dropshot: dropshot::ConfigDropshot {
+                            bind_address: SocketAddr::new(*opte_ip, nexus_port),
+                            // This has to be large enough to support:
+                            // - bulk writes to disks
+                            request_body_max_bytes: 8192 * 1024,
+                            default_handler_task_mode:
+                                HandlerTaskMode::Detached,
+                        },
+                    },
+                    dropshot_internal: dropshot::ConfigDropshot {
+                        bind_address: (*internal_address).into(),
+                        // This has to be large enough to support, among
+                        // other things, the initial list of TLS
+                        // certificates provided by the customer during
+                        // rack setup.
+                        request_body_max_bytes: 10 * 1024 * 1024,
+                        default_handler_task_mode: HandlerTaskMode::Detached,
+                    },
+                    internal_dns: nexus_config::InternalDns::FromSubnet {
+                        subnet: Ipv6Subnet::<RACK_PREFIX>::new(
+                            info.underlay_address,
+                        ),
+                    },
+                    database: nexus_config::Database::FromDns,
+                    external_dns_servers: external_dns_servers.clone(),
+                };
+
+                // Copy the partial config file to the expected
+                // location.
+                let config_dir = Utf8PathBuf::from(format!(
+                    "{}/var/svc/manifest/site/nexus",
+                    installed_zone.root()
+                ));
+                // The filename of a half-completed config, in need of
+                // parameters supplied at runtime.
+                const PARTIAL_LEDGER_FILENAME: &str = "config-partial.toml";
+                // The filename of a completed config, merging the
+                // partial config with additional appended parameters
+                // known at runtime.
+                const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
+                let partial_config_path =
+                    config_dir.join(PARTIAL_LEDGER_FILENAME);
+                let config_path = config_dir.join(COMPLETE_LEDGER_FILENAME);
+                tokio::fs::copy(partial_config_path, &config_path)
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?;
+
+                // Serialize the configuration and append it into the
+                // file.
+                let serialized_cfg = toml::Value::try_from(&deployment_config)
+                    .expect("Cannot serialize config");
+                let mut map = toml::map::Map::new();
+                map.insert("deployment".to_string(), serialized_cfg);
+                let config_str = toml::to_string(&map).map_err(|err| {
+                    Error::TomlSerialize { path: config_path.clone(), err }
+                })?;
+                let mut file = tokio::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&config_path)
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?;
+                file.write_all(b"\n\n")
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?;
+                file.write_all(config_str.as_bytes())
+                    .await
+                    .map_err(|err| Error::io_path(&config_path, err))?;
+
+                let nexus_config = PropertyGroupBuilder::new("config");
+                let nexus_service = ServiceBuilder::new("oxide/nexus")
+                    .add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(nexus_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(opte_interface_setup)
+                    .add_service(disabled_ssh_service)
+                    .add_service(nexus_service)
+                    .add_service(disabled_dns_client_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to setup Nexus profile", err)
+                    })?;
                 return Ok(RunningZone::boot(installed_zone).await?);
             }
             _ => {}
@@ -2155,203 +2382,7 @@ impl ServiceManager {
 
         match &request {
             ZoneArgs::Omicron(zone_config) => {
-                // TODO: Related to
-                // https://github.com/oxidecomputer/omicron/pull/1124 , should we
-                // avoid importing this manifest?
-                debug!(self.inner.log, "importing manifest");
-
-                let smfh =
-                    SmfHelper::new(&running_zone, &zone_config.zone.zone_type);
-                smfh.import_manifest()?;
-
                 match &zone_config.zone.zone_type {
-                    OmicronZoneType::Nexus {
-                        internal_address,
-                        external_tls,
-                        external_dns_servers,
-                        ..
-                    } => {
-                        info!(self.inner.log, "Setting up Nexus service");
-
-                        let sled_info = self
-                            .inner
-                            .sled_info
-                            .get()
-                            .ok_or(Error::SledAgentNotReady)?;
-
-                        // While Nexus will be reachable via `external_ip`, it
-                        // communicates atop an OPTE port which operates on a
-                        // VPC private IP. OPTE will map the private IP to the
-                        // external IP automatically.
-                        let port_ip = running_zone
-                            .ensure_address_for_port("public", 0)
-                            .await?
-                            .ip();
-
-                        // Nexus takes a separate config file for parameters
-                        // which cannot be known at packaging time.
-                        let nexus_port = if *external_tls { 443 } else { 80 };
-                        let deployment_config = DeploymentConfig {
-                            id: zone_config.zone.id,
-                            rack_id: sled_info.rack_id,
-                            techport_external_server_port:
-                                NEXUS_TECHPORT_EXTERNAL_PORT,
-
-                            dropshot_external: ConfigDropshotWithTls {
-                                tls: *external_tls,
-                                dropshot: dropshot::ConfigDropshot {
-                                    bind_address: SocketAddr::new(
-                                        port_ip, nexus_port,
-                                    ),
-                                    // This has to be large enough to support:
-                                    // - bulk writes to disks
-                                    request_body_max_bytes: 8192 * 1024,
-                                    default_handler_task_mode:
-                                        HandlerTaskMode::Detached,
-                                },
-                            },
-                            dropshot_internal: dropshot::ConfigDropshot {
-                                bind_address: (*internal_address).into(),
-                                // This has to be large enough to support, among
-                                // other things, the initial list of TLS
-                                // certificates provided by the customer during
-                                // rack setup.
-                                request_body_max_bytes: 10 * 1024 * 1024,
-                                default_handler_task_mode:
-                                    HandlerTaskMode::Detached,
-                            },
-                            internal_dns:
-                                nexus_config::InternalDns::FromSubnet {
-                                    subnet: Ipv6Subnet::<RACK_PREFIX>::new(
-                                        sled_info.underlay_address,
-                                    ),
-                                },
-                            database: nexus_config::Database::FromDns,
-                            external_dns_servers: external_dns_servers.clone(),
-                        };
-
-                        // Copy the partial config file to the expected
-                        // location.
-                        let config_dir = Utf8PathBuf::from(format!(
-                            "{}/var/svc/manifest/site/nexus",
-                            running_zone.root()
-                        ));
-                        // The filename of a half-completed config, in need of
-                        // parameters supplied at runtime.
-                        const PARTIAL_LEDGER_FILENAME: &str =
-                            "config-partial.toml";
-                        // The filename of a completed config, merging the
-                        // partial config with additional appended parameters
-                        // known at runtime.
-                        const COMPLETE_LEDGER_FILENAME: &str = "config.toml";
-                        let partial_config_path =
-                            config_dir.join(PARTIAL_LEDGER_FILENAME);
-                        let config_path =
-                            config_dir.join(COMPLETE_LEDGER_FILENAME);
-                        tokio::fs::copy(partial_config_path, &config_path)
-                            .await
-                            .map_err(|err| Error::io_path(&config_path, err))?;
-
-                        // Serialize the configuration and append it into the
-                        // file.
-                        let serialized_cfg =
-                            toml::Value::try_from(&deployment_config)
-                                .expect("Cannot serialize config");
-                        let mut map = toml::map::Map::new();
-                        map.insert("deployment".to_string(), serialized_cfg);
-                        let config_str =
-                            toml::to_string(&map).map_err(|err| {
-                                Error::TomlSerialize {
-                                    path: config_path.clone(),
-                                    err,
-                                }
-                            })?;
-                        let mut file = tokio::fs::OpenOptions::new()
-                            .append(true)
-                            .open(&config_path)
-                            .await
-                            .map_err(|err| Error::io_path(&config_path, err))?;
-                        file.write_all(b"\n\n")
-                            .await
-                            .map_err(|err| Error::io_path(&config_path, err))?;
-                        file.write_all(config_str.as_bytes())
-                            .await
-                            .map_err(|err| Error::io_path(&config_path, err))?;
-                    }
-                    OmicronZoneType::InternalDns {
-                        http_address,
-                        dns_address,
-                        gz_address,
-                        gz_address_index,
-                        ..
-                    } => {
-                        info!(
-                            self.inner.log,
-                            "Setting up internal-dns service"
-                        );
-
-                        // Internal DNS zones require a special route through
-                        // the global zone, since they are not on the same part
-                        // of the underlay as most other services on this sled
-                        // (the sled's subnet).
-                        //
-                        // We create an IP address in the dedicated portion of
-                        // the underlay used for internal DNS servers, but we
-                        // *also* add a number ("which DNS server is this") to
-                        // ensure these addresses are given unique names. In the
-                        // unlikely case that two internal DNS servers end up on
-                        // the same machine (which is effectively a
-                        // developer-only environment -- we wouldn't want this
-                        // in prod!), they need to be given distinct names.
-                        let addr_name =
-                            format!("internaldns{gz_address_index}");
-                        Zones::ensure_has_global_zone_v6_address(
-                            self.inner.underlay_vnic.clone(),
-                            *gz_address,
-                            &addr_name,
-                        )
-                        .map_err(|err| {
-                            Error::GzAddress {
-                                message: format!(
-                            "Failed to create address {} for Internal DNS zone",
-                            addr_name
-                        ),
-                                err,
-                            }
-                        })?;
-                        // If this address is in a new ipv6 prefix, notify
-                        // maghemite so it can advertise it to other sleds.
-                        self.advertise_prefix_of_address(*gz_address).await;
-
-                        running_zone.add_default_route(*gz_address).map_err(
-                            |err| Error::ZoneCommand {
-                                intent: "Adding Route".to_string(),
-                                err,
-                            },
-                        )?;
-
-                        smfh.setprop(
-                            "config/http_address",
-                            format!(
-                                "[{}]:{}",
-                                http_address.ip(),
-                                http_address.port(),
-                            ),
-                        )?;
-                        smfh.setprop(
-                            "config/dns_address",
-                            &format!(
-                                "[{}]:{}",
-                                dns_address.ip(),
-                                dns_address.port(),
-                            ),
-                        )?;
-
-                        // Refresh the manifest with the new properties we set,
-                        // so they become "effective" properties when the
-                        // service is enabled.
-                        smfh.refresh()?;
-                    }
                     OmicronZoneType::BoundaryNtp { .. }
                     | OmicronZoneType::Clickhouse { .. }
                     | OmicronZoneType::ClickhouseKeeper { .. }
@@ -2359,7 +2390,9 @@ impl ServiceManager {
                     | OmicronZoneType::Crucible { .. }
                     | OmicronZoneType::CruciblePantry { .. }
                     | OmicronZoneType::ExternalDns { .. }
+                    | OmicronZoneType::InternalDns { .. }
                     | OmicronZoneType::InternalNtp { .. }
+                    | OmicronZoneType::Nexus { .. }
                     | OmicronZoneType::Oximeter { .. } => {
                         panic!(
                             "{} is a service which exists as part of a \
@@ -2368,9 +2401,6 @@ impl ServiceManager {
                         )
                     }
                 };
-
-                debug!(self.inner.log, "enabling service");
-                smfh.enable()?;
             }
             ZoneArgs::Switch(request) => {
                 for service in &request.zone.services {
