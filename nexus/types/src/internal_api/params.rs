@@ -70,6 +70,12 @@ pub struct SledAgentInfo {
 
     /// The generation number of this request from sled-agent
     pub generation: Generation,
+
+    /// Whether the sled-agent has been decommissioned by nexus
+    ///
+    /// This flag is only set to true by nexus. Setting it on an upsert from
+    /// sled-agent has no effect.
+    pub decommissioned: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

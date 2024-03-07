@@ -122,6 +122,7 @@ async fn test_sled_list_uninitialized(cptestctx: &ControlPlaneTestContext) {
         usable_physical_ram: ByteCount::from_gibibytes_u32(100),
         reservoir_size: ByteCount::from_mebibytes_u32(100),
         generation: Generation::new(),
+        decommissioned: false,
     };
     internal_client
         .make_request(

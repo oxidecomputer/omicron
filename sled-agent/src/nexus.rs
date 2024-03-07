@@ -286,6 +286,9 @@ type NexusRsp = (
 ///     latest known state, and it's easiest to just do that unconditionally
 ///     rather than trying to reason about exactly why Nexus rejected the
 ///     request.
+///  6. An exception to step 5 is that if the latest state returned from Nexus
+///     contains `decommissioned = true`, then we stop dead in our tracks and no
+///     longer send requests to nexus.
 pub struct NexusNotifierTask {
     sled_id: Uuid,
     nexus_client: NexusClient,
@@ -360,6 +363,7 @@ impl NexusNotifierTask {
                     .into(),
                 reservoir_size: vmm_reservoir_manager.reservoir_size().into(),
                 generation,
+                decommissioned: false,
             }
         });
 
@@ -510,6 +514,11 @@ impl NexusNotifierTask {
                     // Nothing to do. We must send the request as is.
                 }
                 NexusKnownInfo::Found(known) => {
+                    // Don't send any more requests if this sled-agent has been decommissioned.
+                    if known.decommissioned {
+                        return;
+                    }
+
                     // We don't need to send a request if the info is identical to what
                     // nexus knows
                     if info == *known {
@@ -568,6 +577,9 @@ impl NexusNotifierTask {
                     "Retrieved SledAgentInfo from Nexus: {:?}", info
                 );
                 assert!(self.nexus_known_info.is_none());
+                if info.decommissioned {
+                    info!(self.log, "Sled Agent Decommissioned.");
+                }
                 self.nexus_known_info = Some(NexusKnownInfo::Found(info));
                 self.total_get_requests_completed += 1;
             }
@@ -727,6 +739,7 @@ mod test {
                     .into(),
                 reservoir_size: ByteCount::from(0u32).into(),
                 generation: Generation::new(),
+                decommissioned: false,
             }));
         let latest_sled_agent_info2 = latest_sled_agent_info.clone();
 

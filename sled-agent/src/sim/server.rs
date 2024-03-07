@@ -126,6 +126,7 @@ impl Server {
                             )
                             .unwrap(),
                             generation: Generation::new(),
+                            decommissioned: false,
                         },
                     )
                     .await

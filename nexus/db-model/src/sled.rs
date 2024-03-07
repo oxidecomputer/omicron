@@ -136,6 +136,10 @@ impl From<Sled> for params::SledAgentInfo {
         } else {
             params::SledRole::Gimlet
         };
+        let decommissioned = match sled.state {
+            SledState::Active => false,
+            SledState::Decommissioned => true,
+        };
         Self {
             sa_address: sled.address(),
             role,
@@ -148,6 +152,7 @@ impl From<Sled> for params::SledAgentInfo {
             usable_physical_ram: sled.usable_physical_ram.into(),
             reservoir_size: sled.reservoir_size.into(),
             generation: sled.sled_agent_gen.into(),
+            decommissioned,
         }
     }
 }
