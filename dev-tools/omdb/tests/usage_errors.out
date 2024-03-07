@@ -94,17 +94,18 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
-  rack       Print information about the rack
-  disks      Print information about disks
-  dns        Print information about internal and external DNS
-  inventory  Print information about collected hardware/software inventory
-  services   Print information about control plane services
-  sleds      Print information about sleds
-  instances  Print information about customer instances
-  network    Print information about the network
-  snapshots  Print information about snapshots
-  validate   Validate the contents of the database
-  help       Print this message or the help of the given subcommand(s)
+  rack                 Print information about the rack
+  disks                Print information about disks
+  dns                  Print information about internal and external DNS
+  inventory            Print information about collected hardware/software inventory
+  reconfigurator-save  Save the current Reconfigurator inputs to a file
+  services             Print information about control plane services
+  sleds                Print information about sleds
+  instances            Print information about customer instances
+  network              Print information about the network
+  snapshots            Print information about snapshots
+  validate             Validate the contents of the database
+  help                 Print this message or the help of the given subcommand(s)
 
 Options:
       --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
@@ -123,17 +124,18 @@ Query the control plane database (CockroachDB)
 Usage: omdb db [OPTIONS] <COMMAND>
 
 Commands:
-  rack       Print information about the rack
-  disks      Print information about disks
-  dns        Print information about internal and external DNS
-  inventory  Print information about collected hardware/software inventory
-  services   Print information about control plane services
-  sleds      Print information about sleds
-  instances  Print information about customer instances
-  network    Print information about the network
-  snapshots  Print information about snapshots
-  validate   Validate the contents of the database
-  help       Print this message or the help of the given subcommand(s)
+  rack                 Print information about the rack
+  disks                Print information about disks
+  dns                  Print information about internal and external DNS
+  inventory            Print information about collected hardware/software inventory
+  reconfigurator-save  Save the current Reconfigurator inputs to a file
+  services             Print information about control plane services
+  sleds                Print information about sleds
+  instances            Print information about customer instances
+  network              Print information about the network
+  snapshots            Print information about snapshots
+  validate             Validate the contents of the database
+  help                 Print this message or the help of the given subcommand(s)
 
 Options:
       --db-url <DB_URL>            URL of the database SQL interface [env: OMDB_DB_URL=]
