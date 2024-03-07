@@ -71,9 +71,10 @@ pub struct Sled {
     #[diesel(column_name = sled_state)]
     state: SledState,
 
-    /// A generation number owned and incremented by sled-agent This is
-    /// specifically distinct from `rcgen`, which is incremented by child
-    /// resources as part of `DatastoreCollectionConfig`.
+    /// A generation number owned and incremented by sled-agent
+    ///
+    /// This is specifically distinct from `rcgen`, which is incremented by
+    /// child resources as part of `DatastoreCollectionConfig`.
     pub sled_agent_gen: Generation,
 }
 

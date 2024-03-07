@@ -276,9 +276,16 @@ type NexusRsp = (
 ///     and the new state transmitted.
 ///  4. If a caller requests an update to be made to nexus and it succeeds
 ///     the known value is set to what was updated.
-///  5. If the request fails, we go ahead and set the known state to `None`,
-///     since we are not sure if the last update succeeded. This will
-///     trigger a get request for the latest state.
+///  5. If the request fails, we go ahead and set the known state to `None`.
+///     This will trigger a get request for the latest state. In the case of
+///     a timeout we are not sure if the last update succeeded and so need to
+///     learn that. In the case of an explicit rejection from nexus, we also
+///     want to learn the latest state. We need to learn the latest state this
+///     because an update can fail if the sled-agent's state is out of date
+///     with respect to what's in CRDB. The only way to fix that is to get the
+///     latest known state, and it's easiest to just do that unconditionally
+///     rather than trying to reason about exactly why Nexus rejected the
+///     request.
 pub struct NexusNotifierTask {
     sled_id: Uuid,
     nexus_client: NexusClient,
@@ -584,7 +591,14 @@ impl NexusNotifierTask {
                         self.nexus_known_info = Some(NexusKnownInfo::NotFound);
                         return;
                     }
-                    // Assert/panic if self.nexus_known_info.is_some() ?
+                    warn!(
+                        self.log,
+                        "Nexus doesn't have have the latest state of this\
+                        sled-agent, but sled-agent thinks it should. Setting \
+                        known state to `None` and trying again.",
+                    );
+                    self.nexus_known_info = None;
+                    return;
                 }
                 self.nexus_known_info = None;
                 warn!(
@@ -892,7 +906,10 @@ mod test {
         );
 
         // Inject a get error and trigger a put to nexus after updating the VMM
-        // reservoir size. We shouldn't end up calling Get at all since we know our state.
+        // reservoir size. We shouldn't end up calling Get at all since we know
+        // our state, and so we will not trigger the error here. However, later
+        // on when we trigger a put error, it will perform a get and that will
+        // trigger this injected get errror.
         get_error.store(true, Ordering::SeqCst);
         {
             let mut info = latest_sled_agent_info.lock().unwrap();
