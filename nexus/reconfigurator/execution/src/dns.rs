@@ -13,7 +13,6 @@ use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::DataStore;
-use nexus_external_endpoints::ExternalEndpoints;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -63,11 +62,9 @@ pub(crate) async fn deploy_dns(
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_config_blueprint =
         blueprint_internal_dns_config(blueprint, sleds_by_id);
-    let external_endpoints = read_all_endpoints(datastore, opctx)
-        .await
-        .internal_context("reading external endpoints to deploy DNS")?;
+    let silos = todo!(); // XXX-dap
     let external_dns_config_blueprint =
-        blueprint_external_dns_config(blueprint, &external_endpoints);
+        blueprint_external_dns_config(blueprint, silos);
 
     // Deploy the changes.
     deploy_dns_one(
@@ -305,15 +302,8 @@ pub fn blueprint_internal_dns_config(
 
 pub fn blueprint_external_dns_config(
     blueprint: &Blueprint,
-    endpoints: &ExternalEndpoints,
+    silos: Vec<Silo>,
 ) -> DnsConfigParams {
-    let dns_params = DnsConfigParams {
-        generation: blueprint.external-dns_version.next(),
-        time_created: Utc::now(),
-        zones: vec![DnsConfigZone {
-
-        }]
-    };
     todo!(); // XXX-dap
 }
 

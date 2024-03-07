@@ -4434,38 +4434,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nexus-external-endpoints"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dropshot",
- "hex",
- "http 0.2.11",
- "hyper 0.14.27",
- "nexus-db-model",
- "nexus-db-queries",
- "nexus-types",
- "omicron-common",
- "omicron-rpaths",
- "omicron-test-utils",
- "omicron-workspace-hack",
- "openssl",
- "pq-sys",
- "rcgen",
- "reqwest",
- "rustls 0.22.2",
- "rustls-pemfile 2.1.0",
- "schemars",
- "serde",
- "serde_with",
- "slog",
- "thiserror",
- "tokio",
- "uuid",
-]
-
-[[package]]
 name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
@@ -4517,7 +4485,6 @@ dependencies = [
  "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
- "nexus-external-endpoints",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
@@ -5093,7 +5060,6 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
- "nexus-external-endpoints",
  "nexus-inventory",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",

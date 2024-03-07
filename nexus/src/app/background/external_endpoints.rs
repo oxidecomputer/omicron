@@ -7,12 +7,12 @@
 //! associated with those names
 
 use super::common::BackgroundTask;
+use crate::app::external_endpoints::read_all_endpoints;
+pub use crate::app::external_endpoints::ExternalEndpoints;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_external_endpoints::read_all_endpoints;
-pub use nexus_external_endpoints::ExternalEndpoints;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;

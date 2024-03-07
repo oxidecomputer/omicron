@@ -42,7 +42,6 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
-    "nexus/external-endpoints",
     "nexus/inventory",
     "nexus/macros-common",
     "nexus/reconfigurator/execution",
@@ -122,7 +121,6 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
-    "nexus/external-endpoints",
     "nexus/inventory",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
@@ -262,7 +260,6 @@ nexus-config = { path = "nexus-config" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
-nexus-external-endpoints = { path = "nexus/external-endpoints" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }

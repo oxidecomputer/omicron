@@ -4,6 +4,7 @@
 
 //! Rack management
 
+use super::silo::silo_dns_name;
 use crate::external_api::params;
 use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
@@ -19,7 +20,6 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::datastore::RackInit;
 use nexus_db_queries::db::lookup::LookupPath;
-use nexus_external_endpoints::silo_dns_name;
 use nexus_types::external_api::params::Address;
 use nexus_types::external_api::params::AddressConfig;
 use nexus_types::external_api::params::AddressLotBlockCreate;
