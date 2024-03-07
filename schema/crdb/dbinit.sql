@@ -240,7 +240,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255)
 );
 
--- Add an index which allows pagination by {rack_id, sled_id} pairs. 
+-- Add an index which allows pagination by {rack_id, sled_id} pairs.
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_allocation_by_rack_and_sled ON omicron.public.sled_underlay_subnet_allocation (
     rack_id,
     sled_id
@@ -886,7 +886,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
  * A view of the amount of provisioned and allocated (set by quotas) resources
  * on a given silo.
  */
-CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization 
+CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization
 AS SELECT
     c.id AS silo_id,
     s.name AS silo_name,
@@ -899,7 +899,7 @@ AS SELECT
     s.discoverable as silo_discoverable
 FROM
     omicron.public.virtual_provisioning_collection AS c
-    RIGHT JOIN omicron.public.silo_quotas AS q 
+    RIGHT JOIN omicron.public.silo_quotas AS q
     ON c.id = q.silo_id
     INNER JOIN omicron.public.silo AS s
     ON c.id = s.id
@@ -1003,7 +1003,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_project ON omicron.public.i
     time_deleted IS NULL;
 
 /*
- * A special view of an instance provided to operators for insights into what's running 
+ * A special view of an instance provided to operators for insights into what's running
  * on a sled.
  *
  * This view requires the VMM table, which doesn't exist yet, so create a
@@ -1152,9 +1152,9 @@ SELECT
     digest,
     block_size,
     size_bytes
-FROM 
+FROM
     omicron.public.image
-WHERE 
+WHERE
     project_id IS NOT NULL;
 
 CREATE VIEW IF NOT EXISTS omicron.public.silo_image AS
@@ -1173,9 +1173,9 @@ SELECT
     digest,
     block_size,
     size_bytes
-FROM 
+FROM
     omicron.public.image
-WHERE 
+WHERE
     project_id IS NULL;
 
 /* Index for silo images */
@@ -3546,6 +3546,13 @@ SELECT
 FROM interleaved_versions;
 
 CREATE INDEX IF NOT EXISTS rack_initialized ON omicron.public.rack (initialized);
+
+CREATE TABLE IF NOT EXISTS omicron.public.bootstore_config (
+    version INT8 NOT NULL PRIMARY KEY,
+    config JSONB NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
 
 INSERT INTO omicron.public.db_metadata (
     singleton,
