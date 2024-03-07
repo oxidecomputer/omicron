@@ -143,6 +143,7 @@ mod test {
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
     use dropshot::PaginationOrder;
+    use nexus_db_model::Generation;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_test_utils::dev;
@@ -159,11 +160,11 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
         db.sled_upsert(sled_update)
             .await
             .expect("Could not upsert sled during test prep")
-            .unwrap()
     }
 
     fn list_disk_params() -> DataPageParams<'static, Uuid> {

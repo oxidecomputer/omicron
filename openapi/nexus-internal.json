@@ -798,6 +798,39 @@
       }
     },
     "/sled-agents/{sled_id}": {
+      "get": {
+        "summary": "Return information about the given sled agent",
+        "operationId": "sled_agent_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledAgentInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "post": {
         "summary": "Report that the sled agent for the specified sled has come online.",
         "operationId": "sled_agent_put",
@@ -816,7 +849,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SledAgentStartupInfo"
+                "$ref": "#/components/schemas/SledAgentInfo"
               }
             }
           },
@@ -6394,8 +6427,8 @@
           "sled_id"
         ]
       },
-      "SledAgentStartupInfo": {
-        "description": "Sent by a sled agent on startup to Nexus to request further instruction",
+      "SledAgentInfo": {
+        "description": "Sent by a sled agent to Nexus to inform about resources",
         "type": "object",
         "properties": {
           "baseboard": {
@@ -6403,6 +6436,18 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/Baseboard"
+              }
+            ]
+          },
+          "decommissioned": {
+            "description": "Whether the sled-agent has been decommissioned by nexus\n\nThis flag is only set to true by nexus. Setting it on an upsert from sled-agent has no effect.",
+            "type": "boolean"
+          },
+          "generation": {
+            "description": "The generation number of this request from sled-agent",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
               }
             ]
           },
@@ -6443,6 +6488,8 @@
         },
         "required": [
           "baseboard",
+          "decommissioned",
+          "generation",
           "reservoir_size",
           "role",
           "sa_address",

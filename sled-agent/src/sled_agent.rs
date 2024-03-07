@@ -11,10 +11,13 @@ use crate::bootstrap::early_networking::{
 };
 use crate::bootstrap::params::{BaseboardId, StartSledAgentRequest};
 use crate::config::Config;
-use crate::instance_manager::{InstanceManager, ReservoirMode};
+use crate::instance_manager::InstanceManager;
 use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::metrics::MetricsManager;
-use crate::nexus::{ConvertInto, NexusClientWithResolver, NexusRequestQueue};
+use crate::nexus::{
+    NexusClientWithResolver, NexusNotifierHandle, NexusNotifierInput,
+    NexusNotifierTask,
+};
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
@@ -25,6 +28,7 @@ use crate::params::{
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
 use crate::updates::{ConfigUpdates, UpdateManager};
+use crate::vmm_reservoir::{ReservoirMode, VmmReservoirManager};
 use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
@@ -57,7 +61,7 @@ use omicron_common::api::{
     internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
-    retry_notify, retry_notify_ext, retry_policy_internal_service,
+    retry_notify, retry_policy_internal_service,
     retry_policy_internal_service_aggressive, BackoffError,
 };
 use oximeter::types::ProducerRegistry;
@@ -288,8 +292,8 @@ struct SledAgentInner {
     // Connection to Nexus.
     nexus_client: NexusClientWithResolver,
 
-    // A serialized request queue for operations interacting with Nexus.
-    nexus_request_queue: NexusRequestQueue,
+    // A mechanism for notifiying nexus about sled-agent updates
+    nexus_notifier: NexusNotifierHandle,
 
     // The rack network config provided at RSS time.
     rack_network_config: Option<RackNetworkConfig>,
@@ -466,6 +470,19 @@ impl SledAgent {
             .map_err(|_| ())
             .expect("Failed to send to StorageMonitor");
 
+        // Configure the VMM reservoir as either a percentage of DRAM or as an
+        // exact size in MiB.
+        let reservoir_mode = ReservoirMode::from_config(
+            config.vmm_reservoir_percentage,
+            config.vmm_reservoir_size_mb,
+        );
+
+        let vmm_reservoir_manager = VmmReservoirManager::spawn(
+            &log,
+            long_running_task_handles.hardware_manager.clone(),
+            reservoir_mode,
+        );
+
         let instances = InstanceManager::new(
             parent_log.clone(),
             nexus_client.clone(),
@@ -474,40 +491,8 @@ impl SledAgent {
             storage_manager.clone(),
             long_running_task_handles.zone_bundler.clone(),
             ZoneBuilderFactory::default(),
+            vmm_reservoir_manager.clone(),
         )?;
-
-        // Configure the VMM reservoir as either a percentage of DRAM or as an
-        // exact size in MiB.
-        let reservoir_mode = match (
-            config.vmm_reservoir_percentage,
-            config.vmm_reservoir_size_mb,
-        ) {
-            (None, None) => ReservoirMode::None,
-            (Some(p), None) => ReservoirMode::Percentage(p),
-            (None, Some(mb)) => ReservoirMode::Size(mb),
-            (Some(_), Some(_)) => panic!(
-                "only one of vmm_reservoir_percentage and \
-                vmm_reservoir_size_mb is allowed"
-            ),
-        };
-
-        match reservoir_mode {
-            ReservoirMode::None => warn!(log, "Not using VMM reservoir"),
-            ReservoirMode::Size(0) | ReservoirMode::Percentage(0) => {
-                warn!(log, "Not using VMM reservoir (size 0 bytes requested)")
-            }
-            _ => {
-                instances
-                    .set_reservoir_size(
-                        &long_running_task_handles.hardware_manager,
-                        reservoir_mode,
-                    )
-                    .map_err(|e| {
-                        error!(log, "Failed to setup VMM reservoir: {e}");
-                        e
-                    })?;
-            }
-        }
 
         let update_config = ConfigUpdates {
             zone_artifact_path: Utf8PathBuf::from("/opt/oxide"),
@@ -570,6 +555,22 @@ impl SledAgent {
             rack_network_config.clone(),
         )?;
 
+        // Spawn a background task for managing notifications to nexus
+        // about this sled-agent.
+        let nexus_notifier_input = NexusNotifierInput {
+            sled_id: request.body.id,
+            sled_address: get_sled_address(request.body.subnet),
+            nexus_client: nexus_client.client().clone(),
+            hardware: long_running_task_handles.hardware_manager.clone(),
+            vmm_reservoir_manager: vmm_reservoir_manager.clone(),
+        };
+        let (nexus_notifier_task, nexus_notifier_handle) =
+            NexusNotifierTask::new(nexus_notifier_input, &log);
+
+        tokio::spawn(async move {
+            nexus_notifier_task.run().await;
+        });
+
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.body.id,
@@ -582,14 +583,7 @@ impl SledAgent {
                 port_manager,
                 services,
                 nexus_client,
-
-                // TODO(https://github.com/oxidecomputer/omicron/issues/1917):
-                // Propagate usage of this request queue throughout the Sled
-                // Agent.
-                //
-                // Also, we could maybe de-dup some of the backoff code in the
-                // request queue?
-                nexus_request_queue: NexusRequestQueue::new(),
+                nexus_notifier: nexus_notifier_handle,
                 rack_network_config,
                 zone_bundler: long_running_task_handles.zone_bundler.clone(),
                 bootstore: long_running_task_handles.bootstore.clone(),
@@ -603,7 +597,7 @@ impl SledAgent {
         // existence. If inspection of the hardware later informs us that we're
         // actually running on a scrimlet, that's fine, the updated value will
         // be received by Nexus eventually.
-        sled_agent.notify_nexus_about_self(&log);
+        sled_agent.notify_nexus_about_self(&log).await;
 
         Ok(sled_agent)
     }
@@ -681,98 +675,10 @@ impl SledAgent {
         Ok(())
     }
 
-    /// Sends a request to Nexus informing it that the current sled exists,
-    /// with information abou the existing set of hardware.
-    ///
-    /// Does not block until Nexus is available -- the future created by this
-    /// function is retried in a queue that is polled in the background.
-    pub(crate) fn notify_nexus_about_self(&self, log: &Logger) {
-        let sled_id = self.inner.id;
-        let nexus_client = self.inner.nexus_client.clone();
-        let sled_address = self.inner.sled_address();
-        let is_scrimlet = self.inner.hardware.is_scrimlet();
-        let baseboard = self.inner.hardware.baseboard().convert();
-        let usable_hardware_threads =
-            self.inner.hardware.online_processor_count();
-        let usable_physical_ram =
-            self.inner.hardware.usable_physical_ram_bytes();
-        let reservoir_size = self.inner.instances.reservoir_size();
-
-        let log = log.clone();
-        let fut = async move {
-            // Notify the control plane that we're up, and continue trying this
-            // until it succeeds. We retry with a randomized, capped
-            // exponential backoff.
-            //
-            // TODO-robustness if this returns a 400 error, we probably want to
-            // return a permanent error from the `notify_nexus` closure.
-            let notify_nexus = || async {
-                info!(
-                    log,
-                    "contacting server nexus, registering sled";
-                    "id" => ?sled_id,
-                    "baseboard" => ?baseboard,
-                );
-                let role = if is_scrimlet {
-                    nexus_client::types::SledRole::Scrimlet
-                } else {
-                    nexus_client::types::SledRole::Gimlet
-                };
-
-                nexus_client
-                    .client()
-                    .sled_agent_put(
-                        &sled_id,
-                        &nexus_client::types::SledAgentStartupInfo {
-                            sa_address: sled_address.to_string(),
-                            role,
-                            baseboard: baseboard.clone(),
-                            usable_hardware_threads,
-                            usable_physical_ram: nexus_client::types::ByteCount(
-                                usable_physical_ram,
-                            ),
-                            reservoir_size: nexus_client::types::ByteCount(
-                                reservoir_size.to_bytes(),
-                            ),
-                        },
-                    )
-                    .await
-                    .map_err(|err| BackoffError::transient(err.to_string()))
-            };
-            // This notification is often invoked before Nexus has started
-            // running, so avoid flagging any errors as concerning until some
-            // time has passed.
-            let log_notification_failure = |err, call_count, total_duration| {
-                if call_count == 0 {
-                    info!(
-                        log,
-                        "failed to notify nexus about sled agent";
-                        "error" => %err,
-                    );
-                } else if total_duration > std::time::Duration::from_secs(30) {
-                    warn!(
-                        log,
-                        "failed to notify nexus about sled agent";
-                        "error" => %err,
-                        "total duration" => ?total_duration,
-                    );
-                }
-            };
-            retry_notify_ext(
-                retry_policy_internal_service_aggressive(),
-                notify_nexus,
-                log_notification_failure,
-            )
-            .await
-            .expect("Expected an infinite retry loop contacting Nexus");
-        };
-        self.inner
-            .nexus_request_queue
-            .sender()
-            .send(Box::pin(fut))
-            .unwrap_or_else(|err| {
-                panic!("Failed to send future to request queue: {err}");
-            });
+    /// Trigger a request to Nexus informing it that the current sled exists,
+    /// with information about the existing set of hardware.
+    pub(crate) async fn notify_nexus_about_self(&self, log: &Logger) {
+        self.inner.nexus_notifier.notify_nexus_about_self(log).await;
     }
 
     /// List all zone bundles on the system, for any zones live or dead.
