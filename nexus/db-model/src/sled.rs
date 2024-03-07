@@ -6,6 +6,7 @@ use super::{ByteCount, Generation, SledState, SqlU16, SqlU32};
 use crate::collection::DatastoreCollectionConfig;
 use crate::ipv6;
 use crate::schema::{physical_disk, service, sled, zpool};
+use crate::sled::shared::Baseboard;
 use crate::sled_policy::DbSledPolicy;
 use chrono::{DateTime, Utc};
 use db_macros::Asset;
@@ -143,9 +144,9 @@ impl From<Sled> for params::SledAgentInfo {
         Self {
             sa_address: sled.address(),
             role,
-            baseboard: params::Baseboard {
-                serial_number: sled.serial_number.clone(),
-                part_number: sled.part_number.clone(),
+            baseboard: Baseboard {
+                serial: sled.serial_number.clone(),
+                part: sled.part_number.clone(),
                 revision: sled.revision,
             },
             usable_hardware_threads: sled.usable_hardware_threads.into(),
