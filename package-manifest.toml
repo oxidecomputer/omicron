@@ -97,8 +97,20 @@ source.paths = [
 output.type = "zone"
 output.intermediate_only = true
 
-[package.omicron-nexus]
+[package.nexus]
 service_name = "nexus"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [
+  "omicron-nexus.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz",
+  "opte-interface-setup.tar.gz"
+]
+output.type = "zone"
+
+[package.omicron-nexus]
+service_name = "omicron-nexus"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["nexus", "schema-updater"]
@@ -115,6 +127,7 @@ setup_hint = """
 - Run `./tools/ci_download_console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
+output.intermediate_only = true
 
 [package.oximeter]
 service_name = "oximeter"

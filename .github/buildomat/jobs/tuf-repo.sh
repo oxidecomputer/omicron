@@ -93,7 +93,7 @@ target/release/omicron-package -t default target create -i standard -m gimlet -s
 ln -s /input/package/work/zones/* out/
 rm out/switch-softnpu.tar.gz  # not used when target switch=asic
 rm out/omicron-gateway-softnpu.tar.gz  # not used when target switch=asic
-rm out/omicron-nexus-single-sled.tar.gz # only used for deploy tests
+rm out/nexus-single-sled.tar.gz # only used for deploy tests
 for zone in out/*.tar.gz; do
     target/release/omicron-package stamp "$(basename "${zone%.tar.gz}")" "$VERSION"
 done
