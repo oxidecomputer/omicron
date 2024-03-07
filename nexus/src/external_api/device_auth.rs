@@ -11,7 +11,6 @@
 
 use super::console_api::console_index_or_login_redirect;
 use super::views::DeviceAccessTokenGrant;
-use crate::app::external_endpoints::authority_for_request;
 use crate::ServerContext;
 use dropshot::{
     endpoint, HttpError, HttpResponseUpdatedNoContent, RequestContext,
@@ -20,6 +19,7 @@ use dropshot::{
 use http::{header, Response, StatusCode};
 use hyper::Body;
 use nexus_db_queries::db::model::DeviceAccessToken;
+use nexus_external_endpoints::authority_for_request;
 use omicron_common::api::external::InternalContext;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
