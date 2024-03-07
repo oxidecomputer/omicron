@@ -853,7 +853,7 @@ async fn cmd_nexus_blueprints_show(
             sled_id, sled_zones.generation
         );
         for z in &sled_zones.zones {
-            println!("    {} {}", z.id, z.zone_type.label());
+            println!("    {} {}", z.id, z.zone_type.tag());
         }
     }
 
