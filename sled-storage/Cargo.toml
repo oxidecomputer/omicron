@@ -8,6 +8,7 @@ async-trait.workspace = true
 camino.workspace = true
 cfg-if.workspace = true
 derive_more.workspace = true
+futures.workspace = true
 glob.workspace = true
 illumos-utils.workspace = true
 key-manager.workspace = true

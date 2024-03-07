@@ -11,6 +11,8 @@ use crate::disk::{Disk, DiskError, RawDisk};
 use crate::error::Error;
 use crate::resources::{AddDiskResult, StorageResources};
 use camino::Utf8PathBuf;
+use futures::stream::FuturesUnordered;
+use futures::StreamExt;
 use illumos_utils::zfs::{Mountpoint, Zfs};
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
@@ -389,7 +391,7 @@ impl StorageManager {
     // and wait for the next retry window to re-call this method. If we hit a
     // permanent error we log it, but we continue inserting queued disks.
     //
-    // Return true if updates should be sent to watchers, false otherwise
+    // Return true if updates should be sent to watchers, false otherwise.
     async fn add_queued_disks(&mut self) -> bool {
         info!(
             self.log,
@@ -398,35 +400,75 @@ impl StorageManager {
         );
         self.state = StorageManagerState::Normal;
 
+        // Do we need to inform our consumers about any new disks?
         let mut send_updates = false;
 
-        // Disks that should be requeued.
-        let queued = self.queued_u2_drives.clone();
-        let mut to_dequeue = HashSet::new();
-        for disk in queued.iter() {
-            if self.state == StorageManagerState::QueueingDisks {
-                // We hit a transient error in a prior iteration.
-                break;
-            } else {
-                match self.add_u2_disk(disk.clone()).await {
-                    Err(_) => {
+        let mut futs = FuturesUnordered::new();
+
+        // Create new disks concurrently
+        for raw_disk in self.queued_u2_drives.iter().cloned() {
+            let key_requester = self.key_requester.clone();
+            let log = self.log.clone();
+            let raw_disk2 = raw_disk.clone();
+            futs.push(async move {
+                (
+                    raw_disk,
+                    Disk::new(&log, raw_disk2, Some(&key_requester)).await,
+                )
+            })
+        }
+
+        // Check to see if any of our disk creations succeeded.
+        // If so, insert them into `self.resources`.
+        while let Some((raw_disk, res)) = futs.next().await {
+            match res {
+                Ok(disk) => match self.resources.insert_disk(disk) {
+                    Err(err) => {
                         // This is an unrecoverable error, so we don't queue the
                         // disk again.
-                        to_dequeue.insert(disk);
+                        error!(
+                            self.log,
+                            "Persistent error: {err}: not queueing disk";
+                            "disk_id" => ?raw_disk.identity()
+                        );
+                        self.queued_u2_drives.remove(&raw_disk);
                     }
                     Ok(AddDiskResult::DiskInserted) => {
                         send_updates = true;
-                        to_dequeue.insert(disk);
+                        self.queued_u2_drives.remove(&raw_disk);
                     }
                     Ok(AddDiskResult::DiskAlreadyInserted) => {
-                        to_dequeue.insert(disk);
+                        self.queued_u2_drives.remove(&raw_disk);
                     }
-                    Ok(AddDiskResult::DiskQueued) => (),
+                    Ok(AddDiskResult::DiskQueued) => {
+                        error!(
+                            self.log,
+                            "Disks cannot be queued by `StorageResources::insert`";
+                            "disk_id" => ?raw_disk.identity()
+                        );
+                    }
+                },
+                Err(err @ DiskError::Dataset(DatasetError::KeyManager(_))) => {
+                    warn!(
+                        self.log,
+                        "Transient error: {err}: queuing disk";
+                        "disk_id" => ?raw_disk.identity()
+                    );
+                    self.state = StorageManagerState::QueueingDisks;
+                }
+                Err(err) => {
+                    error!(
+                        self.log,
+                        "Persistent error: {err}: not queueing disk";
+                        "disk_id" => ?raw_disk.identity()
+                    );
+                    // This is an unrecoverable error, so we don't queue the
+                    // disk again.
+                    self.queued_u2_drives.remove(&raw_disk);
                 }
             }
         }
-        // Dequeue any inserted disks
-        self.queued_u2_drives.retain(|k| !to_dequeue.contains(k));
+
         send_updates
     }
 
@@ -539,19 +581,35 @@ impl StorageManager {
             }
         }
 
+        // We want to add all U.2 disks concurrently rather than sequentially.
+        // Instead of directly calling `self.add_disk` in a loop or duplicating
+        // the logic in `add_queued_disks`, we queue up all the U.2 disks to
+        // add and then call `add_queued_disks` directly if the storage key
+        // manager is ready.
         for raw_disk in raw_disks {
             let disk_id = raw_disk.identity().clone();
-            match self.add_disk(raw_disk).await {
-                Ok(AddDiskResult::DiskInserted) => should_update = true,
-                Ok(_) => (),
-                Err(err) => {
-                    warn!(
-                        self.log,
-                        "Failed to add disk to storage resources: {err}";
-                        "disk_id" => ?disk_id
-                    );
+            match raw_disk.variant() {
+                DiskVariant::M2 => match self.add_m2_disk(raw_disk).await {
+                    Ok(AddDiskResult::DiskInserted) => should_update = true,
+                    Ok(_) => (),
+                    Err(err) => {
+                        warn!(
+                            self.log,
+                            "Failed to add disk to storage resources: {err}";
+                            "disk_id" => ?disk_id
+                        );
+                    }
+                },
+                DiskVariant::U2 => {
+                    let _ = self.queued_u2_drives.insert(raw_disk);
                 }
             }
+        }
+
+        // Add the newly queued U.2 drives unless we are not ready. If we are
+        // not ready the storage manager will try again later.
+        if self.state == StorageManagerState::Normal {
+            should_update = should_update | self.add_queued_disks().await;
         }
 
         should_update
@@ -766,7 +824,7 @@ mod tests {
             manager.run().await;
         });
 
-        // Queue up a disks, as we haven't told the `StorageManager` that
+        // Queue up a disk, as we haven't told the `StorageManager` that
         // the `KeyManager` is ready yet.
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
@@ -804,7 +862,7 @@ mod tests {
         // Spawn the key_manager so that it will respond to requests for encryption keys
         tokio::spawn(async move { key_manager.run().await });
 
-        // Queue up a disks, as we haven't told the `StorageManager` that
+        // Queue up a disk, as we haven't told the `StorageManager` that
         // the `KeyManager` is ready yet.
         let zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let dir = tempdir().unwrap();
