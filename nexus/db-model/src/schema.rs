@@ -1498,6 +1498,13 @@ table! {
 }
 
 table! {
+    bp_expunged_nexus_zones (blueprint_id, bp_nexus_zone_id) {
+        blueprint_id -> Uuid,
+        bp_nexus_zone_id -> Uuid,
+    }
+}
+
+table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,

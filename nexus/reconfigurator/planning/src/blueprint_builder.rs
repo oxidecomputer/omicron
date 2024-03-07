@@ -22,6 +22,9 @@ use nexus_types::deployment::OmicronZonesConfig;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledProvisionPolicy;
+use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
@@ -35,11 +38,13 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
+use sled_agent_client::ZoneTag;
 use slog::o;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::fmt;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -60,6 +65,15 @@ pub enum Error {
     NoSystemMacAddressAvailable,
     #[error("exhausted available Nexus IP addresses")]
     ExhaustedNexusIps,
+    #[error(
+        "for sled_id {sled_id}, attempted to ensure a zone \
+         of kind {zone_tag}, but the sled is {reason}"
+    )]
+    InvalidEnsure {
+        sled_id: Uuid,
+        zone_tag: ZoneTag,
+        reason: InvalidEnsureReason,
+    },
     #[error("programming error in planner")]
     Planner(#[from] anyhow::Error),
 }
@@ -82,6 +96,44 @@ pub enum EnsureMultiple {
     Added(usize),
     /// no action was necessary
     NotNeeded,
+}
+
+/// A kind of zone that can be idempotently "ensured" by the blueprint builder.
+///
+/// Forms part of [`Error::InvalidEnsure`].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum EnsureZoneKind {
+    /// NTP zone
+    Ntp,
+    /// Crucible zone
+    Crucible,
+    /// Nexus zone
+    Nexus,
+}
+
+/// The reason why an idempotent "ensure" operation was invalid.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum InvalidEnsureReason {
+    /// The sled is marked expunged.
+    Expunged,
+
+    /// The sled is decommissioned.
+    Decommissioned,
+
+    /// This is a discretionary service and the sled is non-provisionable.
+    NonProvisionable,
+}
+
+impl fmt::Display for InvalidEnsureReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InvalidEnsureReason::Expunged => write!(f, "expunged"),
+            InvalidEnsureReason::Decommissioned => write!(f, "decommissioned"),
+            InvalidEnsureReason::NonProvisionable => {
+                write!(f, "non-provisionable")
+            }
+        }
+    }
 }
 
 /// Helper for assembling a blueprint
@@ -143,6 +195,9 @@ impl<'a> BlueprintBuilder<'a> {
             .sleds
             .keys()
             .map(|sled_id| {
+                // XXX: do we need to handle, or check for, initially expunged
+                // or decommissioned sleds?
+
                 let mut zones = collection
                     .omicron_zones
                     .get(sled_id)
@@ -181,6 +236,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: Uuid::new_v4(),
             omicron_zones,
             zones_in_service,
+            expunged_nexus_zones: BTreeSet::new(),
             parent_blueprint_id: None,
             internal_dns_version,
             time_created: now_db_precision(),
@@ -306,7 +362,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZones::new(parent_blueprint),
             zones_in_service: parent_blueprint.zones_in_service.clone(),
-            expunged_nexus_zones: BTreeSet::new(),
+            expunged_nexus_zones: parent_blueprint.expunged_nexus_zones.clone(),
             creator: creator.to_owned(),
             comments: Vec::new(),
             nexus_v4_ips,
@@ -325,6 +381,7 @@ impl<'a> BlueprintBuilder<'a> {
             id: Uuid::new_v4(),
             omicron_zones,
             zones_in_service: self.zones_in_service,
+            expunged_nexus_zones: self.expunged_nexus_zones,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.internal_dns_version,
             time_created: now_db_precision(),
@@ -348,7 +405,7 @@ impl<'a> BlueprintBuilder<'a> {
     ///
     /// Returns an error if the sled ID is not found in the policy.
     pub fn has_resources_for_sled(&self, sled_id: Uuid) -> Result<bool, Error> {
-        // XXX: also check for zpools?
+        // XXX: do we need to check anything other than zones for the sled?
         let _ = self.sled_resources(sled_id)?;
 
         let mut zones = self.zones.current_sled_zones(sled_id);
@@ -359,6 +416,32 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: Uuid,
     ) -> Result<Ensure, Error> {
+        let sled_info = self.sled_resources(sled_id)?;
+
+        match sled_info.state {
+            SledState::Active => {}
+            SledState::Decommissioned => {
+                return Err(Error::InvalidEnsure {
+                    zone_tag: ZoneTag::InternalNtp,
+                    sled_id,
+                    reason: InvalidEnsureReason::Decommissioned,
+                });
+            }
+        }
+
+        match sled_info.policy {
+            SledPolicy::InService { .. } => {
+                // Non-provisionable sleds should still get NTP zones.
+            }
+            SledPolicy::Expunged => {
+                return Err(Error::InvalidEnsure {
+                    zone_tag: ZoneTag::InternalNtp,
+                    sled_id,
+                    reason: InvalidEnsureReason::Expunged,
+                });
+            }
+        }
+
         // If there's already an NTP zone on this sled, do nothing.
         let has_ntp = self
             .zones
@@ -368,7 +451,6 @@ impl<'a> BlueprintBuilder<'a> {
             return Ok(Ensure::NotNeeded);
         }
 
-        let sled_info = self.sled_resources(sled_id)?;
         let sled_subnet = sled_info.subnet;
         let ip = self.sled_alloc_ip(sled_id)?;
         let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
@@ -420,6 +502,32 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: Uuid,
         pool_name: ZpoolName,
     ) -> Result<Ensure, Error> {
+        let sled_info = self.sled_resources(sled_id)?;
+
+        match sled_info.state {
+            SledState::Active => {}
+            SledState::Decommissioned => {
+                return Err(Error::InvalidEnsure {
+                    zone_tag: ZoneTag::Crucible,
+                    sled_id,
+                    reason: InvalidEnsureReason::Decommissioned,
+                });
+            }
+        }
+
+        match sled_info.policy {
+            SledPolicy::InService { .. } => {
+                // Non-provisionable sleds should still get Crucible zones.
+            }
+            SledPolicy::Expunged => {
+                return Err(Error::InvalidEnsure {
+                    zone_tag: ZoneTag::Crucible,
+                    sled_id,
+                    reason: InvalidEnsureReason::Expunged,
+                });
+            }
+        }
+
         // If this sled already has a Crucible zone on this pool, do nothing.
         let has_crucible_on_this_pool =
             self.zones.current_sled_zones(sled_id).any(|z| {
@@ -433,7 +541,6 @@ impl<'a> BlueprintBuilder<'a> {
             return Ok(Ensure::NotNeeded);
         }
 
-        let sled_info = self.sled_resources(sled_id)?;
         if !sled_info.zpools.contains(&pool_name) {
             return Err(Error::Planner(anyhow!(
                 "adding crucible zone for sled {:?}: \
@@ -475,6 +582,41 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: Uuid,
         desired_zone_count: usize,
     ) -> Result<EnsureMultiple, Error> {
+        let sled_info = self.sled_resources(sled_id)?;
+
+        match sled_info.state {
+            SledState::Active => {}
+            SledState::Decommissioned => {
+                return Err(Error::InvalidEnsure {
+                    zone_tag: ZoneTag::Nexus,
+                    sled_id,
+                    reason: InvalidEnsureReason::Decommissioned,
+                });
+            }
+        }
+
+        match sled_info.policy {
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::Provisionable,
+            } => {}
+            SledPolicy::InService {
+                provision_policy: SledProvisionPolicy::NonProvisionable,
+            } => {
+                return Err(Error::InvalidEnsure {
+                    zone_tag: ZoneTag::Nexus,
+                    sled_id,
+                    reason: InvalidEnsureReason::NonProvisionable,
+                });
+            }
+            SledPolicy::Expunged => {
+                return Err(Error::InvalidEnsure {
+                    zone_tag: ZoneTag::Nexus,
+                    sled_id,
+                    reason: InvalidEnsureReason::Expunged,
+                });
+            }
+        }
+
         // How many Nexus zones do we need to add?
         let nexus_count = self.sled_num_nexus_zones(sled_id);
         let num_nexus_to_add = match desired_zone_count.checked_sub(nexus_count)
@@ -592,7 +734,7 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_expunge_zones(sled_id, |_| false)
     }
 
-    /// Removes a set of zones corresponding to this sled ID.
+    /// Expunges a set of zones corresponding to this sled ID.
     ///
     /// Returns the list of expunged [`OmicronZoneConfig`] instances, or an
     /// error if the sled ID wasn't found.
@@ -609,52 +751,52 @@ impl<'a> BlueprintBuilder<'a> {
 
         // Find all the zone IDs to remove in this sled.
         let sled_zones = self.zones.current_sled_zones(sled_id);
-        let zone_ids_to_remove = sled_zones
+        let zone_ids_to_expunge = sled_zones
             .filter(|z| !retain_fn(z))
             .map(|z| z.id)
             .collect::<BTreeSet<_>>();
 
         slog::debug!(
             self.log,
-            "removing zones for sled";
+            "expunging zones for sled";
             "sled_id" => %sled_id,
-            "zone_ids_to_remove" => ?zone_ids_to_remove,
+            "zone_ids_to_expunge" => ?zone_ids_to_expunge,
         );
 
         // Check that all the zone IDs exist. It is an internal invariant
         // violation for a zone to be in the list of current sled zones, but
         // not in zones_in_service.
-        if !zone_ids_to_remove.is_subset(&self.zones_in_service) {
+        if !zone_ids_to_expunge.is_subset(&self.zones_in_service) {
             return Err(Error::Planner(anyhow!(
                 "zone IDs to remove are not a subset of zones in service: \
                  zone_ids_to_remove: {:?}, zones_in_service: {:?}",
-                zone_ids_to_remove,
+                zone_ids_to_expunge,
                 self.zones_in_service,
             )));
         }
 
         let sled_zones = self.zones.change_sled_zones(sled_id);
         let zones = std::mem::replace(&mut sled_zones.zones, Vec::new());
-        let (remove, keep) = zones
+        let (expunge, keep) = zones
             .into_iter()
-            .partition::<Vec<_>, _>(|z| zone_ids_to_remove.contains(&z.id));
+            .partition::<Vec<_>, _>(|z| zone_ids_to_expunge.contains(&z.id));
         sled_zones.zones = keep;
 
         // Also add the list of expunged Nexus zones to self.expunged_nexus_zones.
-        self.expunged_nexus_zones.extend(remove.iter().filter_map(|z| {
-            match &z.zone_type {
-                OmicronZoneType::Nexus { .. } => Some(z.id),
-                _ => None,
-            }
+        self.expunged_nexus_zones.extend(expunge.iter().filter_map(|z| {
+            (z.zone_type.tag() == ZoneTag::Nexus).then_some(z.id)
         }));
 
-        Ok(remove)
+        Ok(expunge)
     }
 
     // ---
     // Helper methods
     // ---
 
+    // Precondition: we must have checked that it is valid for the zone to be
+    // added to the sled. (TODO: actually check this here, or use the type
+    // system to statically verify this.)
     fn sled_add_zone(
         &mut self,
         sled_id: Uuid,
@@ -826,6 +968,7 @@ impl<'a> BlueprintZones<'a> {
 pub mod test {
     use super::*;
     use nexus_types::external_api::views::SledPolicy;
+    use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use omicron_common::address::IpRange;
     use omicron_common::address::Ipv4Range;
@@ -1393,6 +1536,247 @@ pub mod test {
         // seem like a particularly useful test either.
 
         logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_ensure_for_ineligible_sleds() {
+        let logctx = test_setup_log(
+            "blueprint_builder_test_ensure_errors_for_ineligible_sleds",
+        );
+        let (collection, mut policy) = example(3);
+
+        let parent = BlueprintBuilder::build_initial_from_collection(
+            &collection,
+            Generation::new(),
+            &policy,
+            "test",
+        )
+        .expect("failed to create initial blueprint");
+
+        let ineligible = IneligibleSleds::setup(&mut policy);
+
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &parent,
+            Generation::new(),
+            &policy,
+            "test",
+        )
+        .expect("failed to create builder");
+
+        ineligible.check_against_builder(&mut builder, Ensure::NotNeeded);
+
+        // Now, expunge all the zones from the sleds above, and try again.
+        builder
+            .sled_expunge_all_zones(ineligible.nonprovisionable_sled_id)
+            .unwrap();
+        builder.sled_expunge_all_zones(ineligible.expunged_sled_id).unwrap();
+        builder
+            .sled_expunge_all_zones(ineligible.decommissioned_sled_id)
+            .unwrap();
+
+        ineligible.check_against_builder(&mut builder, Ensure::Added);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Specifies sleds to be marked as ineligible for provisioning.
+    #[derive(Debug)]
+    pub struct IneligibleSleds {
+        pub nonprovisionable_sled_id: Uuid,
+        pub expunged_sled_id: Uuid,
+        pub decommissioned_sled_id: Uuid,
+
+        // Arbitrary zpools corresponding to each sled.
+        pub nonprovisionable_zpool: ZpoolName,
+        pub expunged_zpool: ZpoolName,
+        pub decommissioned_zpool: ZpoolName,
+    }
+
+    impl IneligibleSleds {
+        /// Marks some of the provided sleds as ineligible for provisioning.
+        ///
+        /// Assumes that the sleds have just been set up and are in the default
+        /// state.
+        pub fn setup(policy: &mut Policy) -> Self {
+            // Arbitrarily choose some of the sleds and mark them non-provisionable
+            // in various ways.
+            let mut sleds_iter = policy.sleds.iter_mut();
+
+            let (nonprovisionable_sled_id, nonprovisionable_zpool) = {
+                let (sled_id, resources) = sleds_iter.next().expect("no sleds");
+                resources.policy = SledPolicy::InService {
+                    provision_policy: SledProvisionPolicy::NonProvisionable,
+                };
+                (*sled_id, resources.zpools.first().unwrap().clone())
+            };
+            let (expunged_sled_id, expunged_zpool) = {
+                let (sled_id, resources) = sleds_iter.next().expect("no sleds");
+                resources.policy = SledPolicy::Expunged;
+                (*sled_id, resources.zpools.first().unwrap().clone())
+            };
+            let (decommissioned_sled_id, decommissioned_zpool) = {
+                let (sled_id, resources) = sleds_iter.next().expect("no sleds");
+                resources.state = SledState::Decommissioned;
+                (*sled_id, resources.zpools.first().unwrap().clone())
+            };
+
+            Self {
+                nonprovisionable_sled_id,
+                expunged_sled_id,
+                decommissioned_sled_id,
+                nonprovisionable_zpool,
+                expunged_zpool,
+                decommissioned_zpool,
+            }
+        }
+
+        fn check_against_builder(
+            &self,
+            builder: &mut BlueprintBuilder<'_>,
+            // For cases where the result is expected to be successful, this is
+            // what we expect it to be.
+            ensure: Ensure,
+        ) {
+            // None of the chosen sleds above should permit Nexus zones.
+            {
+                let error = builder
+                    .sled_ensure_zone_multiple_nexus(
+                        self.nonprovisionable_sled_id,
+                        1,
+                    )
+                    .expect_err("Nexus on non-provisionable sled should fail");
+                assert_invalid_ensure(
+                    error,
+                    self.nonprovisionable_sled_id,
+                    ZoneTag::Nexus,
+                    InvalidEnsureReason::NonProvisionable,
+                );
+
+                let error = builder
+                    .sled_ensure_zone_multiple_nexus(self.expunged_sled_id, 1)
+                    .expect_err("Nexus on expunged sled should fail");
+                assert_invalid_ensure(
+                    error,
+                    self.expunged_sled_id,
+                    ZoneTag::Nexus,
+                    InvalidEnsureReason::Expunged,
+                );
+
+                let error = builder
+                    .sled_ensure_zone_multiple_nexus(
+                        self.decommissioned_sled_id,
+                        1,
+                    )
+                    .expect_err("Nexus on decommissioned sled should fail");
+                assert_invalid_ensure(
+                    error,
+                    self.decommissioned_sled_id,
+                    ZoneTag::Nexus,
+                    InvalidEnsureReason::Decommissioned,
+                );
+            }
+
+            // The expunged and decommissioned sleds shouldn't permit NTP zones.
+            {
+                let error = builder
+                    .sled_ensure_zone_ntp(self.expunged_sled_id)
+                    .expect_err("NTP on expunged sled should fail");
+                assert_invalid_ensure(
+                    error,
+                    self.expunged_sled_id,
+                    ZoneTag::InternalNtp,
+                    InvalidEnsureReason::Expunged,
+                );
+
+                let error = builder
+                    .sled_ensure_zone_ntp(self.decommissioned_sled_id)
+                    .expect_err("NTP on decommissioned sled should fail");
+                assert_invalid_ensure(
+                    error,
+                    self.decommissioned_sled_id,
+                    ZoneTag::InternalNtp,
+                    InvalidEnsureReason::Decommissioned,
+                );
+            }
+
+            // The expunged and decommissioned sleds shouldn't permit Crucible zones.
+            {
+                let error = builder
+                    .sled_ensure_zone_crucible(
+                        self.expunged_sled_id,
+                        self.expunged_zpool.clone(),
+                    )
+                    .expect_err("Crucible on expunged sled should fail");
+                assert_invalid_ensure(
+                    error,
+                    self.expunged_sled_id,
+                    ZoneTag::Crucible,
+                    InvalidEnsureReason::Expunged,
+                );
+
+                let error = builder
+                    .sled_ensure_zone_crucible(
+                        self.decommissioned_sled_id,
+                        self.decommissioned_zpool.clone(),
+                    )
+                    .expect_err("Crucible on decommissioned sled should fail");
+                assert_invalid_ensure(
+                    error,
+                    self.decommissioned_sled_id,
+                    ZoneTag::Crucible,
+                    InvalidEnsureReason::Decommissioned,
+                );
+            }
+
+            // The non-provisionable sled *should* permit both Crucible and NTP
+            // zones, since they're mandatory.
+            {
+                let ntp_ensure = builder
+                    .sled_ensure_zone_ntp(self.nonprovisionable_sled_id)
+                    .expect("NTP on non-provisionable sled should succeed");
+                assert_eq!(ntp_ensure, ensure, "NTP ensure matches");
+                let crucible_ensure = builder
+                    .sled_ensure_zone_crucible(
+                        self.nonprovisionable_sled_id,
+                        self.nonprovisionable_zpool.clone(),
+                    )
+                    .expect(
+                        "Crucible on non-provisionable sled should succeed",
+                    );
+
+                assert_eq!(crucible_ensure, ensure, "Crucible ensure matches");
+            }
+        }
+    }
+
+    fn assert_invalid_ensure(
+        error: Error,
+        sled_id: Uuid,
+        zone_tag: ZoneTag,
+        reason: InvalidEnsureReason,
+    ) {
+        match &error {
+            Error::InvalidEnsure {
+                sled_id: actual_sled_id,
+                zone_tag: actual_zone_tag,
+                reason: actual_reason,
+            } => {
+                assert_eq!(
+                    *actual_sled_id, sled_id,
+                    "sled_id matches in error: {error}"
+                );
+                assert_eq!(
+                    *actual_zone_tag, zone_tag,
+                    "zone_tag matches in error: {error}"
+                );
+                assert_eq!(
+                    *actual_reason, reason,
+                    "reason matches in error: {error}"
+                );
+            }
+            _ => panic!("expected Error::InvalidEnsure, found {error}"),
+        }
     }
 
     #[test]

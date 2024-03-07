@@ -131,7 +131,7 @@ impl<'a> Planner<'a> {
                 self.blueprint.sled_expunge_all_zones(*sled_id)?;
             let expunged_zones_strs: Vec<String> = expunged_zones
                 .iter()
-                .map(|z| format!("{} {}", z.zone_type.label(), z.id))
+                .map(|z| format!("{} {}", z.zone_type.tag(), z.id))
                 .collect();
             self.blueprint.comment(&format!(
                 "sled {sled_id}: expunged all zones ({})",
@@ -406,11 +406,11 @@ mod test {
     use crate::blueprint_builder::test::example;
     use crate::blueprint_builder::test::policy_add_sled;
     use crate::blueprint_builder::test::verify_blueprint;
+    use crate::blueprint_builder::test::IneligibleSleds;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_types::external_api::views::SledPolicy;
-    use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZoneType;
     use nexus_types::inventory::OmicronZonesFound;
@@ -811,27 +811,9 @@ mod test {
             );
         }
 
-        // Arbitrarily choose some of the sleds and mark them non-provisionable
-        // in various ways.
-        let mut sleds_iter = policy.sleds.iter_mut();
+        let ineligible = IneligibleSleds::setup(&mut policy);
 
-        let nonprovisionable_sled_id = {
-            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
-            resources.policy = SledPolicy::InService {
-                provision_policy: SledProvisionPolicy::NonProvisionable,
-            };
-            *sled_id
-        };
-        let expunged_sled_id = {
-            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
-            resources.policy = SledPolicy::Expunged;
-            *sled_id
-        };
-        let decommissioned_sled_id = {
-            let (sled_id, resources) = sleds_iter.next().expect("no sleds");
-            resources.state = SledState::Decommissioned;
-            *sled_id
-        };
+        // ---
 
         // Now run the planner with a high number of target Nexus zones. The
         // number (16) is chosen such that:
@@ -859,8 +841,14 @@ mod test {
 
         println!("blueprint2 comments: {}", blueprint2.comment);
 
+        assert_eq!(
+            blueprint2.expunged_nexus_zones.len(),
+            2,
+            "exactly 2 Nexus zones should be expunged"
+        );
+
         let diff = blueprint1.diff_sleds(&blueprint2);
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
+        println!("1 -> 2 (added and removed nexus zones):\n{}", diff);
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let sleds = diff.sleds_changed().collect::<Vec<_>>();
@@ -868,8 +856,8 @@ mod test {
         let (expect_removed, expect_added): (Vec<_>, Vec<_>) =
             sleds.into_iter().partition(|(sled_id, _)| {
                 // The expunged and decommissioned sleds should have resources removed from them.
-                *sled_id == expunged_sled_id
-                    || *sled_id == decommissioned_sled_id
+                *sled_id == ineligible.expunged_sled_id
+                    || *sled_id == ineligible.decommissioned_sled_id
             });
 
         assert_eq!(
@@ -879,19 +867,25 @@ mod test {
         );
 
         for (sled_id, sled_changes) in expect_removed {
-            let previous_zone_count = blueprint1
+            let bp1_zones = &blueprint1
                 .omicron_zones
                 .get(&sled_id)
                 .expect("missing sled")
-                .zones
-                .len();
+                .zones;
+            let bp1_nexus_zone = bp1_zones
+                .iter()
+                .find(|z| z.zone_type.is_nexus())
+                .expect("missing Nexus zone");
             // Each sled should have all of its zones removed.
-            assert_eq!(
-                sled_changes.zones_removed().count(),
-                previous_zone_count
-            );
+            assert_eq!(sled_changes.zones_removed().count(), bp1_zones.len());
             assert_eq!(sled_changes.zones_changed().count(), 0);
             assert_eq!(sled_changes.zones_added().count(), 0);
+
+            assert!(
+                blueprint2.expunged_nexus_zones.contains(&bp1_nexus_zone.id),
+                "expected expunged Nexus zone {} to be in expunged_nexus_zones",
+                bp1_nexus_zone.id
+            );
         }
 
         // Only 2 of the 5 sleds should get additional Nexus zones. We expect a
@@ -906,9 +900,9 @@ mod test {
         );
         let mut total_new_nexus_zones = 0;
         for (sled_id, sled_changes) in expect_added {
-            assert!(sled_id != nonprovisionable_sled_id);
-            assert!(sled_id != expunged_sled_id);
-            assert!(sled_id != decommissioned_sled_id);
+            assert!(sled_id != ineligible.nonprovisionable_sled_id);
+            assert!(sled_id != ineligible.expunged_sled_id);
+            assert!(sled_id != ineligible.decommissioned_sled_id);
             assert_eq!(sled_changes.zones_removed().count(), 0);
             assert_eq!(sled_changes.zones_changed().count(), 0);
             let zones = sled_changes.zones_added().collect::<Vec<_>>();
@@ -927,6 +921,92 @@ mod test {
             }
         }
         assert_eq!(total_new_nexus_zones, 13);
+
+        // ---
+
+        // Next, attempt to generate a no-op plan, using blueprint2 and the
+        // same collection as before.
+
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            Generation::new(),
+            &policy,
+            "test (no-op)",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .plan()
+        .expect("failed to plan");
+
+        println!("blueprint3 comments: {}", blueprint3.comment);
+
+        assert_eq!(
+            blueprint2.expunged_nexus_zones, blueprint3.expunged_nexus_zones,
+            "2->3: expunged_nexus_zones should be carried forward"
+        );
+
+        let diff23 = blueprint2.diff_sleds(&blueprint3);
+        println!("2 -> 3 (should be a no-op):\n{}", diff23);
+
+        assert_eq!(diff23.sleds_added().count(), 0, "2->3: no sleds added");
+        assert_eq!(diff23.sleds_removed().count(), 0, "2->3: no sleds removed");
+        assert_eq!(diff23.sleds_changed().count(), 0, "2->3: no sleds changed");
+
+        // ---
+
+        // Test that if a new sled shows up with an expunged policy or
+        // decommissioned state, the planner doesn't balk at it.
+        let new_expunged_sled_id =
+            "7097f5b3-5896-4fff-bd97-63a9a69563a9".parse().unwrap();
+        let _ = policy_add_sled(&mut policy, new_expunged_sled_id);
+        policy.sleds.get_mut(&new_expunged_sled_id).unwrap().policy =
+            SledPolicy::Expunged;
+
+        let new_decommissioned_sled_id =
+            "8c4dbdf4-2ab1-4201-a884-8815e348b2c4".parse().unwrap();
+        let _ = policy_add_sled(&mut policy, new_decommissioned_sled_id);
+        policy.sleds.get_mut(&new_decommissioned_sled_id).unwrap().state =
+            SledState::Decommissioned;
+
+        let blueprint4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint3,
+            Generation::new(),
+            &policy,
+            "test (new expunged and decommissioned sleds)",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .plan()
+        .expect("failed to plan");
+
+        println!("blueprint4 comments: {}", blueprint4.comment);
+
+        assert_eq!(
+            blueprint3.expunged_nexus_zones, blueprint4.expunged_nexus_zones,
+            "3->4: expunged_nexus_zones should be carried forward"
+        );
+
+        let diff34 = blueprint3.diff_sleds(&blueprint4);
+        println!("3 -> 4 (new expunged and decommissioned sleds):\n{}", diff34);
+
+        assert_eq!(diff34.sleds_added().count(), 2, "3->4: 2 sleds added");
+        assert_eq!(diff34.sleds_removed().count(), 0, "3->4: no sleds removed");
+        assert_eq!(diff34.sleds_changed().count(), 0, "3->4: no sleds changed");
+
+        for (sled_id, config) in diff34.sleds_added() {
+            assert!(
+                sled_id == new_expunged_sled_id
+                    || sled_id == new_decommissioned_sled_id
+            );
+            assert!(
+                config.zones.is_empty(),
+                "3->4: new sleds should not get any zones"
+            );
+        }
+
+        // ---
 
         logctx.cleanup_successful();
     }
