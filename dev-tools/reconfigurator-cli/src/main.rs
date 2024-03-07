@@ -561,36 +561,15 @@ fn cmd_save(
         blueprints: sim.blueprints.values().cloned().collect(),
     };
 
-    let output_path = args.filename;
-
-    // Check up front if the output path exists so that we don't clobber it.
-    // This is not perfect because there's a time-of-check-to-time-of-use race,
-    // but it seems better than nothing.
-    match std::fs::metadata(&output_path) {
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            bail!("stat {:?}: {:#}", output_path, e);
-        }
-        Ok(_) => {
-            bail!("error: file {:?} already exists", output_path);
-        }
-    };
-
-    let output_path_basename = output_path
-        .file_name()
-        .ok_or_else(|| anyhow!("unsupported path (no filename part)"))?;
-    let tmppath =
-        output_path.with_file_name(format!("{}.tmp", output_path_basename));
-    let tmpfile = std::fs::OpenOptions::new()
+    let output_path = &args.filename;
+    let outfile = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
-        .open(&tmppath)
-        .with_context(|| format!("open {:?}", tmppath))?;
-    serde_json::to_writer_pretty(&tmpfile, &saved)
-        .with_context(|| format!("writing to {:?}", tmppath))
+        .open(output_path)
+        .with_context(|| format!("open {:?}", output_path))?;
+    serde_json::to_writer_pretty(&outfile, &saved)
+        .with_context(|| format!("writing to {:?}", output_path))
         .unwrap_or_else(|e| panic!("{:#}", e));
-    std::fs::rename(&tmppath, &output_path)
-        .with_context(|| format!("mv {:?} {:?}", &tmppath, &output_path))?;
     Ok(Some(format!(
         "saved policy, collections, and blueprints to {:?}",
         output_path

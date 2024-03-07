@@ -20,9 +20,9 @@ use std::str::FromStr;
 /// process, produce a `Policy` object encapsulating what the planner needs to
 /// generate a blueprint
 pub fn policy_from_db(
-    sled_rows: Vec<nexus_db_model::Sled>,
-    zpool_rows: Vec<nexus_db_model::Zpool>,
-    ip_pool_range_rows: Vec<nexus_db_model::IpPoolRange>,
+    sled_rows: &[nexus_db_model::Sled],
+    zpool_rows: &[nexus_db_model::Zpool],
+    ip_pool_range_rows: &[nexus_db_model::IpPoolRange],
     target_nexus_zone_count: usize,
 ) -> Result<Policy, Error> {
     let mut zpools_by_sled_id = {

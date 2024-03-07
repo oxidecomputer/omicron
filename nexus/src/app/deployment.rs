@@ -119,9 +119,9 @@ impl super::Nexus {
         };
 
         let policy = policy_from_db(
-            sled_rows,
-            zpool_rows,
-            ip_pool_range_rows,
+            &sled_rows,
+            &zpool_rows,
+            &ip_pool_range_rows,
             NEXUS_REDUNDANCY,
         )?;
 
@@ -155,7 +155,7 @@ impl super::Nexus {
 
         Ok(PlanningContext {
             creator,
-            policy: policy,
+            policy,
             inventory,
             internal_dns_version: *dns_version.version,
         })

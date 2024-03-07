@@ -682,6 +682,7 @@ impl DataStore {
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
     ) -> ListResultVec<IpPoolRange> {
+        opctx.check_complex_operations_allowed()?;
         let mut ip_ranges = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {

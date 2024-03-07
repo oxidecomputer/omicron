@@ -3163,9 +3163,9 @@ async fn cmd_db_reconfigurator_save(
     };
 
     let policy = policy_from_db(
-        sled_rows,
-        zpool_rows,
-        ip_pool_range_rows,
+        &sled_rows,
+        &zpool_rows,
+        &ip_pool_range_rows,
         NEXUS_REDUNDANCY,
     )
     .context("assembling policy")?;
