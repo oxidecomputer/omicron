@@ -2140,7 +2140,7 @@ impl ServiceManager {
                 let static_addr = underlay_address.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
-                    &info,
+                    &info.underlay_address,
                     &installed_zone,
                     &static_addr.clone(),
                 )?;
