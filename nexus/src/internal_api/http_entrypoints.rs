@@ -88,6 +88,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_delete)?;
         api.register(blueprint_target_view)?;
         api.register(blueprint_target_set)?;
+        api.register(blueprint_target_set_enabled)?;
         api.register(blueprint_generate_from_collection)?;
         api.register(blueprint_regenerate)?;
 
@@ -770,6 +771,26 @@ async fn blueprint_target_set(
         let nexus = &apictx.nexus;
         let target = target.into_inner();
         let target = nexus.blueprint_target_set(&opctx, target).await?;
+        Ok(HttpResponseOk(target))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Set the `enabled` field of the current target blueprint
+#[endpoint {
+    method = PATCH,
+    path = "/deployment/blueprints/target/enabled",
+}]
+async fn blueprint_target_set_enabled(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    target: TypedBody<BlueprintTargetSet>,
+) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let target = target.into_inner();
+        let target = nexus.blueprint_target_set_enabled(&opctx, target).await?;
         Ok(HttpResponseOk(target))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

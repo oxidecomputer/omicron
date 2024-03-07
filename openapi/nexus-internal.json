@@ -359,6 +359,40 @@
         }
       }
     },
+    "/deployment/blueprints/target/enabled": {
+      "patch": {
+        "summary": "Set the `enabled` field of the current target blueprint",
+        "operationId": "blueprint_target_set_enabled",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlueprintTargetSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlueprintTarget"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disk/{disk_id}/remove-read-only-parent": {
       "post": {
         "summary": "Request removal of a read_only_parent from a disk",

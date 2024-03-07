@@ -100,6 +100,27 @@ impl super::Nexus {
         Ok(new_target)
     }
 
+    pub async fn blueprint_target_set_enabled(
+        &self,
+        opctx: &OpContext,
+        params: BlueprintTargetSet,
+    ) -> Result<BlueprintTarget, Error> {
+        let new_target = BlueprintTarget {
+            target_id: params.target_id,
+            enabled: params.enabled,
+            time_made_target: chrono::Utc::now(),
+        };
+
+        self.db_datastore
+            .blueprint_target_set_current_enabled(opctx, new_target)
+            .await?;
+
+        // When we add a background task executing the target blueprint,
+        // this is the point where we'd signal it to update its target.
+
+        Ok(new_target)
+    }
+
     async fn blueprint_planning_context(
         &self,
         opctx: &OpContext,
