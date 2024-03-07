@@ -2165,8 +2165,6 @@ impl ServiceManager {
                     .map_err(|err| Error::io_path(&config_path, err))?;
 
                 let nexus_config = PropertyGroupBuilder::new("config");
-                //    .add_property("http_address", "astring", &http_addr)
-                //    .add_property("dns_address", "astring", &dns_addr);
                 let nexus_service = ServiceBuilder::new("oxide/nexus")
                     .add_instance(
                         ServiceInstanceBuilder::new("default")
