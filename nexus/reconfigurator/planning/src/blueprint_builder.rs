@@ -721,7 +721,10 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Added(num_nexus_to_add))
     }
 
-    /// Removes all zones for this sled.
+    /// Expunges all zones for this sled.
+    ///
+    /// This does not check whether the sled is actually decommissioned or
+    /// expunged.
     ///
     /// Returns the list of removed [`OmicronZoneConfig`] instances, or an
     /// error if the sled ID wasn't found.
@@ -729,9 +732,9 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: Uuid,
     ) -> Result<Vec<OmicronZoneConfig>, Error> {
-        slog::debug!(self.log, "removing all zones for sled"; "sled_id" => %sled_id);
+        slog::debug!(self.log, "expunging all zones for sled"; "sled_id" => %sled_id);
 
-        self.sled_expunge_zones(sled_id, |_| false)
+        self.sled_expunge_zones(sled_id, |_| true)
     }
 
     /// Expunges a set of zones corresponding to this sled ID.
@@ -739,12 +742,11 @@ impl<'a> BlueprintBuilder<'a> {
     /// Returns the list of expunged [`OmicronZoneConfig`] instances, or an
     /// error if the sled ID wasn't found.
     ///
-    /// `retain_fn` determines whether a zone should be kept -- return true to
-    /// retain a zone, or false to expunge it.
+    /// Return true in `expunge_fn` to remove a zone, or false to retain it.
     pub fn sled_expunge_zones(
         &mut self,
         sled_id: Uuid,
-        mut retain_fn: impl FnMut(&OmicronZoneConfig) -> bool,
+        mut expunge_fn: impl FnMut(&OmicronZoneConfig) -> bool,
     ) -> Result<Vec<OmicronZoneConfig>, Error> {
         // Check the sled id and return an appropriate error if it's invalid.
         let _ = self.sled_resources(sled_id)?;
@@ -752,7 +754,7 @@ impl<'a> BlueprintBuilder<'a> {
         // Find all the zone IDs to remove in this sled.
         let sled_zones = self.zones.current_sled_zones(sled_id);
         let zone_ids_to_expunge = sled_zones
-            .filter(|z| !retain_fn(z))
+            .filter(|z| expunge_fn(z))
             .map(|z| z.id)
             .collect::<BTreeSet<_>>();
 
@@ -773,6 +775,10 @@ impl<'a> BlueprintBuilder<'a> {
                 zone_ids_to_expunge,
                 self.zones_in_service,
             )));
+        }
+
+        for z in &zone_ids_to_expunge {
+            self.zones_in_service.remove(z);
         }
 
         let sled_zones = self.zones.change_sled_zones(sled_id);

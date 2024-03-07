@@ -1123,6 +1123,7 @@ mod tests {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
     use std::mem;
@@ -1504,6 +1505,60 @@ mod tests {
             blueprint_list_all_ids(&opctx, &datastore).await,
             [blueprint2.id]
         );
+
+        // ---
+
+        // Make another blueprint, this time expunging a Nexus zone.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint2,
+            new_dns_version,
+            &policy,
+            "test",
+        )
+        .expect("failed to create builder");
+
+        let (nexus_sled_id, nexus_zone) = blueprint2
+            .all_omicron_zones()
+            .find(|(_, zone_config)| zone_config.zone_type.is_nexus())
+            .expect("at least one nexus zone");
+
+        builder
+            .sled_expunge_zones(nexus_sled_id, |z| z.id == nexus_zone.id)
+            .expect("expunging zones is successful");
+
+        let blueprint3 = builder.build();
+        let authz_blueprint3 = authz_blueprint_from_id(blueprint3.id);
+
+        // Ensure that the expunged zone made it into the new blueprint.
+        assert_eq!(
+            blueprint3.expunged_nexus_zones,
+            maplit::btreeset! {nexus_zone.id}
+        );
+
+        // Check that we can write blueprint3 to the DB and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint3)
+            .await
+            .expect("failed to insert blueprint3");
+        let blueprint3_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint3)
+            .await
+            .expect("failed to read collection back");
+        println!(
+            "blueprint 3 diff: {}",
+            blueprint3.diff_sleds(&blueprint3_read)
+        );
+        assert_eq!(blueprint3, blueprint3_read);
+        assert_eq!(blueprint3.internal_dns_version, new_dns_version);
+        {
+            let mut expected_ids = [blueprint2.id, blueprint3.id];
+            expected_ids.sort();
+            assert_eq!(
+                blueprint_list_all_ids(&opctx, &datastore).await,
+                expected_ids
+            );
+        }
 
         // Clean up.
         db.cleanup().await.unwrap();

@@ -881,6 +881,17 @@ mod test {
             assert_eq!(sled_changes.zones_changed().count(), 0);
             assert_eq!(sled_changes.zones_added().count(), 0);
 
+            // Ensure that none of the expunged zones stick around in
+            // zones_in_service.
+            for zone in bp1_zones {
+                assert!(
+                    !blueprint2.zones_in_service.contains(&zone.id),
+                    "blueprint2.zones_in_service should not contain \
+                     expunged zone {}",
+                    zone.id
+                );
+            }
+
             assert!(
                 blueprint2.expunged_nexus_zones.contains(&bp1_nexus_zone.id),
                 "expected expunged Nexus zone {} to be in expunged_nexus_zones",
