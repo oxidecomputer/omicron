@@ -4,6 +4,7 @@
 
 //! Insights into capacity and utilization
 
+use nexus_db_model::IpPoolUtilization;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -29,5 +30,23 @@ impl super::Nexus {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::SiloUtilization> {
         self.db_datastore.silo_utilization_list(opctx, pagparams).await
+    }
+
+    pub async fn ip_pool_utilization_view(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+    ) -> Result<IpPoolUtilization, Error> {
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Read).await?;
+        let allocated = self
+            .db_datastore
+            .ip_pool_allocated_count(opctx, &authz_pool)
+            .await?;
+        let total = self
+            .db_datastore
+            .ip_pool_total_capacity(opctx, &authz_pool)
+            .await?;
+        Ok(IpPoolUtilization { allocated, total })
     }
 }

@@ -5723,6 +5723,44 @@
         }
       }
     },
+    "/v1/system/ip-pools/{pool}/utilization": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch IP pool",
+        "operationId": "ip_pool_utilization_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
@@ -13649,6 +13687,24 @@
                 "$ref": "#/components/schemas/Name"
               }
             ]
+          }
+        }
+      },
+      "IpPoolUtilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "total": {
+            "nullable": true,
+            "description": "Total will be null if the actual value is too large to convert to a 32-bit integer. This should be unlikely in practice, but it is possible if the pool contains a large IPv6 range.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           }
         }
       },

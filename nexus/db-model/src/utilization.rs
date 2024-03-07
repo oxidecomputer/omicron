@@ -55,3 +55,21 @@ impl From<SiloUtilization> for views::Utilization {
         }
     }
 }
+
+// Not really a DB model, just the result of a datastore function
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpPoolUtilization {
+    // has to be i64 because SQL counts from Diesel are BigInts
+    pub allocated: i64,
+    pub total: u128,
+}
+
+impl From<IpPoolUtilization> for views::IpPoolUtilization {
+    fn from(util: IpPoolUtilization) -> Self {
+        Self {
+            allocated: util.allocated.try_into().ok(),
+            // if u128 is too big to convert to u32, fall back to None (null)
+            total: util.total.try_into().ok(),
+        }
+    }
+}

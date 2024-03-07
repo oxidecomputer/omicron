@@ -421,6 +421,15 @@ impl IpRange {
             IpRange::V6(ip6) => IpRangeIter::V6(ip6.iter()),
         }
     }
+
+    // Has to be u128 to accommodate IPv6 -- logic around converting back down
+    // to u32 (if possible) lives in the view layer
+    pub fn len(&self) -> u128 {
+        match self {
+            IpRange::V4(ip4) => u128::from(ip4.len()),
+            IpRange::V6(ip6) => ip6.len(),
+        }
+    }
 }
 
 impl From<IpAddr> for IpRange {
@@ -508,6 +517,12 @@ impl Ipv4Range {
     pub fn iter(&self) -> Ipv4RangeIter {
         Ipv4RangeIter { next: Some(self.first.into()), last: self.last.into() }
     }
+
+    pub fn len(&self) -> u32 {
+        let start_num = u32::from(self.first);
+        let end_num = u32::from(self.last);
+        end_num - start_num + 1
+    }
 }
 
 impl From<Ipv4Addr> for Ipv4Range {
@@ -563,6 +578,12 @@ impl Ipv6Range {
 
     pub fn iter(&self) -> Ipv6RangeIter {
         Ipv6RangeIter { next: Some(self.first.into()), last: self.last.into() }
+    }
+
+    pub fn len(&self) -> u128 {
+        let start_num = u128::from(self.first);
+        let end_num = u128::from(self.last);
+        end_num - start_num + 1
     }
 }
 
@@ -779,6 +800,19 @@ mod test {
                 Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 3),
             ]
         );
+    }
+
+    #[test]
+    fn test_ip_range_length() {
+        let lo = Ipv4Addr::new(10, 0, 0, 1);
+        let hi = Ipv4Addr::new(10, 0, 0, 3);
+        let range = IpRange::try_from((lo, hi)).unwrap();
+        assert_eq!(range.len(), 3);
+
+        let lo = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
+        let hi = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 3);
+        let range = IpRange::try_from((lo, hi)).unwrap();
+        assert_eq!(range.len(), 2u128.pow(16) + 3);
     }
 
     #[test]

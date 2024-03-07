@@ -305,6 +305,31 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolUtilization {
+    // TODO: correct names
+    // TODO: discuss why this might be too big for u32, it's a different reason
+    // from total
+    pub allocated: Option<u32>,
+
+    // Too-detailed explanation for the doc comment: pools containing ipv6 ranges
+    // can theoretically contain an enormous total number of addresses. (By
+    // contrast, the number of allocated IPs should always be reasonable.) In
+    // practice we are unlikely to run into this, but we should have a mechanism
+    // for dealing with it. Off the top of my head, the obvious thing to do
+    // would be to make total nullable, and when we convert from the u128
+    // total to a u32 (a reasonable largest number we can send back in an API
+    // response), we simply fall back to None if the conversion fails, and the
+    // client is supposed to understand that possibility and handle it. Like I
+    // said, in practice this should be very unlikely except through operator
+    // error, and it is well understood that networking misconfigurations can
+    // bork everything.
+    /// Total will be null if the actual value is too large to convert to a
+    /// 32-bit integer. This should be unlikely in practice, but it is possible
+    /// if the pool contains a large IPv6 range.
+    pub total: Option<u32>,
+}
+
 /// An IP pool in the context of a silo
 #[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct SiloIpPool {
