@@ -256,7 +256,7 @@ fn ensure_size_and_formatting(
         preferred_nvme_device_settings().get(identity.model.as_str())
     {
         let nvme = Nvme::new()?;
-        for controller in nvme.controller_discovery()?.into_iter() {
+        for controller in nvme.controller_discovery()? {
             let controller = controller?.write_lock().map_err(|(_, e)| e)?;
             let controller_info = controller.get_info()?;
             // Make sure we are operating on the correct NVMe device.
@@ -304,7 +304,6 @@ fn ensure_size_and_formatting(
                 .unwrap_or(DEFAULT_NVME_LBA_DATA_SIZE);
             let desired_lba = controller_info
                 .lba_formats()
-                .into_iter()
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .find(|lba| {
