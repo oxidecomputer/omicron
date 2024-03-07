@@ -15,7 +15,10 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
+use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
+use nexus_types::internal_api::params::DnsConfigZone;
+use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
@@ -34,6 +37,8 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
+use std::collections::HashMap;
+use std::net::IpAddr;
 use uuid::Uuid;
 
 pub(crate) async fn deploy_dns(
@@ -62,15 +67,29 @@ pub(crate) async fn deploy_dns(
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_config_blueprint =
         blueprint_internal_dns_config(blueprint, sleds_by_id);
-    let silos = todo!(); // XXX-dap
-    let external_dns_config_blueprint =
-        blueprint_external_dns_config(blueprint, silos);
+    let silos = datastore
+        .silo_list_all_batched(opctx)
+        .await
+        .internal_context("listing Silos (for configuring external DNS)")?;
+
+    let (nexus_external_ips, nexus_external_dns_zones) =
+        datastore.nexus_external_addresses(opctx).await?;
+    let nexus_external_dns_zone_names = nexus_external_dns_zones
+        .into_iter()
+        .map(|z| z.zone_name)
+        .collect::<Vec<_>>();
+    let external_dns_config_blueprint = blueprint_external_dns_config(
+        blueprint,
+        &silos,
+        &nexus_external_ips,
+        &nexus_external_dns_zone_names,
+    );
 
     // Deploy the changes.
     deploy_dns_one(
         opctx,
         datastore,
-        creator,
+        creator.clone(),
         blueprint,
         &internal_dns_config_current,
         &internal_dns_config_blueprint,
@@ -302,9 +321,36 @@ pub fn blueprint_internal_dns_config(
 
 pub fn blueprint_external_dns_config(
     blueprint: &Blueprint,
-    silos: Vec<Silo>,
+    silos: &[Silo],
+    nexus_external_ips: &[IpAddr],
+    external_dns_zone_names: &[String],
 ) -> DnsConfigParams {
-    todo!(); // XXX-dap
+    let dns_records: Vec<DnsRecord> = nexus_external_ips
+        .into_iter()
+        .map(|addr| match addr {
+            IpAddr::V4(addr) => DnsRecord::A(*addr),
+            IpAddr::V6(addr) => DnsRecord::Aaaa(*addr),
+        })
+        .collect();
+
+    let records = silos
+        .into_iter()
+        .map(|silo| (silo_dns_name(&silo.name()), dns_records.clone()))
+        .collect::<HashMap<String, Vec<DnsRecord>>>();
+
+    let zones = external_dns_zone_names
+        .into_iter()
+        .map(|zone_name| DnsConfigZone {
+            zone_name: zone_name.to_owned(),
+            records: records.clone(),
+        })
+        .collect();
+
+    DnsConfigParams {
+        generation: u64::from(blueprint.external_dns_version.next()),
+        time_created: chrono::Utc::now(),
+        zones,
+    }
 }
 
 fn dns_compute_update(
@@ -802,4 +848,18 @@ mod test {
 
         logctx.cleanup_successful();
     }
+}
+
+// XXX-dap duplicated -- figure out where to put this
+/// Returns the (relative) DNS name for this Silo's API and console endpoints
+/// _within_ the external DNS zone (i.e., without that zone's suffix)
+///
+/// This specific naming scheme is determined under RFD 357.
+pub(crate) fn silo_dns_name(
+    name: &omicron_common::api::external::Name,
+) -> String {
+    // RFD 4 constrains resource names (including Silo names) to DNS-safe
+    // strings, which is why it's safe to directly put the name of the
+    // resource into the DNS name rather than doing any kind of escaping.
+    format!("{}.sys", name)
 }

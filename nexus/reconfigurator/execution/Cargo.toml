@@ -9,6 +9,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 dns-service-client.workspace = true
+chrono.workspace = true
 futures.workspace = true
 illumos-utils.workspace = true
 internal-dns.workspace = true
@@ -31,7 +32,6 @@ pq-sys = "*"
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-chrono.workspace = true
 httptest.workspace = true
 ipnet.workspace = true
 nexus-reconfigurator-planning.workspace = true
