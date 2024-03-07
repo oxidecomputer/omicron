@@ -30,11 +30,13 @@ static DEFAULT_NVME_LBA_DATA_SIZE: u64 = 4096;
 /// NVMe device settings for a particular NVMe model.
 struct NvmeDeviceSettings {
     /// The desired disk size for dealing with overprovisioning.
-    size: Option<u32>,
+    size: u32,
     /// An override for the default 4k LBA formatting.
     lba_data_size_override: Option<u64>,
 }
 
+/// A mapping from model to desired settings.
+/// A device not found in this lookup table will not be modified by sled-agent.
 static PREFERRED_NVME_DEVICE_SETTINGS: OnceLock<
     HashMap<&'static str, NvmeDeviceSettings>,
 > = OnceLock::new();
@@ -43,39 +45,25 @@ fn preferred_nvme_device_settings(
 ) -> &'static HashMap<&'static str, NvmeDeviceSettings> {
     PREFERRED_NVME_DEVICE_SETTINGS.get_or_init(|| {
         HashMap::from([
-            // This disk ships with a size of 3200 from the factory, but we
-            // still wish to apply 4K LBA formatting.
             (
                 "WUS4C6432DSP3X3",
-                NvmeDeviceSettings { size: None, lba_data_size_override: None },
+                NvmeDeviceSettings { size: 3200, lba_data_size_override: None },
             ),
             (
                 "WUS5EA138ESP7E1",
-                NvmeDeviceSettings {
-                    size: Some(3200),
-                    lba_data_size_override: None,
-                },
+                NvmeDeviceSettings { size: 3200, lba_data_size_override: None },
             ),
             (
                 "WUS5EA138ESP7E3",
-                NvmeDeviceSettings {
-                    size: Some(3200),
-                    lba_data_size_override: None,
-                },
+                NvmeDeviceSettings { size: 3200, lba_data_size_override: None },
             ),
             (
                 "WUS5EA176ESP7E1",
-                NvmeDeviceSettings {
-                    size: Some(6400),
-                    lba_data_size_override: None,
-                },
+                NvmeDeviceSettings { size: 6400, lba_data_size_override: None },
             ),
             (
                 "WUS5EA176ESP7E3",
-                NvmeDeviceSettings {
-                    size: Some(6400),
-                    lba_data_size_override: None,
-                },
+                NvmeDeviceSettings { size: 6400, lba_data_size_override: None },
             ),
         ])
     })
@@ -287,15 +275,14 @@ fn ensure_size_and_formatting(
 
             // Resize the device if needed to ensure we get the expected
             // durability level in terms of drive writes per day.
-            if let Some(wanted_size) = nvme_settings.size {
-                if size != wanted_size {
-                    controller.wdc_resize_set(wanted_size)?;
-                    info!(
-                        log,
-                        "Resized {} from {size} to {wanted_size}",
-                        identity.serial,
-                    )
-                }
+            if size != nvme_settings.size {
+                controller.wdc_resize_set(nvme_settings.size)?;
+                info!(
+                    log,
+                    "Resized {} from {size} to {}",
+                    identity.serial,
+                    nvme_settings.size
+                )
             }
 
             // Find the LBA format we want to use for the device.
