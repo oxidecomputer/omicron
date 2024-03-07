@@ -161,7 +161,7 @@ cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
 cp /input/package/work/zones/* out/
-mv out/omicron-nexus-single-sled.tar.gz out/omicron-nexus.tar.gz
+mv out/nexus-single-sled.tar.gz out/nexus.tar.gz
 mkdir tests
 for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"
