@@ -404,7 +404,7 @@ impl RunningZone {
 
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
-        self.inner.zonepath.join(Self::ROOT_FS_PATH)
+        self.inner.root()
     }
 
     pub fn control_interface(&self) -> AddrObject {
@@ -1094,6 +1094,9 @@ pub struct InstalledZone {
 }
 
 impl InstalledZone {
+    /// The path to the zone's root filesystem (i.e., `/`), within zonepath.
+    pub const ROOT_FS_PATH: &'static str = "root";
+
     /// Returns the name of a zone, based on the base zone name plus any unique
     /// identifying info.
     ///
@@ -1134,6 +1137,11 @@ impl InstalledZone {
     /// Returns references to the OPTE ports for this zone.
     pub fn opte_ports(&self) -> impl Iterator<Item = &Port> {
         self.opte_ports.iter().map(|(port, _)| port)
+    }
+
+    /// Returns the filesystem path to the zone's root in the GZ.
+    pub fn root(&self) -> Utf8PathBuf {
+        self.zonepath.join(Self::ROOT_FS_PATH)
     }
 }
 

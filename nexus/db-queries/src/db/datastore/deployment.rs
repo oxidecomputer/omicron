@@ -7,6 +7,7 @@ use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::pagination::paginated;
@@ -49,17 +50,7 @@ use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::num::NonZeroU32;
 use uuid::Uuid;
-
-/// "limit" used in SQL queries that paginate through all sleds, omicron
-/// zones, etc.
-///
-/// While we always load an entire blueprint in one operation, we use a
-/// [`Paginator`] to guard against single queries returning an unchecked number
-/// of rows.
-// unsafe: `new_unchecked` is only unsound if the argument is 0.
-const SQL_BATCH_SIZE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1000) };
 
 impl DataStore {
     /// List blueprints
@@ -1355,6 +1346,7 @@ mod tests {
         let new_internal_dns_version = blueprint1.internal_dns_version.next();
         let new_external_dns_version = new_internal_dns_version.next();
         let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint1,
             new_internal_dns_version,
             new_external_dns_version,
@@ -1509,6 +1501,7 @@ mod tests {
         )
         .unwrap();
         let blueprint2 = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint1,
             Generation::new(),
             Generation::new(),
@@ -1518,6 +1511,7 @@ mod tests {
         .expect("failed to create builder")
         .build();
         let blueprint3 = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint1,
             Generation::new(),
             Generation::new(),
@@ -1615,6 +1609,7 @@ mod tests {
         // Create a child of blueprint3, and ensure when we set it as the target
         // with enabled=false, that status is serialized.
         let blueprint4 = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint3,
             Generation::new(),
             Generation::new(),

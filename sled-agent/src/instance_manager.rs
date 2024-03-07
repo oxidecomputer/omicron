@@ -8,6 +8,7 @@ use crate::instance::propolis_zone_name;
 use crate::instance::Instance;
 use crate::nexus::NexusClientWithResolver;
 use crate::params::InstanceExternalIpBody;
+use crate::params::InstanceMetadata;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{
     InstanceHardware, InstanceMigrationSourceParams, InstancePutStateResponse,
@@ -227,6 +228,7 @@ impl InstanceManager {
         *self.inner.reservoir_size.lock().unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn ensure_registered(
         &self,
         instance_id: Uuid,
@@ -235,6 +237,7 @@ impl InstanceManager {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
@@ -246,6 +249,7 @@ impl InstanceManager {
                 instance_runtime,
                 vmm_runtime,
                 propolis_addr,
+                metadata,
                 tx,
             })
             .await
@@ -396,6 +400,7 @@ enum InstanceManagerRequest {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        metadata: InstanceMetadata,
         tx: oneshot::Sender<Result<SledInstanceState, Error>>,
     },
     EnsureUnregistered {
@@ -509,9 +514,10 @@ impl InstanceManagerRunner {
                             instance_runtime,
                             vmm_runtime,
                             propolis_addr,
+                            metadata,
                             tx,
                         }) => {
-                            tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr).await).map_err(|_| Error::FailedSendClientClosed)
+                            tx.send(self.ensure_registered(instance_id, propolis_id, hardware, instance_runtime, vmm_runtime, propolis_addr, metadata).await).map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(EnsureUnregistered { instance_id, tx }) => {
                             self.ensure_unregistered(tx, instance_id).await
@@ -574,7 +580,8 @@ impl InstanceManagerRunner {
     /// (instance ID, Propolis ID) pair multiple times, but will fail if the
     /// instance is registered with a Propolis ID different from the one the
     /// caller supplied.
-    async fn ensure_registered(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn ensure_registered(
         &mut self,
         instance_id: Uuid,
         propolis_id: Uuid,
@@ -582,6 +589,7 @@ impl InstanceManagerRunner {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         info!(
             &self.log,
@@ -592,6 +600,7 @@ impl InstanceManagerRunner {
             "instance_runtime" => ?instance_runtime,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
+            "metadata" => ?metadata,
         );
 
         let instance = {
@@ -646,6 +655,7 @@ impl InstanceManagerRunner {
                     ticket,
                     state,
                     services,
+                    metadata,
                 )?;
                 let _old =
                     self.instances.insert(instance_id, (propolis_id, instance));

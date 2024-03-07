@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+gateway-client.workspace = true
+indexmap.workspace = true
 internal-dns.workspace = true
 ipnet.workspace = true
 ipnetwork.workspace = true
@@ -13,16 +15,12 @@ nexus-config.workspace = true
 nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+sled-agent-client.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
-
-# XXX-dap this needs to move back to dev-dependencies.  I moved it so I can
-# expose the test module to another crate.
-sled-agent-client.workspace = true
 
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
-#sled-agent-client.workspace = true

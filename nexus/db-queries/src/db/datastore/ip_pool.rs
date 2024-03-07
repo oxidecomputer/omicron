@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`IpPool`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
@@ -25,6 +26,7 @@ use crate::db::model::IpPoolResourceType;
 use crate::db::model::IpPoolUpdate;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::TransactionError;
@@ -667,6 +669,33 @@ impl DataStore {
                     ErrorHandler::NotFoundByResource(authz_pool),
                 )
             })
+    }
+
+    /// List all IP pool ranges for a given pool, making as many queries as
+    /// needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn ip_pool_list_ranges_batched(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::IpPool,
+    ) -> ListResultVec<IpPoolRange> {
+        opctx.check_complex_operations_allowed()?;
+        let mut ip_ranges = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .ip_pool_list_ranges(opctx, &authz_pool, &p.current_pagparams())
+                .await?;
+            // The use of `last_address` here assumes `paginator` is sorting
+            // in Ascending order (which it does - see the implementation of
+            // `current_pagparams()`).
+            paginator = p.found_batch(&batch, &|r| r.last_address);
+            ip_ranges.extend(batch);
+        }
+        Ok(ip_ranges)
     }
 
     pub async fn ip_pool_add_range(
