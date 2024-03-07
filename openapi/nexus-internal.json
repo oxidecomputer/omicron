@@ -6440,7 +6440,7 @@
             ]
           },
           "decommissioned": {
-            "description": "Whether the sled-agent has been decommissioned by nexus This flag is only set to true by nexus Setting it on a PUT from sled-agent has no effect",
+            "description": "Whether the sled-agent has been decommissioned by nexus\n\nThis flag is only set to true by nexus. Setting it on an upsert from sled-agent has no effect.",
             "type": "boolean"
           },
           "generation": {
