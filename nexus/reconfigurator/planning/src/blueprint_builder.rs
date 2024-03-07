@@ -35,6 +35,8 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
+use slog::o;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
@@ -98,6 +100,9 @@ pub enum EnsureMultiple {
 ///    However, the new blueprint can only be made the system's target if its
 ///    parent is the current target.
 pub struct BlueprintBuilder<'a> {
+    #[allow(dead_code)]
+    log: Logger,
+
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
     internal_dns_version: Generation,
@@ -186,11 +191,17 @@ impl<'a> BlueprintBuilder<'a> {
     /// Construct a new `BlueprintBuilder` based on a previous blueprint,
     /// starting with no changes from that state
     pub fn new_based_on(
+        log: &Logger,
         parent_blueprint: &'a Blueprint,
         internal_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
+        let log = log.new(o!(
+            "component" => "BlueprintBuilder",
+            "parent_id" => parent_blueprint.id.to_string(),
+        ));
+
         // Scan through the parent blueprint and build several sets of "used
         // resources". When adding new control plane zones to a sled, we may
         // need to allocate new resources to that zone. However, allocation at
@@ -287,6 +298,7 @@ impl<'a> BlueprintBuilder<'a> {
         );
 
         Ok(BlueprintBuilder {
+            log,
             parent_blueprint,
             internal_dns_version,
             policy,
@@ -731,6 +743,7 @@ pub mod test {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::ByteCount;
+    use omicron_test_utils::dev::test_setup_log;
     use sled_agent_client::types::{
         Baseboard, Inventory, OmicronZoneConfig, OmicronZoneDataset,
         OmicronZoneType, OmicronZonesConfig, SledRole,
@@ -945,6 +958,7 @@ pub mod test {
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
         // describes no changes.
+        let logctx = test_setup_log("blueprint_builder_test_initial");
         let (collection, policy) = example(DEFAULT_N_SLEDS);
         let blueprint_initial =
             BlueprintBuilder::build_initial_from_collection(
@@ -971,6 +985,7 @@ pub mod test {
 
         // Test a no-op blueprint.
         let builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint_initial,
             Generation::new(),
             &policy,
@@ -987,10 +1002,13 @@ pub mod test {
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_basic() {
+        let logctx = test_setup_log("blueprint_builder_test_basic");
         let (collection, mut policy) = example(DEFAULT_N_SLEDS);
         let blueprint1 = BlueprintBuilder::build_initial_from_collection(
             &collection,
@@ -1002,6 +1020,7 @@ pub mod test {
         verify_blueprint(&blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint1,
             Generation::new(),
             &policy,
@@ -1036,6 +1055,7 @@ pub mod test {
         let new_sled_id = Uuid::new_v4();
         let _ = policy_add_sled(&mut policy, new_sled_id);
         let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint2,
             Generation::new(),
             &policy,
@@ -1106,10 +1126,15 @@ pub mod test {
             })
             .collect::<BTreeSet<_>>();
         assert_eq!(crucible_pool_names, new_sled_resources.zpools);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_add_nexus_with_no_existing_nexus_zones() {
+        let logctx = test_setup_log(
+            "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones",
+        );
         let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We don't care about the internal DNS version here.
@@ -1134,6 +1159,7 @@ pub mod test {
         .expect("failed to create initial blueprint");
 
         let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &parent,
             internal_dns_version,
             &policy,
@@ -1157,10 +1183,14 @@ pub mod test {
             matches!(err, Error::NoNexusZonesInParentBlueprint),
             "unexpected error {err}"
         );
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_add_nexus_error_cases() {
+        let logctx =
+            test_setup_log("blueprint_builder_test_add_nexus_error_cases");
         let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We don't care about the internal DNS version here.
@@ -1196,6 +1226,7 @@ pub mod test {
             // Attempting to add Nexus to the sled we removed it from (with no
             // other changes to the environment) should succeed.
             let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
                 &parent,
                 internal_dns_version,
                 &policy,
@@ -1214,6 +1245,7 @@ pub mod test {
             // from (with no other changes to the environment) should also
             // succeed.
             let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
                 &parent,
                 internal_dns_version,
                 &policy,
@@ -1246,6 +1278,7 @@ pub mod test {
             policy.service_ip_pool_ranges = used_ip_ranges;
 
             let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
                 &parent,
                 internal_dns_version,
                 &policy,
@@ -1269,10 +1302,16 @@ pub mod test {
         // `NEXUS_OPTE_*_SUBNET`. We could hack around that by creating the
         // `BlueprintBuilder` and mucking with its internals, but that doesn't
         // seem like a particularly useful test either.
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_invalid_parent_blueprint_two_zones_with_same_external_ip() {
+        let logctx = test_setup_log(
+            "blueprint_builder_test_invalid_parent_blueprint_\
+             two_zones_with_same_external_ip",
+        );
         let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1309,6 +1348,7 @@ pub mod test {
         .unwrap();
 
         match BlueprintBuilder::new_based_on(
+            &logctx.log,
             &parent,
             Generation::new(),
             &policy,
@@ -1320,10 +1360,16 @@ pub mod test {
                 "unexpected error: {err:#}"
             ),
         };
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_invalid_parent_blueprint_two_nexus_zones_with_same_nic_ip() {
+        let logctx = test_setup_log(
+            "blueprint_builder_test_invalid_parent_blueprint_\
+             two_nexus_zones_with_same_nic_ip",
+        );
         let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1358,6 +1404,7 @@ pub mod test {
         .unwrap();
 
         match BlueprintBuilder::new_based_on(
+            &logctx.log,
             &parent,
             Generation::new(),
             &policy,
@@ -1369,10 +1416,16 @@ pub mod test {
                 "unexpected error: {err:#}"
             ),
         };
+
+        logctx.cleanup_successful();
     }
 
     #[test]
     fn test_invalid_parent_blueprint_two_zones_with_same_vnic_mac() {
+        let logctx = test_setup_log(
+            "blueprint_builder_test_invalid_parent_blueprint_\
+             two_zones_with_same_vnic_mac",
+        );
         let (mut collection, policy) = example(DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -1407,6 +1460,7 @@ pub mod test {
         .unwrap();
 
         match BlueprintBuilder::new_based_on(
+            &logctx.log,
             &parent,
             Generation::new(),
             &policy,
@@ -1418,5 +1472,7 @@ pub mod test {
                 "unexpected error: {err:#}"
             ),
         };
+
+        logctx.cleanup_successful();
     }
 }

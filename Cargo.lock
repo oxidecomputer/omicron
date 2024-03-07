@@ -1709,6 +1709,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "derror-macro"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
+dependencies = [
+ "darling 0.20.3",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.51",
+]
+
+[[package]]
 name = "diesel"
 version = "2.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1856,7 +1867,7 @@ dependencies = [
  "dns-service-client",
  "dropshot",
  "expectorate",
- "http 0.2.11",
+ "http 0.2.12",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
@@ -1889,7 +1900,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "http 0.2.11",
+ "http 0.2.12",
  "omicron-workspace-hack",
  "progenitor",
  "reqwest",
@@ -1941,7 +1952,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
- "http 0.2.11",
+ "http 0.2.12",
  "ipnetwork",
  "omicron-workspace-hack",
  "omicron-zone-package",
@@ -1976,7 +1987,7 @@ dependencies = [
  "form_urlencoded",
  "futures",
  "hostname",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "indexmap 2.2.5",
  "multer",
@@ -1985,7 +1996,7 @@ dependencies = [
  "percent-encoding",
  "proc-macro2",
  "rustls 0.22.2",
- "rustls-pemfile 2.1.0",
+ "rustls-pemfile 2.1.1",
  "schemars",
  "serde",
  "serde_json",
@@ -2158,7 +2169,7 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "omicron-sled-agent",
  "omicron-test-utils",
@@ -2812,7 +2823,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http 0.2.11",
+ "http 0.2.12",
  "indexmap 2.2.5",
  "slab",
  "tokio",
@@ -2882,7 +2893,7 @@ dependencies = [
  "base64",
  "bytes",
  "headers-core",
- "http 0.2.11",
+ "http 0.2.12",
  "httpdate",
  "mime",
  "sha1",
@@ -2894,7 +2905,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
 dependencies = [
- "http 0.2.11",
+ "http 0.2.12",
 ]
 
 [[package]]
@@ -3011,9 +3022,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8947b1a6fad4393052c7ba1f4cd97bed3e953a95c79c92ad9b051a04611d9fbb"
+checksum = "601cbb57e577e2f5ef5be8e7b83f0f63994f25aa94d673e54a92d5c516d101f1"
 dependencies = [
  "bytes",
  "fnv",
@@ -3038,7 +3049,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d5f38f16d184e36f2408a55281cd658ecbd3ca05cce6d6510a176eca393e26d1"
 dependencies = [
  "bytes",
- "http 0.2.11",
+ "http 0.2.12",
  "pin-project-lite",
 ]
 
@@ -3081,7 +3092,7 @@ dependencies = [
  "crossbeam-channel",
  "form_urlencoded",
  "futures",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "log",
  "once_cell",
@@ -3168,7 +3179,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http 0.2.11",
+ "http 0.2.12",
  "http-body 0.4.5",
  "httparse",
  "httpdate",
@@ -3206,7 +3217,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "rustls 0.21.9",
  "tokio",
@@ -3239,7 +3250,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "318ca89e4827e7fe4ddd2824f52337239796ae8ecc761a663324407dc3d8d7e7"
 dependencies = [
  "futures-util",
- "http 0.2.11",
+ "http 0.2.12",
  "http-range",
  "httpdate",
  "hyper 0.14.27",
@@ -3347,7 +3358,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 
 [[package]]
 name = "illumos-utils"
@@ -3469,7 +3480,7 @@ dependencies = [
  "futures",
  "hex",
  "hex-literal",
- "http 0.2.11",
+ "http 0.2.12",
  "illumos-utils",
  "installinator-artifact-client",
  "installinator-common",
@@ -3736,7 +3747,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "quote",
  "syn 2.0.51",
@@ -4364,7 +4375,7 @@ dependencies = [
  "futures",
  "gateway-client",
  "headers",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "hyper-rustls 0.26.0",
  "illumos-utils",
@@ -4555,7 +4566,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "headers",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "internal-dns",
  "nexus-config",
@@ -4907,7 +4918,7 @@ dependencies = [
  "expectorate",
  "futures",
  "hex",
- "http 0.2.11",
+ "http 0.2.12",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -4984,7 +4995,7 @@ dependencies = [
  "gateway-sp-comms",
  "gateway-test-utils",
  "hex",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "illumos-utils",
  "ipcc",
@@ -5044,7 +5055,7 @@ dependencies = [
  "gateway-test-utils",
  "headers",
  "hex",
- "http 0.2.11",
+ "http 0.2.12",
  "httptest",
  "hubtools",
  "hyper 0.14.27",
@@ -5099,7 +5110,7 @@ dependencies = [
  "reqwest",
  "ring 0.17.8",
  "rustls 0.22.2",
- "rustls-pemfile 2.1.0",
+ "rustls-pemfile 2.1.1",
  "samael",
  "schemars",
  "semver 1.0.22",
@@ -5273,7 +5284,7 @@ dependencies = [
  "glob",
  "guppy",
  "hex",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "hyper-staticfile",
  "illumos-utils",
@@ -5347,7 +5358,7 @@ dependencies = [
  "filetime",
  "headers",
  "hex",
- "http 0.2.11",
+ "http 0.2.12",
  "libc",
  "nexus-config",
  "omicron-common",
@@ -5614,9 +5625,10 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "cfg-if",
+ "derror-macro",
  "dyn-clone",
  "illumos-sys-hdrs",
  "kstat-macro",
@@ -5624,13 +5636,14 @@ dependencies = [
  "postcard",
  "serde",
  "smoltcp 0.11.0",
+ "tabwriter",
  "version_check",
 ]
 
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -5642,7 +5655,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "libc",
  "libnet",
@@ -5698,7 +5711,7 @@ dependencies = [
  "base64",
  "chrono",
  "futures",
- "http 0.2.11",
+ "http 0.2.12",
  "hyper 0.14.27",
  "omicron-workspace-hack",
  "progenitor",
@@ -5716,7 +5729,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=1d29ef60a18179babfb44f0f7a3c2fe71034a2c1#1d29ef60a18179babfb44f0f7a3c2fe71034a2c1"
+source = "git+https://github.com/oxidecomputer/opte?rev=b85995f92ae94cdc78b97b0a610c69e103e00423#b85995f92ae94cdc78b97b0a610c69e103e00423"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -5724,6 +5737,7 @@ dependencies = [
  "poptrie",
  "serde",
  "smoltcp 0.11.0",
+ "tabwriter",
  "zerocopy 0.7.32",
 ]
 
@@ -5855,7 +5869,7 @@ dependencies = [
  "chrono",
  "dropshot",
  "futures",
- "http 0.2.11",
+ "http 0.2.12",
  "kstat-rs",
  "omicron-workspace-hack",
  "oximeter",
@@ -6599,7 +6613,7 @@ source = "git+https://github.com/oxidecomputer/progenitor?branch=main#08bbafc251
 dependencies = [
  "getopts",
  "heck 0.4.1",
- "http 0.2.11",
+ "http 0.2.12",
  "indexmap 2.2.5",
  "openapiv3",
  "proc-macro2",
@@ -7094,7 +7108,7 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http 0.2.11",
+ "http 0.2.12",
  "http-body 0.4.5",
  "hyper 0.14.27",
  "hyper-rustls 0.24.2",
@@ -7449,7 +7463,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f1fb85efa936c42c6d5fc28d2629bb51e4b2f4b8a5211e297d599cc5a093792"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile 2.1.0",
+ "rustls-pemfile 2.1.1",
  "rustls-pki-types",
  "schannel",
  "security-framework",
@@ -7466,9 +7480,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-pemfile"
-version = "2.1.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c333bb734fcdedcea57de1602543590f545f127dc8b533324318fd492c5c70b"
+checksum = "f48172685e6ff52a556baa527774f61fcaa884f59daf3375c62a3f1cd2549dab"
 dependencies = [
  "base64",
  "rustls-pki-types",
@@ -8863,6 +8877,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tabwriter"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a327282c4f64f6dc37e3bba4c2b6842cc3a992f204fa58d917696a89f691e5f6"
+dependencies = [
+ "unicode-width",
+]
+
+[[package]]
 name = "take_mut"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9675,7 +9698,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "data-encoding",
- "http 0.2.11",
+ "http 0.2.12",
  "httparse",
  "log",
  "rand 0.8.5",
@@ -10401,7 +10424,7 @@ dependencies = [
  "gateway-messages",
  "gateway-test-utils",
  "hex",
- "http 0.2.11",
+ "http 0.2.12",
  "hubtools",
  "hyper 0.14.27",
  "illumos-utils",

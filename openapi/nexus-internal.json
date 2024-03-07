@@ -918,6 +918,57 @@
         }
       }
     },
+    "/sleds/add": {
+      "post": {
+        "summary": "Add sled to initialized rack",
+        "operationId": "sled_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UninitializedSledId"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sleds/uninitialized": {
+      "get": {
+        "summary": "List uninitialized sleds",
+        "operationId": "sled_list_uninitialized",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UninitializedSledResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/switch/{switch_id}": {
       "put": {
         "operationId": "switch_put",
@@ -1049,24 +1100,24 @@
         ]
       },
       "Baseboard": {
-        "description": "Describes properties that should uniquely identify Oxide manufactured hardware",
+        "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
         "properties": {
-          "part_number": {
+          "part": {
             "type": "string"
           },
           "revision": {
             "type": "integer",
             "format": "int64"
           },
-          "serial_number": {
+          "serial": {
             "type": "string"
           }
         },
         "required": [
-          "part_number",
+          "part",
           "revision",
-          "serial_number"
+          "serial"
         ]
       },
       "BgpConfig": {
@@ -6545,6 +6596,66 @@
       },
       "SwitchPutResponse": {
         "type": "object"
+      },
+      "UninitializedSled": {
+        "description": "A sled that has not been added to an initialized rack yet",
+        "type": "object",
+        "properties": {
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "cubby": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "rack_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "baseboard",
+          "cubby",
+          "rack_id"
+        ]
+      },
+      "UninitializedSledId": {
+        "description": "The unique hardware ID for a sled",
+        "type": "object",
+        "properties": {
+          "part": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "part",
+          "serial"
+        ]
+      },
+      "UninitializedSledResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UninitializedSled"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "UserId": {
         "title": "A name unique within the parent collection",
