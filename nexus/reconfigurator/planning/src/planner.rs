@@ -48,6 +48,7 @@ impl<'a> Planner<'a> {
         inventory: &'a Collection,
     ) -> anyhow::Result<Planner<'a>> {
         let blueprint = BlueprintBuilder::new_based_on(
+            &log,
             parent_blueprint,
             internal_dns_version,
             policy,

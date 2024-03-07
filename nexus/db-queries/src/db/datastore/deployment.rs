@@ -1349,6 +1349,7 @@ mod tests {
         // different DNS version to test that that works.
         let new_dns_version = blueprint1.internal_dns_version.next();
         let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint1,
             new_dns_version,
             &policy,
@@ -1500,6 +1501,7 @@ mod tests {
         )
         .unwrap();
         let blueprint2 = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint1,
             Generation::new(),
             &EMPTY_POLICY,
@@ -1508,6 +1510,7 @@ mod tests {
         .expect("failed to create builder")
         .build();
         let blueprint3 = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint1,
             Generation::new(),
             &EMPTY_POLICY,
@@ -1604,6 +1607,7 @@ mod tests {
         // Create a child of blueprint3, and ensure when we set it as the target
         // with enabled=false, that status is serialized.
         let blueprint4 = BlueprintBuilder::new_based_on(
+            &logctx.log,
             &blueprint3,
             Generation::new(),
             &EMPTY_POLICY,
