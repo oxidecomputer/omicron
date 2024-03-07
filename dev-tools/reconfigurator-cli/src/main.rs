@@ -454,6 +454,7 @@ fn cmd_blueprint_from_inventory(
     let blueprint = BlueprintBuilder::build_initial_from_collection(
         collection,
         dns_version,
+        dns_version,
         &policy,
         creator,
     )
@@ -486,6 +487,7 @@ fn cmd_blueprint_plan(
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
+        dns_version,
         dns_version,
         &policy,
         creator,

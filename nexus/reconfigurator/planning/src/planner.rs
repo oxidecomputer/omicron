@@ -320,11 +320,11 @@ impl<'a> Planner<'a> {
 #[cfg(test)]
 mod test {
     use super::Planner;
-    use crate::blueprint_builder::test::example;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::blueprint_builder::test::ExampleSystem;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
+    use crate::example::example;
+    use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_types::external_api::views::SledPolicy;

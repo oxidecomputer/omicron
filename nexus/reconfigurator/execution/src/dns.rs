@@ -432,8 +432,8 @@ mod test {
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_inventory::CollectionBuilder;
-    use nexus_reconfigurator_planning::blueprint_builder::test::example;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::example::example;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
@@ -777,7 +777,8 @@ mod test {
 
     #[tokio::test]
     async fn test_blueprint_external_dns_basic() {
-        let (collection, policy) = example(5);
+        let logctx = test_setup_log("test_blueprint_external_dns_basic");
+        let (collection, policy) = example(&logctx.log, 5);
         let initial_external_dns_generation = Generation::new();
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
@@ -879,6 +880,7 @@ mod test {
                 "192.0.2.6".parse::<IpAddr>().unwrap(),
             ]
         );
+        logctx.cleanup_successful();
     }
 
     #[test]
