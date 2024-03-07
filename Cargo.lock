@@ -4383,6 +4383,7 @@ dependencies = [
  "ipnetwork",
  "itertools 0.12.1",
  "macaddr",
+ "maplit",
  "newtype_derive",
  "nexus-config",
  "nexus-db-model",

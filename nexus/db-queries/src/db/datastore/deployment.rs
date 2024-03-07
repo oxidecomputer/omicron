@@ -32,6 +32,7 @@ use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
 use nexus_db_model::Blueprint as DbBlueprint;
+use nexus_db_model::BpExpungedNexusZone;
 use nexus_db_model::BpOmicronZone;
 use nexus_db_model::BpOmicronZoneNic;
 use nexus_db_model::BpOmicronZoneNotInService;
@@ -147,6 +148,15 @@ impl DataStore {
             zones_not_in_service
         };
 
+        let expunged_nexus_zones = blueprint
+            .expunged_nexus_zones
+            .iter()
+            .map(|&zone_id| BpExpungedNexusZone {
+                blueprint_id,
+                bp_nexus_zone_id: zone_id,
+            })
+            .collect::<Vec<_>>();
+
         // This implementation inserts all records associated with the
         // blueprint in one transaction.  This is required: we don't want
         // any planner or executor to see a half-inserted blueprint, nor do we
@@ -205,6 +215,15 @@ impl DataStore {
                         .values(omicron_zones_not_in_service)
                         .execute_async(&conn)
                         .await?;
+            }
+
+            {
+                use db::schema::bp_expunged_nexus_zones::dsl;
+
+                let _ = diesel::insert_into(dsl::bp_expunged_nexus_zones)
+                    .values(expunged_nexus_zones)
+                    .execute_async(&conn)
+                    .await?;
             }
 
             Ok(())
@@ -386,6 +405,42 @@ impl DataStore {
             omicron_zones_not_in_service
         };
 
+        // Load the list of expunged nexus zones.
+        let expunged_nexus_zones = {
+            use db::schema::bp_expunged_nexus_zones::dsl;
+
+            let mut expunged_nexus_zones = BTreeSet::new();
+            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::bp_expunged_nexus_zones,
+                    dsl::bp_nexus_zone_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::blueprint_id.eq(blueprint_id))
+                .select(BpExpungedNexusZone::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+                paginator = p.found_batch(&batch, &|z| z.bp_nexus_zone_id);
+
+                for z in batch {
+                    let inserted =
+                        expunged_nexus_zones.insert(z.bp_nexus_zone_id);
+                    bail_unless!(
+                        inserted,
+                        "found duplicate zone ID in bp_expunged_nexus_zones: {}",
+                        z.bp_nexus_zone_id,
+                    );
+                }
+            }
+
+            expunged_nexus_zones
+        };
+
         // Create the in-memory list of zones _in_ service, which we'll
         // calculate below as we load zones. (Any zone that isn't present in
         // `omicron_zones_not_in_service` is considered in service.)
@@ -485,6 +540,7 @@ impl DataStore {
             id: blueprint_id,
             omicron_zones,
             zones_in_service,
+            expunged_nexus_zones,
             parent_blueprint_id,
             internal_dns_version,
             time_created,
@@ -1067,6 +1123,7 @@ mod tests {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
     use std::mem;
@@ -1340,7 +1397,7 @@ mod tests {
             "unexpected error: {err}"
         );
 
-        // Add a new sled to `policy`.
+        // Add two new sleds to `policy`.
         let new_sled_id = Uuid::new_v4();
         policy.sleds.insert(new_sled_id, fake_sled_resources(None));
         let new_sled_zpools = &policy.sleds.get(&new_sled_id).unwrap().zpools;
@@ -1448,6 +1505,60 @@ mod tests {
             blueprint_list_all_ids(&opctx, &datastore).await,
             [blueprint2.id]
         );
+
+        // ---
+
+        // Make another blueprint, this time expunging a Nexus zone.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint2,
+            new_dns_version,
+            &policy,
+            "test",
+        )
+        .expect("failed to create builder");
+
+        let (nexus_sled_id, nexus_zone) = blueprint2
+            .all_omicron_zones()
+            .find(|(_, zone_config)| zone_config.zone_type.is_nexus())
+            .expect("at least one nexus zone");
+
+        builder
+            .sled_expunge_zones(nexus_sled_id, |z| z.id == nexus_zone.id)
+            .expect("expunging zones is successful");
+
+        let blueprint3 = builder.build();
+        let authz_blueprint3 = authz_blueprint_from_id(blueprint3.id);
+
+        // Ensure that the expunged zone made it into the new blueprint.
+        assert_eq!(
+            blueprint3.expunged_nexus_zones,
+            maplit::btreeset! {nexus_zone.id}
+        );
+
+        // Check that we can write blueprint3 to the DB and read it back.
+        datastore
+            .blueprint_insert(&opctx, &blueprint3)
+            .await
+            .expect("failed to insert blueprint3");
+        let blueprint3_read = datastore
+            .blueprint_read(&opctx, &authz_blueprint3)
+            .await
+            .expect("failed to read collection back");
+        println!(
+            "blueprint 3 diff: {}",
+            blueprint3.diff_sleds(&blueprint3_read)
+        );
+        assert_eq!(blueprint3, blueprint3_read);
+        assert_eq!(blueprint3.internal_dns_version, new_dns_version);
+        {
+            let mut expected_ids = [blueprint2.id, blueprint3.id];
+            expected_ids.sort();
+            assert_eq!(
+                blueprint_list_all_ids(&opctx, &datastore).await,
+                expected_ids
+            );
+        }
 
         // Clean up.
         db.cleanup().await.unwrap();

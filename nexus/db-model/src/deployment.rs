@@ -8,7 +8,7 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_zone, bp_omicron_zone_nic,
+    blueprint, bp_expunged_nexus_zones, bp_omicron_zone, bp_omicron_zone_nic,
     bp_omicron_zones_not_in_service, bp_sled_omicron_zones, bp_target,
 };
 use crate::{ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8};
@@ -263,4 +263,11 @@ impl BpOmicronZoneNic {
 pub struct BpOmicronZoneNotInService {
     pub blueprint_id: Uuid,
     pub bp_omicron_zone_id: Uuid,
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_expunged_nexus_zones)]
+pub struct BpExpungedNexusZone {
+    pub blueprint_id: Uuid,
+    pub bp_nexus_zone_id: Uuid,
 }

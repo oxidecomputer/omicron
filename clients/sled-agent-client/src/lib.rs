@@ -7,6 +7,7 @@
 use anyhow::Context;
 use async_trait::async_trait;
 use std::convert::TryFrom;
+use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -50,25 +51,62 @@ impl Eq for types::OmicronZoneConfig {}
 impl Eq for types::OmicronZoneType {}
 impl Eq for types::OmicronZoneDataset {}
 
-impl types::OmicronZoneType {
-    /// Human-readable label describing what kind of zone this is
-    ///
-    /// This is just use for testing and reporting.
-    pub fn label(&self) -> impl std::fmt::Display {
+/// Like [`types::OmicronZoneType`], but without any associated data.
+///
+/// The [`fmt::Display`] impl for this type is a human-readable label, meant
+/// for testing and reporting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ZoneTag {
+    BoundaryNtp,
+    Clickhouse,
+    ClickhouseKeeper,
+    CockroachDb,
+    Crucible,
+    CruciblePantry,
+    ExternalDns,
+    InternalDns,
+    InternalNtp,
+    Nexus,
+    Oximeter,
+}
+
+impl fmt::Display for ZoneTag {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            types::OmicronZoneType::BoundaryNtp { .. } => "boundary_ntp",
-            types::OmicronZoneType::Clickhouse { .. } => "clickhouse",
+            ZoneTag::BoundaryNtp => write!(f, "boundary_ntp"),
+            ZoneTag::Clickhouse => write!(f, "clickhouse"),
+            ZoneTag::ClickhouseKeeper => write!(f, "clickhouse_keeper"),
+            ZoneTag::CockroachDb => write!(f, "cockroach_db"),
+            ZoneTag::Crucible => write!(f, "crucible"),
+            ZoneTag::CruciblePantry => write!(f, "crucible_pantry"),
+            ZoneTag::ExternalDns => write!(f, "external_dns"),
+            ZoneTag::InternalDns => write!(f, "internal_dns"),
+            ZoneTag::InternalNtp => write!(f, "internal_ntp"),
+            ZoneTag::Nexus => write!(f, "nexus"),
+            ZoneTag::Oximeter => write!(f, "oximeter"),
+        }
+    }
+}
+
+impl types::OmicronZoneType {
+    /// Returns the tag corresponding to this variant.
+    pub fn tag(&self) -> ZoneTag {
+        match self {
+            types::OmicronZoneType::BoundaryNtp { .. } => ZoneTag::BoundaryNtp,
+            types::OmicronZoneType::Clickhouse { .. } => ZoneTag::Clickhouse,
             types::OmicronZoneType::ClickhouseKeeper { .. } => {
-                "clickhouse_keeper"
+                ZoneTag::ClickhouseKeeper
             }
-            types::OmicronZoneType::CockroachDb { .. } => "cockroach_db",
-            types::OmicronZoneType::Crucible { .. } => "crucible",
-            types::OmicronZoneType::CruciblePantry { .. } => "crucible_pantry",
-            types::OmicronZoneType::ExternalDns { .. } => "external_dns",
-            types::OmicronZoneType::InternalDns { .. } => "internal_dns",
-            types::OmicronZoneType::InternalNtp { .. } => "internal_ntp",
-            types::OmicronZoneType::Nexus { .. } => "nexus",
-            types::OmicronZoneType::Oximeter { .. } => "oximeter",
+            types::OmicronZoneType::CockroachDb { .. } => ZoneTag::CockroachDb,
+            types::OmicronZoneType::Crucible { .. } => ZoneTag::Crucible,
+            types::OmicronZoneType::CruciblePantry { .. } => {
+                ZoneTag::CruciblePantry
+            }
+            types::OmicronZoneType::ExternalDns { .. } => ZoneTag::ExternalDns,
+            types::OmicronZoneType::InternalDns { .. } => ZoneTag::InternalDns,
+            types::OmicronZoneType::InternalNtp { .. } => ZoneTag::InternalNtp,
+            types::OmicronZoneType::Nexus { .. } => ZoneTag::Nexus,
+            types::OmicronZoneType::Oximeter { .. } => ZoneTag::Oximeter,
         }
     }
 

@@ -122,6 +122,7 @@ mod test {
                 id,
                 omicron_zones,
                 zones_in_service: BTreeSet::new(),
+                expunged_nexus_zones: BTreeSet::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 time_created: chrono::Utc::now(),

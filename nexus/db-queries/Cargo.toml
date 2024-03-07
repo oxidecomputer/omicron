@@ -70,6 +70,7 @@ gateway-client.workspace = true
 illumos-utils.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
+maplit.workspace = true
 nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-test-utils.workspace = true

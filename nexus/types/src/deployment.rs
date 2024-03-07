@@ -148,6 +148,10 @@ pub struct Blueprint {
     /// should appear in DNS)
     pub zones_in_service: BTreeSet<Uuid>,
 
+    /// Nexus zones marked expunged -- used to deallocate other entries
+    /// assigned to an individual Nexus instance.
+    pub expunged_nexus_zones: BTreeSet<Uuid>,
+
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
 
@@ -512,7 +516,7 @@ impl<'a> OmicronZonesDiff<'a> {
                 "{}         zone {} type {} underlay IP {} ({})",
                 prefix,
                 z.id,
-                z.zone_type.label(),
+                z.zone_type.tag(),
                 z.underlay_address,
                 label
             )?;
@@ -561,14 +565,14 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                     f,
                     "-        zone {} type {} (removed)",
                     zone.id,
-                    zone.zone_type.label(),
+                    zone.zone_type.tag(),
                 )?;
             }
 
             for zone_changes in sled_changes.zones_in_common() {
                 let zone_id = zone_changes.zone_before.id;
-                let zone_type = zone_changes.zone_before.zone_type.label();
-                let zone2_type = zone_changes.zone_after.zone_type.label();
+                let zone_tag = zone_changes.zone_before.zone_type.tag();
+                let zone2_tag = zone_changes.zone_after.zone_type.tag();
                 match zone_changes.changed_how {
                     DiffZoneChangedHow::DetailsChanged => {
                         writeln!(
@@ -576,7 +580,7 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                             "-         zone {} type {} underlay IP {} \
                                 (changed)",
                             zone_id,
-                            zone_type,
+                            zone_tag,
                             zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
@@ -584,7 +588,7 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                             "+         zone {} type {} underlay IP {} \
                                 (changed)",
                             zone_id,
-                            zone2_type,
+                            zone2_tag,
                             zone_changes.zone_after.underlay_address,
                         )?;
                     }
@@ -594,7 +598,7 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                             "-         zone {} type {} underlay IP {} \
                                 (in service)",
                             zone_id,
-                            zone_type,
+                            zone_tag,
                             zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
@@ -602,7 +606,7 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                             "+         zone {} type {} underlay IP {} \
                                 (removed from service)",
                             zone_id,
-                            zone2_type,
+                            zone2_tag,
                             zone_changes.zone_after.underlay_address,
                         )?;
                     }
@@ -612,7 +616,7 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                             "-         zone {} type {} underlay IP {} \
                                 (not in service)",
                             zone_id,
-                            zone_type,
+                            zone_tag,
                             zone_changes.zone_before.underlay_address,
                         )?;
                         writeln!(
@@ -620,7 +624,7 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                             "+         zone {} type {} underlay IP {} \
                                 (added to service)",
                             zone_id,
-                            zone2_type,
+                            zone2_tag,
                             zone_changes.zone_after.underlay_address,
                         )?;
                     }
@@ -630,7 +634,7 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                             "         zone {} type {} underlay IP {} \
                                 (unchanged)",
                             zone_id,
-                            zone_type,
+                            zone_tag,
                             zone_changes.zone_before.underlay_address,
                         )?;
                     }
@@ -642,7 +646,7 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
                     f,
                     "+        zone {} type {} underlay IP {} (added)",
                     zone.id,
-                    zone.zone_type.label(),
+                    zone.zone_type.tag(),
                     zone.underlay_address,
                 )?;
             }
