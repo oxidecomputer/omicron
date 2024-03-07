@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(38, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(39, 0, 0);
 
 table! {
     disk (id) {
@@ -827,6 +827,7 @@ table! {
         last_used_address -> Inet,
         sled_policy -> crate::sled_policy::SledPolicyEnum,
         sled_state -> crate::SledStateEnum,
+        sled_agent_gen -> Int8,
     }
 }
 

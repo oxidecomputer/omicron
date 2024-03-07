@@ -70,6 +70,11 @@ pub struct Sled {
 
     #[diesel(column_name = sled_state)]
     state: SledState,
+
+    /// A generation number owned and incremented by sled-agent This is
+    /// specifically distinct from `rcgen`, which is incremented by child
+    /// resources as part of `DatastoreCollectionConfig`.
+    pub sled_agent_gen: Generation,
 }
 
 impl Sled {
@@ -141,7 +146,7 @@ impl From<Sled> for params::SledAgentInfo {
             usable_hardware_threads: sled.usable_hardware_threads.into(),
             usable_physical_ram: sled.usable_physical_ram.into(),
             reservoir_size: sled.reservoir_size.into(),
-            generation: sled.rcgen.into(),
+            generation: sled.sled_agent_gen.into(),
         }
     }
 }
@@ -170,7 +175,6 @@ impl DatastoreCollectionConfig<super::Service> for Sled {
 
 /// Form of `Sled` used for updates from sled-agent. This is missing some
 /// columns that are present in `Sled` because sled-agent doesn't control them.
-///
 #[derive(Debug, Clone)]
 pub struct SledUpdate {
     id: Uuid,
@@ -190,8 +194,8 @@ pub struct SledUpdate {
     pub ip: ipv6::Ipv6Addr,
     pub port: SqlU16,
 
-    // Generation number - owned and incremented by sled-agent
-    pub rcgen: Generation,
+    // Generation number - owned and incremented by sled-agent.
+    pub sled_agent_gen: Generation,
 }
 
 impl SledUpdate {
@@ -201,7 +205,7 @@ impl SledUpdate {
         baseboard: SledBaseboard,
         hardware: SledSystemHardware,
         rack_id: Uuid,
-        rcgen: Generation,
+        sled_agent_gen: Generation,
     ) -> Self {
         Self {
             id,
@@ -217,7 +221,7 @@ impl SledUpdate {
             reservoir_size: hardware.reservoir_size,
             ip: addr.ip().into(),
             port: addr.port().into(),
-            rcgen,
+            sled_agent_gen,
         }
     }
 
@@ -236,7 +240,7 @@ impl SledUpdate {
         };
         Sled {
             identity: SledIdentity::new(self.id),
-            rcgen: self.rcgen,
+            rcgen: Generation::new(),
             time_deleted: None,
             rack_id: self.rack_id,
             is_scrimlet: self.is_scrimlet,
@@ -253,6 +257,7 @@ impl SledUpdate {
             ip: self.ip,
             port: self.port,
             last_used_address,
+            sled_agent_gen: self.sled_agent_gen,
         }
     }
 

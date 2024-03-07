@@ -41,7 +41,8 @@ use uuid::Uuid;
 impl DataStore {
     /// Stores a new sled in the database.
     ///
-    /// Returns an error if rcgen is stale, or the sled is decommissioned.
+    /// Returns an error if `sled_agent_gen` is stale, or the sled is
+    /// decommissioned.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
@@ -64,9 +65,9 @@ impl DataStore {
                     .eq(sled_update.usable_hardware_threads),
                 dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
                 dsl::reservoir_size.eq(sled_update.reservoir_size),
-                dsl::rcgen.eq(sled_update.rcgen),
+                dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
             ))
-            .filter(dsl::rcgen.lt(sled_update.rcgen))
+            .filter(dsl::sled_agent_gen.lt(sled_update.sled_agent_gen))
             .filter(dsl::sled_state.ne(SledState::Decommissioned))
             .returning(Sled::as_returning())
             .get_result_async(&*self.pool_connection_unauthorized().await?)
@@ -721,8 +722,8 @@ mod test {
             .unwrap(),
         );
 
-        // Bump the gneration number so the insert succeeds.
-        sled_update.rcgen.0 = sled_update.rcgen.0.next();
+        // Bump the generation number so the insert succeeds.
+        sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
 
         // Test that upserting the sled propagates those changes to the DB.
         let observed_sled = datastore
@@ -744,9 +745,10 @@ mod test {
     }
 
     #[tokio::test]
-    async fn upsert_sled_updates_fails_with_stale_rcgen() {
-        let logctx =
-            dev::test_setup_log("upsert_sled_updates_fails_with_stale_rcgen");
+    async fn upsert_sled_updates_fails_with_stale_sled_agent_gen() {
+        let logctx = dev::test_setup_log(
+            "upsert_sled_updates_fails_with_stale_sled_agent_gen",
+        );
         let mut db = test_setup_database(&logctx.log).await;
         let (_opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -769,8 +771,8 @@ mod test {
         // Fail the update, since the generation number didn't change.
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
-        // Bump the gneration number so the next insert succeeds.
-        sled_update.rcgen.0 = sled_update.rcgen.0.next();
+        // Bump the generation number so the next insert succeeds.
+        sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
 
         // Test that upserting the sled propagates those changes to the DB.
         let observed_sled = datastore
@@ -781,8 +783,8 @@ mod test {
 
         // Now reset the generation to a lower value and try again.
         // This should fail.
-        let current_gen = sled_update.rcgen;
-        sled_update.rcgen = Generation::new();
+        let current_gen = sled_update.sled_agent_gen;
+        sled_update.sled_agent_gen = Generation::new();
         assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // Now bump the generation from the saved `current_gen`
@@ -793,14 +795,14 @@ mod test {
             )
             .unwrap(),
         );
-        sled_update.rcgen.0 = current_gen.0.next();
+        sled_update.sled_agent_gen.0 = current_gen.0.next();
         // Test that upserting the sled propagates those changes to the DB.
         let observed_sled = datastore
             .sled_upsert(sled_update.clone())
             .await
             .expect("Could not upsert sled during test prep");
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
-        assert_eq!(observed_sled.rcgen, sled_update.rcgen);
+        assert_eq!(observed_sled.sled_agent_gen, sled_update.sled_agent_gen);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
