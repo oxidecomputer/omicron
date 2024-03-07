@@ -84,6 +84,12 @@ function main
 	# Unpack the tarball into a local directory
 	do_untar "$TARBALL_FILE" "$DEST_DIR"
 
+	# on macOS, we need to take the binary out of quarantine after download
+	# https://github.com/ClickHouse/clickhouse-docs/blob/08d7a329d/knowledgebase/fix-developer-verification-error-in-macos.md
+	if [[ $CIDL_OS == darwin* ]]; then
+		xattr -d com.apple.quarantine "$DEST_DIR/clickhouse"
+	fi
+
 	# Run the binary as a sanity-check.
 	"$DEST_DIR/clickhouse" server --version
 }
