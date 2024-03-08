@@ -435,7 +435,7 @@ task: "switch_port_config_manager"
   currently executing: no
   last completed activation: iter 2, triggered by an explicit signal
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    last completion reported error: Could not determine if task is enabled via db: Invalid Request: no matching records
+warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 ---------------------------------------------
 stderr:
