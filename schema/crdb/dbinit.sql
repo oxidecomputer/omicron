@@ -3547,12 +3547,17 @@ FROM interleaved_versions;
 
 CREATE INDEX IF NOT EXISTS rack_initialized ON omicron.public.rack (initialized);
 
+-- table for tracking bootstore configuration changes over time
+-- this makes reconciliation easier and also gives us a visible history of changes
 CREATE TABLE IF NOT EXISTS omicron.public.bootstore_config (
-    version INT8 NOT NULL PRIMARY KEY,
-    config JSONB NOT NULL,
+    key TEXT NOT NULL,
+    generation INT8 NOT NULL,
+    PRIMARY KEY (key, generation),
+    data JSONB NOT NULL,
     time_created TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ
 );
+
 
 INSERT INTO omicron.public.db_metadata (
     singleton,

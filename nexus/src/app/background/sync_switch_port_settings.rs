@@ -14,8 +14,8 @@ use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    BgpConfig, SwitchLinkFec, SwitchLinkSpeed, SwitchPortBgpPeerConfig,
-    NETWORK_KEY,
+    BgpConfig, BootstoreConfig, SwitchLinkFec, SwitchLinkSpeed,
+    SwitchPortBgpPeerConfig, NETWORK_KEY,
 };
 use uuid::Uuid;
 
@@ -546,6 +546,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
+                // TODO: remove. Historically, we've been using the first scrimlet we can reach
+                // to get the ntp servers and address lot range. We should instead be pulling this
+                // information from the db.
+
                 // find the active sled-agent bootstore config with the highest generation
                 let mut latest_sled_agent_bootstore_config: Option<EarlyNetworkConfig> = None;
 
@@ -574,6 +578,25 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     error!(log, "both scrimlets are unreachable, cannot update bootstore");
                     continue;
                 }
+
+                let (ntp_servers, infra_ip_first, infra_ip_last) = latest_sled_agent_bootstore_config
+                    .as_ref()
+                    .and_then(|config| {
+                        config.body.rack_network_config.as_ref().map(|rack_config| {
+                            (
+                                config.body.ntp_servers.clone(),
+                                rack_config.infra_ip_first,
+                                rack_config.infra_ip_last,
+                            )
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        (
+                            Vec::new(),
+                            Ipv4Addr::UNSPECIFIED,
+                            Ipv4Addr::UNSPECIFIED,
+                        )
+                    });
 
                 // build the desired bootstore config from the records we've fetched
                 let subnet = match rack.rack_subnet {
@@ -663,30 +686,86 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     generation: 0,
                     schema_version: 1,
                     body: EarlyNetworkConfigBody {
-                        ntp_servers: Vec::new(), //TODO
+                        ntp_servers,
                         rack_network_config: Some(RackNetworkConfigV1 {
                             rack_subnet: subnet,
                             //TODO(ry) you are here. We need to remove these too. They are
                             // inconsistent with a generic set of addresses on ports.
-                            infra_ip_first: Ipv4Addr::UNSPECIFIED,
-                            infra_ip_last: Ipv4Addr::UNSPECIFIED,
+                            infra_ip_first,
+                            infra_ip_last,
                             ports,
                             bgp,
                         }),
                     },
                 };
 
-                // we currently are not caching the last sent bootstore config, so we have to build
-                // it every time and compare.
-
-                let bootstore_needs_update = {
-                    match latest_sled_agent_bootstore_config {
-                        Some(ref existing_config) => {
-                            existing_config.body.ntp_servers != desired_config.body.ntp_servers ||
-                            existing_config.body.rack_network_config != desired_config.body.rack_network_config
-                        },
-                        _ => true,
-                    }
+                // should_update is a boolean value that determines whether or not we need to
+                // increment the bootstore version and push a new config to the sled agents.
+                //
+                // * If the config we've built from the switchport configuration information is
+                //   different from the last config we've cached in the db, we update the config,
+                //   cache it in the db, and apply it.
+                // * If the last cached config cannot be succesfully deserialized into our current
+                //   bootstore format, we assume that it is an older format and update the config,
+                //   cache it in the db, and apply it.
+                // * If there is no last cached config, we assume that this is the first time this
+                //   rpw has run for the given rack, so we update the config, cache it in the db,
+                //   and apply it.
+                // * If we cannot fetch the latest version due to a db error, something is broken
+                //   so we don't do anything.
+                let bootstore_needs_update = match self.datastore.get_latest_bootstore_config(opctx, NETWORK_KEY.into()).await {
+                    Ok(Some(BootstoreConfig { data, .. })) => {
+                        match serde_json::from_value::<EarlyNetworkConfig>(data.clone()) {
+                            Ok(config) => {
+                                if config.body.ntp_servers != desired_config.body.ntp_servers {
+                                    info!(
+                                        log,
+                                        "ntp servers have changed";
+                                        "old" => ?config.body.ntp_servers,
+                                        "new" => ?desired_config.body.ntp_servers,
+                                    );
+                                    true
+                                } else if config.body.rack_network_config != desired_config.body.rack_network_config {
+                                    info!(
+                                        log,
+                                        "rack network config has changed";
+                                        "old" => ?config.body.rack_network_config,
+                                        "new" => ?desired_config.body.rack_network_config,
+                                    );
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
+                            Err(e) => {
+                                error!(
+                                    log,
+                                    "bootstore config does not deserialized to current EarlyNetworkConfig format";
+                                    "key" => %NETWORK_KEY,
+                                    "value" => %data,
+                                    "error" => %e,
+                                );
+                                true
+                            },
+                        }
+                    },
+                    Ok(None) => {
+                        warn!(
+                            log,
+                            "no bootstore config found in db";
+                            "key" => %NETWORK_KEY,
+                        );
+                        true
+                    },
+                    Err(e) => {
+                        error!(
+                            log,
+                            "error while fetching last applied bootstore config";
+                            "key" => %NETWORK_KEY,
+                            "error" => %e,
+                        );
+                        continue;
+                    },
                 };
 
                 if bootstore_needs_update {
@@ -715,6 +794,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                     // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
+                    let mut one_succeeded = false;
                     for (location, client) in &sled_agent_clients {
                         if let Err(e) = client.write_network_bootstore_config(&desired_config).await {
                             error!(
@@ -724,6 +804,28 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 "config" => ?desired_config,
                                 "error" => %e,
                             )
+                        } else {
+                            one_succeeded = true;
+                        }
+                    }
+
+                    if one_succeeded {
+                        let config = BootstoreConfig {
+                            key: NETWORK_KEY.into(),
+                            generation: desired_config.generation as i64,
+                            data: serde_json::to_value(&desired_config).unwrap(),
+                            time_created: chrono::Utc::now(),
+                            time_deleted: None,
+                        };
+                        if let Err(e) = self.datastore.ensure_bootstore_config(opctx, config.clone()).await {
+                            // if this fails, worst case scenario is that we will send the bootstore
+                            // information it already has on the next run
+                            error!(
+                                log,
+                                "error while caching bootstore config in db";
+                                "config" => ?config,
+                                "error" => %e,
+                            );
                         }
                     }
                 }
