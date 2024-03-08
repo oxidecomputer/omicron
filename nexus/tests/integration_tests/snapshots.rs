@@ -307,7 +307,7 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
     .parsed_body()
     .unwrap();
 
-    // Boot instance with disk
+    // Create a stopped instance with attached disk
     let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
     let instance_name = "base-instance";
 
