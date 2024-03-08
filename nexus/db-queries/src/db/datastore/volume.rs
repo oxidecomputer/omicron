@@ -53,6 +53,21 @@ pub enum VolumeCheckoutReason {
     Pantry,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum VolumeGetError {
+    #[error("Serde error during volume_checkout: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Updated {0} database rows, expected {1}")]
+    UnexpectedDatabaseUpdate(usize, usize),
+
+    #[error("Checkout condition failed: {0}")]
+    CheckoutConditionFailed(String),
+
+    #[error("Invalid Volume: {0}")]
+    InvalidVolume(String),
+}
+
 impl DataStore {
     pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
         use db::schema::volume::dsl;
@@ -203,6 +218,244 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    async fn volume_checkout_allowed(
+        reason: &VolumeCheckoutReason,
+        vcr: &VolumeConstructionRequest,
+        maybe_disk: Option<Disk>,
+        maybe_instance: Option<Instance>,
+    ) -> Result<(), VolumeGetError> {
+        match reason {
+            VolumeCheckoutReason::ReadOnlyCopy => {
+                // When checking out to make a copy (usually for use as a
+                // read-only parent), the volume must be read only. Even if a
+                // call-site that uses Copy sends this copied Volume to a
+                // Propolis or Pantry, the Upstairs that will be created will be
+                // read-only, and will not take over from other read-only
+                // Upstairs.
+
+                match volume_is_read_only(&vcr) {
+                    Ok(read_only) => {
+                        if !read_only {
+                            return Err(VolumeGetError::CheckoutConditionFailed(
+                                String::from("Non-read-only Volume Checkout for use Copy!")
+                            ));
+                        }
+
+                        Ok(())
+                    }
+
+                    Err(e) => Err(VolumeGetError::InvalidVolume(e.to_string())),
+                }
+            }
+
+            VolumeCheckoutReason::CopyAndModify => {
+                // `CopyAndModify` is used when taking a read/write Volume,
+                // modifying it (for example, when taking a snapshot, to point
+                // to read-only resources), and committing it back to the DB.
+                // This is a checkout of a read/write Volume, so creating an
+                // Upstairs from it *may* take over from something else. The
+                // call-site must ensure this doesn't happen, but we can't do
+                // that here.
+
+                Ok(())
+            }
+
+            VolumeCheckoutReason::InstanceStart { vmm_id } => {
+                // Check out this volume to send to Propolis to start an
+                // Instance. The VMM id in the enum must match the instance's
+                // propolis_id.
+
+                let Some(instance) = &maybe_instance else {
+                    return Err(VolumeGetError::CheckoutConditionFailed(
+                        format!(
+                            "InstanceStart {}: instance does not exist",
+                            vmm_id
+                        ),
+                    ));
+                };
+
+                let runtime = instance.runtime();
+                match (runtime.propolis_id, runtime.dst_propolis_id) {
+                    (Some(_), Some(_)) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceStart {}: instance {} is undergoing migration",
+                                vmm_id,
+                                instance.id(),
+                            )
+                        ))
+                    }
+
+                    (None, None) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceStart {}: instance {} has no propolis ids",
+                                vmm_id,
+                                instance.id(),
+                            )
+                        ))
+                    }
+
+                    (Some(propolis_id), None) => {
+                        if propolis_id != *vmm_id {
+                            return Err(VolumeGetError::CheckoutConditionFailed(
+                                format!(
+                                    "InstanceStart {}: instance {} propolis id {} mismatch",
+                                    vmm_id,
+                                    instance.id(),
+                                    propolis_id,
+                                )
+                            ));
+                        }
+
+                        Ok(())
+                    }
+
+                    (None, Some(dst_propolis_id)) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceStart {}: instance {} has no propolis id but dst propolis id {}",
+                                vmm_id,
+                                instance.id(),
+                                dst_propolis_id,
+                            )
+                        ))
+                    }
+                }
+            }
+
+            VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id } => {
+                // Check out this volume to send to destination Propolis to
+                // migrate an Instance. Only take over from the specified source
+                // VMM.
+
+                let Some(instance) = &maybe_instance else {
+                    return Err(VolumeGetError::CheckoutConditionFailed(
+                        format!(
+                            "InstanceMigrate {} {}: instance does not exist",
+                            vmm_id, target_vmm_id
+                        ),
+                    ));
+                };
+
+                let runtime = instance.runtime();
+                match (runtime.propolis_id, runtime.dst_propolis_id) {
+                    (Some(propolis_id), Some(dst_propolis_id)) => {
+                        if propolis_id != *vmm_id || dst_propolis_id != *target_vmm_id {
+                            return Err(VolumeGetError::CheckoutConditionFailed(
+                                format!(
+                                    "InstanceMigrate {} {}: instance {} propolis id mismatches {} {}",
+                                    vmm_id,
+                                    target_vmm_id,
+                                    instance.id(),
+                                    propolis_id,
+                                    dst_propolis_id,
+                                )
+                            ));
+                        }
+
+                        Ok(())
+                    }
+
+                    (None, None) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceMigrate {} {}: instance {} has no propolis ids",
+                                vmm_id,
+                                target_vmm_id,
+                                instance.id(),
+                            )
+                        ))
+                    }
+
+                    (Some(propolis_id), None) => {
+                        // XXX is this right?
+                        if propolis_id != *vmm_id {
+                            return Err(VolumeGetError::CheckoutConditionFailed(
+                                format!(
+                                    "InstanceMigrate {} {}: instance {} propolis id {} mismatch",
+                                    vmm_id,
+                                    target_vmm_id,
+                                    instance.id(),
+                                    propolis_id,
+                                )
+                            ));
+                        }
+
+                        Ok(())
+                    }
+
+                    (None, Some(dst_propolis_id)) => {
+                        Err(VolumeGetError::CheckoutConditionFailed(
+                            format!(
+                                "InstanceMigrate {} {}: instance {} has no propolis id but dst propolis id {}",
+                                vmm_id,
+                                target_vmm_id,
+                                instance.id(),
+                                dst_propolis_id,
+                            )
+                        ))
+                    }
+                }
+            }
+
+            VolumeCheckoutReason::Pantry => {
+                // Check out this Volume to send to a Pantry, which will create
+                // a read/write Upstairs, for background maintenance operations.
+                // There must not be any Propolis, otherwise this will take over
+                // from that and cause errors for guest OSes.
+
+                let Some(disk) = maybe_disk else {
+                    // This volume isn't backing a disk, it won't take over from
+                    // a Propolis' Upstairs.
+                    return Ok(());
+                };
+
+                let Some(attach_instance_id) =
+                    disk.runtime().attach_instance_id
+                else {
+                    // The volume is backing a disk that is not attached to an
+                    // instance. At this moment it won't take over from a
+                    // Propolis' Upstairs, so send it to a Pantry to create an
+                    // Upstairs there.  A future checkout that happens after
+                    // this transaction that is sent to a Propolis _will_ take
+                    // over from this checkout (sent to a Pantry), which is ok.
+                    return Ok(());
+                };
+
+                let Some(instance) = maybe_instance else {
+                    // The instance, which the disk that this volume backs is
+                    // attached to, doesn't exist?
+                    //
+                    // XXX this is a Nexus bug!
+                    return Err(VolumeGetError::CheckoutConditionFailed(
+                        format!(
+                            "Pantry: instance {} backing disk {} does not exist?",
+                            attach_instance_id,
+                            disk.id(),
+                        )
+                    ));
+                };
+
+                if let Some(propolis_id) = instance.runtime().propolis_id {
+                    // The instance, which the disk that this volume backs is
+                    // attached to, exists and has an active propolis ID.  A
+                    // propolis _may_ exist, so bail here - an activation from
+                    // the Pantry is not allowed to take over from a Propolis.
+                    Err(VolumeGetError::CheckoutConditionFailed(format!(
+                        "Pantry: possible Propolis {}",
+                        propolis_id
+                    )))
+                } else {
+                    // The instance, which the disk that this volume backs is
+                    // attached to, exists, but there is no active propolis ID.
+                    // This is ok.
+                    Ok(())
+                }
+            }
+        }
+    }
+
     /// Checkout a copy of the Volume from the database.
     /// This action (getting a copy) will increase the generation number
     /// of Volumes of the VolumeConstructionRequest::Volume type that have
@@ -215,21 +468,6 @@ impl DataStore {
         reason: VolumeCheckoutReason,
     ) -> LookupResult<Volume> {
         use db::schema::volume::dsl;
-
-        #[derive(Debug, thiserror::Error)]
-        enum VolumeGetError {
-            #[error("Serde error during volume_checkout: {0}")]
-            SerdeError(#[from] serde_json::Error),
-
-            #[error("Updated {0} database rows, expected {1}")]
-            UnexpectedDatabaseUpdate(usize, usize),
-
-            #[error("Checkout condition failed: {0}")]
-            CheckoutConditionFailed(String),
-
-            #[error("Invalid Volume: {0}")]
-            InvalidVolume(String),
-        }
 
         // We perform a transaction here, to be sure that on completion
         // of this, the database contains an updated version of the
@@ -286,205 +524,25 @@ impl DataStore {
                                     .await
                                     .optional()?
                             } else {
+                                // Disk not attached to an instance
                                 None
                             }
                         } else {
+                            // Volume not associated with disk
                             None
                         };
 
                         (maybe_disk, maybe_instance)
                     };
 
-                    match reason {
-                        VolumeCheckoutReason::ReadOnlyCopy => {
-                            // When checking out to make a copy (usually for use as a read-only
-                            // parent), the volume must be read only. Even if a call-site that uses
-                            // Copy sends this copied Volume to a Propolis or Pantry, the Upstairs
-                            // that will be created will be read-only, and will not take over from
-                            // other read-only Upstairs.
-
-                            match volume_is_read_only(&vcr) {
-                                Ok(read_only) => {
-                                    if !read_only {
-                                        return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                            String::from("Non-read-only Volume Checkout for use Copy!")
-                                        )));
-                                    }
-                                }
-
-                                Err(e) => {
-                                    return Err(err.bail(VolumeGetError::InvalidVolume(
-                                        e.to_string()
-                                    )));
-                                }
-                            }
-                        }
-
-                        VolumeCheckoutReason::CopyAndModify => {
-                            // `CopyAndModify` is used when taking a read/write Volume, modifying it
-                            // (for example, when taking a snapshot, to point to read-only
-                            // resources), and committing it back to the DB. This is a checkout of a
-                            // read/write Volume, so creating an Upstairs from it *may* take over
-                            // from something else. The call-site must ensure this doesn't happen,
-                            // but we can't do that here.
-                        }
-
-                        VolumeCheckoutReason::InstanceStart { vmm_id } => {
-                            // Check out this volume to send to Propolis to start an Instance. The
-                            // VMM id in the enum must match the instance's propolis_id.
-
-                            if let Some(instance) = &maybe_instance {
-                                let runtime = instance.runtime();
-                                match (runtime.propolis_id, runtime.dst_propolis_id) {
-                                    (Some(_), Some(_)) => {
-                                        return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                            format!("InstanceStart {}: instance {} is undergoing migration", vmm_id, instance.id())
-                                        )));
-                                    }
-
-                                    (None, None) => {
-                                        return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                            format!("InstanceStart {}: instance {} has no propolis ids", vmm_id, instance.id())
-                                        )));
-                                    }
-
-                                    (Some(propolis_id), None) => {
-                                        if propolis_id != vmm_id {
-                                            return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                                format!(
-                                                    "InstanceStart {}: instance {} propolis id {} mismatch",
-                                                    vmm_id,
-                                                    instance.id(),
-                                                    propolis_id,
-                                                )
-                                            )));
-                                        }
-                                    }
-
-                                    (None, Some(dst_propolis_id)) => {
-                                        return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                            format!(
-                                                "InstanceStart {}: instance {} has no propolis id but dst propolis id {}",
-                                                vmm_id,
-                                                instance.id(),
-                                                dst_propolis_id,
-                                            )
-                                        )));
-                                    }
-                                }
-                            } else {
-                                return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                    format!("InstanceStart {}: instance does not exist", vmm_id)
-                                )));
-                            }
-                        }
-
-                        VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id } => {
-                            // Check out this volume to send to destination Propolis to migrate an
-                            // Instance. Only take over from the specified source VMM.
-
-                            if let Some(instance) = &maybe_instance {
-                                let runtime = instance.runtime();
-                                match (runtime.propolis_id, runtime.dst_propolis_id) {
-                                    (Some(propolis_id), Some(dst_propolis_id)) => {
-                                        if propolis_id != vmm_id || dst_propolis_id != target_vmm_id {
-                                            return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                                format!(
-                                                    "InstanceMigrate {} {}: instance {} propolis id mismatches {} {}",
-                                                    vmm_id,
-                                                    target_vmm_id,
-                                                    instance.id(),
-                                                    propolis_id,
-                                                    dst_propolis_id,
-                                                )
-                                            )));
-                                        }
-                                    }
-
-                                    (None, None) => {
-                                        return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                            format!("InstanceMigrate {} {}: instance {} has no propolis ids", vmm_id, target_vmm_id, instance.id())
-                                        )));
-                                    }
-
-                                    (Some(propolis_id), None) => {
-                                        if propolis_id != vmm_id {
-                                            return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                                format!(
-                                                    "InstanceMigrate {} {}: instance {} propolis id {} mismatch",
-                                                    vmm_id,
-                                                    target_vmm_id,
-                                                    instance.id(),
-                                                    propolis_id,
-                                                )
-                                            )));
-                                        }
-                                    }
-
-                                    (None, Some(dst_propolis_id)) => {
-                                        return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                            format!(
-                                                "InstanceMigrate {} {}: instance {} has no propolis id but dst propolis id {}",
-                                                vmm_id,
-                                                target_vmm_id,
-                                                instance.id(),
-                                                dst_propolis_id,
-                                            )
-                                        )));
-                                    }
-                                }
-                            } else {
-                                return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                    format!("InstanceMigrate {} {}: instance does not exist", vmm_id, target_vmm_id)
-                                )));
-                            }
-                        }
-
-                        VolumeCheckoutReason::Pantry => {
-                            // Check out this Volume to send to a Pantry, which will create a
-                            // read/write Upstairs, for background maintenance operations. There
-                            // must not be any Propolis, otherwise this will take over from that and
-                            // cause errors for guest OSes.
-
-                            if let Some(disk) = maybe_disk {
-                                if let Some(attach_instance_id) = disk.runtime().attach_instance_id {
-                                    if let Some(instance) = maybe_instance {
-                                        if let Some(propolis_id) = instance.runtime().propolis_id {
-                                            // The instance, which the disk that this volume backs
-                                            // is attached to, exists and has an active propolis ID.
-                                            // A propolis _may_ exist, so bail here - an activation
-                                            // from the Pantry is not allowed to take over from a
-                                            // Propolis.
-                                            return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                                format!("Pantry: possible Propolis {}", propolis_id)
-                                            )));
-                                        } else {
-                                            // The instance, which the disk that this volume backs
-                                            // is attached to, exists, but there is no active
-                                            // propolis ID. This is ok.
-                                        }
-                                    } else {
-                                        // The instance, which the disk that this volume backs is
-                                        // attached to, doesn't exist?
-                                        //
-                                        // XXX this is a Nexus bug
-                                        return Err(err.bail(VolumeGetError::CheckoutConditionFailed(
-                                            format!("Pantry: instance {} backing disk {} does not exist?", attach_instance_id, disk.id())
-                                        )));
-                                    }
-                                } else {
-                                    // The volume is backing a disk that is not attached to an
-                                    // instance. At this moment it won't take over from a Propolis'
-                                    // Upstairs, so send it to a Pantry to create an Upstairs there.
-                                    // A future checkout that happens after this transaction that is
-                                    // sent to a Propolis _will_ take over from this checkout (sent
-                                    // to a Pantry), which is ok.
-                                }
-                            } else {
-                                // This volume isn't backing a disk, it won't take over from a
-                                // Propolis' Upstairs.
-                            }
-                        }
+                    if let Err(e) = Self::volume_checkout_allowed(
+                        &reason,
+                        &vcr,
+                        maybe_disk,
+                        maybe_instance,
+                    )
+                    .await {
+                        return Err(err.bail(e));
                     }
 
                     // Look to see if the VCR is a Volume type, and if so, look at
