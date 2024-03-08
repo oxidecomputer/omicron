@@ -94,8 +94,12 @@ impl super::Nexus {
             .blueprint_target_set_current(opctx, new_target)
             .await?;
 
-        // When we add a background task executing the target blueprint,
-        // this is the point where we'd signal it to update its target.
+        // We have a new target: trigger the background task to realize it if
+        // it's enabled.
+        if new_target.enabled {
+            self.background_tasks
+                .activate(&self.background_tasks.task_blueprint_executor);
+        }
 
         Ok(new_target)
     }
@@ -115,8 +119,12 @@ impl super::Nexus {
             .blueprint_target_set_current_enabled(opctx, new_target)
             .await?;
 
-        // When we add a background task executing the target blueprint,
-        // this is the point where we'd signal it to update its target.
+        // If we just enabled this target, activate the background task to
+        // realize it.
+        if new_target.enabled {
+            self.background_tasks
+                .activate(&self.background_tasks.task_blueprint_executor);
+        }
 
         Ok(new_target)
     }
