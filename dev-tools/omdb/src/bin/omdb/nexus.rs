@@ -41,6 +41,7 @@ pub struct NexusArgs {
 }
 
 /// Subcommands for the "omdb nexus" subcommand
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum NexusCommands {
     /// print information about background tasks
@@ -150,6 +151,7 @@ struct SledsArgs {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum SledsCommands {
     /// List all uninitialized sleds
     ListUninitialized,
