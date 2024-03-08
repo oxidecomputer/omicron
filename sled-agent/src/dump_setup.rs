@@ -1100,9 +1100,9 @@ mod tests {
     };
     use sled_storage::dataset::{CRASH_DATASET, DUMP_DATASET};
     use std::collections::HashMap;
-    use std::io::Write;
     use std::str::FromStr;
     use tempfile::TempDir;
+    use tokio::io::AsyncWriteExt;
 
     impl Clone for ZfsGetError {
         fn clone(&self) -> Self {
@@ -1201,8 +1201,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_does_not_configure_coreadm_when_no_crash_dataset_mounted() {
+    #[tokio::test]
+    async fn test_does_not_configure_coreadm_when_no_crash_dataset_mounted() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_does_not_configure_coreadm_when_no_crash_dataset_mounted",
         );
@@ -1225,6 +1225,7 @@ mod tests {
 
         // nothing when no disks
         worker.update_disk_loadout(vec![], vec![], vec![]);
+        worker.reevaluate_choices().await;
         assert_eq!(worker.chosen_core_dir, None);
 
         // nothing when only a disk that's not ready
@@ -1233,12 +1234,13 @@ mod tests {
             name: ZpoolName::from_str(NOT_MOUNTED_INTERNAL).unwrap(),
         };
         worker.update_disk_loadout(vec![], vec![], vec![non_mounted_zpool]);
+        worker.reevaluate_choices().await;
         assert_eq!(worker.chosen_core_dir, None);
         logctx.cleanup_successful();
     }
 
-    #[test]
-    fn test_configures_coreadm_only_when_crash_dataset_mounted() {
+    #[tokio::test]
+    async fn test_configures_coreadm_only_when_crash_dataset_mounted() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_configures_coreadm_only_when_crash_dataset_mounted",
         );
@@ -1303,8 +1305,9 @@ mod tests {
             vec![],
             vec![non_mounted_zpool.clone(), mounted_zpool],
         );
+        worker.reevaluate_choices().await;
         assert_eq!(
-            worker.chosen_core_dir.as_ref().unwrap().0,
+            worker.chosen_core_dir.as_ref().expect("core dir wasn't chosen").0,
             Utf8PathBuf::from(ZPOOL_MNT).join(CRASH_DATASET)
         );
 
@@ -1314,34 +1317,35 @@ mod tests {
             vec![],
             vec![non_mounted_zpool, err_zpool],
         );
+        worker.reevaluate_choices().await;
         assert_eq!(worker.chosen_core_dir, None);
         logctx.cleanup_successful();
     }
 
     // we make these so illumos_utils::dumpadm::dump_flag_is_valid returns what we want
-    fn populate_tempdir_with_fake_dumps(
+    async fn populate_tempdir_with_fake_dumps(
         tempdir: &TempDir,
     ) -> (DumpSlicePath, DumpSlicePath) {
         let occupied = DumpSlicePath(
             Utf8PathBuf::from_path_buf(tempdir.path().join("occupied.bin"))
                 .unwrap(),
         );
-        let mut f = std::fs::File::create(occupied.as_ref()).unwrap();
-        f.write_all(&[0u8; DUMP_OFFSET as usize]).unwrap();
-        f.write_all(&DUMP_MAGIC.to_le_bytes()).unwrap();
-        f.write_all(&DUMP_VERSION.to_le_bytes()).unwrap();
-        f.write_all(&DF_VALID.to_le_bytes()).unwrap();
+        let mut f = tokio::fs::File::create(occupied.as_ref()).await.unwrap();
+        f.write_all(&[0u8; DUMP_OFFSET as usize]).await.unwrap();
+        f.write_all(&DUMP_MAGIC.to_le_bytes()).await.unwrap();
+        f.write_all(&DUMP_VERSION.to_le_bytes()).await.unwrap();
+        f.write_all(&DF_VALID.to_le_bytes()).await.unwrap();
         drop(f);
 
         let vacant = DumpSlicePath(
             Utf8PathBuf::from_path_buf(tempdir.path().join("vacant.bin"))
                 .unwrap(),
         );
-        let mut f = std::fs::File::create(vacant.as_ref()).unwrap();
-        f.write_all(&[0u8; DUMP_OFFSET as usize]).unwrap();
-        f.write_all(&DUMP_MAGIC.to_le_bytes()).unwrap();
-        f.write_all(&DUMP_VERSION.to_le_bytes()).unwrap();
-        f.write_all(&0u32.to_le_bytes()).unwrap();
+        let mut f = tokio::fs::File::create(vacant.as_ref()).await.unwrap();
+        f.write_all(&[0u8; DUMP_OFFSET as usize]).await.unwrap();
+        f.write_all(&DUMP_MAGIC.to_le_bytes()).await.unwrap();
+        f.write_all(&DUMP_VERSION.to_le_bytes()).await.unwrap();
+        f.write_all(&0u32.to_le_bytes()).await.unwrap();
         drop(f);
 
         (occupied, vacant)
@@ -1349,8 +1353,8 @@ mod tests {
 
     // if we only have two filled dump slices and nowhere to evacuate them,
     // don't configure a dump slice at all.
-    #[test]
-    fn test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir() {
+    #[tokio::test]
+    async fn test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_savecore_and_dumpadm_not_called_when_occupied_and_no_dir",
         );
@@ -1362,13 +1366,14 @@ mod tests {
             tokio::sync::mpsc::channel(1).1,
         );
         let tempdir = TempDir::new().unwrap();
-        let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir);
+        let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir).await;
 
         worker.update_disk_loadout(
             vec![occupied.clone(), occupied],
             vec![],
             vec![],
         );
+        worker.reevaluate_choices().await;
         assert!(worker.chosen_dump_slice.is_none());
         logctx.cleanup_successful();
     }
@@ -1376,8 +1381,8 @@ mod tests {
     // if we have one dump slice that's free and one that's full,
     // and nowhere to savecore the full one,
     // we should always call dumpadm with the free one.
-    #[test]
-    fn test_dumpadm_called_when_vacant_slice_but_no_dir() {
+    #[tokio::test]
+    async fn test_dumpadm_called_when_vacant_slice_but_no_dir() {
         let logctx = omicron_test_utils::dev::test_setup_log(
             "test_dumpadm_called_when_vacant_slice_but_no_dir",
         );
@@ -1389,12 +1394,14 @@ mod tests {
             tokio::sync::mpsc::channel(1).1,
         );
         let tempdir = TempDir::new().unwrap();
-        let (occupied, vacant) = populate_tempdir_with_fake_dumps(&tempdir);
+        let (occupied, vacant) =
+            populate_tempdir_with_fake_dumps(&tempdir).await;
         worker.update_disk_loadout(
             vec![occupied, vacant.clone()],
             vec![],
             vec![],
         );
+        worker.reevaluate_choices().await;
         assert_eq!(worker.chosen_dump_slice.as_ref(), Some(&vacant));
         logctx.cleanup_successful();
     }
@@ -1402,8 +1409,8 @@ mod tests {
     // if we have two occupied dump slices,
     // but we also have somewhere to unload them,
     // call dumpadm and savecore.
-    #[test]
-    fn test_savecore_and_dumpadm_invoked_when_slices_occupied_and_dir_is_available(
+    #[tokio::test]
+    async fn test_savecore_and_dumpadm_invoked_when_slices_occupied_and_dir_is_available(
     ) {
         let logctx = omicron_test_utils::dev::test_setup_log("test_savecore_and_dumpadm_invoked_when_slices_occupied_and_dir_is_available");
         const MOUNTED_EXTERNAL: &str =
@@ -1429,7 +1436,7 @@ mod tests {
             tokio::sync::mpsc::channel(1).1,
         );
         let tempdir = TempDir::new().unwrap();
-        let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir);
+        let (occupied, _) = populate_tempdir_with_fake_dumps(&tempdir).await;
 
         let mounted_zpool = DebugZpool {
             mount_config: MountConfig::default(),
@@ -1440,6 +1447,8 @@ mod tests {
             vec![mounted_zpool],
             vec![],
         );
+        worker.reevaluate_choices().await;
+
         assert_eq!(worker.chosen_dump_slice.as_ref(), Some(&occupied));
         assert_eq!(
             worker.chosen_debug_dir.unwrap().0,
@@ -1500,22 +1509,24 @@ mod tests {
             tokio::sync::mpsc::channel(1).1,
         );
 
-        std::fs::create_dir_all(&core_dir).unwrap();
-        std::fs::create_dir_all(&debug_dir).unwrap();
-        std::fs::create_dir_all(&zone_logs).unwrap();
+        tokio::fs::create_dir_all(&core_dir).await.unwrap();
+        tokio::fs::create_dir_all(&debug_dir).await.unwrap();
+        tokio::fs::create_dir_all(&zone_logs).await.unwrap();
         const LOG_NAME: &'static str = "foo.log.0";
-        writeln!(
-            std::fs::File::create(zone_logs.join(LOG_NAME)).unwrap(),
-            "hello"
-        )
-        .unwrap();
+        tokio::fs::File::create(zone_logs.join(LOG_NAME))
+            .await
+            .expect("creating fake log")
+            .write_all(b"hello")
+            .await
+            .expect("writing fake log");
 
         const CORE_NAME: &str = "core.myzone.myexe.123.1690540950";
-        writeln!(
-            std::fs::File::create(core_dir.join(CORE_NAME)).unwrap(),
-            "crunch"
-        )
-        .unwrap();
+        tokio::fs::File::create(core_dir.join(CORE_NAME))
+            .await
+            .expect("creating fake core")
+            .write_all(b"crunch")
+            .await
+            .expect("writing fake core");
 
         let mounted_core_zpool = CoreZpool {
             mount_config: MountConfig::default(),
@@ -1531,6 +1542,7 @@ mod tests {
             vec![mounted_debug_zpool],
             vec![mounted_core_zpool],
         );
+        worker.reevaluate_choices().await;
         worker.archive_files().await.unwrap();
 
         // it'll be renamed to use an epoch timestamp instead of .0
