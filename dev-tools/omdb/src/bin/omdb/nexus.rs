@@ -118,6 +118,14 @@ enum BlueprintTargetCommands {
     Show,
     /// Change the current target blueprint
     Set(BlueprintTargetSetArgs),
+    /// Enable the current target blueprint
+    ///
+    /// Fails if the specified blueprint id is not the curren target
+    Enable(BlueprintIdArgs),
+    /// Disable the current target blueprint
+    ///
+    /// Fails if the specified blueprint id is not the curren target
+    Disable(BlueprintIdArgs),
 }
 
 #[derive(Debug, Args)]
@@ -229,6 +237,26 @@ impl NexusArgs {
             }) => {
                 omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_target_set(&client, args).await
+            }
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command:
+                    BlueprintsCommands::Target(BlueprintsTargetArgs {
+                        command: BlueprintTargetCommands::Enable(args),
+                    }),
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set_enabled(&client, args, true)
+                    .await
+            }
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command:
+                    BlueprintsCommands::Target(BlueprintsTargetArgs {
+                        command: BlueprintTargetCommands::Disable(args),
+                    }),
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set_enabled(&client, args, false)
+                    .await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
@@ -963,6 +991,27 @@ async fn cmd_nexus_blueprints_target_set(
             format!("setting target to blueprint {}", args.blueprint_id)
         })?;
     eprintln!("set target blueprint to {}", args.blueprint_id);
+    Ok(())
+}
+
+async fn cmd_nexus_blueprints_target_set_enabled(
+    client: &nexus_client::Client,
+    args: &BlueprintIdArgs,
+    enabled: bool,
+) -> Result<(), anyhow::Error> {
+    let description = if enabled { "enabled" } else { "disabled" };
+    client
+        .blueprint_target_set_enabled(
+            &nexus_client::types::BlueprintTargetSet {
+                target_id: args.blueprint_id,
+                enabled,
+            },
+        )
+        .await
+        .with_context(|| {
+            format!("setting blueprint {} to {description}", args.blueprint_id)
+        })?;
+    eprintln!("set target blueprint {} to {description}", args.blueprint_id);
     Ok(())
 }
 
