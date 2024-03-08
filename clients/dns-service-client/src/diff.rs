@@ -59,8 +59,11 @@ impl<'a> DnsDiff<'a> {
         &self,
     ) -> impl Iterator<Item = (&str, &[DnsRecord], &[DnsRecord])> {
         self.left.iter().filter_map(|(k, v1)| match self.right.get(k) {
-            Some(v2) if v1 != v2 => {
-                Some((k.as_ref(), v1.as_ref(), v2.as_ref()))
+            Some(v2) => {
+                let v1_sorted = v1.clone().sort();
+                let v2_sorted = v2.clone().sort();
+                (v1_sorted != v2_sorted)
+                    .then(|| (k.as_ref(), v1.as_ref(), v2.as_ref()))
             }
             _ => None,
         })
