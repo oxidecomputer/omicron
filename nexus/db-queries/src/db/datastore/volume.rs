@@ -330,8 +330,8 @@ impl DataStore {
                         }
 
                         VolumeCheckoutReason::InstanceStart { vmm_id } => {
-                            // Check out this volume to send to Propolis to start an Instance. There
-                            // must not be any existing VMM.
+                            // Check out this volume to send to Propolis to start an Instance. The
+                            // VMM id in the enum must match the instance's propolis_id.
 
                             if let Some(instance) = &maybe_instance {
                                 let runtime = instance.runtime();
