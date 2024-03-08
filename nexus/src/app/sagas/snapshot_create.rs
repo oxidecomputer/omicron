@@ -704,9 +704,11 @@ async fn ssc_send_snapshot_request_to_sled_agent(
         .map_err(ActionError::action_failed)?
         .sled_id();
 
-    // If this instance does not currently have a sled, we can't continue.
+    // If this instance does not currently have a sled, we can't continue this
+    // saga - the user will have to reissue the snapshot request and it will get
+    // run on a Pantry.
     let Some(sled_id) = sled_id else {
-        return Err(ActionError::action_failed(Error::internal_error(
+        return Err(ActionError::action_failed(Error::unavail(
             "sled id is None!",
         )));
     };
