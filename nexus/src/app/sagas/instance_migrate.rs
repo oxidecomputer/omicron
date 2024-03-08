@@ -4,7 +4,7 @@
 
 use super::{NexusActionContext, NexusSaga, ACTION_GENERATE_ID};
 use crate::app::instance::{
-    InstanceEnsureOperation, InstanceStateChangeError,
+    InstanceRegisterReason, InstanceStateChangeError,
     InstanceStateChangeRequest,
 };
 use crate::app::sagas::{
@@ -357,7 +357,7 @@ async fn sim_ensure_destination_propolis(
             &db_instance,
             &vmm.id,
             &vmm,
-            InstanceEnsureOperation::Migrate {
+            InstanceRegisterReason::Migrate {
                 vmm_id: params.src_vmm.id,
                 target_vmm_id: vmm.id,
             },

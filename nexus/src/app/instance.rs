@@ -174,8 +174,8 @@ enum InstanceStateChangeRequestAction {
 }
 
 /// What is the higher level operation that is calling
-/// `instance_ensure_registered`
-pub(crate) enum InstanceEnsureOperation {
+/// `instance_ensure_registered`?
+pub(crate) enum InstanceRegisterReason {
     Start { vmm_id: Uuid },
     Migrate { vmm_id: Uuid, target_vmm_id: Uuid },
 }
@@ -1014,7 +1014,7 @@ impl super::Nexus {
         db_instance: &db::model::Instance,
         propolis_id: &Uuid,
         initial_vmm: &db::model::Vmm,
-        operation: InstanceEnsureOperation,
+        operation: InstanceRegisterReason,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
@@ -1075,8 +1075,10 @@ impl super::Nexus {
                 .volume_checkout(
                     disk.volume_id,
                     match operation {
-                        InstanceEnsureOperation::Start { vmm_id } => db::datastore::VolumeCheckoutReason::InstanceStart { vmm_id },
-                        InstanceEnsureOperation::Migrate { vmm_id, target_vmm_id } => db::datastore::VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id },
+                        InstanceRegisterReason::Start { vmm_id } =>
+                            db::datastore::VolumeCheckoutReason::InstanceStart { vmm_id },
+                        InstanceRegisterReason::Migrate { vmm_id, target_vmm_id } =>
+                            db::datastore::VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id },
                     }
                 )
                 .await?;
