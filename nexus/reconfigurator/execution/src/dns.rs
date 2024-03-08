@@ -454,6 +454,7 @@ mod test {
     use nexus_types::internal_api::params::DnsConfigParams;
     use nexus_types::internal_api::params::DnsConfigZone;
     use nexus_types::internal_api::params::DnsRecord;
+    use nexus_types::internal_api::params::Srv;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::Ipv6Subnet;
@@ -976,6 +977,88 @@ mod test {
                 ),
                 ("ex3", [DnsRecord::A(Ipv4Addr::LOCALHOST)].as_ref()),
             ]
+        );
+
+        // Test the difference between two configs whose SRV records differ.
+        let mut dns_config1 = dns_config1.clone();
+        dns_config1.zones[0].records.insert(
+            String::from("_nexus._tcp"),
+            vec![
+                DnsRecord::Srv(Srv {
+                    port: 123,
+                    prio: 1,
+                    target: String::from("ex1.my-zone"),
+                    weight: 2,
+                }),
+                DnsRecord::Srv(Srv {
+                    port: 123,
+                    prio: 1,
+                    target: String::from("ex2.my-zone"),
+                    weight: 2,
+                }),
+            ],
+        );
+        // A clone of the same one should of course be the same as the original.
+        let mut dns_config2 = dns_config1.clone();
+        let update = dns_compute_update(
+            &logctx.log,
+            DnsGroup::Internal,
+            "test-suite".to_string(),
+            "test-suite".to_string(),
+            &dns_config1,
+            &dns_config2,
+        )
+        .expect("failed to compute update");
+        assert!(update.is_none());
+
+        // If we shift the order of the items, it should still reflect no
+        // changes.
+        let records =
+            dns_config2.zones[0].records.get_mut("_nexus._tcp").unwrap();
+        records.rotate_left(1);
+        assert!(
+            records != dns_config1.zones[0].records.get("_nexus._tcp").unwrap()
+        );
+        let update = dns_compute_update(
+            &logctx.log,
+            DnsGroup::Internal,
+            "test-suite".to_string(),
+            "test-suite".to_string(),
+            &dns_config1,
+            &dns_config2,
+        )
+        .expect("failed to compute update");
+        assert!(update.is_none());
+
+        // If we add another record, there should indeed be a new update.
+        let records =
+            dns_config2.zones[0].records.get_mut("_nexus._tcp").unwrap();
+        records.push(DnsRecord::Srv(Srv {
+            port: 123,
+            prio: 1,
+            target: String::from("ex3.my-zone"),
+            weight: 2,
+        }));
+        let final_records = records.clone();
+
+        let update = dns_compute_update(
+            &logctx.log,
+            DnsGroup::Internal,
+            "test-suite".to_string(),
+            "test-suite".to_string(),
+            &dns_config1,
+            &dns_config2,
+        )
+        .expect("failed to compute update")
+        .expect("expected an update");
+
+        assert_eq!(
+            update.names_removed().collect::<Vec<_>>(),
+            &["_nexus._tcp"]
+        );
+        assert_eq!(
+            update.names_added().collect::<Vec<_>>(),
+            &[("_nexus._tcp", final_records.as_slice())]
         );
 
         logctx.cleanup_successful();
