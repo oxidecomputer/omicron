@@ -244,12 +244,10 @@ first = \"$SERVICE_IP_POOL_START\"
 		/^last/c\\
 last = \"$SERVICE_IP_POOL_END\"
 	}
-	/^\\[rack_network_config/,/^$/ {
-		/^infra_ip_first/c\\
+	/^infra_ip_first/c\\
 infra_ip_first = \"$UPLINK_IP\"
-		/^infra_ip_last/c\\
+	/^infra_ip_last/c\\
 infra_ip_last = \"$UPLINK_IP\"
-	}
 	/^\\[\\[rack_network_config.ports/,/^\$/ {
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
