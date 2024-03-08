@@ -351,8 +351,8 @@ echo "Waited for chrony: ${retry}s"
 # Wait for at least one nexus zone to become available
 retry=0
 until zoneadm list | grep nexus; do
-	if [[ $retry -gt 60 ]]; then
-		echo "Failed to start at least one nexus zone after 60 seconds"
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to start at least one nexus zone after 300 seconds"
 		exit 1
 	fi
 	sleep 1
