@@ -11,8 +11,9 @@ use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupResult;
 use sled_agent_client::Client as SledAgentClient;
-use slog::Logger;
 use slog::o;
+use slog::Logger;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 pub fn sled_lookup<'a>(
@@ -33,6 +34,14 @@ pub async fn sled_client(
     let (.., sled) =
         sled_lookup(datastore, lookup_opctx, sled_id)?.fetch().await?;
 
+    Ok(sled_client_from_address(sled_id, sled.address(), log))
+}
+
+pub fn sled_client_from_address(
+    sled_id: Uuid,
+    address: SocketAddrV6,
+    log: &Logger,
+) -> SledAgentClient {
     let log = log.new(o!("SledAgent" => sled_id.to_string()));
     let dur = std::time::Duration::from_secs(60);
     let client = reqwest::ClientBuilder::new()
@@ -40,9 +49,5 @@ pub async fn sled_client(
         .timeout(dur)
         .build()
         .unwrap();
-    Ok(SledAgentClient::new_with_client(
-        &format!("http://{}", sled.address()),
-        client,
-        log,
-    ))
+    SledAgentClient::new_with_client(&format!("http://{address}"), client, log)
 }
