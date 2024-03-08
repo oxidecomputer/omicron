@@ -8,7 +8,7 @@ use crate::ServerContext;
 
 use super::params::{
     OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
-    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentStartupInfo,
+    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentInfo,
     ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
@@ -58,6 +58,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the internal nexus API
 pub(crate) fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+        api.register(sled_agent_get)?;
         api.register(sled_agent_put)?;
         api.register(sled_firewall_rules_request)?;
         api.register(switch_put)?;
@@ -109,6 +110,27 @@ struct SledAgentPathParam {
     sled_id: Uuid,
 }
 
+/// Return information about the given sled agent
+#[endpoint {
+     method = GET,
+     path = "/sled-agents/{sled_id}",
+ }]
+async fn sled_agent_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledAgentPathParam>,
+) -> Result<HttpResponseOk<SledAgentInfo>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+    let path = path_params.into_inner();
+    let sled_id = &path.sled_id;
+    let handler = async {
+        let (.., sled) = nexus.sled_lookup(&opctx, sled_id)?.fetch().await?;
+        Ok(HttpResponseOk(sled.into()))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Report that the sled agent for the specified sled has come online.
 #[endpoint {
      method = POST,
@@ -117,7 +139,7 @@ struct SledAgentPathParam {
 async fn sled_agent_put(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SledAgentPathParam>,
-    sled_info: TypedBody<SledAgentStartupInfo>,
+    sled_info: TypedBody<SledAgentInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;

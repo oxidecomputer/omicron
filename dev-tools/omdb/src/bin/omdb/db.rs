@@ -22,6 +22,7 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
+use camino::Utf8PathBuf;
 use chrono::SecondsFormat;
 use clap::Args;
 use clap::Subcommand;
@@ -34,6 +35,8 @@ use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
+use dropshot::PaginationOrder;
+use futures::StreamExt;
 use gateway_client::types::SpType;
 use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
@@ -68,22 +71,27 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
+use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
+use nexus_reconfigurator_preparation::policy_from_db;
 use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPageWhich;
+use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MacAddr;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
@@ -177,6 +185,8 @@ enum DbCommands {
     Dns(DnsArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
+    /// Save the current Reconfigurator inputs to a file
+    ReconfiguratorSave(ReconfiguratorSaveArgs),
     /// Print information about control plane services
     Services(ServicesArgs),
     /// Print information about sleds
@@ -310,6 +320,12 @@ struct CollectionsShowArgs {
     /// show long strings in their entirety
     #[clap(long)]
     show_long_strings: bool,
+}
+
+#[derive(Debug, Args)]
+struct ReconfiguratorSaveArgs {
+    /// where to save the output
+    output_file: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -463,6 +479,15 @@ impl DbArgs {
                     &datastore,
                     &self.fetch_opts,
                     inventory_args,
+                )
+                .await
+            }
+            DbCommands::ReconfiguratorSave(reconfig_save_args) => {
+                cmd_db_reconfigurator_save(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    reconfig_save_args,
                 )
                 .await
             }
@@ -3169,4 +3194,114 @@ impl LongStringFormatter {
         // wide, so return it as-is
         s.into()
     }
+}
+
+// Reconfigurator
+
+/// Packages up database state that's used as input to the Reconfigurator
+/// planner into a file so that it can be loaded into `reconfigurator-cli`
+async fn cmd_db_reconfigurator_save(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    reconfig_save_args: &ReconfiguratorSaveArgs,
+) -> Result<(), anyhow::Error> {
+    // See Nexus::blueprint_planning_context().
+    eprint!("assembling policy ... ");
+    let sled_rows = datastore
+        .sled_list_all_batched(opctx)
+        .await
+        .context("listing sleds")?;
+    let zpool_rows = datastore
+        .zpool_list_all_external_batched(opctx)
+        .await
+        .context("listing zpools")?;
+    let ip_pool_range_rows = {
+        let (authz_service_ip_pool, _) = datastore
+            .ip_pools_service_lookup(opctx)
+            .await
+            .context("fetching IP services pool")?;
+        datastore
+            .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
+            .await
+            .context("listing services IP pool ranges")?
+    };
+
+    let policy = policy_from_db(
+        &sled_rows,
+        &zpool_rows,
+        &ip_pool_range_rows,
+        NEXUS_REDUNDANCY,
+    )
+    .context("assembling policy")?;
+    eprintln!("done.");
+
+    eprint!("loading inventory collections ... ");
+    let collection_ids = datastore
+        .inventory_collections()
+        .await
+        .context("listing collections")?;
+    let collections = futures::stream::iter(collection_ids)
+        .filter_map(|id| async move {
+            let read = datastore
+                .inventory_collection_read(opctx, id)
+                .await
+                .with_context(|| format!("reading collection {}", id));
+            if let Err(error) = &read {
+                eprintln!("warning: {}", error);
+            }
+            read.ok()
+        })
+        .collect::<Vec<Collection>>()
+        .await;
+    eprintln!("done.");
+
+    eprint!("loading blueprints ... ");
+    let limit = fetch_opts.fetch_limit;
+    let pagparams = DataPageParams {
+        marker: None,
+        direction: PaginationOrder::Ascending,
+        limit,
+    };
+    let blueprint_ids = datastore
+        .blueprints_list(opctx, &pagparams)
+        .await
+        .context("listing blueprints")?;
+    check_limit(&blueprint_ids, limit, || "listing blueprint ids");
+    let blueprints = futures::stream::iter(blueprint_ids)
+        .filter_map(|bpm| async move {
+            let blueprint_id = bpm.id;
+            let read = datastore
+                .blueprint_read(
+                    opctx,
+                    &nexus_db_queries::authz::Blueprint::new(
+                        nexus_db_queries::authz::FLEET,
+                        blueprint_id,
+                        LookupType::ById(blueprint_id),
+                    ),
+                )
+                .await
+                .with_context(|| format!("reading blueprint {}", blueprint_id));
+            if let Err(error) = &read {
+                eprintln!("warning: {}", error);
+            }
+            read.ok()
+        })
+        .collect::<Vec<Blueprint>>()
+        .await;
+    eprintln!("done.");
+
+    let state =
+        UnstableReconfiguratorState { policy: policy, collections, blueprints };
+
+    let output_path = &reconfig_save_args.output_file;
+    let file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&output_path)
+        .with_context(|| format!("open {:?}", output_path))?;
+    serde_json::to_writer_pretty(&file, &state)
+        .with_context(|| format!("write {:?}", output_path))?;
+    eprintln!("wrote {}", output_path);
+    Ok(())
 }

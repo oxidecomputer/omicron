@@ -108,7 +108,6 @@ pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
 pub use rack::RackInit;
 pub use silo::Discoverability;
-pub use sled::SledUpsertOutput;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use volume::read_only_resources_associated_with_volume;
@@ -393,6 +392,7 @@ mod test {
     use futures::stream;
     use futures::StreamExt;
     use nexus_config::RegionAllocationStrategy;
+    use nexus_db_model::Generation;
     use nexus_db_model::IpAttachState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
@@ -619,8 +619,9 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
-        datastore.sled_upsert(sled_update).await.unwrap().unwrap();
+        datastore.sled_upsert(sled_update).await.unwrap();
         sled_id
     }
 
@@ -1338,8 +1339,9 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
-        datastore.sled_upsert(sled1).await.unwrap().unwrap();
+        datastore.sled_upsert(sled1).await.unwrap();
 
         let addr2 = "[fd00:1df::1]:12345".parse().unwrap();
         let sled2_id = "66285c18-0c79-43e0-e54f-95271f271314".parse().unwrap();
@@ -1349,8 +1351,9 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id,
+            Generation::new(),
         );
-        datastore.sled_upsert(sled2).await.unwrap().unwrap();
+        datastore.sled_upsert(sled2).await.unwrap();
 
         let ip = datastore.next_ipv6_address(&opctx, sled1_id).await.unwrap();
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1de, 0, 0, 0, 0, 1, 0);

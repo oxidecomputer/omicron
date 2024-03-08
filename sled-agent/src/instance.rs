@@ -15,7 +15,7 @@ use crate::nexus::NexusClientWithResolver;
 use crate::params::ZoneBundleMetadata;
 use crate::params::{InstanceExternalIpBody, ZoneBundleCause};
 use crate::params::{
-    InstanceHardware, InstanceMigrationSourceParams,
+    InstanceHardware, InstanceMetadata, InstanceMigrationSourceParams,
     InstanceMigrationTargetParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, VpcFirewallRule,
 };
@@ -310,6 +310,11 @@ struct InstanceRunner {
 
     // Properties visible to Propolis
     properties: propolis_client::types::InstanceProperties,
+
+    // This is currently unused, but will be sent to Propolis as part of the
+    // work tracked in https://github.com/oxidecomputer/omicron/issues/4851. It
+    // will be included in the InstanceProperties above, most likely.
+    _metadata: InstanceMetadata,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: Uuid,
@@ -928,6 +933,7 @@ impl Instance {
         ticket: InstanceTicket,
         state: InstanceInitialState,
         services: InstanceManagerServices,
+        metadata: InstanceMetadata,
     ) -> Result<Self, Error> {
         info!(log, "initializing new Instance";
               "instance_id" => %id,
@@ -1005,6 +1011,9 @@ impl Instance {
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: hardware.properties.ncpus.0 as u8,
             },
+            // This will be used in a follow up, tracked under
+            // https://github.com/oxidecomputer/omicron/issues/4851.
+            _metadata: metadata,
             propolis_id,
             propolis_addr,
             vnic_allocator,

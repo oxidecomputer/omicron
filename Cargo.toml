@@ -21,6 +21,7 @@ members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
+    "dev-tools/reconfigurator-cli",
     "dev-tools/xtask",
     "dns-server",
     "end-to-end-tests",
@@ -46,6 +47,7 @@ members = [
     "nexus/macros-common",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
+    "nexus/reconfigurator/preparation",
     "nexus/test-interface",
     "nexus/test-utils-macros",
     "nexus/test-utils",
@@ -98,6 +100,7 @@ default-members = [
     "dev-tools/omdb",
     "dev-tools/omicron-dev",
     "dev-tools/oxlog",
+    "dev-tools/reconfigurator-cli",
     # Do not include xtask in the list of default members, because this causes
     # hakari to not work as well and build times to be longer.
     # See omicron#4392.
@@ -124,6 +127,7 @@ default-members = [
     "nexus/inventory",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
+    "nexus/reconfigurator/preparation",
     "nexus/types",
     "oximeter/collector",
     "oximeter/db",
@@ -264,6 +268,7 @@ nexus-inventory = { path = "nexus/inventory" }
 nexus-macros-common = { path = "nexus/macros-common" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
+nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
 omicron-certificates = { path = "certificates" }
 omicron-passwords = { path = "passwords" }
 omicron-workspace-hack = "0.1.0"
@@ -326,7 +331,7 @@ rand = "0.8.5"
 ratatui = "0.26.1"
 rayon = "1.9"
 rcgen = "0.12.1"
-reedline = "0.29.0"
+reedline = "0.30.0"
 ref-cast = "1.0"
 regex = "1.10.3"
 regress = "0.8.0"
@@ -342,7 +347,7 @@ samael = { version = "0.0.14", features = ["xmlsec"] }
 schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.22", features = ["std", "serde"] }
-serde = { version = "1.0", default-features = false, features = [ "derive" ] }
+serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.114"
