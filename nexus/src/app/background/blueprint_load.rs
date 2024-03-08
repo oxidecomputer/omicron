@@ -153,10 +153,34 @@ impl BackgroundTask for TargetBlueprintLoader {
                                 "status": "target blueprint unchanged (error)",
                                 "error": message
                             })
+                        } else if old.0.enabled != new_bp_target.enabled {
+                            // The blueprints have the same contents, but its
+                            // enabled bit has flipped.
+                            let status = if new_bp_target.enabled {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            };
+                            info!(
+                                log,
+                                "target blueprint enabled state changed";
+                                "target_id" => &target_id,
+                                "time_created" => &time_created,
+                                "state" => status,
+                            );
+                            self.last =
+                                Some(Arc::new((new_bp_target, new_blueprint)));
+                            self.tx.send_replace(self.last.clone());
+                            json!({
+                                "target_id": target_id,
+                                "time_created": time_created,
+                                "time_found": chrono::Utc::now().to_string(),
+                                "status": format!("target blueprint {status}"),
+                            })
                         } else {
-                            // We found a new target blueprint that exactly matches
-                            // the old target blueprint. This is the common case
-                            // when we're activated by a timeout.
+                            // We found a new target blueprint that exactly
+                            // matches the old target blueprint. This is the
+                            // common case when we're activated by a timeout.
                             debug!(
                                log,
                                 "found latest target blueprint (unchanged)";
