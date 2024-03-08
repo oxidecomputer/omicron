@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+use crate::db::DbUrlOptions;
 use crate::Omdb;
 use anyhow::Context;
 use chrono::DateTime;
@@ -17,7 +18,11 @@ use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
+use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
+use reedline::DefaultPrompt;
+use reedline::DefaultPromptSegment;
+use reedline::Reedline;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -150,6 +155,8 @@ enum SledsCommands {
     ListUninitialized,
     /// Add an uninitialized sled
     Add(SledAddArgs),
+    /// Expunge a sled (DANGEROUS)
+    Expunge(SledExpungeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -158,6 +165,17 @@ struct SledAddArgs {
     serial: String,
     /// sled's part number
     part: String,
+}
+
+#[derive(Debug, Args)]
+struct SledExpungeArgs {
+    // expunge is _extremely_ dangerous, so we also require a database
+    // connection to perform some safety checks
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
+
+    /// sled ID
+    sled_id: Uuid,
 }
 
 impl NexusArgs {
@@ -252,6 +270,12 @@ impl NexusArgs {
             }) => {
                 omdb.check_allow_destructive()?;
                 cmd_nexus_sled_add(&client, args).await
+            }
+            NexusCommands::Sleds(SledsArgs {
+                command: SledsCommands::Expunge(args),
+            }) => {
+                omdb.check_allow_destructive()?;
+                cmd_nexus_sled_expunge(&client, args, omdb, log).await
             }
         }
     }
@@ -1046,5 +1070,105 @@ async fn cmd_nexus_sled_add(
         .await
         .context("adding sled")?;
     eprintln!("added sled {} ({})", args.serial, args.part);
+    Ok(())
+}
+
+/// Runs `omdb nexus sleds expunge`
+async fn cmd_nexus_sled_expunge(
+    client: &nexus_client::Client,
+    args: &SledExpungeArgs,
+    omdb: &Omdb,
+    log: &slog::Logger,
+) -> Result<(), anyhow::Error> {
+    // This is an extremely dangerous and irreversible operation. We put a
+    // couple of safeguards in place to ensure this cannot be called without
+    // due consideration:
+    //
+    // 1. We'll require manual input on stdin to confirm the sled to be removed
+    // 2. We'll warn sternly if the sled-to-be-expunged is still present in the
+    //    most recent inventory collection
+    use nexus_db_model::Sled;
+    use nexus_db_queries::context::OpContext;
+
+    // First, we need to look up the sled so we know it's serial number.
+    let datastore = args.db_url_opts.connect(omdb, log).await?;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = &opctx;
+
+    let sled = {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::ExpressionMethods;
+        use diesel::QueryDsl;
+        use diesel::SelectableHelper;
+        use nexus_db_queries::db::schema::sled::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await?;
+        dsl::sled
+            .filter(dsl::id.eq(args.sled_id))
+            .select(Sled::as_select())
+            .first_async::<Sled>(&*conn)
+            .await
+            .with_context(|| format!("failed to find sled {}", args.sled_id))?
+    };
+
+    // Now check whether its sled-agent or SP were found in the most recent
+    // inventory collection.
+    match datastore
+        .inventory_get_latest_collection(opctx)
+        .await
+        .context("loading latest collection")?
+    {
+        Some(collection) => {
+            let sled_present =
+                collection.sled_agents.contains_key(&args.sled_id)
+                    || collection.sps.keys().any(|baseboard| {
+                        baseboard.part_number == sled.part_number()
+                            && baseboard.serial_number == sled.serial_number()
+                    });
+            if sled_present {
+                eprintln!(
+                    "WARNING: sled {} IS PRESENT in the most recent inventory \
+                    collection; are you sure you want to mark it expunged?",
+                    args.sled_id,
+                );
+            }
+        }
+        None => {
+            eprintln!("WARNING: no inventory collections present");
+        }
+    }
+
+    eprintln!(
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark sled \
+        {} ({}) expunged. To proceed, type the sled's serial number.",
+        args.sled_id,
+        sled.serial_number(),
+    );
+    let mut line_editor = Reedline::create();
+    let prompt = DefaultPrompt::new(
+        DefaultPromptSegment::Basic("sled serial".to_string()),
+        DefaultPromptSegment::Empty,
+    );
+    if let Ok(reedline::Signal::Success(input)) =
+        line_editor.read_line(&prompt)
+    {
+        if input != sled.serial_number() {
+            eprintln!("serial number mismatch; aborting");
+            return Ok(());
+        }
+    } else {
+        eprintln!("expungment aborted");
+        return Ok(());
+    }
+
+    let old_policy = client
+        .sled_expunge(&SledSelector { sled: args.sled_id })
+        .await
+        .context("expunging sled")?
+        .into_inner();
+    eprintln!(
+        "expunged sled {} (previous policy: {old_policy:?})",
+        args.sled_id
+    );
     Ok(())
 }

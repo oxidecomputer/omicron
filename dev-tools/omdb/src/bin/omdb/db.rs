@@ -147,15 +147,79 @@ impl Display for MaybeSledId {
 
 #[derive(Debug, Args)]
 pub struct DbArgs {
-    /// URL of the database SQL interface
-    #[clap(long, env("OMDB_DB_URL"))]
-    db_url: Option<PostgresConfigWithUrl>,
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
 
     #[clap(flatten)]
     fetch_opts: DbFetchOptions,
 
     #[command(subcommand)]
     command: DbCommands,
+}
+
+#[derive(Debug, Args)]
+pub struct DbUrlOptions {
+    /// URL of the database SQL interface
+    #[clap(long, env("OMDB_DB_URL"))]
+    db_url: Option<PostgresConfigWithUrl>,
+}
+
+impl DbUrlOptions {
+    async fn resolve_pg_url(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> anyhow::Result<PostgresConfigWithUrl> {
+        match &self.db_url {
+            Some(cli_or_env_url) => Ok(cli_or_env_url.clone()),
+            None => {
+                eprintln!(
+                    "note: database URL not specified.  Will search DNS."
+                );
+                eprintln!("note: (override with --db-url or OMDB_DB_URL)");
+                let addrs = omdb
+                    .dns_lookup_all(
+                        log.clone(),
+                        internal_dns::ServiceName::Cockroach,
+                    )
+                    .await?;
+
+                format!(
+                    "postgresql://root@{}/omicron?sslmode=disable",
+                    addrs
+                        .into_iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+                .parse()
+                .context("failed to parse constructed postgres URL")
+            }
+        }
+    }
+
+    pub async fn connect(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> anyhow::Result<Arc<DataStore>> {
+        let db_url = self.resolve_pg_url(omdb, log).await?;
+        eprintln!("note: using database URL {}", &db_url);
+
+        let db_config = db::Config { url: db_url.clone() };
+        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
+
+        // Being a dev tool, we want to try this operation even if the schema
+        // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
+        // here.  We will then check the schema version explicitly and warn the
+        // user if it doesn't match.
+        let datastore = Arc::new(
+            DataStore::new_unchecked(log.clone(), pool)
+                .map_err(|e| anyhow!(e).context("creating datastore"))?,
+        );
+        check_schema_version(&datastore).await;
+        Ok(datastore)
+    }
 }
 
 #[derive(Debug, Args)]
@@ -404,47 +468,7 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let db_url = match &self.db_url {
-            Some(cli_or_env_url) => cli_or_env_url.clone(),
-            None => {
-                eprintln!(
-                    "note: database URL not specified.  Will search DNS."
-                );
-                eprintln!("note: (override with --db-url or OMDB_DB_URL)");
-                let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Cockroach,
-                    )
-                    .await?;
-
-                format!(
-                    "postgresql://root@{}/omicron?sslmode=disable",
-                    addrs
-                        .into_iter()
-                        .map(|a| a.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )
-                .parse()
-                .context("failed to parse constructed postgres URL")?
-            }
-        };
-        eprintln!("note: using database URL {}", &db_url);
-
-        let db_config = db::Config { url: db_url.clone() };
-        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
-
-        // Being a dev tool, we want to try this operation even if the schema
-        // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
-        // here.  We will then check the schema version explicitly and warn the
-        // user if it doesn't match.
-        let datastore = Arc::new(
-            DataStore::new_unchecked(log.clone(), pool)
-                .map_err(|e| anyhow!(e).context("creating datastore"))?,
-        );
-        check_schema_version(&datastore).await;
-
+        let datastore = self.db_url_opts.connect(omdb, log).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         match &self.command {
             DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
