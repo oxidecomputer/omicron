@@ -40,6 +40,7 @@ mod smf_helper;
 mod storage_monitor;
 mod swap_device;
 mod updates;
+mod vmm_reservoir;
 mod zone_bundle;
 
 #[cfg(test)]

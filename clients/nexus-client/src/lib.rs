@@ -33,6 +33,11 @@ progenitor::generate_api!(
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+    },
+    patch = {
+        SledAgentInfo = { derives = [PartialEq, Eq] },
+        ByteCount = { derives = [PartialEq, Eq] },
+        Baseboard = { derives = [PartialEq, Eq] }
     }
 );
 

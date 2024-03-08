@@ -1,105 +1,95 @@
 <?xml version="1.0"?>
 <!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
 <!--
  This Source Code Form is subject to the terms of the Mozilla Public
  License, v. 2.0. If a copy of the MPL was not distributed with this
  file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
- Copyright 2023 Oxide Computer Company
+ Copyright 2024 Oxide Computer Company
 -->
-<service_bundle type="manifest"
-                name="ntp:default">
 
-<service name="oxide/ntp"
-             type="service"
-             version="1">
+<service_bundle type="manifest" name="ntp:default">
 
-        <create_default_instance enabled="false" />
+  <service name="oxide/ntp" type="service" version="1">
+  <create_default_instance enabled="true" />
 
-        <dependency name="network"
-                    grouping="require_any"
-                    restart_on="error"
-                    type="service">
-            <service_fmri value="svc:/network/service" />
-        </dependency>
+  <dependency name="network" grouping="require_any" restart_on="error"
+    type="service">
+  <service_fmri value="svc:/network/service" />
+  </dependency>
 
-        <dependency name="filesystem"
-                    grouping="require_all"
-                    restart_on="error"
-                    type="service">
-            <service_fmri value="svc:/system/filesystem/minimal" />
-        </dependency>
+  <dependency name="filesystem" grouping="require_all" restart_on="error"
+    type="service">
+  <service_fmri value="svc:/system/filesystem/minimal" />
+  </dependency>
 
-        <dependency name="name-services"
-                    grouping="optional_all"
-                    restart_on="none"
-                    type="service">
-            <service_fmri value="svc:/milestone/name-services" />
-        </dependency>
+  <dependency name="name-services" grouping="require_all" restart_on="none"
+    type="service">
+  <service_fmri value="svc:/milestone/name-services" />
+  </dependency>
 
-        <dependency name="routing-setup"
-                    grouping="optional_all"
-                    restart_on="none"
-                    type="service">
-            <service_fmri value="svc:/network/routing-setup" />
-        </dependency>
+  <dependency name="routing-setup" grouping="optional_all" restart_on="none"
+    type="service">
+  <service_fmri value="svc:/network/routing-setup" />
+  </dependency>
 
-	<!--
-        The service is started as root, but with only the privileges it
-	    requires. The chrony daemon forks a privileged helper and then the
-	    main daemon drops everything it does not need, leaving it with
-	    completely minimal privileges (it even divests the privilege to
-        fork/exec).
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
 
-        The service also always starts the binary with ASLR enabled,
-	    regardless of whether it was linked with -zaslr
-	-->
-        <exec_method type="method"
-                     name="start"
-		     exec="/var/svc/method/svc-site-ntp %m"
-                     timeout_seconds="60">
-            <method_context security_flags="aslr">
-                <method_credential user="root"
-                                   group="root"
-                                   privileges="basic,!file_link_any,!proc_info,!proc_session,file_chown_self,file_dac_search,file_dac_write,net_privaddr,proc_lock_memory,proc_priocntl,proc_setid,sys_time" />
-            </method_context>
-        </exec_method>
+  <!-- 
+    Only Boundary NTP needs the opte interface.
+  -->
+  <dependency name='opte_interface_setup' grouping='optional_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/opte-interface-setup:default' />
+  </dependency>
 
-        <exec_method type="method"
-                     name="refresh"
-		     exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
-                     timeout_seconds="60">
-        </exec_method>
+  <!--
+    The service is started as root, but with only the privileges it
+    requires. The chrony daemon forks a privileged helper and then the
+    main daemon drops everything it does not need, leaving it with
+    completely minimal privileges (it even divests the privilege to
+    fork/exec).
 
-        <exec_method type="method"
-                     name="stop"
-		     exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
-                     timeout_seconds="60" />
+    The service also always starts the binary with ASLR enabled,
+    regardless of whether it was linked with -zaslr
+  -->
+  <exec_method type="method" name="start" exec="/var/svc/method/svc-site-ntp %m"
+    timeout_seconds="60">
+  <method_context security_flags="aslr">
+  <method_credential user="root" group="root"
+    privileges="basic,!file_link_any,!proc_info,!proc_session,file_chown_self,file_dac_search,file_dac_write,net_privaddr,proc_lock_memory,proc_priocntl,proc_setid,sys_time" />
+  </method_context>
+  </exec_method>
 
-        <property_group name="config"
-                        type="application">
-            <propval name="file"
-                     type="astring"
-                     value="/etc/inet/chrony.conf" />
-	    <propval name="boundary"
-                     type="boolean"
-		    value="false" />
-            <propval name="server"
-                     type="astring"
-                     value="" />
-            <propval name="allow"
-                     type="astring"
-                     value="" />
-        </property_group>
+  <exec_method type="method" name="refresh"
+    exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}" timeout_seconds="60">
+  </exec_method>
 
-        <stability value="Unstable" />
+  <exec_method type="method" name="stop"
+    exec="/var/svc/method/svc-site-ntp %m %{restarter/contract}"
+    timeout_seconds="60" />
 
-        <template>
-            <common_name>
-                <loctext xml:lang="C">Network Time Protocol (NTP)</loctext>
-            </common_name>
-        </template>
+  <property_group name="config" type="application">
+    <propval name="file" type="astring" value="/etc/inet/chrony.conf" />
+    <propval name="boundary" type="boolean" value="false" />
+    <propval name="server" type="astring" value="" />
+    <propval name="allow" type="astring" value="" />
+  </property_group>
 
-    </service>
+  <stability value="Unstable" />
+
+  <template>
+    <common_name>
+      <loctext xml:lang="C">Network Time Protocol (NTP)</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Oxide's Network Time Protocol Service</loctext>
+    </description>
+  </template>
+  </service>
 
 </service_bundle>

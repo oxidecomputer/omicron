@@ -827,6 +827,7 @@ table! {
         last_used_address -> Inet,
         sled_policy -> crate::sled_policy::SledPolicyEnum,
         sled_state -> crate::SledStateEnum,
+        sled_agent_gen -> Int8,
     }
 }
 

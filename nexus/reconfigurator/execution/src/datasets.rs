@@ -138,6 +138,7 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
@@ -184,12 +185,9 @@ mod tests {
                     reservoir_size: (16 << 30).try_into().unwrap(),
                 },
                 rack_id,
+                Generation::new(),
             );
-            datastore
-                .sled_upsert(sled)
-                .await
-                .expect("failed to upsert sled")
-                .unwrap();
+            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
 
             for zone in &config.zones.zones {
                 let OmicronZoneType::Crucible { dataset, .. } = &zone.zone_type

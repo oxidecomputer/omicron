@@ -1,0 +1,40 @@
+[package]
+name = "reconfigurator-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[build-dependencies]
+omicron-rpaths.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+dropshot.workspace = true
+humantime.workspace = true
+indexmap.workspace = true
+nexus-reconfigurator-planning.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+reedline.workspace = true
+serde_json.workspace = true
+slog-error-chain.workspace = true
+slog.workspace = true
+swrite.workspace = true
+tabled.workspace = true
+uuid.workspace = true
+omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+camino-tempfile.workspace = true
+expectorate.workspace = true
+omicron-test-utils.workspace = true
+regex.workspace = true
+subprocess.workspace = true
+
+# Disable doc builds by default for our binaries to work around issue
+# rust-lang/cargo#8373.  These docs would not be very useful anyway.
+[[bin]]
+name = "reconfigurator-cli"
+doc = false

@@ -31,6 +31,6 @@ tuftool [-r PATH/TO/REPO] add-zone [--name NAME] ZONE_TAR_GZ VERSION
 Example:
 
 ----
-$ tuftool add-zone out/omicron-nexus.tar.gz 0.0.0
-added zone omicron-nexus, version 0.0.0
+$ tuftool add-zone out/nexus.tar.gz 0.0.0
+added zone nexus, version 0.0.0
 ----

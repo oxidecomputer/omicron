@@ -11,6 +11,7 @@ use clap::Args;
 use clap::Parser;
 use dropshot::test_util::LogContext;
 use futures::stream::StreamExt;
+use nexus_config::NexusConfig;
 use nexus_test_interface::NexusServer;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
@@ -473,7 +474,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
 
     // Read configuration.
     let config_str = include_str!("../../../../nexus/examples/config.toml");
-    let mut config: omicron_common::nexus_config::Config =
+    let mut config: NexusConfig =
         toml::from_str(config_str).context("parsing example config")?;
     config.pkg.log = dropshot::ConfigLogging::File {
         // See LogContext::new(),

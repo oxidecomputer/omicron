@@ -14,7 +14,6 @@
 
 pub mod app; // Public for documentation examples
 mod cidata;
-mod config;
 mod context; // Public for documentation examples
 pub mod external_api; // Public for testing
 mod internal_api;
@@ -23,11 +22,11 @@ mod saga_interface;
 
 pub use app::test_interfaces::TestInterfaces;
 pub use app::Nexus;
-pub use config::Config;
 use context::ServerContext;
 use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
+use nexus_config::NexusConfig;
 use nexus_types::internal_api::params::ServiceKind;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::{
@@ -73,14 +72,14 @@ pub struct InternalServer {
     /// dropshot server for internal API
     http_server_internal: dropshot::HttpServer<Arc<ServerContext>>,
 
-    config: Config,
+    config: NexusConfig,
     log: Logger,
 }
 
 impl InternalServer {
     /// Start a nexus server.
     pub async fn start(
-        config: &Config,
+        config: &NexusConfig,
         log: &Logger,
     ) -> Result<InternalServer, String> {
         let log = log.new(o!("name" => config.deployment.id.to_string()));
@@ -219,7 +218,7 @@ impl nexus_test_interface::NexusServer for Server {
     type InternalServer = InternalServer;
 
     async fn start_internal(
-        config: &Config,
+        config: &NexusConfig,
         log: &Logger,
     ) -> (InternalServer, SocketAddr) {
         let internal_server =
@@ -231,7 +230,7 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn start(
         internal_server: InternalServer,
-        config: &Config,
+        config: &NexusConfig,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
@@ -343,7 +342,7 @@ impl nexus_test_interface::NexusServer for Server {
 }
 
 /// Run an instance of the Nexus server.
-pub async fn run_server(config: &Config) -> Result<(), String> {
+pub async fn run_server(config: &NexusConfig) -> Result<(), String> {
     use slog::Drain;
     let (drain, registration) =
         slog_dtrace::with_drain(
