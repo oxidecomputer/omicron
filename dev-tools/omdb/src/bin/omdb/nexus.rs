@@ -854,13 +854,15 @@ async fn cmd_nexus_blueprints_list(
     struct BlueprintRow {
         #[tabled(rename = "T")]
         is_target: &'static str,
+        #[tabled(rename = "ENA")]
+        enabled: &'static str,
         id: String,
         parent: String,
         time_created: String,
     }
 
-    let target_id = match client.blueprint_target_view().await {
-        Ok(result) => Some(result.into_inner().target_id),
+    let target = match client.blueprint_target_view().await {
+        Ok(result) => Some(result.into_inner()),
         Err(error) => {
             // This request will fail if there's no target configured, so it's
             // not necessarily a big deal.
@@ -879,13 +881,17 @@ async fn cmd_nexus_blueprints_list(
         .context("listing blueprints")?
         .into_iter()
         .map(|blueprint| {
-            let is_target = match target_id {
-                Some(target_id) if target_id == blueprint.id => "*",
-                _ => "",
+            let (is_target, enabled) = match &target {
+                Some(target) if target.target_id == blueprint.id => {
+                    let enabled = if target.enabled { "yes" } else { "no" };
+                    ("*", enabled)
+                }
+                _ => ("", ""),
             };
 
             BlueprintRow {
                 is_target,
+                enabled,
                 id: blueprint.id.to_string(),
                 parent: blueprint
                     .parent_blueprint_id
