@@ -47,6 +47,7 @@ use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// Filter a "silo_list" query based on silos' discoverability
+#[derive(Clone, Copy)]
 pub enum Discoverability {
     /// Show all Silos
     All,
@@ -361,13 +362,19 @@ impl DataStore {
     pub async fn silo_list_all_batched(
         &self,
         opctx: &OpContext,
+        discoverability: Discoverability,
     ) -> ListResultVec<Silo> {
         opctx.check_complex_operations_allowed()?;
         let mut all_silos = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
-            let batch =
-                self.silos_list_by_id(opctx, &p.current_pagparams()).await?;
+            let batch = self
+                .silos_list(
+                    opctx,
+                    &PaginatedBy::Id(p.current_pagparams()),
+                    discoverability,
+                )
+                .await?;
             paginator =
                 p.found_batch(&batch, &|s: &nexus_db_model::Silo| s.id());
             all_silos.extend(batch);

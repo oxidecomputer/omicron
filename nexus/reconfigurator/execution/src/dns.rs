@@ -11,6 +11,7 @@ use internal_dns::ServiceName;
 use nexus_db_model::DnsGroup;
 use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
@@ -68,7 +69,7 @@ pub(crate) async fn deploy_dns(
     let internal_dns_config_blueprint =
         blueprint_internal_dns_config(blueprint, sleds_by_id);
     let silos = datastore
-        .silo_list_all_batched(opctx)
+        .silo_list_all_batched(opctx, Discoverability::All)
         .await
         .internal_context("listing Silos (for configuring external DNS)")?;
 

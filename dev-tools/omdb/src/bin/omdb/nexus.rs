@@ -947,7 +947,10 @@ async fn cmd_nexus_blueprints_generate_from_collection(
         )
         .await
         .context("creating blueprint from collection id")?;
-    eprintln!("created blueprint {} from collection id", blueprint.id);
+    eprintln!(
+        "created blueprint {} from collection id {}",
+        blueprint.id, args.collection_id
+    );
     Ok(())
 }
 
