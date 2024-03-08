@@ -1217,13 +1217,13 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::datastore::test::sled_baseboard_for_test;
+    use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
-    use nexus_db_model::SledBaseboard;
-    use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Blueprint;
@@ -1503,22 +1503,14 @@ mod tests {
         }
 
         fn db_sleds(&self) -> impl Iterator<Item = SledUpdate> + '_ {
-            self.sled_ids.iter().enumerate().map(|(index, sled_id)| {
+            self.sled_ids.iter().copied().map(|sled_id| {
                 SledUpdate::new(
-                    *sled_id,
+                    sled_id,
                     "[::1]:0".parse().unwrap(),
-                    SledBaseboard {
-                        serial_number: format!("sled-{index}"),
-                        part_number: "test-sled".to_string(),
-                        revision: 0,
-                    },
-                    SledSystemHardware {
-                        is_scrimlet: false,
-                        usable_hardware_threads: 128,
-                        usable_physical_ram: (128 << 30).try_into().unwrap(),
-                        reservoir_size: (64 << 30).try_into().unwrap(),
-                    },
+                    sled_baseboard_for_test(),
+                    sled_system_hardware_for_test(),
                     self.rack_id,
+                    Generation::new().into(),
                 )
             })
         }
@@ -1613,11 +1605,7 @@ mod tests {
         // Create four sleds.
         let harness = Harness::new(4);
         for sled in harness.db_sleds() {
-            datastore
-                .sled_upsert(sled)
-                .await
-                .expect("failed to upsert sled")
-                .unwrap();
+            datastore.sled_upsert(sled).await.expect("failed to upsert sled");
         }
 
         // Insert two Nexus records into `service`, emulating RSS.
