@@ -687,8 +687,8 @@ impl<'a> BlueprintZones<'a> {
             } else {
                 // The first generation is reserved to mean the one
                 // containing no zones.  See
-                // OMICRON_ZONES_CONFIG_INITIAL_GENERATION.  So we start
-                // with the next one.
+                // OmicronZonesConfig::INITIAL_GENERATION.  So we start with the
+                // next one.
                 OmicronZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![],

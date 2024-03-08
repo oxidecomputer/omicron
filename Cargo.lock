@@ -5406,6 +5406,7 @@ dependencies = [
  "mg-admin-client",
  "nexus-client",
  "nexus-config",
+ "nexus-types",
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",

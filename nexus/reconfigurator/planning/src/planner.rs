@@ -403,7 +403,7 @@ mod test {
         let (sled_id, sled_zones) = sleds[0];
         // We have defined elsewhere that the first generation contains no
         // zones.  So the first one with zones must be newer.  See
-        // OMICRON_ZONES_CONFIG_INITIAL_GENERATION.
+        // OmicronZonesConfig::INITIAL_GENERATION.
         assert!(sled_zones.generation > Generation::new());
         assert_eq!(sled_id, new_sled_id);
         assert_eq!(sled_zones.zones.len(), 1);
