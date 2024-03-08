@@ -33,6 +33,10 @@ use nexus_types::internal_api::params::RecoverySiloConfig;
 use nexus_types::internal_api::params::ServiceKind;
 use nexus_types::internal_api::params::ServiceNic;
 use nexus_types::internal_api::params::ServicePutRequest;
+use nexus_types::inventory::OmicronZoneConfig;
+use nexus_types::inventory::OmicronZoneDataset;
+use nexus_types::inventory::OmicronZoneType;
+use nexus_types::inventory::OmicronZonesConfig;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::MacAddr;
@@ -57,6 +61,7 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
+use omicron_common::api::external::Generation;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
 
@@ -260,6 +265,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
     pub external_dns: Option<dns_server::TransientServer>,
     pub internal_dns: Option<dns_server::TransientServer>,
     dns_config: Option<DnsConfigParams>,
+    omicron_zones: Vec<OmicronZoneConfig>,
 
     pub silo_name: Option<Name>,
     pub user_name: Option<UserId>,
@@ -300,6 +306,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             external_dns: None,
             internal_dns: None,
             dns_config: None,
+            omicron_zones: Vec::new(),
             silo_name: None,
             user_name: None,
         }
@@ -380,6 +387,18 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             DatasetKind::Cockroach,
             internal_dns::ServiceName::Cockroach,
         );
+        let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
+            .to_string()
+            .parse()
+            .unwrap();
+        self.omicron_zones.push(OmicronZoneConfig {
+            id: dataset_id,
+            underlay_address: *address.ip(),
+            zone_type: OmicronZoneType::CockroachDb {
+                address: address.to_string(),
+                dataset: OmicronZoneDataset { pool_name },
+            },
+        });
         self.database = Some(database);
     }
 
@@ -753,6 +772,24 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.sled_agent_storage = Some(tempdir);
     }
 
+    pub async fn configure_sled_agent(&mut self) {
+        // Tell our Sled Agent to report the zones that we configured.
+        let Some(sled_agent) = &self.sled_agent else {
+            panic!("no sled agent has been created");
+        };
+        let client = sled_agent_client::Client::new(
+            &format!("http://{}", sled_agent.http_server.local_addr()),
+            self.logctx.log.clone(),
+        );
+        client
+            .omicron_zones_put(&OmicronZonesConfig {
+                zones: self.omicron_zones.clone(),
+                generation: Generation::new().next(),
+            })
+            .await
+            .expect("Failed to configure sled agent with our zones");
+    }
+
     // Set up the Crucible Pantry on an existing Sled Agent.
     pub async fn start_crucible_pantry(&mut self) {
         let sled_agent = self
@@ -1042,6 +1079,10 @@ async fn setup_with_config_impl<N: NexusServer>(
                 (
                     "populate_internal_dns",
                     Box::new(|builder| builder.populate_internal_dns().boxed()),
+                ),
+                (
+                    "configure_sled_agent",
+                    Box::new(|builder| builder.configure_sled_agent().boxed()),
                 ),
                 (
                     "start_nexus_external",

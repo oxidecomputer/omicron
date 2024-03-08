@@ -24,7 +24,6 @@ use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CLICKHOUSE_PORT;
-use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
@@ -41,6 +40,7 @@ use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::net::IpAddr;
+use std::net::SocketAddrV6;
 use uuid::Uuid;
 
 pub(crate) async fn deploy_dns(
@@ -240,6 +240,11 @@ pub fn blueprint_internal_dns_config(
     // the details.
     let mut dns_builder = DnsConfigBuilder::new();
 
+    // XXX-dap don't panic
+    fn parse_port(address: &str) -> u16 {
+        address.parse::<SocketAddrV6>().unwrap().port()
+    }
+
     // The code below assumes that all zones are using the default port numbers.
     // That should be true, as those are the only ports ever used today.
     // In an ideal world, the correct port would be pulled out of the
@@ -253,7 +258,7 @@ pub fn blueprint_internal_dns_config(
             continue;
         }
 
-        let (service_name, port) = match omicron_zone.zone_type {
+        let (service_name, port) = match &omicron_zone.zone_type {
             OmicronZoneType::BoundaryNtp { .. } => {
                 (ServiceName::BoundaryNtp, NTP_PORT)
             }
@@ -266,8 +271,9 @@ pub fn blueprint_internal_dns_config(
             OmicronZoneType::ClickhouseKeeper { .. } => {
                 (ServiceName::ClickhouseKeeper, CLICKHOUSE_KEEPER_PORT)
             }
-            OmicronZoneType::CockroachDb { .. } => {
-                (ServiceName::Cockroach, COCKROACH_PORT)
+            OmicronZoneType::CockroachDb { address, .. } => {
+                let port = parse_port(&address);
+                (ServiceName::Cockroach, port)
             }
             OmicronZoneType::Nexus { .. } => {
                 (ServiceName::Nexus, NEXUS_INTERNAL_PORT)
@@ -437,9 +443,11 @@ mod test {
     use internal_dns::DNS_ZONE;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
+    use nexus_db_queries::context::OpContext;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
@@ -460,9 +468,13 @@ mod test {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
+    use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_test_utils::dev::poll::wait_for_condition;
+    use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::test_setup_log;
+    use slog::{debug, info};
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -471,7 +483,11 @@ mod test {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
+    use std::time::Duration;
     use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn blueprint_empty() -> Blueprint {
         let builder = CollectionBuilder::new("test-suite");
@@ -1062,6 +1078,106 @@ mod test {
         );
 
         logctx.cleanup_successful();
+    }
+
+    // Tests end-to-end DNS behavior:
+    //
+    // - If we create a blueprint matching the current system, and then apply
+    //   it, there are no changes to either internal or external DNS
+    //
+    // - If we then generate a blueprint with a Nexus zone and execute the DNS
+    //   part of that, then:
+    //
+    //   - internal DNS SRV record for _nexus._tcp is updated
+    //   - internal DNS AAAA record for the new zone is added
+    //   - external DNS gets a A record for the new zone's external IP
+    //
+    // - If we subsequently create a new Silo, the new Silo's DNS record
+    //   reflects the Nexus zone that was added.
+    // XXX-dap move to crate-level test since it uses realize_blueprint()?
+    #[nexus_test]
+    async fn test_silos_external_dns_end_to_end(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let log = &cptestctx.logctx.log;
+        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+
+        // First, wait until Nexus has successfully completed an inventory
+        // collection.
+        let collection = wait_for_condition(
+            || async {
+                let result =
+                    datastore.inventory_get_latest_collection(&opctx).await;
+                let log_result = match &result {
+                    Ok(Some(_)) => Ok("found"),
+                    Ok(None) => Ok("not found"),
+                    Err(error) => Err(error),
+                };
+                debug!(
+                    log,
+                    "attempt to fetch latest inventory collection";
+                    "result" => ?log_result,
+                );
+
+                match result {
+                    Ok(None) => Err(CondCheckError::NotYet),
+                    Ok(Some(c)) => Ok(c),
+                    Err(Error::ServiceUnavailable { .. }) => {
+                        Err(CondCheckError::NotYet)
+                    }
+                    Err(error) => Err(CondCheckError::Failed(error)),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(30),
+        )
+        .await
+        .expect("expected to find inventory collection");
+
+        // Fetch the initial contents of internal and external DNS.
+        let dns_initial_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("fetching initial internal DNS");
+        let dns_initial_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .expect("fetching initial external DNS");
+
+        // Now, use it to construct an initial blueprint.
+        info!(log, "using collection"; "collection_id" => %collection.id);
+        let blueprint = nexus
+            .blueprint_generate_from_collection(&opctx, collection.id)
+            .await
+            .expect("failed to generate initial blueprint");
+
+        // Now, execute the blueprint.
+        crate::realize_blueprint(&opctx, datastore, &blueprint, "test-suite")
+            .await
+            .expect("failed to execute initial blueprint");
+
+        // Now fetch DNS again.  It ought not to have changed.
+        let dns_latest_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("fetching latest internal DNS");
+        let dns_latest_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .expect("fetching latest external DNS");
+
+        assert_eq!(
+            dns_initial_internal.generation,
+            dns_latest_internal.generation
+        );
+        assert_eq!(
+            dns_initial_external.generation,
+            dns_latest_external.generation
+        );
+
+        // XXX-dap continue writing the test.  See above.
     }
 }
 
