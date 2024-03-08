@@ -94,11 +94,11 @@ impl super::Nexus {
             .blueprint_target_set_current(opctx, new_target)
             .await?;
 
-        // We have a new target: trigger the background task to realize it if
-        // it's enabled.
+        // We have a new target: trigger the background task to load this
+        // blueprint and hand it off to execution if it's enabled.
         if new_target.enabled {
             self.background_tasks
-                .activate(&self.background_tasks.task_blueprint_executor);
+                .activate(&self.background_tasks.task_blueprint_loader);
         }
 
         Ok(new_target)
@@ -120,10 +120,10 @@ impl super::Nexus {
             .await?;
 
         // If we just enabled this target, activate the background task to
-        // realize it.
+        // load this blueprint and hand it off to execution.
         if new_target.enabled {
             self.background_tasks
-                .activate(&self.background_tasks.task_blueprint_executor);
+                .activate(&self.background_tasks.task_blueprint_loader);
         }
 
         Ok(new_target)
