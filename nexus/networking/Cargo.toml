@@ -13,3 +13,4 @@ reqwest.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 uuid.workspace = true
+omicron-workspace-hack.workspace = true

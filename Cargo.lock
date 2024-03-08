@@ -4489,6 +4489,7 @@ dependencies = [
  "ipnetwork",
  "nexus-db-queries",
  "omicron-common",
+ "omicron-workspace-hack",
  "reqwest",
  "sled-agent-client",
  "slog",
