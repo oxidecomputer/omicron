@@ -498,7 +498,7 @@ struct UpstairsPathParam {
 /// An Upstairs will notify this endpoint when a repair starts
 #[endpoint {
      method = POST,
-     path = "/upstairs/{upstairs_id}/repair-start",
+     path = "/crucible/0/upstairs/{upstairs_id}/repair-start",
  }]
 async fn cpapi_upstairs_repair_start(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -526,7 +526,7 @@ async fn cpapi_upstairs_repair_start(
 /// An Upstairs will notify this endpoint when a repair finishes.
 #[endpoint {
      method = POST,
-     path = "/upstairs/{upstairs_id}/repair-finish",
+     path = "/crucible/0/upstairs/{upstairs_id}/repair-finish",
  }]
 async fn cpapi_upstairs_repair_finish(
     rqctx: RequestContext<Arc<ServerContext>>,
@@ -561,7 +561,7 @@ struct UpstairsRepairPathParam {
 /// An Upstairs will update this endpoint with the progress of a repair
 #[endpoint {
      method = POST,
-     path = "/upstairs/{upstairs_id}/repair/{repair_id}/progress",
+     path = "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress",
  }]
 async fn cpapi_upstairs_repair_progress(
     rqctx: RequestContext<Arc<ServerContext>>,

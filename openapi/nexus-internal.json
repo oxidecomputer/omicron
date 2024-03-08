@@ -125,6 +125,125 @@
         }
       }
     },
+    "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress": {
+      "post": {
+        "summary": "An Upstairs will update this endpoint with the progress of a repair",
+        "operationId": "cpapi_upstairs_repair_progress",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repair_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairProgress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/crucible/0/upstairs/{upstairs_id}/repair-finish": {
+      "post": {
+        "summary": "An Upstairs will notify this endpoint when a repair finishes.",
+        "operationId": "cpapi_upstairs_repair_finish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairFinishInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/crucible/0/upstairs/{upstairs_id}/repair-start": {
+      "post": {
+        "summary": "An Upstairs will notify this endpoint when a repair starts",
+        "operationId": "cpapi_upstairs_repair_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairStartInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/deployment/blueprints/all": {
       "get": {
         "summary": "Lists blueprints",
@@ -952,125 +1071,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/upstairs/{upstairs_id}/repair/{repair_id}/progress": {
-      "post": {
-        "summary": "An Upstairs will update this endpoint with the progress of a repair",
-        "operationId": "cpapi_upstairs_repair_progress",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "repair_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
-            }
-          },
-          {
-            "in": "path",
-            "name": "upstairs_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RepairProgress"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/upstairs/{upstairs_id}/repair-finish": {
-      "post": {
-        "summary": "An Upstairs will notify this endpoint when a repair finishes.",
-        "operationId": "cpapi_upstairs_repair_finish",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "upstairs_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RepairFinishInfo"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/upstairs/{upstairs_id}/repair-start": {
-      "post": {
-        "summary": "An Upstairs will notify this endpoint when a repair starts",
-        "operationId": "cpapi_upstairs_repair_start",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "upstairs_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RepairStartInfo"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -6873,6 +6873,10 @@
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
       },
+      "TypedUuidForUpstairsKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",
         "oneOf": [
@@ -6884,10 +6888,6 @@
             ]
           }
         ]
-      },
-      "TypedUuidForUpstairsKind": {
-        "type": "string",
-        "format": "uuid"
       }
     },
     "responses": {
