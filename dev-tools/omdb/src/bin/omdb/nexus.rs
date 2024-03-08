@@ -1149,8 +1149,7 @@ async fn cmd_nexus_sled_expunge(
         DefaultPromptSegment::Basic("sled serial".to_string()),
         DefaultPromptSegment::Empty,
     );
-    if let Ok(reedline::Signal::Success(input)) =
-        line_editor.read_line(&prompt)
+    if let Ok(reedline::Signal::Success(input)) = line_editor.read_line(&prompt)
     {
         if input != sled.serial_number() {
             eprintln!("serial number mismatch; aborting");
