@@ -91,6 +91,7 @@ id_path_param!(SwitchPath, switch_id, "switch");
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
     pub sled: Uuid,
