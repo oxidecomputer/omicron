@@ -4511,6 +4511,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-inventory",
+ "nexus-networking",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
  "nexus-test-utils-macros",

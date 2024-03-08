@@ -68,7 +68,7 @@ where
     info!(
         opctx.log,
         "attempting to realize blueprint";
-        "blueprint_id" => ?blueprint.id
+        "blueprint_id" => %blueprint.id
     );
 
     resource_allocation::ensure_zone_resources_allocated(
@@ -89,6 +89,21 @@ where
         .collect();
     omicron_zones::deploy_zones(&opctx, &sleds_by_id, &blueprint.omicron_zones)
         .await?;
+
+    // After deploying omicron zones, we may need to refresh OPTE service
+    // firewall rules. This is an idempotent operation, so we don't attempt
+    // to optimize out calling it in unnecessary cases, although we expect
+    // _most_ cases this is not needed.
+    nexus_networking::plumb_service_firewall_rules(
+        datastore,
+        &opctx,
+        &[],
+        &opctx,
+        &opctx.log,
+    )
+    .await
+    .context("failed to plumb service firewall rules to sleds")
+    .map_err(|err| vec![err])?;
 
     datasets::ensure_crucible_dataset_records_exist(
         &opctx,
