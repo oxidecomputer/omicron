@@ -1550,6 +1550,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
+    bp_omicron_zone,
+    bp_target,
     dataset,
     disk,
     image,
