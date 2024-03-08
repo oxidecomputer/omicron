@@ -348,6 +348,18 @@ while [[ $(pfexec svcs -z $(zoneadm list -n | grep oxz_ntp) \
 done
 echo "Waited for chrony: ${retry}s"
 
+# Wait for at least one nexus zone to become available
+retry=0
+until zoneadm list | grep nexus; do
+	if [[ $retry -gt 60 ]]; then
+		echo "Failed to start at least one nexus zone after 60 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+echo "Waited for nexus: ${retry}s"
+
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END
 eval "$(./tests/bootstrap)"
