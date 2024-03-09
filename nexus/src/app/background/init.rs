@@ -22,11 +22,9 @@ use crate::app::sagas::SagaRequest;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_common::nexus_config::BackgroundTaskConfig;
 use omicron_common::nexus_config::DnsTasksConfig;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -92,8 +90,6 @@ impl BackgroundTasks {
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
-        dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
-        mgd_clients: &HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
@@ -138,8 +134,6 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
-        let dpd_client_list: Vec<_> = dpd_clients.values().cloned().collect();
-
         let nat_cleanup = {
             driver.register(
                 "nat_v4_garbage_collector".to_string(),
@@ -150,7 +144,7 @@ impl BackgroundTasks {
                 config.nat_cleanup.period_secs,
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
                     datastore.clone(),
-                    dpd_client_list.clone(),
+                    resolver.clone()
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -167,7 +161,7 @@ impl BackgroundTasks {
                 config.bfd_manager.period_secs,
                 Box::new(bfd::BfdManager::new(
                     datastore.clone(),
-                    mgd_clients.clone(),
+                    resolver.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -260,7 +254,7 @@ impl BackgroundTasks {
                 config.sync_service_zone_nat.period_secs,
                 Box::new(ServiceZoneNatTracker::new(
                     datastore.clone(),
-                    dpd_client_list.clone(),
+                    resolver.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],

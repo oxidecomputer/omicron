@@ -15,7 +15,6 @@ use nexus_db_queries::db::model::{LoopbackAddress, Name};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{IpNet, NameOrId};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use steno::ActionError;
 use uuid::Uuid;
 
@@ -171,9 +170,15 @@ async fn slc_loopback_address_delete(
         .parse()
         .map_err(|e| ActionError::action_failed(format!("{e:#?}")))?;
 
-    let dpd_client: Arc<dpd_client::Client> = osagactx
+    let dpd_client: dpd_client::Client = osagactx
         .nexus()
-        .dpd_clients
+        .dpd_clients()
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "unable to retrieve dpd clients: {e}"
+            ))
+        })?
         .get(&switch)
         .ok_or_else(|| {
             ActionError::action_failed(format!(

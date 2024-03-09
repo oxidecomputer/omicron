@@ -6,6 +6,7 @@
 //! (dendrite, mgd, etc.)
 
 use crate::app::{
+    background::networking::{build_dpd_clients, build_mgd_clients},
     map_switch_zone_addrs,
     sagas::switch_port_settings_common::api_to_dpd_port_settings,
 };
@@ -14,8 +15,8 @@ use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    BgpConfig, BootstoreConfig, SwitchLinkFec, SwitchLinkSpeed,
-    SwitchPortBgpPeerConfig, NETWORK_KEY,
+    AddressLotBlock, BgpConfig, BootstoreConfig, SwitchLinkFec,
+    SwitchLinkSpeed, SwitchPortBgpPeerConfig, INFRA_LOT, NETWORK_KEY,
 };
 use uuid::Uuid;
 
@@ -32,9 +33,9 @@ use nexus_db_queries::{
     db::{datastore::SwitchPortSettingsCombinedResult, DataStore},
 };
 use nexus_types::{external_api::params, identity::Resource};
-use omicron_common::{address::DENDRITE_PORT, OMICRON_DPD_TAG};
+use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
-    address::{get_sled_address, Ipv6Subnet, MGD_PORT},
+    address::{get_sled_address, Ipv6Subnet},
     api::external::{DataPageParams, SwitchLocation},
 };
 use serde_json::json;
@@ -45,7 +46,7 @@ use sled_agent_client::types::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, SocketAddrV6},
+    net::{IpAddr, Ipv4Addr},
     str::FromStr,
     sync::Arc,
 };
@@ -546,9 +547,11 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply bootstore changes
                 //
 
-                // TODO: remove. Historically, we've been using the first scrimlet we can reach
-                // to get the ntp servers and address lot range. We should instead be pulling this
-                // information from the db.
+                // TODO: #5232 Make ntp servers w/ generation tracking first-class citizens in the db
+                // We're using the latest bootstore config from the sled agents to get the ntp
+                // servers. We should instead be pulling this information from the db. However, it
+                // seems that we're currently not storing the ntp servers in the db as a first-class
+                // citizen, so we'll need to add that first.
 
                 // find the active sled-agent bootstore config with the highest generation
                 let mut latest_sled_agent_bootstore_config: Option<EarlyNetworkConfig> = None;
@@ -572,31 +575,18 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }
 
+                // TODO: this will also be removed once the above is resolved
                 // Move on to the next rack if neither scrimlet is reachable.
                 // if both scrimlets are unreachable we probably have bigger problems on this rack
-                if latest_sled_agent_bootstore_config.is_none() {
-                    error!(log, "both scrimlets are unreachable, cannot update bootstore");
-                    continue;
-                }
-
-                let (ntp_servers, infra_ip_first, infra_ip_last) = latest_sled_agent_bootstore_config
-                    .as_ref()
-                    .and_then(|config| {
-                        config.body.rack_network_config.as_ref().map(|rack_config| {
-                            (
-                                config.body.ntp_servers.clone(),
-                                rack_config.infra_ip_first,
-                                rack_config.infra_ip_last,
-                            )
-                        })
-                    })
-                    .unwrap_or_else(|| {
-                        (
-                            Vec::new(),
-                            Ipv4Addr::UNSPECIFIED,
-                            Ipv4Addr::UNSPECIFIED,
-                        )
-                    });
+                let ntp_servers = match latest_sled_agent_bootstore_config {
+                    Some(config) => {
+                        config.body.ntp_servers.clone()
+                    },
+                    None => {
+                        error!(log, "both scrimlets are unreachable, cannot update bootstore");
+                        continue;
+                    }
+                };
 
                 // build the desired bootstore config from the records we've fetched
                 let subnet = match rack.rack_subnet {
@@ -682,6 +672,36 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     ports.push(port_config);
                 }
 
+                let blocks = match self.datastore.address_lot_blocks_by_name(opctx, INFRA_LOT.into()).await {
+                    Ok(blocks) => blocks,
+                    Err(e) => {
+                        error!(log, "error while fetching address lot blocks from db"; "error" => %e);
+                        continue;
+                    },
+                };
+
+                // currently there should only be one block assigned. If there is more than one
+                // block, grab the first one and emit a warning.
+                if blocks.len() > 1 {
+                    warn!(log, "more than one block assigned to infra lot"; "blocks" => ?blocks);
+                }
+
+                let (infra_ip_first, infra_ip_last)= match blocks.get(0) {
+                    Some(AddressLotBlock{ first_address, last_address, ..}) => {
+                        match (first_address, last_address) {
+                            (IpNetwork::V4(first), IpNetwork::V4(last)) => (first.ip(), last.ip()),
+                            _ =>  {
+                                error!(log, "infra lot block must be ipv4"; "block" => ?blocks.get(0));
+                                continue;
+                            },
+                        }
+                    },
+                    None => {
+                        error!(log, "no blocks assigned to infra lot");
+                        continue;
+                    },
+                };
+
                 let mut desired_config = EarlyNetworkConfig {
                     generation: 0,
                     schema_version: 1,
@@ -689,8 +709,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         ntp_servers,
                         rack_network_config: Some(RackNetworkConfigV1 {
                             rack_subnet: subnet,
-                            //TODO(ry) you are here. We need to remove these too. They are
-                            // inconsistent with a generic set of addresses on ports.
                             infra_ip_first,
                             infra_ip_last,
                             ports,
@@ -788,8 +806,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     info!(
                         &log,
                         "updating bootstore config";
-                        "old config" => ?latest_sled_agent_bootstore_config,
-                        "new config" => ?desired_config,
+                        "config" => ?desired_config,
                     );
 
                     // push the updates to both scrimlets
@@ -809,6 +826,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         }
                     }
 
+                    // if at least one succeeded, record this update in the db
                     if one_succeeded {
                         let config = BootstoreConfig {
                             key: NETWORK_KEY.into(),
@@ -864,60 +882,6 @@ fn uplinks(
         }
     }
     uplinks
-}
-
-fn build_mgd_clients(
-    mappings: HashMap<SwitchLocation, std::net::Ipv6Addr>,
-    log: &slog::Logger,
-) -> HashMap<SwitchLocation, mg_admin_client::Client> {
-    let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> = vec![];
-    for (location, addr) in &mappings {
-        let port = MGD_PORT;
-        let socketaddr =
-            std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-        let client =
-            match mg_admin_client::Client::new(&log.clone(), socketaddr) {
-                Ok(client) => client,
-                Err(e) => {
-                    error!(
-                        log,
-                        "error building mgd client";
-                        "location" => %location,
-                        "addr" => %addr,
-                        "error" => %e,
-                    );
-                    continue;
-                }
-            };
-        clients.push((*location, client));
-    }
-    clients.into_iter().collect::<HashMap<_, _>>()
-}
-
-fn build_dpd_clients(
-    mappings: &HashMap<SwitchLocation, std::net::Ipv6Addr>,
-    log: &slog::Logger,
-) -> HashMap<SwitchLocation, dpd_client::Client> {
-    let dpd_clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
-        .iter()
-        .map(|(location, addr)| {
-            let port = DENDRITE_PORT;
-
-            let client_state = dpd_client::ClientState {
-                tag: String::from("nexus"),
-                log: log.new(o!(
-                    "component" => "DpdClient"
-                )),
-            };
-
-            let dpd_client = dpd_client::Client::new(
-                &format!("http://[{addr}]:{port}"),
-                client_state,
-            );
-            (*location, dpd_client)
-        })
-        .collect();
-    dpd_clients
 }
 
 fn build_sled_agent_clients(

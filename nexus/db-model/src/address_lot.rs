@@ -11,6 +11,8 @@ use omicron_common::api::external;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+pub const INFRA_LOT: &str = "initial-infra";
+
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone, Copy)]
     #[diesel(postgres_type(name = "address_lot_kind", schema = "public"))]

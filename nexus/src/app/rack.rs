@@ -13,6 +13,7 @@ use gateway_client::types::SpType;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
+use nexus_db_model::INFRA_LOT;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -288,12 +289,11 @@ impl super::Nexus {
         // going forward via self.run_saga()? Note that self.create_runnable_saga and
         // self.execute_saga are currently not available within this scope.
         info!(self.log, "Recording Rack Network Configuration");
-        let address_lot_name =
-            Name::from_str("initial-infra").map_err(|e| {
-                Error::internal_error(&format!(
-                    "unable to use `initial-infra` as `Name`: {e}"
-                ))
-            })?;
+        let address_lot_name = Name::from_str(INFRA_LOT).map_err(|e| {
+            Error::internal_error(&format!(
+                "unable to use `initial-infra` as `Name`: {e}"
+            ))
+        })?;
         let identity = IdentityMetadataCreateParams {
             name: address_lot_name.clone(),
             description: "initial infrastructure ip address lot".to_string(),

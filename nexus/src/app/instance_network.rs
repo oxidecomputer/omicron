@@ -642,7 +642,12 @@ impl super::Nexus {
                        "instance_id" => ?instance_id,
                        "switch" => switch.to_string());
 
-            let client_result = self.dpd_clients.get(switch).ok_or_else(|| {
+            let clients = self.dpd_clients().await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to get dpd clients: {e}"
+                ))
+            })?;
+            let client_result = clients.get(switch).ok_or_else(|| {
                 Error::internal_error(&format!(
                     "unable to find dendrite client for {switch}"
                 ))

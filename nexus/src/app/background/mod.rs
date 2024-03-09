@@ -15,6 +15,7 @@ mod external_endpoints;
 mod init;
 mod inventory_collection;
 mod nat_cleanup;
+mod networking;
 mod phantom_disks;
 mod region_replacement;
 mod status;

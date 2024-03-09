@@ -225,6 +225,35 @@ impl DataStore {
 
         Ok(address_lot_id)
     }
+
+    // Take the name of an address lot and look up its blocks
+    pub async fn address_lot_blocks_by_name(
+        &self,
+        opctx: &OpContext,
+        name: String,
+    ) -> LookupResult<Vec<AddressLotBlock>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::address_lot::dsl as lot_dsl;
+        use db::schema::address_lot_block::dsl as block_dsl;
+
+        let address_lot_id = lot_dsl::address_lot
+            .filter(lot_dsl::name.eq(name))
+            .select(lot_dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let blocks = block_dsl::address_lot_block
+            .filter(block_dsl::address_lot_id.eq(address_lot_id))
+            .select(AddressLotBlock::as_select())
+            .load_async::<AddressLotBlock>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(blocks)
+    }
 }
 
 #[derive(Debug)]

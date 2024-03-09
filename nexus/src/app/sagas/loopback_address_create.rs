@@ -14,7 +14,6 @@ use nexus_db_queries::authz;
 use nexus_db_queries::db::model::LoopbackAddress;
 use omicron_common::api::internal::shared::SwitchLocation;
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use steno::ActionError;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -136,7 +135,7 @@ async fn slc_loopback_address_create(
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
 
-    let dpd_client: Arc<dpd_client::Client> =
+    let dpd_client: dpd_client::Client =
         select_dendrite_client(&sagactx).await?;
 
     retry_until_known_result(log, || async {
@@ -154,7 +153,7 @@ async fn slc_loopback_address_create(
 
 pub(crate) async fn select_dendrite_client(
     sagactx: &NexusActionContext,
-) -> Result<Arc<dpd_client::Client>, ActionError> {
+) -> Result<dpd_client::Client, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
@@ -164,9 +163,15 @@ pub(crate) async fn select_dendrite_client(
         .as_str()
         .parse()
         .map_err(ActionError::action_failed)?;
-    let dpd_client: Arc<dpd_client::Client> = osagactx
+    let dpd_client: dpd_client::Client = osagactx
         .nexus()
-        .dpd_clients
+        .dpd_clients()
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to get dpd clients: {e}"
+            ))
+        })?
         .get(&switch_location)
         .ok_or_else(|| {
             ActionError::action_failed(format!(
