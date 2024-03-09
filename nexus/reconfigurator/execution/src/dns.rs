@@ -4,6 +4,7 @@
 
 //! Propagates internal DNS changes in a given blueprint
 
+use crate::ExecutionOverrides;
 use crate::Sled;
 use dns_service_client::DnsDiff;
 use internal_dns::DnsConfigBuilder;
@@ -21,13 +22,9 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
 use nexus_types::internal_api::params::DnsRecord;
-use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
-use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
-use omicron_common::address::MGD_PORT;
-use omicron_common::address::MGS_PORT;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::api::external::Error;
@@ -46,6 +43,7 @@ pub(crate) async fn deploy_dns(
     creator: String,
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
+    overrides: &ExecutionOverrides,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
     let internal_dns_config_current = datastore
@@ -65,7 +63,7 @@ pub(crate) async fn deploy_dns(
 
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_config_blueprint =
-        blueprint_internal_dns_config(blueprint, sleds_by_id);
+        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides);
     let silos = datastore
         .silo_list_all_batched(opctx, Discoverability::All)
         .await
@@ -228,6 +226,7 @@ pub(crate) async fn deploy_dns_one(
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
+    overrides: &ExecutionOverrides,
 ) -> DnsConfigParams {
     // The DNS names configured here should match what RSS configures for the
     // same zones.  It's tricky to have RSS share the same code because it uses
@@ -310,15 +309,15 @@ pub fn blueprint_internal_dns_config(
     let scrimlets = sleds_by_id.values().filter(|sled| sled.is_scrimlet);
     for scrimlet in scrimlets {
         let sled_subnet = scrimlet.subnet();
-        let switch_zone_ip = get_switch_zone_address(sled_subnet);
+        let switch_zone_ip = overrides.switch_zone_ip(scrimlet.id, sled_subnet);
         // unwrap(): see above.
         dns_builder
             .host_zone_switch(
                 scrimlet.id,
                 switch_zone_ip,
-                DENDRITE_PORT,
-                MGS_PORT,
-                MGD_PORT,
+                overrides.dendrite_port(scrimlet.id),
+                overrides.mgs_port(scrimlet.id),
+                overrides.mgd_port(scrimlet.id),
             )
             .unwrap();
     }
@@ -438,6 +437,7 @@ mod test {
     use super::dns_compute_update;
     use crate::dns::blueprint_external_dns_config;
     use crate::dns::silo_dns_name;
+    use crate::ExecutionOverrides;
     use crate::Sled;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
@@ -447,6 +447,8 @@ mod test {
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_test_utils::SLED_AGENT2_UUID;
+    use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::OmicronZoneConfig;
@@ -471,6 +473,7 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::SwitchLocation;
     use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::test_setup_log;
@@ -522,8 +525,11 @@ mod test {
     #[test]
     fn test_blueprint_internal_dns_empty() {
         let blueprint = blueprint_empty();
-        let blueprint_dns =
-            blueprint_internal_dns_config(&blueprint, &BTreeMap::new());
+        let blueprint_dns = blueprint_internal_dns_config(
+            &blueprint,
+            &BTreeMap::new(),
+            &Default::default(),
+        );
         assert!(blueprint_dns.sole_zone().unwrap().records.is_empty());
     }
 
@@ -620,8 +626,11 @@ mod test {
             })
             .collect();
 
-        let dns_config_blueprint =
-            blueprint_internal_dns_config(&blueprint, &sleds_by_id);
+        let dns_config_blueprint = blueprint_internal_dns_config(
+            &blueprint,
+            &sleds_by_id,
+            &Default::default(),
+        );
         assert_eq!(
             dns_config_blueprint.generation,
             u64::from(initial_dns_generation.next())
@@ -1154,9 +1163,39 @@ mod test {
             .expect("failed to generate initial blueprint");
 
         // Now, execute the blueprint.
-        crate::realize_blueprint(&opctx, datastore, &blueprint, "test-suite")
-            .await
-            .expect("failed to execute initial blueprint");
+        // XXX-dap doc/cleanup
+        let mut overrides = ExecutionOverrides::default();
+        let scrimlets = [
+            (SLED_AGENT_UUID, SwitchLocation::Switch0),
+            (SLED_AGENT2_UUID, SwitchLocation::Switch1),
+        ];
+        for (id_str, switch_location) in scrimlets {
+            let sled_id = id_str.parse().unwrap();
+            let ip = Ipv6Addr::LOCALHOST;
+            let mgs_port = cptestctx
+                .gateway
+                .get(&switch_location)
+                .unwrap()
+                .client
+                .bind_address
+                .port();
+            let dendrite_port =
+                cptestctx.dendrite.get(&switch_location).unwrap().port;
+            let mgd_port = cptestctx.mgd.get(&switch_location).unwrap().port;
+            overrides.override_switch_zone_ip(sled_id, ip);
+            overrides.override_dendrite_port(sled_id, dendrite_port);
+            overrides.override_mgs_port(sled_id, mgs_port);
+            overrides.override_mgd_port(sled_id, mgd_port);
+        }
+        crate::realize_blueprint(
+            &opctx,
+            datastore,
+            &blueprint,
+            "test-suite",
+            &overrides,
+        )
+        .await
+        .expect("failed to execute initial blueprint");
 
         // Now fetch DNS again.  It ought not to have changed.
         let dns_latest_internal = datastore
