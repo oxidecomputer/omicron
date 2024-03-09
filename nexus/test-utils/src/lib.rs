@@ -61,6 +61,7 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
+use chrono::SecondsFormat;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 pub use sim::TEST_HARDWARE_THREADS;
@@ -193,18 +194,6 @@ impl RackInitRequestBuilder {
     // Keeps track of:
     // - The "ServicePutRequest" (for handoff to Nexus)
     // - The internal DNS configuration for this service
-    // XXX-dap remove me
-    fn add_service(
-        &mut self,
-        address: SocketAddrV6,
-        kind: ServiceKind,
-        service_name: internal_dns::ServiceName,
-        sled_id: Uuid,
-    ) {
-        let zone_id = Uuid::new_v4();
-        self.add_service_with_id(zone_id, address, kind, service_name, sled_id);
-    }
-
     fn add_service_with_id(
         &mut self,
         zone_id: Uuid,
@@ -957,7 +946,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
-        self.rack_init_builder.add_service(
+        let zone_id = Uuid::new_v4();
+        self.rack_init_builder.add_service_with_id(
+            zone_id,
             dropshot_address,
             ServiceKind::ExternalDns {
                 external_address: (*dns_address.ip()).into(),
@@ -975,6 +966,36 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             internal_dns::ServiceName::ExternalDns,
             sled_id,
         );
+
+        let zpool_id = Uuid::new_v4();
+        let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
+            .to_string()
+            .parse()
+            .unwrap();
+        self.omicron_zones.push(OmicronZoneConfig {
+            id: zone_id,
+            underlay_address: *dropshot_address.ip(),
+            zone_type: OmicronZoneType::ExternalDns {
+                dataset: OmicronZoneDataset { pool_name },
+                dns_address: dns_address.to_string(),
+                http_address: dropshot_address.to_string(),
+                nic: NetworkInterface {
+                    id: Uuid::new_v4(),
+                    ip: (*dns_address.ip()).into(),
+                    kind: NetworkInterfaceKind::Service(zone_id),
+                    mac,
+                    name: format!("external-dns-{}", zone_id).parse().unwrap(),
+                    primary: true,
+                    slot: 0,
+                    subnet: sled_agent_client::types::Ipv4Net::from(
+                        *DNS_OPTE_IPV4_SUBNET,
+                    )
+                    .into(),
+                    vni: Vni::SERVICES_VNI,
+                },
+            },
+        });
+
         self.external_dns = Some(dns);
     }
 
@@ -987,12 +1008,31 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let SocketAddr::V6(address) = dns.dropshot_server.local_addr() else {
             panic!("Unsupported IPv4 DNS address");
         };
-        self.rack_init_builder.add_service(
+        let zone_id = Uuid::new_v4();
+        self.rack_init_builder.add_service_with_id(
+            zone_id,
             address,
             ServiceKind::InternalDns,
             internal_dns::ServiceName::InternalDns,
             sled_id,
         );
+
+        let zpool_id = Uuid::new_v4();
+        let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
+            .to_string()
+            .parse()
+            .unwrap();
+        self.omicron_zones.push(OmicronZoneConfig {
+            id: zone_id,
+            underlay_address: *address.ip(),
+            zone_type: OmicronZoneType::InternalDns {
+                dataset: OmicronZoneDataset { pool_name },
+                dns_address: dns.dns_server.local_address().to_string(),
+                http_address: address.to_string(),
+                gz_address: Ipv6Addr::LOCALHOST,
+                gz_address_index: 0,
+            },
+        });
 
         self.internal_dns = Some(dns);
     }

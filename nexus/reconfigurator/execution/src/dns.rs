@@ -22,11 +22,6 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
 use nexus_types::internal_api::params::DnsRecord;
-use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
-use omicron_common::address::CRUCIBLE_PORT;
-use omicron_common::address::DNS_HTTP_PORT;
-use omicron_common::address::NTP_PORT;
-use omicron_common::address::OXIMETER_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
@@ -237,36 +232,32 @@ pub fn blueprint_internal_dns_config(
     let mut dns_builder = DnsConfigBuilder::new();
 
     // XXX-dap don't panic
+    // See oxidecomputer/omicron#4988.
     fn parse_port(address: &str) -> u16 {
         address.parse::<SocketAddrV6>().unwrap().port()
     }
 
-    // The code below assumes that all zones are using the default port numbers.
-    // That should be true, as those are the only ports ever used today.
-    // In an ideal world, the correct port would be pulled out of the
-    // `OmicronZoneType` variant instead.  Although that information is present,
-    // it's irritatingly non-trivial to do right now because SocketAddrs are
-    // represented as strings, so we'd need to parse all of them and handle all
-    // the errors, even though they should never happen.
-    // See oxidecomputer/omicron#4988.
     for (_, omicron_zone) in blueprint.all_omicron_zones() {
         if !blueprint.zones_in_service.contains(&omicron_zone.id) {
             continue;
         }
 
         let (service_name, port) = match &omicron_zone.zone_type {
-            OmicronZoneType::BoundaryNtp { .. } => {
-                (ServiceName::BoundaryNtp, NTP_PORT)
+            OmicronZoneType::BoundaryNtp { address, .. } => {
+                let port = parse_port(&address);
+                (ServiceName::BoundaryNtp, port)
             }
-            OmicronZoneType::InternalNtp { .. } => {
-                (ServiceName::InternalNtp, NTP_PORT)
+            OmicronZoneType::InternalNtp { address, .. } => {
+                let port = parse_port(&address);
+                (ServiceName::InternalNtp, port)
             }
             OmicronZoneType::Clickhouse { address, .. } => {
                 let port = parse_port(&address);
                 (ServiceName::Clickhouse, port)
             }
-            OmicronZoneType::ClickhouseKeeper { .. } => {
-                (ServiceName::ClickhouseKeeper, CLICKHOUSE_KEEPER_PORT)
+            OmicronZoneType::ClickhouseKeeper { address, .. } => {
+                let port = parse_port(&address);
+                (ServiceName::ClickhouseKeeper, port)
             }
             OmicronZoneType::CockroachDb { address, .. } => {
                 let port = parse_port(&address);
@@ -276,21 +267,25 @@ pub fn blueprint_internal_dns_config(
                 let port = parse_port(internal_address);
                 (ServiceName::Nexus, port)
             }
-            OmicronZoneType::Crucible { .. } => {
-                (ServiceName::Crucible(omicron_zone.id), CRUCIBLE_PORT)
+            OmicronZoneType::Crucible { address, .. } => {
+                let port = parse_port(address);
+                (ServiceName::Crucible(omicron_zone.id), port)
             }
             OmicronZoneType::CruciblePantry { address } => {
                 let port = parse_port(address);
                 (ServiceName::CruciblePantry, port)
             }
-            OmicronZoneType::Oximeter { .. } => {
-                (ServiceName::Oximeter, OXIMETER_PORT)
+            OmicronZoneType::Oximeter { address } => {
+                let port = parse_port(address);
+                (ServiceName::Oximeter, port)
             }
-            OmicronZoneType::ExternalDns { .. } => {
-                (ServiceName::ExternalDns, DNS_HTTP_PORT)
+            OmicronZoneType::ExternalDns { http_address, .. } => {
+                let port = parse_port(http_address);
+                (ServiceName::ExternalDns, port)
             }
-            OmicronZoneType::InternalDns { .. } => {
-                (ServiceName::InternalDns, DNS_HTTP_PORT)
+            OmicronZoneType::InternalDns { http_address, .. } => {
+                let port = parse_port(http_address);
+                (ServiceName::InternalDns, port)
             }
         };
 
