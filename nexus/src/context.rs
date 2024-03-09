@@ -195,7 +195,6 @@ impl ServerContext {
                 // This means a new cockroachdb instance won't picked up until
                 // Nexus restarts.
                 let addrs = loop {
-                    debug!(log, "Looking up cockroach addresses");
                     match resolver
                         .lookup_all_socket_v6(ServiceName::Cockroach)
                         .await
