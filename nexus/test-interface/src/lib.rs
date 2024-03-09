@@ -56,6 +56,7 @@ pub trait NexusServer: Send + Sync + 'static {
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
         tls_certificates: Vec<nexus_types::internal_api::params::Certificate>,
+        disable_sled_id: Uuid,
     ) -> Self;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;

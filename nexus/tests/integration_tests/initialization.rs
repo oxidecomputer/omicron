@@ -78,19 +78,6 @@ async fn test_nexus_boots_before_cockroach() {
 
 #[tokio::test]
 async fn test_nexus_boots_before_dendrite() {
-    // Start MGS + Sim SP. This is needed for the Dendrite client initialization
-    // inside of Nexus initialization
-    let (mgs_config, sp_sim_config) = mgs_setup::load_test_config();
-    let mgs_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, MGS_PORT, 0, 0);
-    let mgs = mgs_setup::test_setup_with_config(
-        "test_nexus_boots_before_dendrite",
-        SpPort::One,
-        mgs_config,
-        &sp_sim_config,
-        Some(mgs_addr),
-    )
-    .await;
-
     let mut config = load_test_config();
 
     let mut builder =
@@ -100,6 +87,13 @@ async fn test_nexus_boots_before_dendrite() {
         );
 
     let log = builder.logctx.log.new(o!("component" => "test"));
+
+    // Start MGS + Sim SP. This is needed for the Dendrite client initialization
+    // inside of Nexus initialization
+    info!(&log, "Starting MGS");
+    builder.start_gateway(SwitchLocation::Switch0).await;
+    builder.start_gateway(SwitchLocation::Switch1).await;
+    info!(&log, "Started MGS");
 
     let populate = true;
     builder.start_crdb(populate).await;
@@ -150,6 +144,7 @@ async fn test_nexus_boots_before_dendrite() {
     info!(log, "Started mgd");
 
     info!(log, "Populating internal DNS records");
+    builder.record_switch_dns().await;
     builder.populate_internal_dns().await;
     info!(log, "Populated internal DNS records");
 
@@ -157,7 +152,6 @@ async fn test_nexus_boots_before_dendrite() {
     nexus_handle.await.expect("Test: Task starting Nexus has failed");
 
     builder.teardown().await;
-    mgs.teardown().await;
 }
 
 // Helper to ensure we perform the same setup for the positive and negative test

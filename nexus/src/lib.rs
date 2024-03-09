@@ -27,6 +27,7 @@ use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::ServiceKind;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::{
@@ -237,6 +238,7 @@ impl nexus_test_interface::NexusServer for Server {
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
         certs: Vec<nexus_types::internal_api::params::Certificate>,
+        disable_sled_id: Uuid,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
@@ -302,7 +304,25 @@ impl nexus_test_interface::NexusServer for Server {
             .expect("Could not initialize rack");
 
         // Start the Nexus external API.
-        Server::start(internal_server).await.unwrap()
+        let rv = Server::start(internal_server).await.unwrap();
+
+        // It's convenient for tests to assume that there's only one
+        // provisionable sled.
+        // XXX-dap
+        rv.apictx()
+            .nexus
+            .sled_set_provision_policy(
+                &opctx,
+                &nexus_db_queries::db::lookup::LookupPath::new(
+                    &opctx,
+                    rv.apictx().nexus.datastore(),
+                )
+                .sled_id(disable_sled_id),
+                SledProvisionPolicy::NonProvisionable,
+            )
+            .await
+            .unwrap();
+        rv
     }
 
     async fn get_http_server_external_address(&self) -> SocketAddr {

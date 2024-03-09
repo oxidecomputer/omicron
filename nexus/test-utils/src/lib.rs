@@ -822,6 +822,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             &external_dns_zone_name,
             recovery_silo,
             tls_certificates,
+            SLED_AGENT2_UUID.parse().unwrap(),
         )
         .await;
 

@@ -9948,6 +9948,7 @@
       ],
       "parent_blueprint_id": null,
       "internal_dns_version": 1,
+      "external_dns_version": 1,
       "time_created": "2024-03-01T19:06:56.467313Z",
       "creator": "54c947d2-6355-453c-80fc-8f49cc2129ee",
       "comment": "from collection df8caafd-c444-4f65-a304-b9ceb62a96c2"
@@ -10701,6 +10702,7 @@
       ],
       "parent_blueprint_id": "486de160-c8f3-4600-acca-b0c78e33aca4",
       "internal_dns_version": 1,
+      "external_dns_version": 1,
       "time_created": "2024-03-01T19:07:58.105708Z",
       "creator": "54c947d2-6355-453c-80fc-8f49cc2129ee",
       "comment": "sled a243c1d0-9051-4b94-ab3e-f2a93fd0ae4f: add NTP zone"
@@ -11550,6 +11552,7 @@
       ],
       "parent_blueprint_id": "6c127695-ba15-408d-a992-325a1a888380",
       "internal_dns_version": 2,
+      "external_dns_version": 1,
       "time_created": "2024-03-01T19:08:52.730520Z",
       "creator": "54c947d2-6355-453c-80fc-8f49cc2129ee",
       "comment": "sled a243c1d0-9051-4b94-ab3e-f2a93fd0ae4f: add zones"
