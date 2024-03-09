@@ -13,6 +13,7 @@
 #:  "%/out/dhcp-server.log",
 #: ]
 #: skip_clone = true
+#: enable = false
 #:
 #: [dependencies.a4x2]
 #: job = "a4x2-prepare"
