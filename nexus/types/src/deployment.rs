@@ -15,8 +15,6 @@
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledState;
 use crate::inventory::Collection;
-pub use crate::inventory::NetworkInterface;
-pub use crate::inventory::NetworkInterfaceKind;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;

@@ -15,12 +15,12 @@ use nexus_db_queries::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::NetworkInterface;
-use nexus_types::deployment::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::OmicronZonesConfig;
 use nexus_types::deployment::SourceNatConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
@@ -357,6 +357,7 @@ impl<'a> ResourceAllocator<'a> {
                 bail!("invalid NIC kind (expected service, got instance)")
             }
             NetworkInterfaceKind::Service { .. } => (),
+            NetworkInterfaceKind::Probe { .. } => (),
         }
 
         // Only attempt to allocate `nic` if it isn't already assigned to this
@@ -558,7 +559,7 @@ mod tests {
             external_ips.next().expect("exhausted external_ips");
         let nexus_nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service(nexus_id),
+            kind: NetworkInterfaceKind::Service { id: nexus_id },
             name: "test-nexus".parse().expect("bad name"),
             ip: NEXUS_OPTE_IPV4_SUBNET
                 .iter()
@@ -566,7 +567,7 @@ mod tests {
                 .unwrap()
                 .into(),
             mac: MacAddr::random_system(),
-            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
+            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
@@ -578,7 +579,7 @@ mod tests {
             external_ips.next().expect("exhausted external_ips");
         let dns_nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service(dns_id),
+            kind: NetworkInterfaceKind::Service { id: dns_id },
             name: "test-external-dns".parse().expect("bad name"),
             ip: DNS_OPTE_IPV4_SUBNET
                 .iter()
@@ -586,7 +587,7 @@ mod tests {
                 .unwrap()
                 .into(),
             mac: MacAddr::random_system(),
-            subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET).into(),
+            subnet: IpNet::from(*DNS_OPTE_IPV4_SUBNET),
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
@@ -601,7 +602,7 @@ mod tests {
         };
         let ntp_nic = NetworkInterface {
             id: Uuid::new_v4(),
-            kind: NetworkInterfaceKind::Service(ntp_id),
+            kind: NetworkInterfaceKind::Service { id: ntp_id },
             name: "test-external-ntp".parse().expect("bad name"),
             ip: NTP_OPTE_IPV4_SUBNET
                 .iter()
@@ -609,7 +610,7 @@ mod tests {
                 .unwrap()
                 .into(),
             mac: MacAddr::random_system(),
-            subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET).into(),
+            subnet: IpNet::from(*NTP_OPTE_IPV4_SUBNET),
             vni: Vni::SERVICES_VNI,
             primary: true,
             slot: 0,
@@ -900,9 +901,14 @@ mod tests {
                             "invalid NIC kind (expected service, got instance)"
                         )
                     }
-                    NetworkInterfaceKind::Service(id) => {
+                    NetworkInterfaceKind::Probe { .. } => {
+                        panic!(
+                            "invalid NIC kind (expected service, got instance)"
+                        )
+                    }
+                    NetworkInterfaceKind::Service { id } => {
                         let id = *id;
-                        nic.kind = NetworkInterfaceKind::Instance(id);
+                        nic.kind = NetworkInterfaceKind::Instance { id };
                     }
                 }
                 "invalid NIC kind".to_string()

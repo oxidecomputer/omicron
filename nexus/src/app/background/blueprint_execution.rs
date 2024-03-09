@@ -193,12 +193,12 @@ mod test {
                     reservoir_size: ByteCount(999.into()),
                 },
                 rack_id,
+                nexus_db_model::Generation::new(),
             );
             datastore
                 .sled_upsert(update)
                 .await
-                .expect("Failed to insert sled to db")
-                .unwrap();
+                .expect("Failed to insert sled to db");
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);

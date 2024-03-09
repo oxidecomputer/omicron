@@ -8,7 +8,7 @@ use crate::ServerContext;
 
 use super::params::{
     OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
-    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentStartupInfo,
+    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentInfo,
     ZpoolPutRequest, ZpoolPutResponse,
 };
 use dropshot::endpoint;
@@ -25,6 +25,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
+use nexus_db_queries::db::datastore::ProbeInfo;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
@@ -58,6 +59,7 @@ type NexusApiDescription = ApiDescription<Arc<ServerContext>>;
 /// Returns a description of the internal nexus API
 pub(crate) fn internal_api() -> NexusApiDescription {
     fn register_endpoints(api: &mut NexusApiDescription) -> Result<(), String> {
+        api.register(sled_agent_get)?;
         api.register(sled_agent_put)?;
         api.register(sled_firewall_rules_request)?;
         api.register(switch_put)?;
@@ -93,6 +95,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(sled_list_uninitialized)?;
         api.register(sled_add)?;
 
+        api.register(probes_get)?;
+
         Ok(())
     }
 
@@ -109,6 +113,27 @@ struct SledAgentPathParam {
     sled_id: Uuid,
 }
 
+/// Return information about the given sled agent
+#[endpoint {
+     method = GET,
+     path = "/sled-agents/{sled_id}",
+ }]
+async fn sled_agent_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<SledAgentPathParam>,
+) -> Result<HttpResponseOk<SledAgentInfo>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+    let path = path_params.into_inner();
+    let sled_id = &path.sled_id;
+    let handler = async {
+        let (.., sled) = nexus.sled_lookup(&opctx, sled_id)?.fetch().await?;
+        Ok(HttpResponseOk(sled.into()))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 /// Report that the sled agent for the specified sled has come online.
 #[endpoint {
      method = POST,
@@ -117,7 +142,7 @@ struct SledAgentPathParam {
 async fn sled_agent_put(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<SledAgentPathParam>,
-    sled_info: TypedBody<SledAgentStartupInfo>,
+    sled_info: TypedBody<SledAgentInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let nexus = &apictx.nexus;
@@ -613,7 +638,7 @@ struct RpwNatQueryParam {
 /// change or until the `limit` is reached. If there are no changes, an
 /// empty vec is returned.
 #[endpoint {
-   method = GET,
+    method = GET,
     path = "/nat/ipv4/changeset/{from_gen}"
 }]
 async fn ipv4_nat_changeset(
@@ -839,6 +864,36 @@ async fn sled_add(
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.sled_add(&opctx, sled.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for probes
+#[derive(Deserialize, JsonSchema)]
+struct ProbePathParam {
+    sled: Uuid,
+}
+
+/// Get all the probes associated with a given sled.
+#[endpoint {
+    method = GET,
+    path = "/probes/{sled}"
+}]
+async fn probes_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<ProbePathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        Ok(HttpResponseOk(
+            nexus.probe_list_for_sled(&opctx, &pagparams, path.sled).await?,
+        ))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

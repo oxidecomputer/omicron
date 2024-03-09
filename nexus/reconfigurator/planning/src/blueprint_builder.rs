@@ -13,8 +13,6 @@ use ipnet::IpAdd;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::NetworkInterface;
-use nexus_types::deployment::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneType;
@@ -35,6 +33,8 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use slog::o;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -538,14 +538,14 @@ impl<'a> BlueprintBuilder<'a> {
                             .next()
                             .ok_or(Error::ExhaustedNexusIps)?
                             .into(),
-                        IpNet::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
+                        IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                     ),
                     IpAddr::V6(_) => (
                         self.nexus_v6_ips
                             .next()
                             .ok_or(Error::ExhaustedNexusIps)?
                             .into(),
-                        IpNet::from(*NEXUS_OPTE_IPV6_SUBNET).into(),
+                        IpNet::from(*NEXUS_OPTE_IPV6_SUBNET),
                     ),
                 };
                 let mac = self
@@ -554,7 +554,7 @@ impl<'a> BlueprintBuilder<'a> {
                     .ok_or(Error::NoSystemMacAddressAvailable)?;
                 NetworkInterface {
                     id: Uuid::new_v4(),
-                    kind: NetworkInterfaceKind::Service(nexus_id),
+                    kind: NetworkInterfaceKind::Service { id: nexus_id },
                     name: format!("nexus-{nexus_id}").parse().unwrap(),
                     ip,
                     mac,

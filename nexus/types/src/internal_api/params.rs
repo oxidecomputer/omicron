@@ -9,6 +9,7 @@ use crate::external_api::params::UserId;
 use crate::external_api::shared::Baseboard;
 use crate::external_api::shared::IpRange;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
@@ -36,9 +37,9 @@ pub enum SledRole {
     Scrimlet,
 }
 
-/// Sent by a sled agent on startup to Nexus to request further instruction
+/// Sent by a sled agent to Nexus to inform about resources
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
-pub struct SledAgentStartupInfo {
+pub struct SledAgentInfo {
     /// The address of the sled agent's API endpoint
     pub sa_address: SocketAddrV6,
 
@@ -58,6 +59,15 @@ pub struct SledAgentStartupInfo {
     ///
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
+
+    /// The generation number of this request from sled-agent
+    pub generation: Generation,
+
+    /// Whether the sled-agent has been decommissioned by nexus
+    ///
+    /// This flag is only set to true by nexus. Setting it on an upsert from
+    /// sled-agent has no effect.
+    pub decommissioned: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

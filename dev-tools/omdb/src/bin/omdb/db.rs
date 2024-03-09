@@ -54,6 +54,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::Probe;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
@@ -80,6 +81,7 @@ use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_preparation::policy_from_db;
 use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
@@ -628,7 +630,7 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
     }
 }
 
-/// Helper function to looks up an instance with the given ID.
+/// Helper function to look up an instance with the given ID.
 async fn lookup_instance(
     datastore: &DataStore,
     instance_id: Uuid,
@@ -644,6 +646,88 @@ async fn lookup_instance(
         .await
         .optional()
         .with_context(|| format!("loading instance {instance_id}"))
+}
+
+/// Helper function to look up the kind of the service with the given ID.
+///
+/// Requires the caller to first have fetched the current target blueprint, so
+/// we can find services that have been added by Reconfigurator.
+async fn lookup_service_kind(
+    datastore: &DataStore,
+    service_id: Uuid,
+    current_target_blueprint: Option<&Blueprint>,
+) -> anyhow::Result<Option<ServiceKind>> {
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    // We need to check the `service` table (populated during rack setup)...
+    {
+        use db::schema::service::dsl;
+        if let Some(kind) = dsl::service
+            .filter(dsl::id.eq(service_id))
+            .limit(1)
+            .select(dsl::kind)
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .with_context(|| format!("loading service {service_id}"))?
+        {
+            return Ok(Some(kind));
+        }
+    }
+
+    // ...and if we don't find the service, check the latest blueprint, because
+    // the service might have been added by Reconfigurator after RSS ran.
+    let Some(blueprint) = current_target_blueprint else {
+        return Ok(None);
+    };
+
+    let Some(zone_config) =
+        blueprint.all_omicron_zones().find_map(|(_sled_id, zone_config)| {
+            if zone_config.id == service_id {
+                Some(zone_config)
+            } else {
+                None
+            }
+        })
+    else {
+        return Ok(None);
+    };
+
+    let service_kind = match &zone_config.zone_type {
+        OmicronZoneType::BoundaryNtp { .. }
+        | OmicronZoneType::InternalNtp { .. } => ServiceKind::Ntp,
+        OmicronZoneType::Clickhouse { .. } => ServiceKind::Clickhouse,
+        OmicronZoneType::ClickhouseKeeper { .. } => {
+            ServiceKind::ClickhouseKeeper
+        }
+        OmicronZoneType::CockroachDb { .. } => ServiceKind::Cockroach,
+        OmicronZoneType::Crucible { .. } => ServiceKind::Crucible,
+        OmicronZoneType::CruciblePantry { .. } => ServiceKind::CruciblePantry,
+        OmicronZoneType::ExternalDns { .. } => ServiceKind::ExternalDns,
+        OmicronZoneType::InternalDns { .. } => ServiceKind::InternalDns,
+        OmicronZoneType::Nexus { .. } => ServiceKind::Nexus,
+        OmicronZoneType::Oximeter { .. } => ServiceKind::Oximeter,
+    };
+
+    Ok(Some(service_kind))
+}
+
+/// Helper function to looks up a probe with the given ID.
+async fn lookup_probe(
+    datastore: &DataStore,
+    probe_id: Uuid,
+) -> anyhow::Result<Option<Probe>> {
+    use db::schema::probe::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::probe
+        .filter(dsl::id.eq(probe_id))
+        .limit(1)
+        .select(Probe::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading probe {probe_id}"))
 }
 
 /// Helper function to looks up a project with the given ID.
@@ -1886,26 +1970,26 @@ async fn cmd_db_eips(
 
     let mut rows = Vec::new();
 
+    let current_target_blueprint = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .context("loading current target blueprint")?
+        .map(|(_, blueprint)| blueprint);
+
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let service = match LookupPath::new(opctx, datastore)
-                    .service_id(owner_id)
-                    .fetch()
-                    .await
+                let kind = match lookup_service_kind(
+                    datastore,
+                    owner_id,
+                    current_target_blueprint.as_ref(),
+                )
+                .await?
                 {
-                    Ok(instance) => instance,
-                    Err(e) => {
-                        eprintln!(
-                            "error looking up service with id {owner_id}: {e}"
-                        );
-                        continue;
-                    }
+                    Some(kind) => format!("{kind:?}"),
+                    None => "UNKNOWN (service ID not found)".to_string(),
                 };
-                Owner::Service {
-                    id: owner_id,
-                    kind: format!("{:?}", service.1.kind),
-                }
+                Owner::Service { id: owner_id, kind }
             } else {
                 let instance =
                     match lookup_instance(datastore, owner_id).await? {
@@ -2055,6 +2139,28 @@ async fn cmd_db_network_list_vnics(
                     None => {
                         ("instance?", "parent instance not found".to_string())
                     }
+                }
+            }
+            NetworkInterfaceKind::Probe => {
+                match lookup_probe(datastore, nic.parent_id).await? {
+                    Some(probe) => {
+                        match lookup_project(datastore, probe.project_id)
+                            .await?
+                        {
+                            Some(project) => (
+                                "probe",
+                                format!("{}/{}", project.name(), probe.name()),
+                            ),
+                            None => {
+                                eprintln!(
+                                    "project with id {} not found",
+                                    probe.project_id
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    None => ("probe?", "parent probe not found".to_string()),
                 }
             }
             NetworkInterfaceKind::Service => {

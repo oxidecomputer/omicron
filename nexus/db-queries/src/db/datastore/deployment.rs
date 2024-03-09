@@ -1205,7 +1205,7 @@ mod tests {
     #[tokio::test]
     async fn test_empty_blueprint() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_empty_blueprint");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -1269,7 +1269,7 @@ mod tests {
     #[tokio::test]
     async fn test_representative_blueprint() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_representative_blueprint");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
@@ -1456,7 +1456,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_target() {
         // Setup
-        let logctx = dev::test_setup_log("inventory_insert");
+        let logctx = dev::test_setup_log("test_set_target");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 

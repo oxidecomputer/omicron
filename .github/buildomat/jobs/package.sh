@@ -124,6 +124,7 @@ zones=(
   out/omicron-gateway-softnpu.tar.gz
   out/omicron-gateway-asic.tar.gz
   out/overlay.tar.gz
+  out/probe.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

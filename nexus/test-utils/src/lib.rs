@@ -39,10 +39,14 @@ use nexus_types::inventory::OmicronZoneType;
 use nexus_types::inventory::OmicronZonesConfig;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
+use omicron_common::api::external::Vni;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_sled_agent::sim;
 use omicron_test_utils::dev;
@@ -61,12 +65,9 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
-use omicron_common::api::external::Generation;
-use omicron_common::api::external::Vni;
+use omicron_common::api::external::Ipv4Net;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
-use sled_agent_client::types::NetworkInterface;
-use sled_agent_client::types::NetworkInterfaceKind;
 
 pub mod db;
 pub mod http_testing;
@@ -712,15 +713,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
                     ip: external_address,
-                    kind: NetworkInterfaceKind::Service(nexus_id),
+                    kind: NetworkInterfaceKind::Service { id: nexus_id },
                     mac,
                     name: format!("nexus-{}", nexus_id).parse().unwrap(),
                     primary: true,
                     slot: 0,
-                    subnet: sled_agent_client::types::Ipv4Net::from(
-                        *NEXUS_OPTE_IPV4_SUBNET,
-                    )
-                    .into(),
+                    subnet: Ipv4Net::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
                 },
             },
@@ -988,15 +986,12 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 nic: NetworkInterface {
                     id: Uuid::new_v4(),
                     ip: (*dns_address.ip()).into(),
-                    kind: NetworkInterfaceKind::Service(zone_id),
+                    kind: NetworkInterfaceKind::Service { id: zone_id },
                     mac,
                     name: format!("external-dns-{}", zone_id).parse().unwrap(),
                     primary: true,
                     slot: 0,
-                    subnet: sled_agent_client::types::Ipv4Net::from(
-                        *DNS_OPTE_IPV4_SUBNET,
-                    )
-                    .into(),
+                    subnet: Ipv4Net::from(*DNS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
                 },
             },
