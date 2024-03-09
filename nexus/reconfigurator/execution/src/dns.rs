@@ -23,7 +23,6 @@ use nexus_types::internal_api::params::DnsConfigZone;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
-use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
@@ -281,8 +280,9 @@ pub fn blueprint_internal_dns_config(
             OmicronZoneType::Crucible { .. } => {
                 (ServiceName::Crucible(omicron_zone.id), CRUCIBLE_PORT)
             }
-            OmicronZoneType::CruciblePantry { .. } => {
-                (ServiceName::CruciblePantry, CRUCIBLE_PANTRY_PORT)
+            OmicronZoneType::CruciblePantry { address } => {
+                let port = parse_port(address);
+                (ServiceName::CruciblePantry, port)
             }
             OmicronZoneType::Oximeter { .. } => {
                 (ServiceName::Oximeter, OXIMETER_PORT)
