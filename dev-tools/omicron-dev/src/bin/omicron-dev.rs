@@ -545,7 +545,7 @@ async fn cmd_run_all(args: &RunAllArgs) -> Result<(), anyhow::Error> {
     );
     println!(
         "omicron-dev: management gateway:    http://{}",
-        cptestctx.gateway.client.bind_address,
+        cptestctx.gateway.values().next().unwrap().client.bind_address,
     );
     println!("omicron-dev: silo name:             {}", cptestctx.silo_name,);
     println!(
