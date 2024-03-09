@@ -545,8 +545,7 @@ fn cmd_blueprint_diff_inventory(
         .get(&blueprint_id)
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
 
-    let zones = collection.all_omicron_zones().map(|z| z.id).collect();
-    let diff = blueprint.diff_sleds_from_collection(&collection, &zones);
+    let diff = blueprint.diff_sleds_from_collection(&collection);
     Ok(Some(diff.to_string()))
 }
 

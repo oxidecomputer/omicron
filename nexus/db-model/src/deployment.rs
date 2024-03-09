@@ -15,6 +15,9 @@ use crate::{ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZonesConfig;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -99,7 +102,7 @@ impl BpSledOmicronZones {
     pub fn new(
         blueprint_id: Uuid,
         sled_id: Uuid,
-        zones_config: &nexus_types::deployment::OmicronZonesConfig,
+        zones_config: &BlueprintZonesConfig,
     ) -> Self {
         Self {
             blueprint_id,
@@ -140,9 +143,9 @@ impl BpOmicronZone {
     pub fn new(
         blueprint_id: Uuid,
         sled_id: Uuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
-        let zone = OmicronZone::new(sled_id, zone)?;
+        let zone = OmicronZone::new(sled_id, &zone.config)?;
         Ok(Self {
             blueprint_id,
             sled_id: zone.sled_id,
@@ -168,10 +171,11 @@ impl BpOmicronZone {
         })
     }
 
-    pub fn into_omicron_zone_config(
+    pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-    ) -> Result<nexus_types::inventory::OmicronZoneConfig, anyhow::Error> {
+        zone_policy: BlueprintZonePolicy,
+    ) -> Result<BlueprintZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
             sled_id: self.sled_id,
             id: self.id,
@@ -194,7 +198,9 @@ impl BpOmicronZone {
             snat_first_port: self.snat_first_port,
             snat_last_port: self.snat_last_port,
         };
-        zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))
+        let config =
+            zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))?;
+        Ok(BlueprintZoneConfig { config, zone_policy })
     }
 }
 
@@ -230,9 +236,9 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
 impl BpOmicronZoneNic {
     pub fn new(
         blueprint_id: Uuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone: &BlueprintZoneConfig,
     ) -> Result<Option<BpOmicronZoneNic>, anyhow::Error> {
-        let zone_nic = OmicronZoneNic::new(zone)?;
+        let zone_nic = OmicronZoneNic::new(&zone.config)?;
         Ok(zone_nic.map(|nic| Self {
             blueprint_id,
             id: nic.id,

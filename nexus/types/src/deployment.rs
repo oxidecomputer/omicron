@@ -143,11 +143,7 @@ pub struct Blueprint {
     /// mapping: sled id -> zones deployed on each sled
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
-    pub omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-
-    /// Omicron zones considered in-service (which generally means that they
-    /// should appear in DNS)
-    pub zones_in_service: BTreeSet<Uuid>,
+    pub omicron_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
@@ -171,7 +167,7 @@ impl Blueprint {
     /// associated sled id
     pub fn all_omicron_zones(
         &self,
-    ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> {
+    ) -> impl Iterator<Item = (Uuid, &BlueprintZoneConfig)> {
         self.omicron_zones
             .iter()
             .flat_map(|(sled_id, z)| z.zones.iter().map(|z| (*sled_id, z)))
@@ -190,40 +186,60 @@ impl Blueprint {
         OmicronZonesDiff {
             before_label: format!("blueprint {}", self.id),
             before_zones: self.omicron_zones.clone(),
-            before_zones_in_service: &self.zones_in_service,
             after_label: format!("blueprint {}", other.id),
             after_zones: &other.omicron_zones,
-            after_zones_in_service: &other.zones_in_service,
         }
     }
 
     /// Summarize the differences in sleds and zones between a collection and a
     /// blueprint
     ///
-    /// This gives an idea about what would change about a running system if one
-    /// were to execute the blueprint.
+    /// This gives an idea about what would change about a running system if
+    /// one were to execute the blueprint.
     ///
     /// Note that collections do not currently include information about what
-    /// zones are in-service, so the caller must provide that information.
-    pub fn diff_sleds_from_collection<'a>(
-        &'a self,
-        collection: &'a Collection,
-        before_zones_in_service: &'a BTreeSet<Uuid>,
-    ) -> OmicronZonesDiff<'a> {
+    /// zones are in-service, so it is assumed that all zones in the collection
+    /// are in-service. (This is the same assumption made by
+    /// [`BlueprintZonesConfig::initial_from_collection`]. The logic here may
+    /// also be expanded to handle cases where not all zones in the collection
+    /// are in-service.)
+    pub fn diff_sleds_from_collection(
+        &self,
+        collection: &Collection,
+    ) -> OmicronZonesDiff<'_> {
         let before_zones = collection
             .omicron_zones
             .iter()
-            .map(|(sled_id, zones_found)| (*sled_id, zones_found.zones.clone()))
+            .map(|(sled_id, zones_found)| {
+                let zones = zones_found
+                    .zones
+                    .zones
+                    .iter()
+                    .map(|z| BlueprintZoneConfig {
+                        config: z.clone(),
+                        zone_policy: BlueprintZonePolicy::InService,
+                    })
+                    .collect();
+                let zones = BlueprintZonesConfig {
+                    generation: zones_found.zones.generation,
+                    zones,
+                };
+                (*sled_id, zones)
+            })
             .collect();
         OmicronZonesDiff {
             before_label: format!("collection {}", collection.id),
             before_zones,
-            before_zones_in_service,
             after_label: format!("blueprint {}", self.id),
             after_zones: &self.omicron_zones,
-            after_zones_in_service: &self.zones_in_service,
         }
     }
+}
+
+/// For a [`Blueprint::diff_sleds_from_collection`]
+#[derive(Clone, Copy, Debug)]
+pub enum CollectionPolicy {
+    AllInService,
 }
 
 impl fmt::Debug for Blueprint {
@@ -261,23 +277,128 @@ impl fmt::Debug for Blueprint {
                 sled_id, sled_zones.generation
             )?;
             for z in &sled_zones.zones {
-                writeln!(
-                    f,
-                    "    {} {} {}",
-                    z.id,
-                    if self.zones_in_service.contains(&z.id) {
-                        "in service    "
-                    } else {
-                        "not in service"
-                    },
-                    z.zone_type.label(),
-                )?;
+                writeln!(f, "    {z}")?;
             }
         }
 
         Ok(())
     }
 }
+
+/// Information about an Omicron zone as recorded in a blueprint.
+///
+/// Currently, this is similar to [`OmicronZonesConfig`], but also contains a
+/// per-zone [`BlueprintZonePolicy`].
+///
+/// Part of [`Blueprint`].
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct BlueprintZonesConfig {
+    /// Generation number of this configuration.
+    ///
+    /// This generation number is owned by the control plane. See
+    /// [`OmicronZonesConfig::generation`] for more details.
+    pub generation: Generation,
+
+    /// The list of running zones.
+    pub zones: Vec<BlueprintZoneConfig>,
+}
+
+impl BlueprintZonesConfig {
+    /// Constructs a new [`BlueprintZonesConfig`] from a collection's zones.
+    ///
+    /// For the initial blueprint, all zones within a collection are assumed to
+    /// be in-service.
+    pub fn initial_from_collection(collection: &OmicronZonesConfig) -> Self {
+        let zones = collection
+            .zones
+            .iter()
+            .map(|z| BlueprintZoneConfig {
+                config: z.clone(),
+                zone_policy: BlueprintZonePolicy::InService,
+            })
+            .collect();
+
+        let mut ret = Self {
+            // An initial blueprint zones starts from a fresh generation -- it
+            // does not reuse the collection's generation.
+            generation: Generation::new(),
+            zones,
+        };
+        ret.sort();
+
+        ret
+    }
+
+    /// Sorts the list of zones stored in this configuration.
+    ///
+    /// This is not strictly necessary. But for testing, it's helpful for
+    /// things to be in sorted order.
+    pub fn sort(&mut self) {
+        self.zones.sort_unstable_by_key(|z| z.config.id);
+    }
+
+    /// Converts self to an [`OmicronZonesConfig`].
+    pub fn to_omicron_zones_config(&self) -> OmicronZonesConfig {
+        OmicronZonesConfig {
+            generation: self.generation,
+            zones: self.zones.iter().map(|z| z.config.clone()).collect(),
+        }
+    }
+}
+
+/// Describes one Omicron-managed zone in a blueprint.
+///
+/// Part of [`BlueprintOmicronZonesConfig`].
+#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+pub struct BlueprintZoneConfig {
+    /// The underlying zone configuration.
+    pub config: OmicronZoneConfig,
+
+    /// The policy for this zone.
+    pub zone_policy: BlueprintZonePolicy,
+}
+
+impl fmt::Display for BlueprintZoneConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "zone {} type {} underlay IP {} policy {}",
+            self.config.id,
+            self.config.zone_type.label(),
+            self.config.underlay_address,
+            self.zone_policy
+        )
+    }
+}
+
+/// The policy for an Omicron-managed zone in a blueprint.
+///
+/// Part of [`BlueprintOmicronZoneConfig`].
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+)]
+pub enum BlueprintZonePolicy {
+    InService,
+    NotInService,
+}
+
+impl fmt::Display for BlueprintZonePolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintZonePolicy::InService => {
+                write!(f, "in_service")
+            }
+            BlueprintZonePolicy::NotInService => {
+                write!(f, "not_in_service")
+            }
+        }
+    }
+}
+
+/// Represents a map of zone ID to policy.
+///
+/// Returned by [`Blueprint::zone_policy_map`].
+pub type ZonePolicyMap = BTreeMap<Uuid, BlueprintZonePolicy>;
 
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can
@@ -328,11 +449,9 @@ pub struct OmicronZonesDiff<'a> {
     before_label: String,
     // We store an owned copy of "before_zones" to make it easier to support
     // collections here, where we need to assemble this map ourselves.
-    before_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-    before_zones_in_service: &'a BTreeSet<Uuid>,
+    before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
     after_label: String,
-    after_zones: &'a BTreeMap<Uuid, OmicronZonesConfig>,
-    after_zones_in_service: &'a BTreeSet<Uuid>,
+    after_zones: &'a BTreeMap<Uuid, BlueprintZonesConfig>,
 }
 
 /// Describes a sled that appeared on both sides of a diff (possibly changed)
@@ -344,8 +463,8 @@ pub struct DiffSledCommon<'a> {
     pub generation_before: Generation,
     /// generation of the "zones" configuration on the right side
     pub generation_after: Generation,
-    zones_added: Vec<&'a OmicronZoneConfig>,
-    zones_removed: Vec<&'a OmicronZoneConfig>,
+    zones_added: Vec<&'a BlueprintZoneConfig>,
+    zones_removed: Vec<&'a BlueprintZoneConfig>,
     zones_common: Vec<DiffZoneCommon<'a>>,
 }
 
@@ -353,14 +472,14 @@ impl<'a> DiffSledCommon<'a> {
     /// Iterate over zones added between the blueprints
     pub fn zones_added(
         &self,
-    ) -> impl Iterator<Item = &'a OmicronZoneConfig> + '_ {
+    ) -> impl Iterator<Item = &'a BlueprintZoneConfig> + '_ {
         self.zones_added.iter().copied()
     }
 
     /// Iterate over zones removed between the blueprints
     pub fn zones_removed(
         &self,
-    ) -> impl Iterator<Item = &'a OmicronZoneConfig> + '_ {
+    ) -> impl Iterator<Item = &'a BlueprintZoneConfig> + '_ {
         self.zones_removed.iter().copied()
     }
 
@@ -375,8 +494,7 @@ impl<'a> DiffSledCommon<'a> {
     pub fn zones_changed(
         &self,
     ) -> impl Iterator<Item = DiffZoneCommon<'a>> + '_ {
-        self.zones_in_common()
-            .filter(|z| z.changed_how != DiffZoneChangedHow::NoChanges)
+        self.zones_in_common().filter(|z| z.is_changed())
     }
 }
 
@@ -384,24 +502,42 @@ impl<'a> DiffSledCommon<'a> {
 #[derive(Debug, Copy, Clone)]
 pub struct DiffZoneCommon<'a> {
     /// full zone configuration before
-    pub zone_before: &'a OmicronZoneConfig,
+    pub zone_before: &'a BlueprintZoneConfig,
     /// full zone configuration after
-    pub zone_after: &'a OmicronZoneConfig,
-    /// summary of what changed, if anything
-    pub changed_how: DiffZoneChangedHow,
+    pub zone_after: &'a BlueprintZoneConfig,
+
+    /// Whether details (not policy) changed.
+    ///
+    /// This is a cache of information that can be computed from `zone_before`
+    /// and `zone_after`.
+    details_changed: bool,
 }
 
-/// Describes how a zone changed across two blueprints, if at all
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum DiffZoneChangedHow {
-    /// the zone did not change between these two blueprints
-    NoChanges,
-    /// the zone details are the same, but it was brought into service
-    AddedToService,
-    /// the zone details are the same, but it was removed from service
-    RemovedFromService,
-    /// the zone's details (i.e., configuration) changed
-    DetailsChanged,
+impl<'a> DiffZoneCommon<'a> {
+    /// Returns true if there are any differences between `zone_before` and
+    /// `zone_after`.
+    ///
+    /// This is equivalent to `policy_changed() || details_changed()`.
+    #[inline]
+    pub fn is_changed(&self) -> bool {
+        self.policy_changed() || self.details_changed
+    }
+
+    /// Returns true if the policy for the zone changed.
+    #[inline]
+    pub fn policy_changed(&self) -> bool {
+        self.zone_before.zone_policy != self.zone_after.zone_policy
+    }
+
+    /// Returns true if details about the zone changed.
+    ///
+    /// This does not take into account whether the policy for the zone
+    /// changed: that can be computed by simply comparing
+    /// `zone_before.zone_policy` and `zone_after.zone_policy`.
+    #[inline]
+    pub fn details_changed(&self) -> bool {
+        self.details_changed
+    }
 }
 
 impl<'a> OmicronZonesDiff<'a> {
@@ -416,7 +552,7 @@ impl<'a> OmicronZonesDiff<'a> {
     /// Iterate over sleds only present in the second blueprint of a diff
     pub fn sleds_added(
         &self,
-    ) -> impl Iterator<Item = (Uuid, &OmicronZonesConfig)> + '_ {
+    ) -> impl Iterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
         let sled_ids = self
             .sleds_after()
             .difference(&self.sleds_before())
@@ -431,7 +567,7 @@ impl<'a> OmicronZonesDiff<'a> {
     /// Iterate over sleds only present in the first blueprint of a diff
     pub fn sleds_removed(
         &self,
-    ) -> impl Iterator<Item = (Uuid, &OmicronZonesConfig)> + '_ {
+    ) -> impl Iterator<Item = (Uuid, &BlueprintZonesConfig)> + '_ {
         let sled_ids = self
             .sleds_before()
             .difference(&self.sleds_after())
@@ -456,71 +592,39 @@ impl<'a> OmicronZonesDiff<'a> {
             let b2sledzones = self.after_zones.get(&sled_id).unwrap();
 
             // Assemble separate summaries of the zones, indexed by zone id.
-            #[derive(Debug)]
-            struct ZoneInfo<'a> {
-                zone: &'a OmicronZoneConfig,
-                in_service: bool,
-            }
-
-            let b1zones: BTreeMap<Uuid, ZoneInfo> = b1sledzones
+            let b1_zones: BTreeMap<Uuid, &'a BlueprintZoneConfig> = b1sledzones
                 .zones
                 .iter()
-                .map(|zone| {
-                    (
-                        zone.id,
-                        ZoneInfo {
-                            zone,
-                            in_service: self
-                                .before_zones_in_service
-                                .contains(&zone.id),
-                        },
-                    )
-                })
+                .map(|zone| (zone.config.id, zone))
                 .collect();
-            let mut b2zones: BTreeMap<Uuid, ZoneInfo> = b2sledzones
-                .zones
-                .iter()
-                .map(|zone| {
-                    (
-                        zone.id,
-                        ZoneInfo {
-                            zone,
-                            in_service: self
-                                .after_zones_in_service
-                                .contains(&zone.id),
-                        },
-                    )
-                })
-                .collect();
+            let mut b2_zones: BTreeMap<Uuid, &'a BlueprintZoneConfig> =
+                b2sledzones
+                    .zones
+                    .iter()
+                    .map(|zone| (zone.config.id, zone))
+                    .collect();
             let mut zones_removed = vec![];
-            let mut zones_changed = vec![];
+            let mut zones_common = vec![];
 
             // Now go through each zone and compare them.
-            for (zone_id, b1z_info) in &b1zones {
-                if let Some(b2z_info) = b2zones.remove(zone_id) {
-                    let changed_how = if b1z_info.zone != b2z_info.zone {
-                        DiffZoneChangedHow::DetailsChanged
-                    } else if b1z_info.in_service && !b2z_info.in_service {
-                        DiffZoneChangedHow::RemovedFromService
-                    } else if !b1z_info.in_service && b2z_info.in_service {
-                        DiffZoneChangedHow::AddedToService
-                    } else {
-                        DiffZoneChangedHow::NoChanges
-                    };
-                    zones_changed.push(DiffZoneCommon {
-                        zone_before: b1z_info.zone,
-                        zone_after: b2z_info.zone,
-                        changed_how,
+            for (zone_id, zone_before) in &b1_zones {
+                if let Some(zone_after) = b2_zones.remove(zone_id) {
+                    let details_changed =
+                        zone_before.config != zone_after.config;
+
+                    zones_common.push(DiffZoneCommon {
+                        zone_before,
+                        zone_after,
+                        details_changed,
                     });
                 } else {
-                    zones_removed.push(b1z_info.zone);
+                    zones_removed.push(*zone_before);
                 }
             }
 
             // Since we removed common zones above, anything else exists only in
             // b2 and was therefore added.
-            let zones_added =
-                b2zones.into_values().map(|b2z_info| b2z_info.zone).collect();
+            let zones_added = b2_zones.into_values().collect();
 
             (
                 sled_id,
@@ -530,7 +634,7 @@ impl<'a> OmicronZonesDiff<'a> {
                     generation_after: b2sledzones.generation,
                     zones_added,
                     zones_removed,
-                    zones_common: zones_changed,
+                    zones_common,
                 },
             )
         })
@@ -551,7 +655,7 @@ impl<'a> OmicronZonesDiff<'a> {
         f: &mut fmt::Formatter<'_>,
         prefix: char,
         label: &str,
-        bbsledzones: &OmicronZonesConfig,
+        bbsledzones: &BlueprintZonesConfig,
         sled_id: Uuid,
     ) -> fmt::Result {
         writeln!(f, "{} sled {} ({})", prefix, sled_id, label)?;
@@ -561,15 +665,7 @@ impl<'a> OmicronZonesDiff<'a> {
             prefix, bbsledzones.generation
         )?;
         for z in &bbsledzones.zones {
-            writeln!(
-                f,
-                "{}         zone {} type {} underlay IP {} ({})",
-                prefix,
-                z.id,
-                z.zone_type.label(),
-                z.underlay_address,
-                label
-            )?;
+            writeln!(f, "{prefix}         {z}; {label}")?;
         }
 
         Ok(())
@@ -611,94 +707,45 @@ impl<'a> fmt::Display for OmicronZonesDiff<'a> {
             }
 
             for zone in sled_changes.zones_removed() {
-                writeln!(
-                    f,
-                    "-        zone {} type {} (removed)",
-                    zone.id,
-                    zone.zone_type.label(),
-                )?;
+                writeln!(f, "-        {zone} (removed)")?;
             }
 
             for zone_changes in sled_changes.zones_in_common() {
-                let zone_id = zone_changes.zone_before.id;
-                let zone_type = zone_changes.zone_before.zone_type.label();
-                let zone2_type = zone_changes.zone_after.zone_type.label();
-                match zone_changes.changed_how {
-                    DiffZoneChangedHow::DetailsChanged => {
-                        writeln!(
-                            f,
-                            "-         zone {} type {} underlay IP {} \
-                                (changed)",
-                            zone_id,
-                            zone_type,
-                            zone_changes.zone_before.underlay_address,
-                        )?;
-                        writeln!(
-                            f,
-                            "+         zone {} type {} underlay IP {} \
-                                (changed)",
-                            zone_id,
-                            zone2_type,
-                            zone_changes.zone_after.underlay_address,
-                        )?;
-                    }
-                    DiffZoneChangedHow::RemovedFromService => {
-                        writeln!(
-                            f,
-                            "-         zone {} type {} underlay IP {} \
-                                (in service)",
-                            zone_id,
-                            zone_type,
-                            zone_changes.zone_before.underlay_address,
-                        )?;
-                        writeln!(
-                            f,
-                            "+         zone {} type {} underlay IP {} \
-                                (removed from service)",
-                            zone_id,
-                            zone2_type,
-                            zone_changes.zone_after.underlay_address,
-                        )?;
-                    }
-                    DiffZoneChangedHow::AddedToService => {
-                        writeln!(
-                            f,
-                            "-         zone {} type {} underlay IP {} \
-                                (not in service)",
-                            zone_id,
-                            zone_type,
-                            zone_changes.zone_before.underlay_address,
-                        )?;
-                        writeln!(
-                            f,
-                            "+         zone {} type {} underlay IP {} \
-                                (added to service)",
-                            zone_id,
-                            zone2_type,
-                            zone_changes.zone_after.underlay_address,
-                        )?;
-                    }
-                    DiffZoneChangedHow::NoChanges => {
-                        writeln!(
-                            f,
-                            "         zone {} type {} underlay IP {} \
-                                (unchanged)",
-                            zone_id,
-                            zone_type,
-                            zone_changes.zone_before.underlay_address,
-                        )?;
-                    }
+                if zone_changes.details_changed() {
+                    writeln!(
+                        f,
+                        "-         {} (changed)",
+                        zone_changes.zone_before,
+                    )?;
+                    writeln!(
+                        f,
+                        "+         {} (changed)",
+                        zone_changes.zone_after
+                    )?;
+                } else if zone_changes.zone_before.zone_policy
+                    != zone_changes.zone_after.zone_policy
+                {
+                    writeln!(
+                        f,
+                        "-         {} (policy changed)",
+                        zone_changes.zone_before,
+                    )?;
+                    writeln!(
+                        f,
+                        "+         {} (policy changed)",
+                        zone_changes.zone_after,
+                    )?;
+                } else {
+                    writeln!(
+                        f,
+                        "         {} (unchanged)",
+                        zone_changes.zone_before,
+                    )?;
                 }
             }
 
             for zone in sled_changes.zones_added() {
-                writeln!(
-                    f,
-                    "+        zone {} type {} underlay IP {} (added)",
-                    zone.id,
-                    zone.zone_type.label(),
-                    zone.underlay_address,
-                )?;
+                writeln!(f, "+        {zone} (added)")?;
             }
         }
 

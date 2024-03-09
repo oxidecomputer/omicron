@@ -41,7 +41,8 @@ use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::OmicronZonesConfig;
+use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -92,6 +93,34 @@ impl DataStore {
         // so that we can produce the `Error` type that we want here.
         let row_blueprint = DbBlueprint::from(blueprint);
         let blueprint_id = row_blueprint.id;
+
+        // `Blueprint` stores the policy for each zone next to the zone itself.
+        // This would ideally be represented as a simple column in
+        // bp_omicron_zone.
+        //
+        // But historically, `Blueprint` used to store the set of zones in
+        // service in a BTreeSet. Since most zones are expected to be in
+        // service, we store the set of zones NOT in service (which we expect
+        // to be much smaller, often empty). Build that inverted set here.
+        //
+        // This will soon be replaced with an extra column in the
+        // `bp_omicron_zone` table, coupled with other data migrations.
+        let omicron_zones_not_in_service = blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zone)| {
+                // Exhaustive match so this fails if we add a new variant.
+                match zone.zone_policy {
+                    BlueprintZonePolicy::InService => None,
+                    BlueprintZonePolicy::NotInService => {
+                        Some(BpOmicronZoneNotInService {
+                            blueprint_id,
+                            bp_omicron_zone_id: zone.config.id,
+                        })
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
+
         let sled_omicron_zones = blueprint
             .omicron_zones
             .iter()
@@ -103,7 +132,7 @@ impl DataStore {
             .omicron_zones
             .iter()
             .flat_map(|(sled_id, zones_config)| {
-                zones_config.zones.iter().map(|zone| {
+                zones_config.zones.iter().map(move |zone| {
                     BpOmicronZone::new(blueprint_id, *sled_id, zone)
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                 })
@@ -115,28 +144,12 @@ impl DataStore {
             .flat_map(|zones_config| {
                 zones_config.zones.iter().filter_map(|zone| {
                     BpOmicronZoneNic::new(blueprint_id, zone)
-                        .with_context(|| format!("zone {:?}", zone.id))
+                        .with_context(|| format!("zone {:?}", zone.config.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
                         .transpose()
                 })
             })
             .collect::<Result<Vec<BpOmicronZoneNic>, _>>()?;
-
-        // `Blueprint` stores a set of zones in service, but in the database we
-        // store the set of zones NOT in service (which we expect to be much
-        // smaller, often empty). Build that inverted set here.
-        let omicron_zones_not_in_service = {
-            let mut zones_not_in_service = Vec::new();
-            for zone in &omicron_zones {
-                if !blueprint.zones_in_service.contains(&zone.id) {
-                    zones_not_in_service.push(BpOmicronZoneNotInService {
-                        blueprint_id,
-                        bp_omicron_zone_id: zone.id,
-                    });
-                }
-            }
-            zones_not_in_service
-        };
 
         // This implementation inserts all records associated with the
         // blueprint in one transaction.  This is required: we don't want
@@ -259,7 +272,7 @@ impl DataStore {
         // the `OmicronZonesConfig` generation number for each sled that is a
         // part of this blueprint. Construct the BTreeMap we ultimately need,
         // but all the `zones` vecs will be empty until our next query below.
-        let mut omicron_zones: BTreeMap<Uuid, OmicronZonesConfig> = {
+        let mut omicron_zones: BTreeMap<Uuid, BlueprintZonesConfig> = {
             use db::schema::bp_sled_omicron_zones::dsl;
 
             let mut omicron_zones = BTreeMap::new();
@@ -283,7 +296,7 @@ impl DataStore {
                 for s in batch {
                     let old = omicron_zones.insert(
                         s.sled_id,
-                        OmicronZonesConfig {
+                        BlueprintZonesConfig {
                             generation: *s.generation,
                             zones: Vec::new(),
                         },
@@ -377,11 +390,6 @@ impl DataStore {
             omicron_zones_not_in_service
         };
 
-        // Create the in-memory list of zones _in_ service, which we'll
-        // calculate below as we load zones. (Any zone that isn't present in
-        // `omicron_zones_not_in_service` is considered in service.)
-        let mut zones_in_service = BTreeSet::new();
-
         // Load all the zones for each sled.
         {
             use db::schema::bp_omicron_zone::dsl;
@@ -437,8 +445,14 @@ impl DataStore {
                             ))
                         })?;
                     let zone_id = z.id;
+                    let zone_policy =
+                        if omicron_zones_not_in_service.remove(&zone_id) {
+                            BlueprintZonePolicy::NotInService
+                        } else {
+                            BlueprintZonePolicy::InService
+                        };
                     let zone = z
-                        .into_omicron_zone_config(nic_row)
+                        .into_blueprint_zone_config(nic_row, zone_policy)
                         .with_context(|| {
                             format!("zone {:?}: parse from database", zone_id)
                         })
@@ -449,14 +463,6 @@ impl DataStore {
                             ))
                         })?;
                     sled_zones.zones.push(zone);
-
-                    // If we can remove `zone_id` from
-                    // `omicron_zones_not_in_service`, then the zone is not in
-                    // service. Otherwise, add it to the list of in-service
-                    // zones.
-                    if !omicron_zones_not_in_service.remove(&zone_id) {
-                        zones_in_service.insert(zone_id);
-                    }
                 }
             }
         }
@@ -475,7 +481,6 @@ impl DataStore {
         Ok(Blueprint {
             id: blueprint_id,
             omicron_zones,
-            zones_in_service,
             parent_blueprint_id,
             internal_dns_version,
             time_created,

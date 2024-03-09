@@ -143,7 +143,6 @@ mod test {
             Blueprint {
                 id,
                 omicron_zones,
-                zones_in_service: BTreeSet::new(),
                 parent_blueprint_id: None,
                 internal_dns_version,
                 time_created: chrono::Utc::now(),

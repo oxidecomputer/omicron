@@ -15,10 +15,10 @@ use nexus_db_queries::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_queries::db::DataStore;
+use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::NetworkInterface;
 use nexus_types::deployment::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneType;
-use nexus_types::deployment::OmicronZonesConfig;
 use nexus_types::deployment::SourceNatConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use slog::info;
@@ -31,17 +31,17 @@ use uuid::Uuid;
 pub(crate) async fn ensure_zone_resources_allocated(
     opctx: &OpContext,
     datastore: &DataStore,
-    zones: &BTreeMap<Uuid, OmicronZonesConfig>,
+    zones: &BTreeMap<Uuid, BlueprintZonesConfig>,
 ) -> anyhow::Result<()> {
     let allocator = ResourceAllocator { opctx, datastore };
 
     for config in zones.values() {
         for z in &config.zones {
-            match &z.zone_type {
+            match &z.config.zone_type {
                 OmicronZoneType::Nexus { external_ip, nic, .. } => {
                     allocator
                         .ensure_nexus_external_networking_allocated(
-                            z.id,
+                            z.config.id,
                             *external_ip,
                             nic,
                         )
@@ -50,7 +50,7 @@ pub(crate) async fn ensure_zone_resources_allocated(
                 OmicronZoneType::ExternalDns { dns_address, nic, .. } => {
                     allocator
                         .ensure_external_dns_external_networking_allocated(
-                            z.id,
+                            z.config.id,
                             dns_address,
                             nic,
                         )
@@ -59,7 +59,9 @@ pub(crate) async fn ensure_zone_resources_allocated(
                 OmicronZoneType::BoundaryNtp { snat_cfg, nic, .. } => {
                     allocator
                         .ensure_boundary_ntp_external_networking_allocated(
-                            z.id, snat_cfg, nic,
+                            z.config.id,
+                            snat_cfg,
+                            nic,
                         )
                         .await?;
                 }

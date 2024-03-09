@@ -10,7 +10,7 @@ use nexus_db_model::Dataset;
 use nexus_db_model::DatasetKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::OmicronZoneConfig;
+use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::identity::Asset;
 use slog::info;
@@ -27,7 +27,7 @@ use std::net::SocketAddrV6;
 pub(crate) async fn ensure_crucible_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
-    all_omicron_zones: impl Iterator<Item = &OmicronZoneConfig>,
+    all_omicron_zones: impl Iterator<Item = &BlueprintZoneConfig>,
 ) -> anyhow::Result<usize> {
     // Before attempting to insert any datasets, first query for any existing
     // dataset records so we can filter them out. This looks like a typical
@@ -51,12 +51,13 @@ pub(crate) async fn ensure_crucible_dataset_records_exist(
     let mut num_already_exist = 0;
 
     for zone in all_omicron_zones {
-        let OmicronZoneType::Crucible { address, dataset } = &zone.zone_type
+        let OmicronZoneType::Crucible { address, dataset } =
+            &zone.config.zone_type
         else {
             continue;
         };
 
-        let id = zone.id;
+        let id = zone.config.id;
 
         // If already present in the datastore, move on.
         if crucible_datasets.remove(&id) {
@@ -144,6 +145,7 @@ mod tests {
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::inventory::OmicronZoneConfig;
     use sled_agent_client::types::OmicronZoneDataset;
     use uuid::Uuid;
 

@@ -10,7 +10,7 @@ use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
-use nexus_types::deployment::OmicronZonesConfig;
+use nexus_types::deployment::BlueprintZonesConfig;
 use sled_agent_client::Client as SledAgentClient;
 use slog::info;
 use slog::warn;
@@ -22,7 +22,7 @@ use uuid::Uuid;
 pub(crate) async fn deploy_zones(
     opctx: &OpContext,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
-    zones: &BTreeMap<Uuid, OmicronZonesConfig>,
+    zones: &BTreeMap<Uuid, BlueprintZonesConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
@@ -35,8 +35,10 @@ pub(crate) async fn deploy_zones(
                 }
             };
             let client = sled_client(opctx, &db_sled);
-            let result =
-                client.omicron_zones_put(&config).await.with_context(|| {
+            let result = client
+                .omicron_zones_put(&config.to_omicron_zones_config())
+                .await
+                .with_context(|| {
                     format!("Failed to put {config:#?} to sled {sled_id}")
                 });
             match result {
@@ -94,7 +96,9 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::OmicronZonesConfig;
-    use nexus_types::deployment::{Blueprint, BlueprintTarget};
+    use nexus_types::deployment::{
+        Blueprint, BlueprintTarget, BlueprintZonesConfig,
+    };
     use nexus_types::inventory::{
         OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
     };
@@ -109,7 +113,7 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn create_blueprint(
-        omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
+        omicron_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -121,7 +125,6 @@ mod test {
             Blueprint {
                 id,
                 omicron_zones,
-                zones_in_service: BTreeSet::new(),
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 time_created: chrono::Utc::now(),

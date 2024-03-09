@@ -13,6 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZonePolicy;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::get_switch_zone_address;
@@ -179,12 +180,15 @@ pub fn blueprint_dns_config(
     // represented as strings, so we'd need to parse all of them and handle all
     // the errors, even though they should never happen.
     // See oxidecomputer/omicron#4988.
-    for (_, omicron_zone) in blueprint.all_omicron_zones() {
-        if !blueprint.zones_in_service.contains(&omicron_zone.id) {
-            continue;
+    for (_, zone) in blueprint.all_omicron_zones() {
+        match zone.zone_policy {
+            BlueprintZonePolicy::InService => {}
+            BlueprintZonePolicy::NotInService => {
+                continue;
+            }
         }
 
-        let (service_name, port) = match omicron_zone.zone_type {
+        let (service_name, port) = match zone.config.zone_type {
             OmicronZoneType::BoundaryNtp { .. } => {
                 (ServiceName::BoundaryNtp, NTP_PORT)
             }
@@ -204,7 +208,7 @@ pub fn blueprint_dns_config(
                 (ServiceName::Nexus, NEXUS_INTERNAL_PORT)
             }
             OmicronZoneType::Crucible { .. } => {
-                (ServiceName::Crucible(omicron_zone.id), CRUCIBLE_PORT)
+                (ServiceName::Crucible(zone.config.id), CRUCIBLE_PORT)
             }
             OmicronZoneType::CruciblePantry { .. } => {
                 (ServiceName::CruciblePantry, CRUCIBLE_PANTRY_PORT)
@@ -224,8 +228,8 @@ pub fn blueprint_dns_config(
         // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
-                omicron_zone.id,
-                omicron_zone.underlay_address,
+                zone.config.id,
+                zone.config.underlay_address,
                 service_name,
                 port,
             )
