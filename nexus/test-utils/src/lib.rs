@@ -65,7 +65,6 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
-use omicron_common::api::external::Ipv4Net;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
 
@@ -718,7 +717,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     name: format!("nexus-{}", nexus_id).parse().unwrap(),
                     primary: true,
                     slot: 0,
-                    subnet: Ipv4Net::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
+                    subnet: (*NEXUS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
                 },
             },
@@ -844,15 +843,22 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.server = Some(server);
     }
 
-    pub async fn start_sled(&mut self, first: bool, sim_mode: sim::SimMode) {
+    pub async fn start_sled(
+        &mut self,
+        switch_location: SwitchLocation,
+        sim_mode: sim::SimMode,
+    ) {
         let nexus_address =
             self.nexus_internal_addr.expect("Must launch Nexus first");
 
         // Set up a single sled agent.
-        let sa_id: Uuid =
-            if first { SLED_AGENT_UUID } else { SLED_AGENT2_UUID }
-                .parse()
-                .unwrap();
+        let sa_id: Uuid = if switch_location == SwitchLocation::Switch0 {
+            SLED_AGENT_UUID
+        } else {
+            SLED_AGENT2_UUID
+        }
+        .parse()
+        .unwrap();
         let tempdir = camino_tempfile::tempdir().unwrap();
         let sled_agent = start_sled_agent(
             self.logctx.log.new(o!(
@@ -867,7 +873,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         .await
         .expect("Failed to start sled agent");
 
-        if first {
+        if switch_location == SwitchLocation::Switch0 {
             self.sled_agent = Some(sled_agent);
             self.sled_agent_storage = Some(tempdir);
         } else {
@@ -876,10 +882,15 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         }
     }
 
-    pub async fn configure_sled_agent(&mut self, first: bool) {
-        let field = if first { &self.sled_agent } else { &self.sled_agent2 };
-        let zones =
-            if first { &self.omicron_zones } else { &self.omicron_zones2 };
+    pub async fn configure_sled_agent(
+        &mut self,
+        switch_location: SwitchLocation,
+    ) {
+        let (field, zones) = if switch_location == SwitchLocation::Switch0 {
+            (&self.sled_agent, &self.omicron_zones)
+        } else {
+            (&self.sled_agent2, &self.omicron_zones2)
+        };
 
         // Tell our Sled Agent to report the zones that we configured.
         let Some(sled_agent) = field else {
@@ -991,7 +1002,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     name: format!("external-dns-{}", zone_id).parse().unwrap(),
                     primary: true,
                     slot: 0,
-                    subnet: Ipv4Net::from(*DNS_OPTE_IPV4_SUBNET).into(),
+                    subnet: (*DNS_OPTE_IPV4_SUBNET).into(),
                     vni: Vni::SERVICES_VNI,
                 },
             },
@@ -1255,13 +1266,17 @@ async fn setup_with_config_impl<N: NexusServer>(
                 (
                     "start_sled1",
                     Box::new(move |builder| {
-                        builder.start_sled(true, sim_mode).boxed()
+                        builder
+                            .start_sled(SwitchLocation::Switch0, sim_mode)
+                            .boxed()
                     }),
                 ),
                 (
                     "start_sled2",
                     Box::new(move |builder| {
-                        builder.start_sled(false, sim_mode).boxed()
+                        builder
+                            .start_sled(SwitchLocation::Switch1, sim_mode)
+                            .boxed()
                     }),
                 ),
                 (
@@ -1275,13 +1290,17 @@ async fn setup_with_config_impl<N: NexusServer>(
                 (
                     "configure_sled_agent1",
                     Box::new(|builder| {
-                        builder.configure_sled_agent(true).boxed()
+                        builder
+                            .configure_sled_agent(SwitchLocation::Switch0)
+                            .boxed()
                     }),
                 ),
                 (
                     "configure_sled_agent2",
                     Box::new(|builder| {
-                        builder.configure_sled_agent(false).boxed()
+                        builder
+                            .configure_sled_agent(SwitchLocation::Switch1)
+                            .boxed()
                     }),
                 ),
                 (

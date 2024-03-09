@@ -306,16 +306,16 @@ impl nexus_test_interface::NexusServer for Server {
         // Start the Nexus external API.
         let rv = Server::start(internal_server).await.unwrap();
 
-        // It's convenient for tests to assume that there's only one
-        // provisionable sled.
-        // XXX-dap
-        rv.apictx()
-            .nexus
+        // Historically, tests have assumed that there's only one provisionable
+        // sled, and that's convenient for a lot of purposes.  Mark our second
+        // sled non-provisionable.
+        let nexus = &rv.apictx().nexus;
+        nexus
             .sled_set_provision_policy(
                 &opctx,
                 &nexus_db_queries::db::lookup::LookupPath::new(
                     &opctx,
-                    rv.apictx().nexus.datastore(),
+                    nexus.datastore(),
                 )
                 .sled_id(disable_sled_id),
                 SledProvisionPolicy::NonProvisionable,

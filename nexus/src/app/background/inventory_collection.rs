@@ -314,7 +314,7 @@ mod test {
             page_size: NonZeroU32::new(3).unwrap(),
         };
 
-        // There will be one sled agent set up as part of the test context.
+        // There will be two sled agents set up as part of the test context.
         let found_urls = db_enum.list_sled_agents().await.unwrap();
         assert_eq!(found_urls.len(), 2);
 
