@@ -482,15 +482,22 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         });
     }
 
-    pub async fn start_gateway(&mut self, switch_location: SwitchLocation) {
-        // For now, this MGS is not configured to match up in any way with
-        // either the simulated sled agent or the Dendrite instances.  It's
-        // useful for testing stuff unrelated to that.  But at some point we
-        // will probably want the reported data to match up better.
+    pub async fn start_gateway(
+        &mut self,
+        switch_location: SwitchLocation,
+        port: Option<u16>,
+    ) {
         debug!(&self.logctx.log, "Starting Management Gateway");
-        let gateway = gateway_test_utils::setup::test_setup(
+        let (mgs_config, sp_sim_config) =
+            gateway_test_utils::setup::load_test_config();
+        let mgs_addr =
+            port.map(|port| SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0));
+        let gateway = gateway_test_utils::setup::test_setup_with_config(
             self.test_name,
             gateway_messages::SpPort::One,
+            mgs_config,
+            &sp_sim_config,
+            mgs_addr,
         )
         .await;
         self.gateway.insert(switch_location, gateway);
@@ -1198,13 +1205,17 @@ async fn setup_with_config_impl<N: NexusServer>(
                 (
                     "start_gateway_switch0",
                     Box::new(|builder| {
-                        builder.start_gateway(SwitchLocation::Switch0).boxed()
+                        builder
+                            .start_gateway(SwitchLocation::Switch0, None)
+                            .boxed()
                     }),
                 ),
                 (
                     "start_gateway_switch1",
                     Box::new(|builder| {
-                        builder.start_gateway(SwitchLocation::Switch1).boxed()
+                        builder
+                            .start_gateway(SwitchLocation::Switch1, None)
+                            .boxed()
                     }),
                 ),
                 (
