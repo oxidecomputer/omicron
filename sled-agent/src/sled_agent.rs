@@ -25,6 +25,7 @@ use crate::params::{
     OmicronZonesConfig, SledRole, TimeSync, VpcFirewallRule,
     ZoneBundleMetadata, Zpool,
 };
+use crate::probe_manager::ProbeManager;
 use crate::services::{self, ServiceManager};
 use crate::storage_monitor::UnderlayAccess;
 use crate::updates::{ConfigUpdates, UpdateManager};
@@ -309,6 +310,9 @@ struct SledAgentInner {
 
     // Handle to the traffic manager for writing OS updates to our boot disks.
     boot_disk_os_writer: BootDiskOsWriter,
+
+    // Component of Sled Agent responsible for managing instrumentation probes.
+    probes: ProbeManager,
 }
 
 impl SledAgentInner {
@@ -571,6 +575,15 @@ impl SledAgent {
             nexus_notifier_task.run().await;
         });
 
+        let probes = ProbeManager::new(
+            request.body.id,
+            nexus_client.clone(),
+            etherstub.clone(),
+            storage_manager.clone(),
+            port_manager.clone(),
+            log.new(o!("component" => "ProbeManager")),
+        );
+
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {
                 id: request.body.id,
@@ -578,6 +591,7 @@ impl SledAgent {
                 start_request: request,
                 storage: long_running_task_handles.storage_manager.clone(),
                 instances,
+                probes,
                 hardware: long_running_task_handles.hardware_manager.clone(),
                 updates,
                 port_manager,
@@ -592,6 +606,8 @@ impl SledAgent {
             }),
             log: log.clone(),
         };
+
+        sled_agent.inner.probes.run().await;
 
         // We immediately add a notification to the request queue about our
         // existence. If inspection of the hardware later informs us that we're
