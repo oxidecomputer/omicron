@@ -93,6 +93,12 @@ impl<'a> ResourceAllocator<'a> {
         external_ip: IpAddr,
         port_range: Option<(u16, u16)>,
     ) -> anyhow::Result<bool> {
+        // Treat localhost as always allocated.  We only use this in the test
+        // suite.
+        if external_ip.is_loopback() {
+            return Ok(true);
+        }
+
         let allocated_ips = self
             .datastore
             .service_lookup_external_ips(self.opctx, zone_id)
@@ -157,6 +163,12 @@ impl<'a> ResourceAllocator<'a> {
         zone_id: Uuid,
         nic: &NetworkInterface,
     ) -> anyhow::Result<bool> {
+        // Treat localhost as always allocated.  We only use this in the test
+        // suite.
+        if nic.ip.is_loopback() {
+            return Ok(true);
+        }
+
         let allocated_nics = self
             .datastore
             .service_list_network_interfaces(self.opctx, zone_id)

@@ -62,8 +62,11 @@ use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::Vni;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
+use sled_agent_client::types::NetworkInterface;
+use sled_agent_client::types::NetworkInterfaceKind;
 
 pub mod db;
 pub mod http_testing;
@@ -184,6 +187,7 @@ impl RackInitRequestBuilder {
     // Keeps track of:
     // - The "ServicePutRequest" (for handoff to Nexus)
     // - The internal DNS configuration for this service
+    // XXX-dap remove me
     fn add_service(
         &mut self,
         address: SocketAddrV6,
@@ -192,6 +196,17 @@ impl RackInitRequestBuilder {
         sled_id: Uuid,
     ) {
         let zone_id = Uuid::new_v4();
+        self.add_service_with_id(zone_id, address, kind, service_name, sled_id);
+    }
+
+    fn add_service_with_id(
+        &mut self,
+        zone_id: Uuid,
+        address: SocketAddrV6,
+        kind: ServiceKind,
+        service_name: internal_dns::ServiceName,
+        sled_id: Uuid,
+    ) {
         self.services.push(ServicePutRequest {
             address,
             kind,
@@ -617,16 +632,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .mac_addrs
             .next()
             .expect("ran out of MAC addresses");
-        self.rack_init_builder.add_service(
+        let external_address =
+            self.config.deployment.dropshot_external.dropshot.bind_address.ip();
+        let nexus_id = self.config.deployment.id;
+        self.rack_init_builder.add_service_with_id(
+            nexus_id,
             address,
             ServiceKind::Nexus {
-                external_address: self
-                    .config
-                    .deployment
-                    .dropshot_external
-                    .dropshot
-                    .bind_address
-                    .ip(),
+                external_address,
                 nic: ServiceNic {
                     id: Uuid::new_v4(),
                     name: "nexus".parse().unwrap(),
@@ -641,6 +654,35 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             internal_dns::ServiceName::Nexus,
             sled_id,
         );
+
+        self.omicron_zones.push(OmicronZoneConfig {
+            id: nexus_id,
+            underlay_address: *address.ip(),
+            zone_type: OmicronZoneType::Nexus {
+                external_dns_servers: self
+                    .config
+                    .deployment
+                    .external_dns_servers
+                    .clone(),
+                external_ip: external_address,
+                external_tls: self.config.deployment.dropshot_external.tls,
+                internal_address: address.to_string(),
+                nic: NetworkInterface {
+                    id: Uuid::new_v4(),
+                    ip: external_address,
+                    kind: NetworkInterfaceKind::Service(nexus_id),
+                    mac,
+                    name: format!("nexus-{}", nexus_id).parse().unwrap(),
+                    primary: true,
+                    slot: 0,
+                    subnet: sled_agent_client::types::Ipv4Net::from(
+                        *NEXUS_OPTE_IPV4_SUBNET,
+                    )
+                    .into(),
+                    vni: Vni::SERVICES_VNI,
+                },
+            },
+        });
 
         self.nexus_internal = Some(nexus_internal);
         self.nexus_internal_addr = Some(nexus_internal_addr);

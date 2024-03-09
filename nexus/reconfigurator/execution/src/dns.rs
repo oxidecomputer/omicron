@@ -29,7 +29,6 @@ use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
-use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::OXIMETER_PORT;
 use omicron_common::api::external::Error;
@@ -275,8 +274,9 @@ pub fn blueprint_internal_dns_config(
                 let port = parse_port(&address);
                 (ServiceName::Cockroach, port)
             }
-            OmicronZoneType::Nexus { .. } => {
-                (ServiceName::Nexus, NEXUS_INTERNAL_PORT)
+            OmicronZoneType::Nexus { internal_address, .. } => {
+                let port = parse_port(internal_address);
+                (ServiceName::Nexus, port)
             }
             OmicronZoneType::Crucible { .. } => {
                 (ServiceName::Crucible(omicron_zone.id), CRUCIBLE_PORT)
