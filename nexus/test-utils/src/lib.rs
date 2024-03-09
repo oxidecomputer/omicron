@@ -61,7 +61,6 @@ use trust_dns_resolver::config::ResolverOpts;
 use trust_dns_resolver::TokioAsyncResolver;
 use uuid::Uuid;
 
-use chrono::SecondsFormat;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 pub use sim::TEST_HARDWARE_THREADS;

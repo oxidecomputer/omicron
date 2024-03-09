@@ -2,17 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::HashMap;
-use std::net::{Ipv6Addr, SocketAddrV6};
-
-use gateway_messages::SpPort;
-use gateway_test_utils::setup as mgs_setup;
 use nexus_config::Database;
 use nexus_config::InternalDns;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::internal::shared::SwitchLocation;
+use std::collections::HashMap;
 use tokio::time::sleep;
 use tokio::time::timeout;
 use tokio::time::Duration;
