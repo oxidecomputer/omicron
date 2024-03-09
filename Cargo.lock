@@ -54,9 +54,9 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.11"
+version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89da841a80418a9b391ebaea17f5c112ffaaa96f621d2c285b5174da76b9011"
+checksum = "42cd52102d3df161c77a887b608d7a4897d7cc112886a9537b738a887a03aaff"
 dependencies = [
  "cfg-if",
  "getrandom 0.2.12",
@@ -160,9 +160,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.80"
+version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
+checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
 dependencies = [
  "backtrace",
 ]
@@ -241,7 +241,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed72493ac66d5804837f480ab3766c72bdfab91a65e565fc54fa9e42db0073a8"
 dependencies = [
  "anstyle",
- "bstr 1.9.1",
+ "bstr 1.9.0",
  "doc-comment",
  "predicates",
  "predicates-core",
@@ -678,12 +678,12 @@ dependencies = [
 
 [[package]]
 name = "bstr"
-version = "1.9.1"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "05efc5cfd9110c8416e471df0e96702d58690178e206e61b7173706673c93706"
+checksum = "c48f0051a4b4c5e0b6d365cd04af53aeaa209e3cc15ec2cdb69e73cc87fbd0dc"
 dependencies = [
  "memchr",
- "regex-automata 0.4.6",
+ "regex-automata 0.4.5",
  "serde",
 ]
 
@@ -909,9 +909,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.35"
+version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eaf5903dcbc0a39312feb77df2ff4c76387d591b9fc7b04a238dcf8bb62639a"
+checksum = "5bc015644b92d5890fab7489e49d21f879d5c990186827d42ec511919404f38b"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -988,9 +988,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.2"
+version = "4.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b230ab84b0ffdf890d5a10abdbc8b83ae1c4918275daea1ab8801f71536b2651"
+checksum = "c918d541ef2913577a0f9566e9ce27cb35b6df072075769e0b26cb5a554520da"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -998,9 +998,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.2"
+version = "4.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae129e2e766ae0ec03484e609954119f123cc1fe650337e155d03b022f24f7b4"
+checksum = "9f3e7391dad68afb0c2ede1bf619f579a3dc9c2ec67f089baa397123a2f3d1eb"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1228,7 +1228,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.5.2",
+ "clap 4.5.1",
  "criterion-plot",
  "futures",
  "is-terminal",
@@ -1905,7 +1905,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dns-service-client",
  "dropshot",
  "expectorate",
@@ -2212,7 +2212,7 @@ dependencies = [
  "async-trait",
  "base64",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "colored",
  "dhcproto",
  "http 0.2.12",
@@ -2620,7 +2620,7 @@ name = "gateway-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.2",
+ "clap 4.5.1",
  "futures",
  "gateway-client",
  "gateway-messages",
@@ -2802,7 +2802,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "759c97c1e17c55525b57192c06a267cda0ac5210b222d6b82189a2338fa1c13d"
 dependencies = [
  "aho-corasick",
- "bstr 1.9.1",
+ "bstr 1.9.0",
  "fnv",
  "log",
  "regex",
@@ -3535,7 +3535,7 @@ dependencies = [
  "bytes",
  "camino",
  "cancel-safe-futures",
- "clap 4.5.2",
+ "clap 4.5.1",
  "ddm-admin-client",
  "display-error-chain",
  "futures",
@@ -3595,7 +3595,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "expectorate",
  "hyper 0.14.28",
@@ -3676,7 +3676,7 @@ name = "internal-dns-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "internal-dns",
  "omicron-common",
@@ -3959,7 +3959,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d8de370f98a6cb8a4606618e53e802f93b094ddec0f96988eaec2c27e6e9ce7"
 dependencies = [
- "clap 4.5.2",
+ "clap 4.5.1",
  "termcolor",
  "threadpool",
 ]
@@ -4015,7 +4015,7 @@ version = "0.2.4"
 source = "git+https://github.com/oxidecomputer/lpc55_support#96f064eaae5e95930efaab6c29fd1b2e22225dac"
 dependencies = [
  "bitfield",
- "clap 4.5.2",
+ "clap 4.5.1",
  "packed_struct",
  "serde",
 ]
@@ -5043,7 +5043,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -5077,7 +5077,7 @@ dependencies = [
  "anyhow",
  "base64",
  "camino",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -5128,7 +5128,7 @@ dependencies = [
  "camino-tempfile",
  "cancel-safe-futures",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "criterion",
  "crucible-agent-client",
  "crucible-pantry-client",
@@ -5242,7 +5242,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "crossterm",
  "crucible-agent-client",
  "csv",
@@ -5294,7 +5294,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "clap 4.5.2",
+ "clap 4.5.1",
  "expectorate",
  "futures",
  "hex",
@@ -5361,7 +5361,7 @@ dependencies = [
  "cancel-safe-futures",
  "cfg-if",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "crucible-agent-client",
  "ddm-admin-client",
  "derive_more",
@@ -5495,12 +5495,12 @@ dependencies = [
  "bitflags 1.3.2",
  "bitflags 2.4.2",
  "bstr 0.2.17",
- "bstr 1.9.1",
+ "bstr 1.9.0",
  "byteorder",
  "bytes",
  "chrono",
  "cipher",
- "clap 4.5.2",
+ "clap 4.5.1",
  "clap_builder",
  "console",
  "const-oid",
@@ -5558,7 +5558,7 @@ dependencies = [
  "rand 0.8.5",
  "rand_chacha 0.3.1",
  "regex",
- "regex-automata 0.4.6",
+ "regex-automata 0.4.5",
  "regex-syntax 0.8.2",
  "reqwest",
  "ring 0.17.8",
@@ -5878,7 +5878,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -5921,7 +5921,7 @@ dependencies = [
  "bytes",
  "camino",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "expectorate",
  "futures",
@@ -5991,7 +5991,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "nexus-client",
  "omicron-common",
@@ -6013,7 +6013,7 @@ dependencies = [
  "anyhow",
  "camino",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "omicron-workspace-hack",
  "uuid",
 ]
@@ -6773,7 +6773,7 @@ dependencies = [
  "anyhow",
  "atty",
  "base64",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "futures",
  "hyper 0.14.28",
@@ -7068,7 +7068,7 @@ dependencies = [
  "anyhow",
  "camino",
  "camino-tempfile",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "expectorate",
  "humantime",
@@ -7176,7 +7176,7 @@ checksum = "b62dbe01f0b06f9d8dc7d49e05a0785f153b00b2c227856282f671e0318c9b15"
 dependencies = [
  "aho-corasick",
  "memchr",
- "regex-automata 0.4.6",
+ "regex-automata 0.4.5",
  "regex-syntax 0.8.2",
 ]
 
@@ -7188,9 +7188,9 @@ checksum = "6c230d73fb8d8c1b9c0b3135c5142a8acee3a0558fb8db5cf1cb65f8d7862132"
 
 [[package]]
 name = "regex-automata"
-version = "0.4.6"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86b83b8b9847f9bf95ef68afb0b8e6cdb80f498442f5179a29fad448fcc1eaea"
+checksum = "5bb987efffd3c6d0d8f5f89510bb458559eab11e4f869acb20bf845e016259cd"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -8580,7 +8580,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "futures",
  "gateway-messages",
@@ -9766,7 +9766,7 @@ dependencies = [
  "assert_cmd",
  "camino",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "console",
  "datatest-stable",
  "fs-err",
@@ -10012,7 +10012,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "clap 4.5.2",
+ "clap 4.5.1",
  "debug-ignore",
  "display-error-chain",
  "dropshot",
@@ -10043,7 +10043,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "cancel-safe-futures",
- "clap 4.5.2",
+ "clap 4.5.1",
  "debug-ignore",
  "derive-where",
  "either",
@@ -10464,7 +10464,7 @@ dependencies = [
  "buf-list",
  "camino",
  "ciborium",
- "clap 4.5.2",
+ "clap 4.5.1",
  "crossterm",
  "futures",
  "humantime",
@@ -10525,7 +10525,7 @@ dependencies = [
  "bytes",
  "camino",
  "ciborium",
- "clap 4.5.2",
+ "clap 4.5.1",
  "crossterm",
  "omicron-workspace-hack",
  "reedline",
@@ -10550,7 +10550,7 @@ dependencies = [
  "bytes",
  "camino",
  "camino-tempfile",
- "clap 4.5.2",
+ "clap 4.5.1",
  "ddm-admin-client",
  "debug-ignore",
  "display-error-chain",
@@ -10876,7 +10876,7 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "cargo_toml",
- "clap 4.5.2",
+ "clap 4.5.1",
 ]
 
 [[package]]
@@ -11008,7 +11008,7 @@ name = "zone-network-setup"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap 4.5.2",
+ "clap 4.5.1",
  "dropshot",
  "illumos-utils",
  "omicron-common",
