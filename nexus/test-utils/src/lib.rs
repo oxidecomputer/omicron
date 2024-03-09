@@ -435,6 +435,19 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .as_mut()
             .expect("Tests expect to set a port of Clickhouse")
             .set_port(port);
+
+        let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
+            .to_string()
+            .parse()
+            .unwrap();
+        self.omicron_zones.push(OmicronZoneConfig {
+            id: dataset_id,
+            underlay_address: *address.ip(),
+            zone_type: OmicronZoneType::Clickhouse {
+                address: address.to_string(),
+                dataset: OmicronZoneDataset { pool_name },
+            },
+        });
     }
 
     pub async fn start_gateway(&mut self) {
