@@ -441,7 +441,9 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_preparation::policy_from_db;
     use nexus_test_utils::SLED_AGENT2_UUID;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
@@ -462,7 +464,9 @@ mod test {
     use nexus_types::internal_api::params::Srv;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
+    use omicron_common::address::IpRange;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::NEXUS_REDUNDANCY;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
     use omicron_common::api::external::Error;
@@ -1210,6 +1214,110 @@ mod test {
             dns_initial_external.generation,
             dns_latest_external.generation
         );
+
+        // Now, go through the motions of provisioning a new Nexus zone.
+        // We do this directly with BlueprintBuilder to avoid the planner
+        // deciding to make other unrelated changes.
+        let sled_rows = datastore.sled_list_all_batched(&opctx).await.unwrap();
+        let zpool_rows =
+            datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
+        let ip_pool_range_rows = {
+            let (authz_service_ip_pool, _) =
+                datastore.ip_pools_service_lookup(&opctx).await.unwrap();
+            datastore
+                .ip_pool_list_ranges_batched(&opctx, &authz_service_ip_pool)
+                .await
+                .unwrap()
+        };
+        let mut policy = policy_from_db(
+            &sled_rows,
+            &zpool_rows,
+            &ip_pool_range_rows,
+            // This is not used because we're not actually going through the
+            // planner.
+            NEXUS_REDUNDANCY,
+        )
+        .unwrap();
+        // We'll need another (fake) external IP for this new Nexus.
+        policy
+            .service_ip_pool_ranges
+            .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        let mut builder = BlueprintBuilder::new_based_on(
+            &log,
+            &blueprint,
+            Generation::from(
+                u32::try_from(dns_latest_internal.generation).unwrap(),
+            ),
+            Generation::from(
+                u32::try_from(dns_latest_external.generation).unwrap(),
+            ),
+            &policy,
+            "test suite",
+        )
+        .unwrap();
+        let sled_id =
+            blueprint.sleds().next().expect("expected at least one sled");
+        let nalready = builder.sled_num_nexus_zones(sled_id);
+        let rv = builder
+            .sled_ensure_zone_multiple_nexus(sled_id, nalready + 1)
+            .unwrap();
+        assert_eq!(rv, EnsureMultiple::Added(1));
+        let blueprint2 = builder.build();
+
+        crate::realize_blueprint(
+            &opctx,
+            datastore,
+            &blueprint2,
+            "test-suite",
+            &overrides,
+        )
+        .await
+        .expect("failed to execute second blueprint");
+
+        // Now fetch DNS again.  Both should have changed this time.
+        let dns_latest_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("fetching latest internal DNS");
+        let dns_latest_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .expect("fetching latest external DNS");
+
+        assert_eq!(
+            dns_latest_internal.generation,
+            dns_initial_internal.generation + 1,
+        );
+        assert_eq!(
+            dns_latest_external.generation,
+            dns_initial_external.generation + 1,
+        );
+
+        // XXX-dap examine the specific changes to both DNS configs
+
+        // If we execute it again, we should see no more changes.
+        crate::realize_blueprint(
+            &opctx,
+            datastore,
+            &blueprint2,
+            "test-suite",
+            &overrides,
+        )
+        .await
+        .expect("failed to execute second blueprint again");
+
+        // Now fetch DNS again.  Both should have changed this time.
+        let dns_internal2 = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("fetching latest internal DNS");
+        let dns_external2 = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .expect("fetching latest external DNS");
+
+        assert_eq!(dns_latest_internal.generation, dns_internal2.generation);
+        assert_eq!(dns_latest_external.generation, dns_external2.generation);
 
         // XXX-dap continue writing the test.  See above.
     }
