@@ -13,18 +13,18 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use overridables::Overridables;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
-use overridables::Overridables;
 use uuid::Uuid;
 
 mod datasets;
 mod dns;
 mod omicron_zones;
-mod resource_allocation;
 mod overridables;
+mod resource_allocation;
 
 struct Sled {
     id: Uuid,
