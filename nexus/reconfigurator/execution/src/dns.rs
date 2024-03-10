@@ -4,7 +4,7 @@
 
 //! Propagates internal DNS changes in a given blueprint
 
-use crate::ExecutionOverrides;
+use crate::overridables::Overridables;
 use crate::Sled;
 use dns_service_client::DnsDiff;
 use internal_dns::DnsConfigBuilder;
@@ -38,7 +38,7 @@ pub(crate) async fn deploy_dns(
     creator: String,
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
-    overrides: &ExecutionOverrides,
+    overrides: &Overridables,
 ) -> Result<(), Error> {
     // First, fetch the current DNS configs.
     let internal_dns_config_current = datastore
@@ -221,7 +221,7 @@ pub(crate) async fn deploy_dns_one(
 pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
-    overrides: &ExecutionOverrides,
+    overrides: &Overridables,
 ) -> DnsConfigParams {
     // The DNS names configured here should match what RSS configures for the
     // same zones.  It's tricky to have RSS share the same code because it uses
@@ -432,7 +432,7 @@ mod test {
     use super::dns_compute_update;
     use crate::dns::blueprint_external_dns_config;
     use crate::dns::silo_dns_name;
-    use crate::ExecutionOverrides;
+    use crate::overridables::Overridables;
     use crate::Sled;
     use dns_service_client::DnsDiff;
     use internal_dns::ServiceName;
@@ -1165,7 +1165,7 @@ mod test {
 
         // Now, execute the blueprint.
         // XXX-dap doc/cleanup
-        let mut overrides = ExecutionOverrides::default();
+        let mut overrides = Overridables::default();
         let scrimlets = [
             (SLED_AGENT_UUID, SwitchLocation::Switch0),
             (SLED_AGENT2_UUID, SwitchLocation::Switch1),

@@ -11,73 +11,20 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::identity::Asset;
-use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::DENDRITE_PORT;
-use omicron_common::address::MGD_PORT;
-use omicron_common::address::MGS_PORT;
 use omicron_common::address::SLED_PREFIX;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
-use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
+use overridables::Overridables;
 use uuid::Uuid;
 
 mod datasets;
 mod dns;
 mod omicron_zones;
 mod resource_allocation;
-
-// XXX-dap
-#[derive(Debug, Default)]
-pub struct ExecutionOverrides {
-    pub dendrite_ports: BTreeMap<Uuid, u16>,
-    pub mgs_ports: BTreeMap<Uuid, u16>,
-    pub mgd_ports: BTreeMap<Uuid, u16>,
-    pub switch_zone_ips: BTreeMap<Uuid, Ipv6Addr>,
-}
-
-impl ExecutionOverrides {
-    pub fn override_dendrite_port(&mut self, sled_id: Uuid, port: u16) {
-        self.dendrite_ports.insert(sled_id, port);
-    }
-
-    fn dendrite_port(&self, sled_id: Uuid) -> u16 {
-        self.dendrite_ports.get(&sled_id).copied().unwrap_or(DENDRITE_PORT)
-    }
-
-    pub fn override_mgs_port(&mut self, sled_id: Uuid, port: u16) {
-        self.mgs_ports.insert(sled_id, port);
-    }
-
-    fn mgs_port(&self, sled_id: Uuid) -> u16 {
-        self.mgs_ports.get(&sled_id).copied().unwrap_or(MGS_PORT)
-    }
-
-    pub fn override_mgd_port(&mut self, sled_id: Uuid, port: u16) {
-        self.mgd_ports.insert(sled_id, port);
-    }
-
-    fn mgd_port(&self, sled_id: Uuid) -> u16 {
-        self.mgd_ports.get(&sled_id).copied().unwrap_or(MGD_PORT)
-    }
-
-    pub fn override_switch_zone_ip(&mut self, sled_id: Uuid, addr: Ipv6Addr) {
-        self.switch_zone_ips.insert(sled_id, addr);
-    }
-
-    fn switch_zone_ip(
-        &self,
-        sled_id: Uuid,
-        sled_subnet: Ipv6Subnet<SLED_PREFIX>,
-    ) -> Ipv6Addr {
-        self.switch_zone_ips
-            .get(&sled_id)
-            .copied()
-            .unwrap_or_else(|| get_switch_zone_address(sled_subnet))
-    }
-}
+mod overridables;
 
 struct Sled {
     id: Uuid,
@@ -111,7 +58,7 @@ pub async fn realize_blueprint<S>(
     datastore: &DataStore,
     blueprint: &Blueprint,
     nexus_label: S,
-    overrides: &ExecutionOverrides,
+    overrides: &Overridables,
 ) -> Result<(), Vec<anyhow::Error>>
 where
     String: From<S>,
