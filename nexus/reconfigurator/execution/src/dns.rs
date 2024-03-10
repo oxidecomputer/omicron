@@ -389,7 +389,7 @@ fn dns_compute_update(
         debug!(
             log,
             "adding name";
-            "name" => name,
+            "dns_name" => name,
             "new_records" => ?new_records,
         );
         update.add_name(
@@ -402,7 +402,7 @@ fn dns_compute_update(
         debug!(
             log,
             "removing name";
-            "name" => name,
+            "dns_name" => name,
             "old_records" => ?old_records,
         );
         update.remove_name(name.to_string())?;
@@ -412,7 +412,7 @@ fn dns_compute_update(
         debug!(
             log,
             "updating name";
-            "name" => name,
+            "dns_name" => name,
             "old_records" => ?old_records,
             "new_records" => ?new_records,
         );
@@ -434,6 +434,7 @@ mod test {
     use crate::dns::silo_dns_name;
     use crate::ExecutionOverrides;
     use crate::Sled;
+    use dns_service_client::DnsDiff;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
     use nexus_db_model::DnsGroup;
@@ -1160,6 +1161,7 @@ mod test {
             .blueprint_generate_from_collection(&opctx, collection.id)
             .await
             .expect("failed to generate initial blueprint");
+        eprintln!("blueprint: {:?}", blueprint);
 
         // Now, execute the blueprint.
         // XXX-dap doc/cleanup
@@ -1263,6 +1265,19 @@ mod test {
             .unwrap();
         assert_eq!(rv, EnsureMultiple::Added(1));
         let blueprint2 = builder.build();
+        eprintln!("blueprint2: {:?}", blueprint2);
+        // Figure out the id of the new zone.
+        let zones_before = blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
+            .collect::<BTreeSet<_>>();
+        let zones_after = blueprint2
+            .all_omicron_zones()
+            .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
+            .collect::<BTreeSet<_>>();
+        let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();
+        assert_eq!(new_zones.len(), 1);
+        let new_zone_id = *new_zones[0];
 
         crate::realize_blueprint(
             &opctx,
@@ -1279,21 +1294,63 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .expect("fetching latest internal DNS");
-        let dns_latest_external = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .expect("fetching latest external DNS");
 
         assert_eq!(
             dns_latest_internal.generation,
             dns_initial_internal.generation + 1,
         );
+
+        let diff =
+            DnsDiff::new(&dns_initial_internal, &dns_latest_internal).unwrap();
+        // There should be one new AAAA record for the zone itself.
+        let new_records: Vec<_> = diff.names_added().collect();
+        let (new_name, &[DnsRecord::Aaaa(_)]) = new_records[0] else {
+            panic!("did not find expected AAAA record for new Nexus zone");
+        };
+        let new_zone_host = internal_dns::config::Host::for_zone(
+            new_zone_id,
+            internal_dns::config::ZoneVariant::Other,
+        );
+        assert!(new_zone_host.fqdn().starts_with(new_name));
+
+        // Nothing was removed.
+        assert!(diff.names_removed().next().is_none());
+
+        // The SRV record for Nexus itself ought to have changed, growing one
+        // more record -- for the new AAAA record above.
+        let changed: Vec<_> = diff.names_changed().collect();
+        assert_eq!(changed.len(), 1);
+        let (name, old_records, new_records) = changed[0];
+        assert_eq!(name, ServiceName::Nexus.dns_name());
+        let new_srv = subset_plus_one(old_records, new_records);
+        let DnsRecord::Srv(new_srv) = new_srv else {
+            panic!("expected SRV record, found {:?}", new_srv);
+        };
+        assert_eq!(new_srv.target, new_zone_host.fqdn());
+
+        // As for external DNS: all existing names ought to have been changed,
+        // gaining a new AAAA record for the new host.
+        let dns_latest_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .expect("fetching latest external DNS");
         assert_eq!(
             dns_latest_external.generation,
             dns_initial_external.generation + 1,
         );
-
-        // XXX-dap examine the specific changes to both DNS configs
+        let diff =
+            DnsDiff::new(&dns_initial_external, &dns_latest_external).unwrap();
+        assert!(diff.names_added().next().is_none());
+        assert!(diff.names_removed().next().is_none());
+        let changed: Vec<_> = diff.names_changed().collect();
+        for (name, old_records, new_records) in changed {
+            // These are Silo names and end with ".sys".
+            assert!(name.ends_with(".sys"));
+            // We can't really tell which one points to what, especially in the
+            // test suite where all Nexus zones use localhost for their external
+            // IP.  All we can tell is that there's one new one.
+            assert_eq!(old_records.len() + 1, new_records.len());
+        }
 
         // If we execute it again, we should see no more changes.
         crate::realize_blueprint(
@@ -1306,7 +1363,6 @@ mod test {
         .await
         .expect("failed to execute second blueprint again");
 
-        // Now fetch DNS again.  Both should have changed this time.
         let dns_internal2 = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
@@ -1320,6 +1376,31 @@ mod test {
         assert_eq!(dns_latest_external.generation, dns_external2.generation);
 
         // XXX-dap continue writing the test.  See above.
+    }
+
+    fn subset_plus_one<'a, T: std::fmt::Debug + Ord + Eq>(
+        list1: &'a [T],
+        list2: &'a [T],
+    ) -> &'a T {
+        let set: BTreeSet<_> = list1.into_iter().collect();
+        let mut extra = Vec::with_capacity(1);
+        for item in list2 {
+            if !set.contains(&item) {
+                extra.push(item);
+            }
+        }
+
+        if extra.len() != 1 {
+            panic!(
+                "expected list2 to have one extra element:\n\
+                list1: {:?}\n\
+                list2: {:?}\n
+                extra: {:?}\n",
+                list1, list2, extra
+            );
+        }
+
+        extra.into_iter().next().unwrap()
     }
 }
 
