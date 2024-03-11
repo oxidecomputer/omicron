@@ -296,6 +296,7 @@ pub struct RepairProgress {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case")]
 pub enum DownstairsClientStopReason {
     Replacing,
     Disabled,
