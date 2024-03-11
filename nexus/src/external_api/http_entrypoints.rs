@@ -7,15 +7,14 @@
 use super::{
     console_api, device_auth, params,
     views::{
-        self, Certificate, Group, IdentityProvider, Image, IpPool, IpPoolRange,
-        PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas, SiloUtilization,
-        Sled, Snapshot, SshKey, User, UserBuiltin, Utilization, Vpc, VpcRouter,
-        VpcSubnet,
+        self, Certificate, FloatingIp, Group, IdentityProvider, Image, IpPool,
+        IpPoolRange, PhysicalDisk, Project, Rack, Role, Silo, SiloQuotas,
+        SiloUtilization, Sled, Snapshot, SshKey, User, UserBuiltin,
+        Utilization, Vpc, VpcRouter, VpcSubnet,
     },
 };
 use crate::external_api::shared;
 use crate::ServerContext;
-use dropshot::EmptyScanParams;
 use dropshot::HttpError;
 use dropshot::HttpResponseAccepted;
 use dropshot::HttpResponseCreated;
@@ -34,18 +33,20 @@ use dropshot::{
     channel, endpoint, WebsocketChannelResult, WebsocketConnection,
 };
 use dropshot::{ApiDescription, StreamingBody};
+use dropshot::{ApiEndpoint, EmptyScanParams};
 use ipnetwork::IpNetwork;
-use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
+use nexus_db_queries::{authz, db::datastore::ProbeInfo};
 use nexus_types::external_api::shared::BfdStatus;
 use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
+use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::PaginatedByName;
 use omicron_common::api::external::http_pagination::PaginatedByNameOrId;
@@ -69,6 +70,7 @@ use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LoopbackAddress;
 use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
 use omicron_common::api::external::SwitchPort;
@@ -141,6 +143,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(floating_ip_list)?;
         api.register(floating_ip_create)?;
         api.register(floating_ip_view)?;
+        api.register(floating_ip_update)?;
         api.register(floating_ip_delete)?;
         api.register(floating_ip_attach)?;
         api.register(floating_ip_detach)?;
@@ -352,11 +355,39 @@ pub(crate) fn external_api() -> NexusApiDescription {
         Ok(())
     }
 
+    fn register_experimental<T>(
+        api: &mut NexusApiDescription,
+        endpoint: T,
+    ) -> Result<(), String>
+    where
+        T: Into<ApiEndpoint<Arc<ServerContext>>>,
+    {
+        let mut ep: ApiEndpoint<Arc<ServerContext>> = endpoint.into();
+        // only one tag is allowed
+        ep.tags = vec![String::from("hidden")];
+        ep.path = String::from("/experimental") + &ep.path;
+        api.register(ep)
+    }
+
+    fn register_experimental_endpoints(
+        api: &mut NexusApiDescription,
+    ) -> Result<(), String> {
+        register_experimental(api, probe_list)?;
+        register_experimental(api, probe_view)?;
+        register_experimental(api, probe_create)?;
+        register_experimental(api, probe_delete)?;
+
+        Ok(())
+    }
+
     let conf = serde_json::from_str(include_str!("./tag-config.json")).unwrap();
     let mut api = NexusApiDescription::new().tag_config(conf);
 
     if let Err(err) = register_endpoints(&mut api) {
         panic!("failed to register entrypoints: {}", err);
+    }
+    if let Err(err) = register_experimental_endpoints(&mut api) {
+        panic!("failed to register experimental entrypoints: {}", err);
     }
     api
 }
@@ -1917,6 +1948,43 @@ async fn floating_ip_create(
             .floating_ip_create(&opctx, &project_lookup, floating_params)
             .await?;
         Ok(HttpResponseCreated(ip))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Update floating IP
+#[endpoint {
+    method = PUT,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"],
+}]
+async fn floating_ip_update(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::FloatingIpPath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    updated_floating_ip: TypedBody<params::FloatingIpUpdate>,
+) -> Result<HttpResponseOk<FloatingIp>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let updated_floating_ip_params = updated_floating_ip.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let floating_ip_selector = params::FloatingIpSelector {
+            project: query.project,
+            floating_ip: path.floating_ip,
+        };
+        let floating_ip_lookup =
+            nexus.floating_ip_lookup(&opctx, floating_ip_selector)?;
+        let floating_ip = nexus
+            .floating_ip_update(
+                &opctx,
+                floating_ip_lookup,
+                updated_floating_ip_params,
+            )
+            .await?;
+        Ok(HttpResponseOk(floating_ip))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
@@ -4088,12 +4156,10 @@ async fn instance_ephemeral_ip_attach(
         let instance_lookup =
             nexus.instance_lookup(&opctx, instance_selector)?;
         let ip = nexus
-            .instance_attach_external_ip(
+            .instance_attach_ephemeral_ip(
                 &opctx,
                 &instance_lookup,
-                &params::ExternalIpCreate::Ephemeral {
-                    pool: ip_to_create.into_inner().pool,
-                },
+                ip_to_create.into_inner().pool,
             )
             .await?;
         Ok(HttpResponseAccepted(ip))
@@ -5958,6 +6024,125 @@ async fn current_user_ssh_key_delete(
         };
         let ssh_key_lookup = nexus.ssh_key_lookup(&opctx, &ssh_key_selector)?;
         nexus.ssh_key_delete(&opctx, actor.actor_id(), &ssh_key_lookup).await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// List instrumentation probes
+#[endpoint {
+    method = GET,
+    path = "/v1/probes",
+    tags = ["system/probes"],
+}]
+async fn probe_list(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
+) -> Result<HttpResponseOk<ResultsPage<ProbeInfo>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let nexus = &apictx.nexus;
+        let query = query_params.into_inner();
+        let pag_params = data_page_params_for(&rqctx, &query)?;
+        let scan_params = ScanByNameOrId::from_query(&query)?;
+        let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+        let project_lookup =
+            nexus.project_lookup(&opctx, scan_params.selector.clone())?;
+
+        let probes =
+            nexus.probe_list(&opctx, &project_lookup, &paginated_by).await?;
+
+        Ok(HttpResponseOk(ScanByNameOrId::results_page(
+            &query,
+            probes,
+            &|_, p: &ProbeInfo| match paginated_by {
+                PaginatedBy::Id(_) => NameOrId::Id(p.id),
+                PaginatedBy::Name(_) => NameOrId::Name(p.name.clone().into()),
+            },
+        )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// View instrumentation probe
+#[endpoint {
+    method = GET,
+    path = "/v1/probes/{probe}",
+    tags = ["system/probes"],
+}]
+async fn probe_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::ProbePath>,
+    query_params: Query<params::ProjectSelector>,
+) -> Result<HttpResponseOk<ProbeInfo>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let project_selector = query_params.into_inner();
+        let project_lookup = nexus.project_lookup(&opctx, project_selector)?;
+        let probe =
+            nexus.probe_get(&opctx, &project_lookup, &path.probe).await?;
+        Ok(HttpResponseOk(probe))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Create instrumentation probe
+#[endpoint {
+    method = POST,
+    path = "/v1/probes",
+    tags = ["system/probes"],
+}]
+async fn probe_create(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    new_probe: TypedBody<params::ProbeCreate>,
+) -> Result<HttpResponseCreated<Probe>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let nexus = &apictx.nexus;
+        let new_probe_params = &new_probe.into_inner();
+        let project_selector = query_params.into_inner();
+        let project_lookup = nexus.project_lookup(&opctx, project_selector)?;
+        let probe = nexus
+            .probe_create(&opctx, &project_lookup, &new_probe_params)
+            .await?;
+        Ok(HttpResponseCreated(probe.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Delete instrumentation probe
+#[endpoint {
+    method = DELETE,
+    path = "/v1/probes/{probe}",
+    tags = ["system/probes"],
+}]
+async fn probe_delete(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::ProjectSelector>,
+    path_params: Path<params::ProbePath>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let project_selector = query_params.into_inner();
+        let project_lookup = nexus.project_lookup(&opctx, project_selector)?;
+        nexus.probe_delete(&opctx, &project_lookup, path.probe).await?;
         Ok(HttpResponseDeleted())
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await

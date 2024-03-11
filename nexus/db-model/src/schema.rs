@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(38, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(40, 0, 0);
 
 table! {
     disk (id) {
@@ -591,6 +591,7 @@ table! {
 
         project_id -> Nullable<Uuid>,
         state -> crate::IpAttachStateEnum,
+        is_probe -> Bool,
     }
 }
 
@@ -827,6 +828,7 @@ table! {
         last_used_address -> Inet,
         sled_policy -> crate::sled_policy::SledPolicyEnum,
         sled_state -> crate::SledStateEnum,
+        sled_agent_gen -> Int8,
     }
 }
 
@@ -1520,6 +1522,19 @@ table! {
 }
 
 table! {
+    probe (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Uuid,
+        sled -> Uuid,
+    }
+}
+
+table! {
     upstairs_repair_notification (repair_id, upstairs_id, session_id, region_id, notification_type) {
         time -> Timestamptz,
 
@@ -1584,6 +1599,8 @@ allow_tables_to_appear_in_same_query!(
 allow_tables_to_appear_in_same_query!(hw_baseboard_id, inv_sled_agent,);
 
 allow_tables_to_appear_in_same_query!(
+    bp_omicron_zone,
+    bp_target,
     dataset,
     disk,
     image,

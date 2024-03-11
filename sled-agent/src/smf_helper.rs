@@ -236,19 +236,4 @@ impl<'t> SmfHelper<'t> {
             })?;
         Ok(())
     }
-
-    pub fn disable(&self) -> Result<(), Error> {
-        self.running_zone
-            .run_cmd(&[
-                illumos_utils::zone::SVCADM,
-                "disable",
-                "-t",
-                &self.default_smf_name,
-            ])
-            .map_err(|err| Error::ZoneCommand {
-                intent: format!("Disable {} service", self.default_smf_name),
-                err,
-            })?;
-        Ok(())
-    }
 }

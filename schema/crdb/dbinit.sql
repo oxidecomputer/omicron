@@ -147,6 +147,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* The actual state of the sled, updated exclusively by Nexus */
     sled_state omicron.public.sled_state NOT NULL,
 
+    /* Generation number owned and incremented by the sled-agent */
+    sled_agent_gen INT8 NOT NULL DEFAULT 1,
+
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.
     CONSTRAINT serial_part_revision_unique UNIQUE (
@@ -3545,6 +3548,26 @@ SELECT
   deleted
 FROM interleaved_versions;
 
+CREATE TABLE IF NOT EXISTS omicron.public.probe (
+    id UUID NOT NULL PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    project_id UUID NOT NULL,
+    sled UUID NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_probe_by_name ON omicron.public.probe (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+ALTER TABLE omicron.public.external_ip ADD COLUMN IF NOT EXISTS is_probe BOOL NOT NULL DEFAULT false;
+
+ALTER TYPE omicron.public.network_interface_kind ADD VALUE IF NOT EXISTS 'probe';
+
 CREATE TYPE IF NOT EXISTS omicron.public.upstairs_repair_notification_type AS ENUM (
   'started',
   'succeeded',
@@ -3594,7 +3617,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '38.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '40.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -97,8 +97,20 @@ source.paths = [
 output.type = "zone"
 output.intermediate_only = true
 
-[package.omicron-nexus]
+[package.nexus]
 service_name = "nexus"
+only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [
+  "omicron-nexus.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz",
+  "opte-interface-setup.tar.gz"
+]
+output.type = "zone"
+
+[package.omicron-nexus]
+service_name = "omicron-nexus"
 only_for_targets.image = "standard"
 source.type = "local"
 source.rust.binary_names = ["nexus", "schema-updater"]
@@ -115,6 +127,7 @@ setup_hint = """
 - Run `./tools/ci_download_console` to download the web console assets
 - Run `pkg install library/postgresql-13` to download Postgres libraries
 """
+output.intermediate_only = true
 
 [package.oximeter]
 service_name = "oximeter"
@@ -228,7 +241,12 @@ output.intermediate_only = true
 service_name = "internal_dns"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "dns-server.tar.gz", "internal-dns-customizations.tar.gz" ]
+source.packages = [
+  "dns-server.tar.gz",
+  "internal-dns-customizations.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
 output.type = "zone"
 
 [package.external-dns]
@@ -273,12 +291,25 @@ output.type = "zone"
 [package.ntp]
 service_name = "ntp"
 only_for_targets.image = "standard"
+source.type = "composite"
+source.packages = [
+  "ntp-svc.tar.gz",
+  "opte-interface-setup.tar.gz",
+  "zone-network-setup.tar.gz",
+  "zone-network-install.tar.gz"
+]
+output.type = "zone"
+
+[package.ntp-svc]
+service_name = "ntp-svc"
+only_for_targets.image = "standard"
 source.type = "local"
 source.paths = [
 	{ from = "smf/ntp/manifest", to = "/var/svc/manifest/site/ntp" },
 	{ from = "smf/ntp/method", to = "/var/svc/method" },
 	{ from = "smf/ntp/etc", to = "/etc" },
 ]
+output.intermediate_only = true
 output.type = "zone"
 
 [package.omicron-gateway]
@@ -441,10 +472,10 @@ only_for_targets.image = "standard"
 # 3. Use source.type = "manual" instead of "prebuilt"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "fe0c5c7909707a0f826025be4fe2bbf5f6e0206f"
+source.commit = "1c1574fb721f98f2df1b23e3fd27d83be018882e"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible.sha256.txt
-source.sha256 = "5da4f93b16fc7c0f3cc3a67919dbaa3f143cc07b703183a236f5c98b61504d15"
+source.sha256 = "a14ce9d6b17c6c8427d526e044bb1196ee81316674936873ac9dc1d7ca51459d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -453,10 +484,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "fe0c5c7909707a0f826025be4fe2bbf5f6e0206f"
+source.commit = "1c1574fb721f98f2df1b23e3fd27d83be018882e"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "ed5027cc37c5ba4f2b9a568528f5bb49deedccaaa60bd770311c7bface6aa02b"
+source.sha256 = "8839a3748cd2926f61244c99344d0802e59ea4673a5f31a2aaad5d759176aa80"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -468,10 +499,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "c7cdaf1875d259e29ca50a14b77b0bfd9dfe443d"
+source.commit = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "0203b7f702377c877c4132851ca102d68cd8fd2c20e4fd5b59d950cbb07fd9ff"
+source.sha256 = "7998a71c4e905a4bf9ef2d2863b7695d0bb4d1b34322aa3ce20d173d4a7ee77a"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -484,7 +515,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "4b0e584eec455a43c36af08ae207086965cef833"
+source.commit = "ee0896f5cf9ba0799f155dd8c95f6e1dabaf80ba"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/maghemite.sha256.txt
 source.sha256 = "f1407cb9aac188d6493d2b0f948c75aad2c36668ddf4ae2a1ed80e9dd395b35d"
@@ -500,7 +531,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "4b0e584eec455a43c36af08ae207086965cef833"
+source.commit = "ee0896f5cf9ba0799f155dd8c95f6e1dabaf80ba"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
 source.sha256 = "fae53cb39536dc92d97cb9610de65b0acbce285e685d7167b719ea6311844fec"
@@ -515,10 +546,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "4b0e584eec455a43c36af08ae207086965cef833"
+source.commit = "ee0896f5cf9ba0799f155dd8c95f6e1dabaf80ba"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "22996a6f3353296b848be729f14e78a42e7d3d6e62a4a918a5c2358ae011c8eb"
+source.sha256 = "151aeb26414989cad571b3886786efbeeafd91c41a93a747c784cdc654d5876d"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -594,6 +625,15 @@ source.paths = [
 output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_transceiver_control` to download the necessary binaries"
+
+[package.thundermuffin]
+service_name = "thundermuffin"
+source.type = "prebuilt"
+source.repo = "thundermuffin"
+source.commit = "a4a6108d7c9aac2464a0b6898e88132a8f701a13"
+source.sha256 = "dc55a2accd33a347df4cbdc0026cbaccea2c004940c3fec8cadcdd633d440dfa"
+output.type = "zone"
+output.intermediate_only = true
 
 # To package and install the asic variant of the switch, do:
 #
@@ -709,3 +749,11 @@ source.type = "local"
 source.rust.binary_names = ["oxlog"]
 source.rust.release = true
 output.type = "tarball"
+
+[package.probe]
+service_name = "probe"
+source.type = "composite"
+source.packages = [
+  "thundermuffin.tar.gz",
+]
+output.type = "zone"

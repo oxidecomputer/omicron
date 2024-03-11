@@ -1,0 +1,12 @@
+[package]
+name = "nexus-reconfigurator-preparation"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+illumos-utils.workspace = true
+nexus-db-model.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+
+omicron-workspace-hack.workspace = true

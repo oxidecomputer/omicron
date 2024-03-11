@@ -7,23 +7,16 @@
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
+use nexus_reconfigurator_preparation::policy_from_db;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
 use nexus_types::deployment::Policy;
-use nexus_types::deployment::SledResources;
-use nexus_types::deployment::ZpoolName;
-use nexus_types::identity::Asset;
 use nexus_types::inventory::Collection;
-use omicron_common::address::IpRange;
-use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_REDUNDANCY;
-use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
@@ -34,9 +27,6 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use slog_error_chain::InlineErrorChain;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::str::FromStr;
 use uuid::Uuid;
 
 /// Common structure for collecting information that the planner needs
@@ -118,80 +108,22 @@ impl super::Nexus {
         let datastore = self.datastore();
 
         let sled_rows = datastore.sled_list_all_batched(opctx).await?;
-
-        let mut zpools_by_sled_id = {
-            let mut zpools = BTreeMap::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-            while let Some(p) = paginator.next() {
-                let batch = datastore
-                    .zpool_list_all_external(opctx, &p.current_pagparams())
-                    .await?;
-                paginator =
-                    p.found_batch(&batch, &|z: &nexus_db_model::Zpool| z.id());
-                for z in batch {
-                    let sled_zpool_names =
-                        zpools.entry(z.sled_id).or_insert_with(BTreeSet::new);
-                    // It's unfortunate that Nexus knows how Sled Agent
-                    // constructs zpool names, but there's not currently an
-                    // alternative.
-                    let zpool_name_generated =
-                        illumos_utils::zpool::ZpoolName::new_external(z.id())
-                            .to_string();
-                    let zpool_name = ZpoolName::from_str(&zpool_name_generated)
-                        .map_err(|e| {
-                            Error::internal_error(&format!(
-                                "unexpectedly failed to parse generated \
-                                zpool name: {}: {}",
-                                zpool_name_generated, e
-                            ))
-                        })?;
-                    sled_zpool_names.insert(zpool_name);
-                }
-            }
-            zpools
-        };
-
-        let sleds = sled_rows
-            .into_iter()
-            .map(|sled_row| {
-                let sled_id = sled_row.id();
-                let subnet = Ipv6Subnet::<SLED_PREFIX>::new(sled_row.ip());
-                let zpools = zpools_by_sled_id
-                    .remove(&sled_id)
-                    .unwrap_or_else(BTreeSet::new);
-                let sled_info = SledResources {
-                    policy: sled_row.policy(),
-                    state: sled_row.state().into(),
-                    subnet,
-                    zpools,
-                };
-                (sled_id, sled_info)
-            })
-            .collect();
-
-        let service_ip_pool_ranges = {
+        let zpool_rows =
+            datastore.zpool_list_all_external_batched(opctx).await?;
+        let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) =
                 datastore.ip_pools_service_lookup(opctx).await?;
-
-            let mut ip_ranges = Vec::new();
-            let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-            while let Some(p) = paginator.next() {
-                let batch = datastore
-                    .ip_pool_list_ranges(
-                        opctx,
-                        &authz_service_ip_pool,
-                        &p.current_pagparams(),
-                    )
-                    .await?;
-                // The use of `last_address` here assumes `paginator` is sorting
-                // in Ascending order (which it does - see the implementation of
-                // `current_pagparams()`).
-                paginator = p.found_batch(&batch, &|r| r.last_address);
-                ip_ranges.extend(batch.iter().map(IpRange::from));
-            }
-
-            ip_ranges
+            datastore
+                .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
+                .await?
         };
+
+        let policy = policy_from_db(
+            &sled_rows,
+            &zpool_rows,
+            &ip_pool_range_rows,
+            NEXUS_REDUNDANCY,
+        )?;
 
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to
@@ -223,11 +155,7 @@ impl super::Nexus {
 
         Ok(PlanningContext {
             creator,
-            policy: Policy {
-                sleds,
-                service_ip_pool_ranges,
-                target_nexus_zone_count: NEXUS_REDUNDANCY,
-            },
+            policy,
             inventory,
             internal_dns_version: *dns_version.version,
         })

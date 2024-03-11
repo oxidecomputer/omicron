@@ -4,7 +4,7 @@
 <service_bundle type='manifest' name='opte-interface-setup'>
 
 <service name='oxide/opte-interface-setup' type='service' version='1'>
-  <create_default_instance enabled='true' />
+  <create_default_instance enabled='false' />
 
   <!-- Run after the operating system's svc:/network/physical service is done. -->
   <dependency name='physical' grouping='require_all' restart_on='none'
@@ -20,7 +20,7 @@
   <exec_method type='method' name='start'
     exec='/opt/oxide/zone-network-cli/bin/zone-networking opte-interface-set-up -i %{config/interface} -g %{config/gateway} -p %{config/ip}'
     timeout_seconds='0' />
-  
+
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='transient' />
   </property_group>
@@ -35,7 +35,7 @@
 
   <template>
     <common_name>
-      <loctext xml:lang='C'>Oxide OPTE interface set up</loctext>
+      <loctext xml:lang='C'>Oxide OPTE interface setup</loctext>
     </common_name>
     <description>
       <loctext xml:lang='C'>Sets up an OPTE interface for control plane zones that require it</loctext>

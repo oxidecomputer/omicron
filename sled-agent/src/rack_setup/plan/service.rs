@@ -857,11 +857,11 @@ struct ServicePortBuilder {
 
 impl ServicePortBuilder {
     fn new(config: &Config) -> Self {
+        use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
         use omicron_common::address::{
             DNS_OPTE_IPV4_SUBNET, DNS_OPTE_IPV6_SUBNET, NEXUS_OPTE_IPV4_SUBNET,
             NEXUS_OPTE_IPV6_SUBNET, NTP_OPTE_IPV4_SUBNET, NTP_OPTE_IPV6_SUBNET,
         };
-        use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 
         let external_dns_ips_set = config
             .external_dns_ips

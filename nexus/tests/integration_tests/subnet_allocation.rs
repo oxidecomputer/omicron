@@ -10,6 +10,7 @@ use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use ipnetwork::Ipv4Network;
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
@@ -23,7 +24,6 @@ use omicron_common::api::external::{
     ByteCount, IdentityMetadataCreateParams, InstanceCpuCount,
     InstanceNetworkInterface, Ipv4Net,
 };
-use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use std::net::Ipv4Addr;
 
 type ControlPlaneTestContext =

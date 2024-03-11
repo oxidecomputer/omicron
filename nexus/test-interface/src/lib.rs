@@ -32,7 +32,7 @@
 //! - integration tests -> nexus-test-utils
 
 use async_trait::async_trait;
-use omicron_common::nexus_config::Config;
+use nexus_config::NexusConfig;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -42,20 +42,21 @@ pub trait NexusServer: Send + Sync + 'static {
     type InternalServer: Send + Sync + 'static;
 
     async fn start_internal(
-        config: &Config,
+        config: &NexusConfig,
         log: &Logger,
     ) -> (Self::InternalServer, SocketAddr);
 
     #[allow(clippy::too_many_arguments)]
     async fn start(
         internal_server: Self::InternalServer,
-        config: &Config,
+        config: &NexusConfig,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
         tls_certificates: Vec<nexus_types::internal_api::params::Certificate>,
+        disable_sled_id: Uuid,
     ) -> Self;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;

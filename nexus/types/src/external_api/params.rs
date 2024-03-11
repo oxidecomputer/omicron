@@ -80,6 +80,7 @@ path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 path_param!(AddressLotPath, address_lot, "address lot");
+path_param!(ProbePath, probe, "probe");
 
 id_path_param!(GroupPath, group_id, "group");
 
@@ -888,6 +889,12 @@ pub struct FloatingIpCreate {
     /// The parent IP pool that a floating IP is pulled from. If unset, the
     /// default pool is selected.
     pub pool: Option<NameOrId>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct FloatingIpUpdate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataUpdateParams,
 }
 
 /// The type of resource that a floating IP is attached to
@@ -2035,4 +2042,22 @@ pub struct UpdatesPutRepositoryParams {
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.
     pub system_version: SemverVersion,
+}
+
+// Probes
+
+/// Create time parameters for probes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ProbeCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub sled: Uuid,
+    pub ip_pool: Option<NameOrId>,
+}
+
+/// List probes with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct ProbeListSelector {
+    /// A name or id to use when selecting a probe.
+    pub name_or_id: Option<NameOrId>,
 }

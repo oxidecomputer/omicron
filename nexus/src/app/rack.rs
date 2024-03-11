@@ -760,8 +760,9 @@ impl super::Nexus {
                 ntp_servers: Vec::new(), //TODO
                 rack_network_config: Some(RackNetworkConfigV1 {
                     rack_subnet: subnet,
-                    //TODO(ry) you are here. We need to remove these too. They are
-                    // inconsistent with a generic set of addresses on ports.
+                    //TODO: We need to remove these. They are inconsistent with
+                    // a generic set of addresses on ports that may not be
+                    // contiguous.
                     infra_ip_first: Ipv4Addr::UNSPECIFIED,
                     infra_ip_last: Ipv4Addr::UNSPECIFIED,
                     ports,

@@ -4,7 +4,7 @@
 
 //! Tool for discovering oxide related logfiles on sleds
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgAction, Args, Parser, Subcommand};
 use oxlog::{Filter, LogFile, Zones};
 
 #[derive(Debug, Parser)]
@@ -50,6 +50,10 @@ struct FilterArgs {
     // Print only the extra log files
     #[arg(short, long)]
     extra: bool,
+
+    /// Show log files even if they are empty
+    #[arg(short, long, action=ArgAction::SetTrue)]
+    show_empty: bool,
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -68,6 +72,7 @@ fn main() -> Result<(), anyhow::Error> {
                 current: filter.current,
                 archived: filter.archived,
                 extra: filter.extra,
+                show_empty: filter.show_empty,
             };
             let print_metadata = |f: &LogFile| {
                 println!(
