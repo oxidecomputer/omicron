@@ -7,6 +7,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;
+use chrono::Utc;
 use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
@@ -24,6 +25,7 @@ use nexus_config::MgdConfig;
 use nexus_config::NexusConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_interface::NexusServer;
+use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
@@ -54,6 +56,8 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::{debug, error, o, Logger};
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -790,7 +794,17 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             self.nexus_internal
                 .take()
                 .expect("Must launch internal nexus first"),
-            &self.config,
+            self.config,
+            Blueprint {
+                id: Uuid::new_v4(),
+                omicron_zones: BTreeMap::new(),
+                zones_in_service: BTreeSet::new(),
+                parent_blueprint_id: None,
+                internal_dns_version: Generation::new(),
+                time_created: Utc::now(),
+                creator: "fixme".to_string(),
+                comment: "fixme".to_string(),
+            },
             self.rack_init_builder.services.clone(),
             // NOTE: We should probably hand off
             // "self.rack_init_builder.datasets" here, but Nexus won't be happy

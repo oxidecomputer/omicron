@@ -65,6 +65,7 @@
 //! thereafter.
 
 use super::config::SetupServiceConfig as Config;
+use super::plan::service::SledConfig;
 use crate::bootstrap::config::BOOTSTRAP_AGENT_HTTP_PORT;
 use crate::bootstrap::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody, EarlyNetworkSetup,
@@ -107,7 +108,7 @@ use sled_hardware::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
@@ -554,7 +555,7 @@ impl ServiceInner {
 
         // Build a Blueprint describing our service plan. This should never
         // fail, unless we've set up an invalid plan.
-        let _blueprint =
+        let blueprint =
             build_initial_blueprint_from_plan(sled_plan, service_plan)
                 .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
 
@@ -665,6 +666,7 @@ impl ServiceInner {
         info!(self.log, "rack_network_config: {:#?}", rack_network_config);
 
         let request = NexusTypes::RackInitializationRequest {
+            blueprint,
             services,
             datasets,
             internal_services_ip_pool_ranges,
@@ -1105,20 +1107,38 @@ fn build_initial_blueprint_from_plan(
         Generation::try_from(service_plan.dns_config.generation)
             .context("invalid internal dns version")?;
 
-    let mut sled_id_by_addr = BTreeMap::new();
+    let mut sled_configs = BTreeMap::new();
     for sled_request in sled_plan.sleds.values() {
-        let addr = get_sled_address(sled_request.body.subnet);
-        if sled_id_by_addr.insert(addr, sled_request.body.id).is_some() {
-            bail!("duplicate sled address deriving blueprint: {addr}");
-        }
+        let sled_addr = get_sled_address(sled_request.body.subnet);
+        let sled_id = sled_request.body.id;
+        let entry = match sled_configs.entry(sled_id) {
+            btree_map::Entry::Vacant(entry) => entry,
+            btree_map::Entry::Occupied(_) => {
+                bail!("duplicate sled address deriving blueprint: {sled_addr}");
+            }
+        };
+        let sled_config =
+            service_plan.services.get(&sled_addr).with_context(|| {
+                format!(
+                    "missing services in plan for sled {sled_id} ({sled_addr})"
+                )
+            })?;
+        entry.insert(sled_config.clone());
     }
 
+    Ok(build_initial_blueprint_from_sled_configs(
+        sled_configs,
+        internal_dns_version,
+    ))
+}
+
+pub(crate) fn build_initial_blueprint_from_sled_configs(
+    sled_configs: BTreeMap<Uuid, SledConfig>,
+    internal_dns_version: Generation,
+) -> Blueprint {
     let mut omicron_zones = BTreeMap::new();
     let mut zones_in_service = BTreeSet::new();
-    for (sled_addr, sled_config) in &service_plan.services {
-        let sled_id = *sled_id_by_addr.get(&sled_addr).with_context(|| {
-            format!("could not sled ID for sled with address {sled_addr}")
-        })?;
+    for (sled_id, sled_config) in sled_configs {
         for zone in &sled_config.zones {
             zones_in_service.insert(zone.id);
         }
@@ -1135,18 +1155,13 @@ fn build_initial_blueprint_from_plan(
                 // value, we will need to revisit storing this in the serialized
                 // RSS plan.
                 generation: DeployStepVersion::V5_EVERYTHING,
-                zones: sled_config.zones.clone(),
+                zones: sled_config.zones,
             },
         );
-        if omicron_zones.insert(sled_id, zones_config).is_some() {
-            bail!(
-                "duplicate sled ID deriving blueprint: \
-                 {sled_id} (address={sled_addr}"
-            );
-        }
+        omicron_zones.insert(sled_id, zones_config);
     }
 
-    Ok(Blueprint {
+    Blueprint {
         id: Uuid::new_v4(),
         omicron_zones,
         zones_in_service,
@@ -1155,7 +1170,7 @@ fn build_initial_blueprint_from_plan(
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
-    })
+    }
 }
 
 /// Facilitates creating a sequence of OmicronZonesConfig objects for each sled
