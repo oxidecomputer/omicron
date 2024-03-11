@@ -46,6 +46,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
+use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
@@ -68,6 +69,42 @@ impl DataStore {
             instance_id,
             pool_id,
         );
+        self.allocate_external_ip(opctx, data).await
+    }
+
+    /// Create an Ephemeral IP address for a probe.
+    pub async fn allocate_probe_ephemeral_ip(
+        &self,
+        opctx: &OpContext,
+        ip_id: Uuid,
+        probe_id: Uuid,
+        pool_name: Option<NameOrId>,
+    ) -> CreateResult<ExternalIp> {
+        let pool = match pool_name {
+            Some(NameOrId::Name(name)) => {
+                let (.., pool) = LookupPath::new(opctx, &self)
+                    .ip_pool_name(&name.into())
+                    .fetch_for(authz::Action::CreateChild)
+                    .await?;
+                pool
+            }
+            Some(NameOrId::Id(id)) => {
+                let (.., pool) = LookupPath::new(opctx, &self)
+                    .ip_pool_id(id)
+                    .fetch_for(authz::Action::CreateChild)
+                    .await?;
+                pool
+            }
+            // If no name given, use the default pool
+            None => {
+                let (.., pool) = self.ip_pools_fetch_default(&opctx).await?;
+                pool
+            }
+        };
+
+        let pool_id = pool.identity.id;
+        let data =
+            IncompleteExternalIp::for_ephemeral_probe(ip_id, probe_id, pool_id);
         self.allocate_external_ip(opctx, data).await
     }
 
@@ -725,6 +762,7 @@ impl DataStore {
         diesel::update(dsl::external_ip)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::is_service.eq(false))
+            .filter(dsl::is_probe.eq(false))
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::kind.ne(IpKind::Floating))
             .set((
@@ -736,7 +774,31 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// Detach all Floating IP address from their parent instance.
+    /// Delete all external IP addresses associated with the provided probe
+    /// ID.
+    ///
+    /// This method returns the number of records deleted, rather than the usual
+    /// `DeleteResult`. That's mostly useful for tests, but could be important
+    /// if callers have some invariants they'd like to check.
+    pub async fn deallocate_external_ip_by_probe_id(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> Result<usize, Error> {
+        use db::schema::external_ip::dsl;
+        let now = Utc::now();
+        diesel::update(dsl::external_ip)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::is_probe.eq(true))
+            .filter(dsl::parent_id.eq(probe_id))
+            .filter(dsl::kind.ne(IpKind::Ephemeral))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Detach an individual Floating IP address from their parent instance.
     ///
     /// As in `deallocate_external_ip_by_instance_id`, this method returns the
     /// number of records altered, rather than an `UpdateResult`.
@@ -774,6 +836,7 @@ impl DataStore {
         use db::schema::external_ip::dsl;
         dsl::external_ip
             .filter(dsl::is_service.eq(false))
+            .filter(dsl::is_probe.eq(false))
             .filter(dsl::parent_id.eq(instance_id))
             .filter(dsl::time_deleted.is_null())
             .select(ExternalIp::as_select())
@@ -794,6 +857,23 @@ impl DataStore {
             .await?
             .into_iter()
             .find(|v| v.kind == IpKind::Ephemeral))
+    }
+
+    /// Fetch all external IP addresses of any kind for the provided probe
+    pub async fn probe_lookup_external_ips(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> LookupResult<Vec<ExternalIp>> {
+        use db::schema::external_ip::dsl;
+        dsl::external_ip
+            .filter(dsl::is_probe.eq(true))
+            .filter(dsl::parent_id.eq(probe_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(ExternalIp::as_select())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetch all Floating IP addresses for the provided project.

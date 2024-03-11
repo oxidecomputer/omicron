@@ -71,6 +71,7 @@ use omicron_common::address::CRUCIBLE_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
+use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
@@ -470,6 +471,7 @@ enum SwitchService {
     ManagementGatewayService,
     Wicketd { baseboard: Baseboard },
     Dendrite { asic: DendriteAsic },
+    Lldpd { baseboard: Baseboard },
     Tfport { pkt_source: String, asic: DendriteAsic },
     Uplink,
     MgDdm { mode: String },
@@ -483,6 +485,7 @@ impl crate::smf_helper::Service for SwitchService {
             SwitchService::ManagementGatewayService => "mgs",
             SwitchService::Wicketd { .. } => "wicketd",
             SwitchService::Dendrite { .. } => "dendrite",
+            SwitchService::Lldpd { .. } => "lldpd",
             SwitchService::Tfport { .. } => "tfport",
             SwitchService::Uplink { .. } => "uplink",
             SwitchService::MgDdm { .. } => "mg-ddm",
@@ -1019,7 +1022,10 @@ impl ServiceManager {
         let mut devices = vec![];
         for svc_details in zone_args.sled_local_services() {
             match svc_details {
-                SwitchService::Dendrite { asic: DendriteAsic::TofinoAsic } => {
+                SwitchService::Dendrite {
+                    asic: DendriteAsic::TofinoAsic,
+                    ..
+                } => {
                     if let Ok(Some(n)) = tofino::get_tofino() {
                         if let Ok(device_path) = n.device_path() {
                             devices.push(device_path);
@@ -1032,6 +1038,7 @@ impl ServiceManager {
                 }
                 SwitchService::Dendrite {
                     asic: DendriteAsic::SoftNpuPropolisDevice,
+                    ..
                 } => {
                     devices.push("/dev/tty03".into());
                 }
@@ -2374,6 +2381,15 @@ impl ServiceManager {
             None
         };
 
+        let sidecar_revision = match &self.inner.sidecar_revision {
+            SidecarRevision::Physical(rev) => rev.to_string(),
+            SidecarRevision::SoftZone(rev)
+            | SidecarRevision::SoftPropolis(rev) => format!(
+                "softnpu_front_{}_rear_{}",
+                rev.front_port_count, rev.rear_port_count
+            ),
+        };
+
         if let Some(gateway) = maybe_gateway {
             running_zone.add_default_route(gateway).map_err(|err| {
                 Error::ZoneCommand { intent: "Adding Route".to_string(), err }
@@ -2596,19 +2612,7 @@ impl ServiceManager {
                                         "config/port_config",
                                         "/opt/oxide/dendrite/misc/sidecar_config.toml",
                                     )?;
-                                    let sidecar_revision =
-                                        match self.inner.sidecar_revision {
-                                            SidecarRevision::Physical(ref rev) => rev,
-                                            _ => {
-                                                return Err(Error::SidecarRevision(
-                                                    anyhow::anyhow!(
-                                                        "expected physical \
-                                                        sidecar revision"
-                                                    ),
-                                                ))
-                                            }
-                                        };
-                                    smfh.setprop("config/board_rev", sidecar_revision)?;
+                                    smfh.setprop("config/board_rev", &sidecar_revision)?;
                                 }
                                 DendriteAsic::TofinoStub => smfh.setprop(
                                     "config/port_config",
@@ -2708,6 +2712,39 @@ impl ServiceManager {
                                 &format!("{}", DENDRITE_PORT),
                             )?;
 
+                            smfh.refresh()?;
+                        }
+                        SwitchService::Lldpd { baseboard } => {
+                            info!(self.inner.log, "Setting up lldpd service");
+
+                            match baseboard {
+                                Baseboard::Gimlet {
+                                    identifier, model, ..
+                                }
+                                | Baseboard::Pc { identifier, model, .. } => {
+                                    smfh.setprop(
+                                        "config/scrimlet_id",
+                                        identifier,
+                                    )?;
+                                    smfh.setprop(
+                                        "config/scrimlet_model",
+                                        model,
+                                    )?;
+                                }
+                                Baseboard::Unknown => {}
+                            }
+                            smfh.setprop(
+                                "config/board_rev",
+                                &sidecar_revision,
+                            )?;
+
+                            smfh.delpropvalue("config/address", "*")?;
+                            for address in &request.zone.addresses {
+                                smfh.addpropvalue(
+                                    "config/address",
+                                    &format!("[{}]:{}", address, LLDP_PORT),
+                                )?;
+                            }
                             smfh.refresh()?;
                         }
                         SwitchService::Uplink => {
@@ -3509,13 +3546,14 @@ impl ServiceManager {
             | SledMode::Scrimlet { asic: DendriteAsic::TofinoAsic } => {
                 vec![
                     SwitchService::Dendrite { asic: DendriteAsic::TofinoAsic },
+                    SwitchService::Lldpd { baseboard: baseboard.clone() },
                     SwitchService::ManagementGatewayService,
                     SwitchService::Tfport {
                         pkt_source: "tfpkt0".to_string(),
                         asic: DendriteAsic::TofinoAsic,
                     },
                     SwitchService::Uplink,
-                    SwitchService::Wicketd { baseboard },
+                    SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
                     SwitchService::MgDdm { mode: "transit".to_string() },
                 ]
@@ -3527,9 +3565,10 @@ impl ServiceManager {
                 data_links = vec!["vioif0".to_owned()];
                 vec![
                     SwitchService::Dendrite { asic },
+                    SwitchService::Lldpd { baseboard: baseboard.clone() },
                     SwitchService::ManagementGatewayService,
                     SwitchService::Uplink,
-                    SwitchService::Wicketd { baseboard },
+                    SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
                     SwitchService::MgDdm { mode: "transit".to_string() },
                     SwitchService::Tfport {
@@ -3557,9 +3596,10 @@ impl ServiceManager {
                 }
                 vec![
                     SwitchService::Dendrite { asic },
+                    SwitchService::Lldpd { baseboard: baseboard.clone() },
                     SwitchService::ManagementGatewayService,
                     SwitchService::Uplink,
-                    SwitchService::Wicketd { baseboard },
+                    SwitchService::Wicketd { baseboard: baseboard.clone() },
                     SwitchService::Mgd,
                     SwitchService::MgDdm { mode: "transit".to_string() },
                     SwitchService::Tfport {
@@ -3823,7 +3863,10 @@ impl ServiceManager {
                             smfh.refresh()?;
                         }
                         SwitchService::Dendrite { .. } => {
-                            info!(self.inner.log, "configuring dendrite zone");
+                            info!(
+                                self.inner.log,
+                                "configuring dendrite service"
+                            );
                             if let Some(info) = self.inner.sled_info.get() {
                                 smfh.setprop("config/rack_id", info.rack_id)?;
                                 smfh.setprop(
@@ -3880,6 +3923,17 @@ impl ServiceManager {
                                     "underlay address unexpectedly missing",
                                 );
                             }
+                        }
+                        SwitchService::Lldpd { .. } => {
+                            info!(self.inner.log, "configuring lldp service");
+                            smfh.delpropvalue("config/address", "*")?;
+                            for address in &request.addresses {
+                                smfh.addpropvalue(
+                                    "config/address",
+                                    &format!("[{}]:{}", address, LLDP_PORT),
+                                )?;
+                            }
+                            smfh.refresh()?;
                         }
                         SwitchService::Tfport { .. } => {
                             // Since tfport and dpd communicate using localhost,

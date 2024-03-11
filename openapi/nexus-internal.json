@@ -667,6 +667,75 @@
         }
       }
     },
+    "/probes/{sled}": {
+      "get": {
+        "summary": "Get all the probes associated with a given sled.",
+        "operationId": "probes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ProbeInfo",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProbeInfo"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
@@ -4358,14 +4427,31 @@
           }
         ]
       },
+      "IpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
+        ]
+      },
       "IpNet": {
-        "description": "IpNet\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"title\": \"v4\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Ipv4Net\" } ] }, { \"title\": \"v6\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Ipv6Net\" } ] } ] } ``` </details>",
-        "anyOf": [
+        "oneOf": [
           {
-            "$ref": "#/components/schemas/Ipv4Net"
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
           },
           {
-            "$ref": "#/components/schemas/Ipv6Net"
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
           }
         ]
       },
@@ -4457,8 +4543,11 @@
         ]
       },
       "Ipv4Net": {
-        "description": "An IPv4 subnet, including prefix and subnet mask\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"An IPv4 subnet\", \"description\": \"An IPv4 subnet, including prefix and subnet mask\", \"examples\": [ \"192.168.1.0/24\" ], \"type\": \"string\", \"pattern\": \"^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$\" } ``` </details>",
-        "type": "string"
+        "example": "192.168.1.0/24",
+        "title": "An IPv4 subnet",
+        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv4Network": {
         "type": "string",
@@ -4483,8 +4572,11 @@
         ]
       },
       "Ipv6Net": {
-        "description": "An IPv6 subnet, including prefix and subnet mask\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"An IPv6 subnet\", \"description\": \"An IPv6 subnet, including prefix and subnet mask\", \"examples\": [ \"fd12:3456::/64\" ], \"type\": \"string\", \"pattern\": \"^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$\" } ``` </details>",
-        "type": "string"
+        "example": "fd12:3456::/64",
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "Ipv6Network": {
         "type": "string",
@@ -4825,7 +4917,7 @@
         "maxLength": 63
       },
       "NetworkInterface": {
-        "description": "Information required to construct a virtual network interface\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Information required to construct a virtual network interface\", \"type\": \"object\", \"required\": [ \"id\", \"ip\", \"kind\", \"mac\", \"name\", \"primary\", \"slot\", \"subnet\", \"vni\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"ip\": { \"type\": \"string\", \"format\": \"ip\" }, \"kind\": { \"$ref\": \"#/components/schemas/NetworkInterfaceKind\" }, \"mac\": { \"$ref\": \"#/components/schemas/MacAddr\" }, \"name\": { \"$ref\": \"#/components/schemas/Name\" }, \"primary\": { \"type\": \"boolean\" }, \"slot\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"subnet\": { \"$ref\": \"#/components/schemas/IpNet\" }, \"vni\": { \"$ref\": \"#/components/schemas/Vni\" } } } ``` </details>",
+        "description": "Information required to construct a virtual network interface",
         "type": "object",
         "properties": {
           "id": {
@@ -4873,7 +4965,7 @@
         ]
       },
       "NetworkInterfaceKind": {
-        "description": "The type of network interface\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"The type of network interface\", \"oneOf\": [ { \"description\": \"A vNIC attached to a guest instance\", \"type\": \"object\", \"required\": [ \"id\", \"type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"instance\" ] } } }, { \"description\": \"A vNIC associated with an internal service\", \"type\": \"object\", \"required\": [ \"id\", \"type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"service\" ] } } } ] } ``` </details>",
+        "description": "The type of network interface",
         "oneOf": [
           {
             "description": "A vNIC attached to a guest instance",
@@ -4907,6 +4999,26 @@
                 "type": "string",
                 "enum": [
                   "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
                 ]
               }
             },
@@ -5502,6 +5614,66 @@
           "speed100_g",
           "speed200_g",
           "speed400_g"
+        ]
+      },
+      "ProbeExternalIp": {
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IpKind"
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "kind",
+          "last_port"
+        ]
+      },
+      "ProbeInfo": {
+        "type": "object",
+        "properties": {
+          "external_ips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeExternalIp"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/NetworkInterface"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "external_ips",
+          "id",
+          "interface",
+          "name",
+          "sled"
         ]
       },
       "ProducerEndpoint": {

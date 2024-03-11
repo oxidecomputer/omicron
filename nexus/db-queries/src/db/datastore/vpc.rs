@@ -1212,6 +1212,30 @@ impl DataStore {
                 )
             })
     }
+
+    /// Look up a VNI by VPC.
+    pub async fn resolve_vpc_to_vni(
+        &self,
+        opctx: &OpContext,
+        vpc_id: Uuid,
+    ) -> LookupResult<Vni> {
+        use db::schema::vpc::dsl;
+        dsl::vpc
+            .filter(dsl::id.eq(vpc_id))
+            .filter(dsl::time_deleted.is_null())
+            .select(dsl::vni)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ByCompositeId("VNI".to_string()),
+                    ),
+                )
+            })
+    }
 }
 
 #[cfg(test)]
@@ -1228,8 +1252,6 @@ mod tests {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
-    use nexus_types::deployment::NetworkInterface;
-    use nexus_types::deployment::NetworkInterfaceKind;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
     use nexus_types::deployment::OmicronZonesConfig;
@@ -1241,6 +1263,8 @@ mod tests {
     use omicron_common::api::external::IpNet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
+    use omicron_common::api::internal::shared::NetworkInterface;
+    use omicron_common::api::internal::shared::NetworkInterfaceKind;
     use omicron_test_utils::dev;
     use slog::info;
     use std::collections::BTreeMap;
@@ -1558,13 +1582,15 @@ mod tests {
                         external_ip: "::1".parse().unwrap(),
                         nic: NetworkInterface {
                             id: nic.identity.id,
-                            kind: NetworkInterfaceKind::Service(service.id()),
+                            kind: NetworkInterfaceKind::Service {
+                                id: service.id(),
+                            },
                             name: format!("test-nic-{}", nic.identity.id)
                                 .parse()
                                 .unwrap(),
                             ip: nic.ip.unwrap(),
                             mac: nic.mac.unwrap(),
-                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
+                            subnet: IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                             vni: Vni::SERVICES_VNI,
                             primary: true,
                             slot: nic.slot.unwrap(),

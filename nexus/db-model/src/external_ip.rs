@@ -22,6 +22,7 @@ use nexus_types::external_api::views;
 use omicron_common::address::NUM_SOURCE_NAT_PORTS;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadata;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::InstanceExternalIpBody;
@@ -34,7 +35,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "ip_kind", schema = "public"))]
      pub struct IpKindEnum;
 
-     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Deserialize, Serialize)]
+     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
      #[diesel(sql_type = IpKindEnum)]
      pub enum IpKind;
 
@@ -48,7 +49,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "ip_attach_state"))]
      pub struct IpAttachStateEnum;
 
-     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Deserialize, Serialize)]
+     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
      #[diesel(sql_type = IpAttachStateEnum)]
      pub enum IpAttachState;
 
@@ -95,10 +96,11 @@ impl std::fmt::Display for IpKind {
     Selectable,
     Queryable,
     Insertable,
-    Deserialize,
-    Serialize,
     PartialEq,
     Eq,
+    Serialize,
+    Deserialize,
+    JsonSchema,
 )]
 #[diesel(table_name = external_ip)]
 pub struct ExternalIp {
@@ -125,6 +127,7 @@ pub struct ExternalIp {
     // Only Some(_) for instance Floating IPs
     pub project_id: Option<Uuid>,
     pub state: IpAttachState,
+    pub is_probe: bool,
 }
 
 /// A view type constructed from `ExternalIp` used to represent Floating IP
@@ -171,6 +174,7 @@ pub struct IncompleteExternalIp {
     time_created: DateTime<Utc>,
     kind: IpKind,
     is_service: bool,
+    is_probe: bool,
     parent_id: Option<Uuid>,
     pool_id: Uuid,
     project_id: Option<Uuid>,
@@ -195,6 +199,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind,
             is_service: false,
+            is_probe: false,
             parent_id: Some(instance_id),
             pool_id,
             project_id: None,
@@ -214,6 +219,30 @@ impl IncompleteExternalIp {
             kind,
             is_service: false,
             parent_id: None,
+            is_probe: false,
+            pool_id,
+            project_id: None,
+            explicit_ip: None,
+            explicit_port_range: None,
+            state: kind.initial_state(),
+        }
+    }
+
+    pub fn for_ephemeral_probe(
+        id: Uuid,
+        instance_id: Uuid,
+        pool_id: Uuid,
+    ) -> Self {
+        let kind = IpKind::Ephemeral;
+        Self {
+            id,
+            name: None,
+            description: None,
+            time_created: Utc::now(),
+            kind: IpKind::Ephemeral,
+            is_service: false,
+            is_probe: true,
+            parent_id: Some(instance_id),
             pool_id,
             project_id: None,
             explicit_ip: None,
@@ -237,6 +266,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind,
             is_service: false,
+            is_probe: false,
             parent_id: None,
             pool_id,
             project_id: Some(project_id),
@@ -262,6 +292,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind,
             is_service: false,
+            is_probe: false,
             parent_id: None,
             pool_id,
             project_id: Some(project_id),
@@ -286,6 +317,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind: IpKind::Floating,
             is_service: true,
+            is_probe: false,
             parent_id: Some(service_id),
             pool_id,
             project_id: None,
@@ -317,6 +349,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind,
             is_service: true,
+            is_probe: false,
             parent_id: Some(service_id),
             pool_id,
             project_id: None,
@@ -341,6 +374,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind,
             is_service: true,
+            is_probe: false,
             parent_id: Some(service_id),
             pool_id,
             project_id: None,
@@ -359,6 +393,7 @@ impl IncompleteExternalIp {
             time_created: Utc::now(),
             kind,
             is_service: true,
+            is_probe: false,
             parent_id: Some(service_id),
             pool_id,
             project_id: None,
@@ -390,6 +425,10 @@ impl IncompleteExternalIp {
 
     pub fn is_service(&self) -> &bool {
         &self.is_service
+    }
+
+    pub fn is_probe(&self) -> &bool {
+        &self.is_probe
     }
 
     pub fn parent_id(&self) -> &Option<Uuid> {
