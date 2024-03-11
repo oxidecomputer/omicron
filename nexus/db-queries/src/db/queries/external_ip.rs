@@ -132,6 +132,7 @@ const MAX_PORT: u16 = u16::MAX;
 ///         CAST(candidate_first_port AS INT4) AS first_port,
 ///         CAST(candidate_last_port AS INT4) AS last_port,
 ///         <project_id> AS project_id,
+///         <is_probe> AS is_probe,
 ///         <state> AS state
 ///     FROM
 ///         SELECT * FROM (
@@ -419,6 +420,12 @@ impl NextExternalIp {
         )?;
         out.push_sql(" AS ");
         out.push_identifier(dsl::state::NAME)?;
+        out.push_sql(", ");
+
+        // is_probe flag
+        out.push_bind_param::<sql_types::Bool, bool>(self.ip.is_probe())?;
+        out.push_sql(" AS ");
+        out.push_identifier(dsl::is_probe::NAME)?;
 
         out.push_sql(" FROM (");
         self.push_address_sequence_subquery(out.reborrow())?;

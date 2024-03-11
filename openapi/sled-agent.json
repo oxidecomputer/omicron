@@ -5670,6 +5670,26 @@
               "id",
               "type"
             ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
           }
         ]
       },
