@@ -29,6 +29,7 @@ omicron-workspace-hack.workspace = true
 [target.'cfg(target_os = "illumos")'.dependencies]
 illumos-devinfo = { git = "https://github.com/oxidecomputer/illumos-devinfo", branch = "main" }
 libefi-illumos = { git = "https://github.com/oxidecomputer/libefi-illumos", branch = "master" }
+libnvme.workspace = true
 
 [dev-dependencies]
 illumos-utils = { workspace = true, features = ["testing"] }
