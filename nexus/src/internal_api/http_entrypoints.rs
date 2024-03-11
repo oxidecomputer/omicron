@@ -781,7 +781,7 @@ async fn blueprint_target_set(
 
 /// Set the `enabled` field of the current target blueprint
 #[endpoint {
-    method = PATCH,
+    method = PUT,
     path = "/deployment/blueprints/target/enabled",
 }]
 async fn blueprint_target_set_enabled(
