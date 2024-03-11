@@ -19,10 +19,9 @@ async fn main() -> Result<(), anyhow::Error> {
     let vm = d.node(&node_name, "helios-2.0", 2, gb(8));
 
     eprintln!("Launching test vm {node_name}");
-    libfalcon::cli::run(&mut d).await?;
-    //    d.launch().await?;
+    d.launch().await?;
     eprintln!("Launched test vm {node_name}");
-    //  let out = d.exec(vm, "uname -a").await?;
-    //    eprintln!("Hello: {out}");
+    let out = d.exec(vm, "uname -a").await?;
+    eprintln!("Hello: {out}");
     Ok(())
 }
