@@ -71,6 +71,11 @@ pub enum Error {
 
     #[error("Conflict: {}", .message.display_internal())]
     Conflict { message: MessagePair },
+
+    /// A generic 404 response. If there is an applicable ResourceType, use
+    /// ObjectNotFound instead.
+    #[error("Not found: {}", .message.display_internal())]
+    NotFound { message: MessagePair },
 }
 
 /// Represents an error message which has an external component, along with
@@ -199,6 +204,7 @@ impl Error {
             | Error::InsufficientCapacity { .. }
             | Error::InternalError { .. }
             | Error::TypeVersionMismatch { .. }
+            | Error::NotFound { .. }
             | Error::Conflict { .. } => false,
         }
     }
@@ -300,6 +306,15 @@ impl Error {
         Error::Conflict { message: MessagePair::new(message.into()) }
     }
 
+    /// Generates an [`Error::NotFound`] with a specific message.
+    ///
+    /// This is used in cases where a generic 404 is required. For cases where
+    /// there is a ResourceType, use a function that produces
+    /// [`Error::ObjectNotFound`] instead.
+    pub fn not_found(message: impl Into<String>) -> Error {
+        Error::NotFound { message: MessagePair::new(message.into()) }
+    }
+
     /// Given an [`Error`] with an internal message, return the same error with
     /// `context` prepended to it to provide more context
     ///
@@ -352,6 +367,9 @@ impl Error {
                 }
             }
             Error::Conflict { message } => Error::Conflict {
+                message: message.with_internal_context(context),
+            },
+            Error::NotFound { message } => Error::NotFound {
                 message: message.with_internal_context(context),
             },
         }
@@ -471,6 +489,17 @@ impl From<Error> for HttpError {
                 HttpError {
                     status_code: http::StatusCode::CONFLICT,
                     error_code: Some(String::from("Conflict")),
+                    external_message,
+                    internal_message,
+                }
+            }
+
+            Error::NotFound { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::NOT_FOUND,
+                    error_code: Some(String::from("Not Found")),
                     external_message,
                     internal_message,
                 }
