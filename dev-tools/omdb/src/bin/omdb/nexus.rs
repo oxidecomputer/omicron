@@ -6,6 +6,7 @@
 
 use crate::db::DbUrlOptions;
 use crate::Omdb;
+use anyhow::bail;
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::SecondsFormat;
@@ -20,6 +21,7 @@ use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
+use nexus_db_queries::db::lookup::LookupPath;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
 use reedline::Reedline;
@@ -1089,28 +1091,33 @@ async fn cmd_nexus_sled_expunge(
     // 1. We'll require manual input on stdin to confirm the sled to be removed
     // 2. We'll warn sternly if the sled-to-be-expunged is still present in the
     //    most recent inventory collection
-    use nexus_db_model::Sled;
     use nexus_db_queries::context::OpContext;
 
-    // First, we need to look up the sled so we know it's serial number.
     let datastore = args.db_url_opts.connect(omdb, log).await?;
     let opctx = OpContext::for_tests(log.clone(), datastore.clone());
     let opctx = &opctx;
 
-    let sled = {
-        use async_bb8_diesel::AsyncRunQueryDsl;
-        use diesel::ExpressionMethods;
-        use diesel::QueryDsl;
-        use diesel::SelectableHelper;
-        use nexus_db_queries::db::schema::sled::dsl;
+    // First, we need to look up the sled so we know its serial number.
+    let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
+        .sled_id(args.sled_id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to find sled {}", args.sled_id))?;
 
-        let conn = datastore.pool_connection_for_tests().await?;
-        dsl::sled
-            .filter(dsl::id.eq(args.sled_id))
-            .select(Sled::as_select())
-            .first_async::<Sled>(&*conn)
-            .await
-            .with_context(|| format!("failed to find sled {}", args.sled_id))?
+    // Helper to get confirmation messages from the user.
+    let mut line_editor = Reedline::create();
+    let mut read_with_prompt = move |message: &str| {
+        let prompt = DefaultPrompt::new(
+            DefaultPromptSegment::Basic(message.to_string()),
+            DefaultPromptSegment::Empty,
+        );
+        if let Ok(reedline::Signal::Success(input)) =
+            line_editor.read_line(&prompt)
+        {
+            Ok(input)
+        } else {
+            bail!("expungement aborted")
+        }
     };
 
     // Now check whether its sled-agent or SP were found in the most recent
@@ -1133,6 +1140,11 @@ async fn cmd_nexus_sled_expunge(
                     collection; are you sure you want to mark it expunged?",
                     args.sled_id,
                 );
+                let confirm = read_with_prompt("y/N")?;
+                if confirm != "y" {
+                    eprintln!("expungement not confirmed: aborting");
+                    return Ok(());
+                }
             }
         }
         None => {
@@ -1146,19 +1158,9 @@ async fn cmd_nexus_sled_expunge(
         args.sled_id,
         sled.serial_number(),
     );
-    let mut line_editor = Reedline::create();
-    let prompt = DefaultPrompt::new(
-        DefaultPromptSegment::Basic("sled serial".to_string()),
-        DefaultPromptSegment::Empty,
-    );
-    if let Ok(reedline::Signal::Success(input)) = line_editor.read_line(&prompt)
-    {
-        if input != sled.serial_number() {
-            eprintln!("serial number mismatch; aborting");
-            return Ok(());
-        }
-    } else {
-        eprintln!("expungment aborted");
+    let confirm = read_with_prompt("sled serial number")?;
+    if confirm != sled.serial_number() {
+        eprintln!("sled serial number not confirmed: aborting");
         return Ok(());
     }
 
