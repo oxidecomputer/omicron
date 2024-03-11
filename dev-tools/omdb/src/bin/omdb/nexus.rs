@@ -4,6 +4,7 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
 use crate::Omdb;
 use anyhow::bail;
@@ -234,8 +235,8 @@ impl NexusArgs {
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Delete(args),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_delete(&client, args).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_delete(&client, args, token).await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command:
@@ -249,21 +250,23 @@ impl NexusArgs {
                         command: BlueprintTargetCommands::Set(args),
                     }),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_target_set(&client, args).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set(&client, args, token).await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_regenerate(&client).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_regenerate(&client, token).await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::GenerateFromCollection(args),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_generate_from_collection(&client, args)
-                    .await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_generate_from_collection(
+                    &client, args, token,
+                )
+                .await
             }
 
             NexusCommands::Sleds(SledsArgs {
@@ -272,14 +275,14 @@ impl NexusArgs {
             NexusCommands::Sleds(SledsArgs {
                 command: SledsCommands::Add(args),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_sled_add(&client, args).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_sled_add(&client, args, token).await
             }
             NexusCommands::Sleds(SledsArgs {
                 command: SledsCommands::Expunge(args),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_sled_expunge(&client, args, omdb, log).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_sled_expunge(&client, args, omdb, log, token).await
             }
         }
     }
@@ -937,6 +940,7 @@ async fn cmd_nexus_blueprints_diff(
 async fn cmd_nexus_blueprints_delete(
     client: &nexus_client::Client,
     args: &BlueprintIdArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let _ = client
         .blueprint_delete(&args.blueprint_id)
@@ -962,6 +966,7 @@ async fn cmd_nexus_blueprints_target_show(
 async fn cmd_nexus_blueprints_target_set(
     client: &nexus_client::Client,
     args: &BlueprintTargetSetArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let enabled = match args.enabled {
         BlueprintTargetSetEnabled::Enabled => true,
@@ -997,6 +1002,7 @@ async fn cmd_nexus_blueprints_target_set(
 async fn cmd_nexus_blueprints_generate_from_collection(
     client: &nexus_client::Client,
     args: &CollectionIdArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let blueprint = client
         .blueprint_generate_from_collection(
@@ -1012,6 +1018,7 @@ async fn cmd_nexus_blueprints_generate_from_collection(
 
 async fn cmd_nexus_blueprints_regenerate(
     client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let blueprint =
         client.blueprint_regenerate().await.context("generating blueprint")?;
@@ -1065,6 +1072,7 @@ async fn cmd_nexus_sleds_list_uninitialized(
 async fn cmd_nexus_sled_add(
     client: &nexus_client::Client,
     args: &SledAddArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     client
         .sled_add(&UninitializedSledId {
@@ -1083,6 +1091,7 @@ async fn cmd_nexus_sled_expunge(
     args: &SledExpungeArgs,
     omdb: &Omdb,
     log: &slog::Logger,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     // This is an extremely dangerous and irreversible operation. We put a
     // couple of safeguards in place to ensure this cannot be called without
