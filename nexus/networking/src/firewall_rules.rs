@@ -20,7 +20,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::internal::nexus::HostIdentifier;
-use sled_agent_client::types::NetworkInterface;
+use omicron_common::api::internal::shared::NetworkInterface;
 use slog::debug;
 use slog::info;
 use slog::warn;

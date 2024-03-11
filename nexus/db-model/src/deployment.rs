@@ -15,6 +15,7 @@ use crate::{ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintTarget;
+use omicron_common::api::internal::shared::NetworkInterface;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -249,7 +250,7 @@ impl BpOmicronZoneNic {
     pub fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+    ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
     }

@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(39, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(40, 0, 0);
 
 table! {
     disk (id) {
@@ -591,6 +591,7 @@ table! {
 
         project_id -> Nullable<Uuid>,
         state -> crate::IpAttachStateEnum,
+        is_probe -> Bool,
     }
 }
 
@@ -1517,6 +1518,19 @@ table! {
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
+    probe (id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        project_id -> Uuid,
+        sled -> Uuid,
     }
 }
 

@@ -26,7 +26,6 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
-
 use std::sync::Arc;
 use uuid::Uuid;
 

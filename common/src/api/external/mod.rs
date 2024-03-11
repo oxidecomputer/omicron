@@ -879,6 +879,8 @@ pub enum ResourceType {
     Vmm,
     Ipv4NatEntry,
     FloatingIp,
+    Probe,
+    ProbeNetworkInterface,
 }
 
 // IDENTITY METADATA
@@ -2825,6 +2827,15 @@ pub enum TufRepoInsertStatus {
 pub struct TufRepoGetResponse {
     /// The description of the repository.
     pub description: TufRepoDescription,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
+)]
+pub struct Probe {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub sled: Uuid,
 }
 
 #[cfg(test)]

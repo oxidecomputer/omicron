@@ -23,6 +23,7 @@ mod metrics;
 mod oximeter;
 mod pantry;
 mod password_login;
+mod probe;
 mod projects;
 mod quotas;
 mod rack;

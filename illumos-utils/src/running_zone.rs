@@ -912,8 +912,14 @@ impl RunningZone {
         Ok(())
     }
 
+    /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
         &self.inner.links
+    }
+
+    /// Return a mutable reference to the links for this zone.
+    pub fn links_mut(&mut self) -> &mut Vec<Link> {
+        &mut self.inner.links
     }
 
     /// Return the running processes associated with all the SMF services this

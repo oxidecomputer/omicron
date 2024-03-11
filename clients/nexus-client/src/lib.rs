@@ -33,6 +33,8 @@ progenitor::generate_api!(
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
         NewPasswordHash = omicron_passwords::NewPasswordHash,
+        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
+        NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },
