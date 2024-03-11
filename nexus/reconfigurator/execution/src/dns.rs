@@ -438,8 +438,6 @@ mod test {
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_preparation::policy_from_db;
     use nexus_test_utils::resource_helpers::create_silo;
-    use nexus_test_utils::SLED_AGENT2_UUID;
-    use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
@@ -467,7 +465,6 @@ mod test {
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_common::api::external::SwitchLocation;
     use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::test_setup_log;
@@ -1128,8 +1125,6 @@ mod test {
     //
     // - If we subsequently create a new Silo, the new Silo's DNS record
     //   reflects the Nexus zone that was added.
-    //
-    // XXX-dap move to crate-level test since it uses realize_blueprint()?
     #[nexus_test]
     async fn test_silos_external_dns_end_to_end(
         cptestctx: &ControlPlaneTestContext,
@@ -1190,30 +1185,7 @@ mod test {
         eprintln!("blueprint: {:?}", blueprint);
 
         // Now, execute the blueprint.
-        // XXX-dap doc/cleanup
-        let mut overrides = Overridables::default();
-        let scrimlets = [
-            (SLED_AGENT_UUID, SwitchLocation::Switch0),
-            (SLED_AGENT2_UUID, SwitchLocation::Switch1),
-        ];
-        for (id_str, switch_location) in scrimlets {
-            let sled_id = id_str.parse().unwrap();
-            let ip = Ipv6Addr::LOCALHOST;
-            let mgs_port = cptestctx
-                .gateway
-                .get(&switch_location)
-                .unwrap()
-                .client
-                .bind_address
-                .port();
-            let dendrite_port =
-                cptestctx.dendrite.get(&switch_location).unwrap().port;
-            let mgd_port = cptestctx.mgd.get(&switch_location).unwrap().port;
-            overrides.override_switch_zone_ip(sled_id, ip);
-            overrides.override_dendrite_port(sled_id, dendrite_port);
-            overrides.override_mgs_port(sled_id, mgs_port);
-            overrides.override_mgd_port(sled_id, mgd_port);
-        }
+        let overrides = Overridables::for_test(cptestctx);
         crate::realize_blueprint(
             &opctx,
             datastore,
