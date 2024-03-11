@@ -251,6 +251,7 @@ itertools = "0.12.1"
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.3"
 libc = "0.2.153"
+libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "9fecec91e6bea6650641b36d9c89025d4f2cf322" }
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"

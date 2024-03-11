@@ -15,6 +15,7 @@ headers.workspace = true
 hex.workspace = true
 http.workspace = true
 libc.workspace = true
+libfalcon.workspace = true
 nexus-config.workspace = true
 omicron-common.workspace = true
 pem.workspace = true
@@ -39,3 +40,6 @@ expectorate.workspace = true
 
 [features]
 seed-gen = ["dep:filetime"]
+
+[[bin]]
+name = "falcon_runner"
