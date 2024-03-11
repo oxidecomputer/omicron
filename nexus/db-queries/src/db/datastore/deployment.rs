@@ -80,6 +80,17 @@ impl DataStore {
         opctx: &OpContext,
         blueprint: &Blueprint,
     ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::blueprint_insert_on_connection(&conn, opctx, blueprint).await
+    }
+
+    /// Variant of [Self::blueprint_insert] which may be called from a
+    /// transaction context.
+    pub(crate) async fn blueprint_insert_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        opctx: &OpContext,
+        blueprint: &Blueprint,
+    ) -> Result<(), Error> {
         opctx
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
@@ -152,8 +163,7 @@ impl DataStore {
         // batch rather than making a bunch of round-trips to the database.
         // We'd do that if we had an interface for doing that with bound
         // parameters, etc.  See oxidecomputer/omicron#973.
-        let pool = self.pool_connection_authorized(opctx).await?;
-        pool.transaction_async(|conn| async move {
+        conn.transaction_async(|conn| async move {
             // Insert the row for the blueprint.
             {
                 use db::schema::blueprint::dsl;
@@ -621,6 +631,18 @@ impl DataStore {
         opctx: &OpContext,
         target: BlueprintTarget,
     ) -> Result<(), Error> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        Self::blueprint_target_set_current_on_connection(&conn, opctx, target)
+            .await
+    }
+
+    /// Variant of [Self::blueprint_target_set_current] which may be called from
+    /// a transaction context.
+    pub(crate) async fn blueprint_target_set_current_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        opctx: &OpContext,
+        target: BlueprintTarget,
+    ) -> Result<(), Error> {
         opctx
             .authorize(authz::Action::Modify, &authz::BLUEPRINT_CONFIG)
             .await?;
@@ -631,10 +653,8 @@ impl DataStore {
             time_made_target: target.time_made_target,
         };
 
-        let conn = self.pool_connection_authorized(opctx).await?;
-
         query
-            .execute_async(&*conn)
+            .execute_async(conn)
             .await
             .map_err(|e| Error::from(query.decode_error(e)))?;
 

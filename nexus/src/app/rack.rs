@@ -221,6 +221,7 @@ impl super::Nexus {
                 RackInit {
                     rack_subnet: rack_network_config.rack_subnet.into(),
                     rack_id,
+                    blueprint: request.blueprint,
                     services: request.services,
                     datasets,
                     service_ip_pool_ranges,

@@ -44,6 +44,8 @@ use nexus_db_model::PasswordHashString;
 use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
 use nexus_db_model::SledUnderlaySubnetAllocation;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -68,6 +70,7 @@ use uuid::Uuid;
 pub struct RackInit {
     pub rack_id: Uuid,
     pub rack_subnet: IpNetwork,
+    pub blueprint: Blueprint,
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
@@ -85,6 +88,8 @@ pub struct RackInit {
 enum RackInitError {
     AddingIp(Error),
     AddingNic(Error),
+    BlueprintInsert(Error),
+    BlueprintTargetSet(Error),
     ServiceInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     RackUpdate { err: DieselError, rack_id: Uuid },
@@ -125,6 +130,12 @@ impl From<RackInitError> for Error {
             },
             RackInitError::ServiceInsert(err) => Error::internal_error(
                 &format!("failed to insert Service record: {:#}", err),
+            ),
+            RackInitError::BlueprintInsert(err) => Error::internal_error(
+                &format!("failed to insert Blueprint: {:#}", err),
+            ),
+            RackInitError::BlueprintTargetSet(err) => Error::internal_error(
+                &format!("failed to insert set target Blueprint: {:#}", err),
             ),
             RackInitError::RackUpdate { err, rack_id } => {
                 public_error_from_diesel(
@@ -583,6 +594,7 @@ impl DataStore {
                 let service_pool = service_pool.clone();
                 async move {
                     let rack_id = rack_init.rack_id;
+                    let blueprint = rack_init.blueprint;
                     let services = rack_init.services;
                     let datasets = rack_init.datasets;
                     let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
@@ -608,7 +620,7 @@ impl DataStore {
                         return Ok::<_, DieselError>(rack);
                     }
 
-                    // Otherwise, insert services and datasets.
+                    // Otherwise, insert blueprint and datasets.
 
                     // Set up the IP pool for internal services.
                     for range in service_ip_pool_ranges {
@@ -628,6 +640,46 @@ impl DataStore {
                             DieselError::RollbackTransaction
                         })?;
                     }
+
+                    // Insert the RSS-generated blueprint.
+                    Self::blueprint_insert_on_connection(
+                        &conn,
+                        opctx,
+                        &blueprint,
+                        ).await
+                        .map_err(|e| {
+                            warn!(
+                                log,
+                                "Initializing Rack: Failed to insert blueprint"
+                            );
+                            err.set(RackInitError::BlueprintInsert(e)).unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
+
+                    // Mark the RSS-generated blueprint as the current target,
+                    // DISABLED. We may change this to enabled in the future
+                    // when more of Reconfigurator is automated, but for now we
+                    // require a support operation to enable it.
+                    Self::blueprint_target_set_current_on_connection(
+                        &conn,
+                        opctx,
+                        BlueprintTarget {
+                            target_id: blueprint.id,
+                            enabled: false,
+                            time_made_target: Utc::now(),
+                        },
+                        )
+                        .await
+                        .map_err(|e| {
+                            warn!(
+                                log,
+                                "Initializing Rack: \
+                                 Failed to set blueprint as target"
+                            );
+                            err.set(RackInitError::BlueprintTargetSet(e))
+                                .unwrap();
+                            DieselError::RollbackTransaction
+                        })?;
 
                     // Allocate records for all services.
                     for service in services {
@@ -882,7 +934,7 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -893,6 +945,16 @@ mod test {
             RackInit {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
+                blueprint: Blueprint {
+                    id: Uuid::new_v4(),
+                    omicron_zones: BTreeMap::new(),
+                    zones_in_service: BTreeSet::new(),
+                    parent_blueprint_id: None,
+                    internal_dns_version: Generation::new().next(),
+                    time_created: Utc::now(),
+                    creator: "test suite".to_string(),
+                    comment: "test suite".to_string(),
+                },
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],
