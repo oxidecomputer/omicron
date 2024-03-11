@@ -68,14 +68,15 @@ pub(crate) async fn deploy_dns(
         .filter(|silo| silo.id() != *SILO_ID)
         .collect::<Vec<_>>();
 
-    let (_, nexus_external_dns_zones) =
-        datastore.nexus_external_addresses(opctx).await?;
+    let (nexus_external_ips, nexus_external_dns_zones) =
+        datastore.nexus_external_addresses(opctx, Some(blueprint)).await?;
     let nexus_external_dns_zone_names = nexus_external_dns_zones
         .into_iter()
         .map(|z| z.zone_name)
         .collect::<Vec<_>>();
     let external_dns_config_blueprint = blueprint_external_dns_config(
         blueprint,
+        &nexus_external_ips,
         &silos.iter().collect::<Vec<_>>(),
         &nexus_external_dns_zone_names,
     );
@@ -326,25 +327,15 @@ pub fn blueprint_internal_dns_config(
 
 pub fn blueprint_external_dns_config(
     blueprint: &Blueprint,
+    nexus_external_ips: &[IpAddr],
     silos: &[&Silo],
     external_dns_zone_names: &[String],
 ) -> DnsConfigParams {
-    let nexus_external_ips =
-        blueprint.all_omicron_zones().filter_map(|(_, z)| {
-            if blueprint.zones_in_service.contains(&z.id) {
-                if let OmicronZoneType::Nexus { external_ip, .. } = &z.zone_type
-                {
-                    return Some(*external_ip);
-                }
-            }
-
-            None
-        });
     let dns_records: Vec<DnsRecord> = nexus_external_ips
         .into_iter()
         .map(|addr| match addr {
-            IpAddr::V4(addr) => DnsRecord::A(addr),
-            IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
+            IpAddr::V4(addr) => DnsRecord::A(*addr),
+            IpAddr::V6(addr) => DnsRecord::Aaaa(*addr),
         })
         .collect();
 
@@ -440,15 +431,18 @@ mod test {
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::DataStore;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
     use nexus_reconfigurator_preparation::policy_from_db;
+    use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils::SLED_AGENT2_UUID;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
     use nexus_types::deployment::Policy;
@@ -835,10 +829,21 @@ mod test {
         })
         .unwrap();
 
+        let nexus_external_ips: Vec<_> = blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, z)| match &z.zone_type {
+                OmicronZoneType::Nexus { external_ip, .. } => {
+                    Some(*external_ip)
+                }
+                _ => None,
+            })
+            .collect();
+
         // It shouldn't ever be possible to have no Silos at all, but at least
         // make sure we don't panic.
         let external_dns_config = blueprint_external_dns_config(
             &blueprint,
+            &nexus_external_ips,
             &[],
             &[String::from("oxide.test")],
         );
@@ -851,19 +856,36 @@ mod test {
         assert!(external_dns_config.zones[0].records.is_empty());
 
         // Same with external DNS zones.
-        let external_dns_config =
-            blueprint_external_dns_config(&blueprint, &[&my_silo], &[]);
+        let external_dns_config = blueprint_external_dns_config(
+            &blueprint,
+            &nexus_external_ips,
+            &[&my_silo],
+            &[],
+        );
         assert_eq!(
             external_dns_config.generation,
             u64::from(initial_external_dns_generation.next())
         );
         assert!(external_dns_config.zones.is_empty());
 
+        // Same with external IPs.
+        let external_dns_config = blueprint_external_dns_config(
+            &blueprint,
+            &[],
+            &[&my_silo],
+            &[String::from("oxide.test")],
+        );
+        assert_eq!(
+            external_dns_config.generation,
+            u64::from(initial_external_dns_generation.next())
+        );
+
         // Now check a more typical case.  (Although we wouldn't normally have
         // more than one external DNS zone, it's a more general case and pretty
         // easy to test.)
         let external_dns_config = blueprint_external_dns_config(
             &blueprint,
+            &nexus_external_ips,
             &[&my_silo],
             &[String::from("oxide1.test"), String::from("oxide2.test")],
         );
@@ -1094,15 +1116,19 @@ mod test {
     // - If we create a blueprint matching the current system, and then apply
     //   it, there are no changes to either internal or external DNS
     //
+    // - If we create a Silo, DNS will be updated.  If we then re-execute the
+    //   previous blueprint, again, there will be no new changes to DNS.
+    //
     // - If we then generate a blueprint with a Nexus zone and execute the DNS
     //   part of that, then:
     //
-    //   - internal DNS SRV record for _nexus._tcp is updated
+    //   - internal DNS SRV record for _nexus._tcp is added
     //   - internal DNS AAAA record for the new zone is added
     //   - external DNS gets a A record for the new zone's external IP
     //
     // - If we subsequently create a new Silo, the new Silo's DNS record
     //   reflects the Nexus zone that was added.
+    //
     // XXX-dap move to crate-level test since it uses realize_blueprint()?
     #[nexus_test]
     async fn test_silos_external_dns_end_to_end(
@@ -1198,24 +1224,30 @@ mod test {
         .await
         .expect("failed to execute initial blueprint");
 
-        // Now fetch DNS again.  It ought not to have changed.
-        let dns_latest_internal = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
-            .await
-            .expect("fetching latest internal DNS");
-        let dns_latest_external = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .expect("fetching latest external DNS");
+        // DNS ought not to have changed.
+        verify_dns_unchanged(
+            &opctx,
+            datastore,
+            &dns_initial_internal,
+            &dns_initial_external,
+        )
+        .await;
 
-        assert_eq!(
-            dns_initial_internal.generation,
-            dns_latest_internal.generation
-        );
-        assert_eq!(
-            dns_initial_external.generation,
-            dns_latest_external.generation
-        );
+        // Create a Silo.  Make sure that external DNS is updated (and that
+        // internal DNS is not).  Then make sure that if we execute the same
+        // blueprint again, DNS does not change again (i.e., that it does not
+        // revert somehow).
+        let dns_latest_external = create_silo_and_verify_dns(
+            cptestctx,
+            &opctx,
+            datastore,
+            &blueprint,
+            &overrides,
+            "squidport",
+            &dns_initial_internal,
+            &dns_initial_external,
+        )
+        .await;
 
         // Now, go through the motions of provisioning a new Nexus zone.
         // We do this directly with BlueprintBuilder to avoid the planner
@@ -1248,7 +1280,7 @@ mod test {
             &log,
             &blueprint,
             Generation::from(
-                u32::try_from(dns_latest_internal.generation).unwrap(),
+                u32::try_from(dns_initial_internal.generation).unwrap(),
             ),
             Generation::from(
                 u32::try_from(dns_latest_external.generation).unwrap(),
@@ -1278,6 +1310,38 @@ mod test {
         let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();
         assert_eq!(new_zones.len(), 1);
         let new_zone_id = *new_zones[0];
+
+        // Set this blueprint as the current target.  We set it to disabled
+        // because we're controlling the execution directly here.  But we need
+        // to do this so that silo creation sees the change.
+        //
+        // Doing this requires writing the whole history of this blueprint.
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: chrono::Utc::now(),
+                },
+            )
+            .await
+            .expect("failed to set blueprint as target");
+        datastore
+            .blueprint_insert(&opctx, &blueprint2)
+            .await
+            .expect("failed to save blueprint to database");
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: blueprint2.id,
+                    enabled: false,
+                    time_made_target: chrono::Utc::now(),
+                },
+            )
+            .await
+            .expect("failed to set blueprint as target");
 
         crate::realize_blueprint(
             &opctx,
@@ -1329,17 +1393,18 @@ mod test {
         assert_eq!(new_srv.target, new_zone_host.fqdn());
 
         // As for external DNS: all existing names ought to have been changed,
-        // gaining a new AAAA record for the new host.
+        // gaining a new A record for the new host.
+        let dns_previous_external = dns_latest_external;
         let dns_latest_external = datastore
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .expect("fetching latest external DNS");
         assert_eq!(
             dns_latest_external.generation,
-            dns_initial_external.generation + 1,
+            dns_previous_external.generation + 1,
         );
         let diff =
-            DnsDiff::new(&dns_initial_external, &dns_latest_external).unwrap();
+            DnsDiff::new(&dns_previous_external, &dns_latest_external).unwrap();
         assert!(diff.names_added().next().is_none());
         assert!(diff.names_removed().next().is_none());
         let changed: Vec<_> = diff.names_changed().collect();
@@ -1362,20 +1427,47 @@ mod test {
         )
         .await
         .expect("failed to execute second blueprint again");
+        verify_dns_unchanged(
+            &opctx,
+            datastore,
+            &dns_latest_internal,
+            &dns_latest_external,
+        )
+        .await;
 
-        let dns_internal2 = datastore
-            .dns_config_read(&opctx, DnsGroup::Internal)
-            .await
-            .expect("fetching latest internal DNS");
-        let dns_external2 = datastore
-            .dns_config_read(&opctx, DnsGroup::External)
-            .await
-            .expect("fetching latest external DNS");
+        // Now create another Silo and verify the changes to DNS.
+        // This ensures that the "create Silo" path picks up Nexus instances
+        // that exist only in Reconfigurator, not the services table.
+        let dns_latest_external = create_silo_and_verify_dns(
+            &cptestctx,
+            &opctx,
+            datastore,
+            &blueprint2,
+            &overrides,
+            "tickety-boo",
+            &dns_latest_internal,
+            &dns_latest_external,
+        )
+        .await;
 
-        assert_eq!(dns_latest_internal.generation, dns_internal2.generation);
-        assert_eq!(dns_latest_external.generation, dns_external2.generation);
-
-        // XXX-dap continue writing the test.  See above.
+        // One more time, make sure that executing the blueprint does not do
+        // anything.
+        crate::realize_blueprint(
+            &opctx,
+            datastore,
+            &blueprint2,
+            "test-suite",
+            &overrides,
+        )
+        .await
+        .expect("failed to execute second blueprint again");
+        verify_dns_unchanged(
+            &opctx,
+            datastore,
+            &dns_latest_internal,
+            &dns_latest_external,
+        )
+        .await;
     }
 
     fn subset_plus_one<'a, T: std::fmt::Debug + Ord + Eq>(
@@ -1401,6 +1493,96 @@ mod test {
         }
 
         extra.into_iter().next().unwrap()
+    }
+
+    async fn create_silo_and_verify_dns(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        datastore: &DataStore,
+        blueprint: &Blueprint,
+        overrides: &Overridables,
+        silo_name: &str,
+        old_internal: &DnsConfigParams,
+        old_external: &DnsConfigParams,
+    ) -> DnsConfigParams {
+        // Create a Silo.  Make sure that external DNS is updated (and that
+        // internal DNS is not).  This is tested elsewhere already but really we
+        // want to make sure that if we then execute the blueprint again, DNS
+        // does not change _again_ (i.e., does not somehow revert).
+        let silo = create_silo(
+            &cptestctx.external_client,
+            silo_name,
+            false,
+            shared::SiloIdentityMode::SamlJit,
+        )
+        .await;
+
+        let dns_latest_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("fetching latest internal DNS");
+        assert_eq!(old_internal.generation, dns_latest_internal.generation);
+        let dns_latest_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .expect("fetching latest external DNS");
+        assert_eq!(old_external.generation + 1, dns_latest_external.generation);
+
+        // Specifically, there should be one new name (for the new Silo).
+        let diff = DnsDiff::new(&old_external, &dns_latest_external).unwrap();
+        assert!(diff.names_removed().next().is_none());
+        assert!(diff.names_changed().next().is_none());
+        let added = diff.names_added().collect::<Vec<_>>();
+        assert_eq!(added.len(), 1);
+        let (new_name, new_records) = added[0];
+        assert_eq!(new_name, silo_dns_name(&silo.identity.name));
+        // And it should have the same IP addresses as all of the other Silos.
+        assert_eq!(
+            new_records,
+            old_external.zones[0].records.values().next().unwrap()
+        );
+
+        // If we execute the blueprint, DNS should not be changed.
+        crate::realize_blueprint(
+            &opctx,
+            datastore,
+            &blueprint,
+            "test-suite",
+            &overrides,
+        )
+        .await
+        .expect("failed to execute blueprint");
+        let dns_latest_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("fetching latest internal DNS");
+        let dns_latest_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .expect("fetching latest external DNS");
+        assert_eq!(old_internal.generation, dns_latest_internal.generation);
+        assert_eq!(old_external.generation + 1, dns_latest_external.generation);
+
+        dns_latest_external
+    }
+
+    async fn verify_dns_unchanged(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        old_internal: &DnsConfigParams,
+        old_external: &DnsConfigParams,
+    ) {
+        let dns_latest_internal = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("fetching latest internal DNS");
+        let dns_latest_external = datastore
+            .dns_config_read(&opctx, DnsGroup::External)
+            .await
+            .expect("fetching latest external DNS");
+
+        assert_eq!(old_internal.generation, dns_latest_internal.generation);
+        assert_eq!(old_external.generation, dns_latest_external.generation);
     }
 }
 

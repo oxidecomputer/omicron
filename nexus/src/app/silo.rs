@@ -95,8 +95,13 @@ impl super::Nexus {
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
+        let target_blueprint = datastore
+            .blueprint_target_get_current_full(opctx)
+            .await
+            .internal_context("loading target blueprint")?;
+        let target = target_blueprint.as_ref().map(|(_, blueprint)| blueprint);
         let (nexus_external_ips, nexus_external_dns_zones) =
-            datastore.nexus_external_addresses(nexus_opctx).await?;
+            datastore.nexus_external_addresses(nexus_opctx, target).await?;
         let dns_records: Vec<DnsRecord> = nexus_external_ips
             .into_iter()
             .map(|addr| match addr {
