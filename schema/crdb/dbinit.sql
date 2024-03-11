@@ -3558,6 +3558,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bootstore_config (
     time_deleted TIMESTAMPTZ
 );
 
+CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name);
 
 INSERT INTO omicron.public.db_metadata (
     singleton,

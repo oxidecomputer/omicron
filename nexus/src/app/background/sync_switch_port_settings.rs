@@ -15,8 +15,9 @@ use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
-    AddressLotBlock, BgpConfig, BootstoreConfig, SwitchLinkFec,
-    SwitchLinkSpeed, SwitchPortBgpPeerConfig, INFRA_LOT, NETWORK_KEY,
+    AddressLotBlock, BgpConfig, BootstoreConfig, LoopbackAddress,
+    SwitchLinkFec, SwitchLinkSpeed, SwitchPortBgpPeerConfig, INFRA_LOT,
+    NETWORK_KEY,
 };
 use uuid::Uuid;
 
@@ -170,6 +171,42 @@ impl SwitchPortSettingsManager {
         }
         Ok(changes)
     }
+
+    async fn db_loopback_addresses<'a>(
+        &'a mut self,
+        opctx: &OpContext,
+        log: &slog::Logger,
+    ) -> Result<
+        HashSet<(SwitchLocation, IpAddr)>,
+        omicron_common::api::external::Error,
+    > {
+        let values = self
+            .datastore
+            .loopback_address_list(opctx, &DataPageParams::max_page())
+            .await?;
+
+        let mut set: HashSet<(SwitchLocation, IpAddr)> = HashSet::new();
+
+        // TODO: are we doing anything special with anycast addresses at the moment?
+        for LoopbackAddress { switch_location, address, .. } in values.iter() {
+            let location: SwitchLocation = match switch_location.parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to parse switch location for loopback address";
+                        "address" => %address,
+                        "location" => switch_location,
+                        "error" => ?e,
+                    );
+                    continue;
+                }
+            };
+            set.insert((location, address.ip()));
+        }
+
+        Ok(set)
+    }
 }
 
 enum PortSettingsChange {
@@ -256,7 +293,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                apply_switch_port_changes(dpd_clients, &changes, log).await;
+                apply_switch_port_changes(&dpd_clients, &changes, log).await;
 
                 //
                 // calculate and apply routing changes
@@ -294,6 +331,36 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // add the new routes
                 info!(&log, "adding static routes"; "routes" => ?routes_to_add);
                 add_static_routes(&mgd_clients, routes_to_add, log).await;
+
+
+                //
+                // calculate and apply loopback address changes
+                //
+
+                match self.db_loopback_addresses(opctx, log).await {
+                    Ok(desired_loopback_addresses) => {
+                        let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, log).await;
+
+                        let loopbacks_to_add: Vec<(SwitchLocation, IpAddr)> = desired_loopback_addresses
+                            .difference(&current_loopback_addresses)
+                            .map(|i| (i.0, i.1))
+                            .collect();
+                        let loopbacks_to_del: Vec<(SwitchLocation, IpAddr)> = current_loopback_addresses
+                            .difference(&desired_loopback_addresses)
+                            .map(|i| (i.0, i.1))
+                            .collect();
+
+                        delete_loopback_addresses_from_switch(&loopbacks_to_del, &dpd_clients, log).await;
+                        add_loopback_addresses_to_switch(&loopbacks_to_add, dpd_clients, log).await;
+                    },
+                    Err(e) => {
+                        error!(
+                            log,
+                            "error fetching loopback addresses from db, skipping loopback config";
+                            "error" => %e
+                        );
+                    },
+                };
 
                 //
                 // calculate and apply switch zone SMF changes
@@ -809,7 +876,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         "config" => ?desired_config,
                     );
 
-                    // push the updates to both scrimlets
+                    // spush the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     let mut one_succeeded = false;
                     for (location, client) in &sled_agent_clients {
@@ -852,6 +919,95 @@ impl BackgroundTask for SwitchPortSettingsManager {
         }
         .boxed()
     }
+}
+
+async fn add_loopback_addresses_to_switch(
+    loopbacks_to_add: &[(SwitchLocation, IpAddr)],
+    dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
+    log: &slog::Logger,
+) {
+    for (location, address) in loopbacks_to_add {
+        let client = match dpd_clients.get(location) {
+            Some(v) => v,
+            None => {
+                error!(log, "dpd_client is missing, cannot create loopback addresses"; "location" => %location);
+                continue;
+            }
+        };
+
+        if let Err(e) =
+            client.ensure_loopback_created(log, *address, OMICRON_DPD_TAG).await
+        {
+            error!(log, "error while creating loopback address"; "error" => %e);
+        };
+    }
+}
+
+async fn delete_loopback_addresses_from_switch(
+    loopbacks_to_del: &[(SwitchLocation, IpAddr)],
+    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
+    log: &slog::Logger,
+) {
+    for (location, address) in loopbacks_to_del {
+        let client = match dpd_clients.get(location) {
+            Some(v) => v,
+            None => {
+                error!(log, "dpd_client is missing, cannot delete loopback addresses"; "location" => %location);
+                continue;
+            }
+        };
+
+        if let Err(e) = client.ensure_loopback_deleted(log, *address).await {
+            error!(log, "error while deleting loopback address"; "error" => %e);
+        };
+    }
+}
+
+async fn switch_loopback_addresses(
+    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
+    log: &slog::Logger,
+) -> HashSet<(SwitchLocation, IpAddr)> {
+    let mut current_loopback_addresses: HashSet<(SwitchLocation, IpAddr)> =
+        HashSet::new();
+
+    for (location, client) in dpd_clients {
+        let ipv4_loopbacks = match client.loopback_ipv4_list().await {
+            Ok(v) => v,
+            Err(e) => {
+                error!(
+                    log,
+                    "error fetching ipv4 loopback addresses from switch";
+                    "location" => %location,
+                    "error" => %e,
+                );
+                continue;
+            }
+        };
+
+        let ipv6_loopbacks = match client.loopback_ipv6_list().await {
+            Ok(v) => v,
+            Err(e) => {
+                error!(
+                    log,
+                    "error fetching ipv6 loopback addresses from switch";
+                    "location" => %location,
+                    "error" => %e,
+                );
+                continue;
+            }
+        };
+
+        for entry in ipv4_loopbacks.iter() {
+            current_loopback_addresses
+                .insert((*location, IpAddr::V4(entry.addr)));
+        }
+
+        for entry in ipv6_loopbacks.iter() {
+            current_loopback_addresses
+                .insert((*location, IpAddr::V6(entry.addr)));
+        }
+    }
+    current_loopback_addresses
 }
 
 fn uplinks(
@@ -1051,7 +1207,7 @@ fn static_routes_in_db(
 // apply changes for each port
 // if we encounter an error, we log it and keep going instead of bailing
 async fn apply_switch_port_changes(
-    dpd_clients: HashMap<SwitchLocation, dpd_client::Client>,
+    dpd_clients: &HashMap<SwitchLocation, dpd_client::Client>,
     changes: &[(
         SwitchLocation,
         nexus_db_model::SwitchPort,
