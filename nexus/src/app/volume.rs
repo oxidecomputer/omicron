@@ -13,8 +13,10 @@ use omicron_common::api::external::DeleteResult;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
+use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -137,6 +139,30 @@ impl super::Nexus {
                 upstairs_id,
                 repair_id,
                 repair_progress,
+            )
+            .await
+    }
+
+    /// An Upstairs is telling us that a Downstairs client task was stopped
+    pub(crate) async fn downstairs_stopped_notification(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        downstairs_id: TypedUuid<DownstairsKind>,
+        downstairs_client_stopped: DownstairsClientStopped,
+    ) -> DeleteResult {
+        info!(
+            self.log,
+            "received downstairs_stopped_notification from upstairs {upstairs_id} for downstairs {downstairs_id}: {:?}",
+            downstairs_client_stopped,
+        );
+
+        self.db_datastore
+            .downstairs_stopped_notification(
+                opctx,
+                upstairs_id,
+                downstairs_id,
+                downstairs_client_stopped,
             )
             .await
     }

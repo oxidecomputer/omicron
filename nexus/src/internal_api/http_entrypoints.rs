@@ -45,10 +45,12 @@ use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
+use omicron_uuid_kinds::DownstairsKind;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -81,6 +83,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_upstairs_repair_start)?;
         api.register(cpapi_upstairs_repair_finish)?;
         api.register(cpapi_upstairs_repair_progress)?;
+        api.register(cpapi_downstairs_stopped)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -580,6 +583,42 @@ async fn cpapi_upstairs_repair_progress(
                 path.upstairs_id,
                 path.repair_id,
                 repair_progress.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Downstairs requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct UpstairsDownstairsPathParam {
+    upstairs_id: TypedUuid<UpstairsKind>,
+    downstairs_id: TypedUuid<DownstairsKind>,
+}
+
+/// An Upstairs will update this endpoint if a Downstairs client task is stopped
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped",
+ }]
+async fn cpapi_downstairs_stopped(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsDownstairsPathParam>,
+    downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .downstairs_stopped_notification(
+                &opctx,
+                path.upstairs_id,
+                path.downstairs_id,
+                downstairs_client_stopped.into_inner(),
             )
             .await?;
         Ok(HttpResponseUpdatedNoContent())

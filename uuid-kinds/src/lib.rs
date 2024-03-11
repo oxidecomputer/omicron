@@ -45,6 +45,7 @@ macro_rules! impl_typed_uuid_kind {
 // Please keep this list in alphabetical order.
 
 impl_typed_uuid_kind! {
+    DownstairsKind => "downstairs",
     DownstairsRegionKind => "downstairs_region",
     LoopbackAddressKind => "loopback_address",
     TufRepoKind => "tuf_repo",

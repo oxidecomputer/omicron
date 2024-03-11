@@ -1546,6 +1546,15 @@ table! {
 }
 
 table! {
+    downstairs_client_stopped_notification (downstairs_id, time, reason) {
+        time -> Timestamptz,
+        upstairs_id -> Uuid,
+        downstairs_id -> Uuid,
+        reason -> crate::DownstairsClientStopReasonEnum,
+    }
+}
+
+table! {
     db_metadata (singleton) {
         singleton -> Bool,
         time_created -> Timestamptz,

@@ -125,6 +125,43 @@
         }
       }
     },
+    "/crucible/0/downstairs/{downstairs_id}/stopped": {
+      "post": {
+        "summary": "An Upstairs will update this endpoint if a Downstairs client task is stopped",
+        "operationId": "cpapi_downstairs_stopped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "downstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDownstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownstairsClientStopped"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress": {
       "post": {
         "summary": "An Upstairs will update this endpoint with the progress of a repair",
@@ -3528,6 +3565,36 @@
           }
         ]
       },
+      "DownstairsClientStopReason": {
+        "type": "string",
+        "enum": [
+          "Replacing",
+          "Disabled",
+          "FailedReconcile",
+          "IOError",
+          "BadNegotiationOrder",
+          "Incompatible",
+          "FailedLiveRepair",
+          "TooManyOutstandingJobs",
+          "Deactivated"
+        ]
+      },
+      "DownstairsClientStopped": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DownstairsClientStopReason"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reason",
+          "time"
+        ]
+      },
       "DownstairsUnderRepair": {
         "type": "object",
         "properties": {
@@ -6872,6 +6939,10 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "TypedUuidForDownstairsKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForUpstairsKind": {
         "type": "string",

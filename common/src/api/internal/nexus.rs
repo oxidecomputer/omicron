@@ -294,3 +294,22 @@ pub struct RepairProgress {
     pub current_item: i64,
     pub total_items: i64,
 }
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub enum DownstairsClientStopReason {
+    Replacing,
+    Disabled,
+    FailedReconcile,
+    IOError,
+    BadNegotiationOrder,
+    Incompatible,
+    FailedLiveRepair,
+    TooManyOutstandingJobs,
+    Deactivated,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct DownstairsClientStopped {
+    pub time: DateTime<Utc>,
+    pub reason: DownstairsClientStopReason,
+}
