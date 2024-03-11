@@ -92,8 +92,12 @@ where
 
     // After deploying omicron zones, we may need to refresh OPTE service
     // firewall rules. This is an idempotent operation, so we don't attempt
-    // to optimize out calling it in unnecessary cases, although we expect
-    // _most_ cases this is not needed.
+    // to optimize out calling it in unnecessary cases, although it is only
+    // needed in cases where we've changed the set of services on one or more
+    // sleds, or the sleds have lost their firewall rules for some reason.
+    // Fixing the latter case is a side effect and should really be handled by a
+    // firewall-rule-specific RPW; once that RPW exists, we could trigger it
+    // here instead of pluming firewall rules ourselves.
     nexus_networking::plumb_service_firewall_rules(
         datastore,
         &opctx,
