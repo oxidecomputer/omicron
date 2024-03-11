@@ -6,6 +6,7 @@
 
 use crate::overridables::Overridables;
 use crate::Sled;
+use anyhow::Context;
 use dns_service_client::DnsDiff;
 use internal_dns::DnsConfigBuilder;
 use internal_dns::ServiceName;
@@ -58,7 +59,13 @@ pub(crate) async fn deploy_dns(
 
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_config_blueprint =
-        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides);
+        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides)
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "error constructing internal DNS config: {:#}",
+                    e
+                ))
+            })?;
     let silos = datastore
         .silo_list_all_batched(opctx, Discoverability::All)
         .await
@@ -223,7 +230,7 @@ pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<Uuid, Sled>,
     overrides: &Overridables,
-) -> DnsConfigParams {
+) -> Result<DnsConfigParams, anyhow::Error> {
     // The DNS names configured here should match what RSS configures for the
     // same zones.  It's tricky to have RSS share the same code because it uses
     // Sled Agent's _internal_ `OmicronZoneConfig` (and friends), whereas we're
@@ -232,10 +239,13 @@ pub fn blueprint_internal_dns_config(
     // the details.
     let mut dns_builder = DnsConfigBuilder::new();
 
-    // XXX-dap don't panic
-    // See oxidecomputer/omicron#4988.
-    fn parse_port(address: &str) -> u16 {
-        address.parse::<SocketAddrV6>().unwrap().port()
+    // It's annoying that we have to parse this because it really should be
+    // valid already.  See oxidecomputer/omicron#4988.
+    fn parse_port(address: &str) -> Result<u16, anyhow::Error> {
+        address
+            .parse::<SocketAddrV6>()
+            .with_context(|| format!("parsing socket address {:?}", address))
+            .map(|addr| addr.port())
     }
 
     for (_, omicron_zone) in blueprint.all_omicron_zones() {
@@ -243,49 +253,57 @@ pub fn blueprint_internal_dns_config(
             continue;
         }
 
+        let context = || {
+            format!(
+                "parsing {} zone with id {}",
+                omicron_zone.zone_type.label(),
+                omicron_zone.id
+            )
+        };
         let (service_name, port) = match &omicron_zone.zone_type {
             OmicronZoneType::BoundaryNtp { address, .. } => {
-                let port = parse_port(&address);
+                let port = parse_port(&address).with_context(context)?;
                 (ServiceName::BoundaryNtp, port)
             }
             OmicronZoneType::InternalNtp { address, .. } => {
-                let port = parse_port(&address);
+                let port = parse_port(&address).with_context(context)?;
                 (ServiceName::InternalNtp, port)
             }
             OmicronZoneType::Clickhouse { address, .. } => {
-                let port = parse_port(&address);
+                let port = parse_port(&address).with_context(context)?;
                 (ServiceName::Clickhouse, port)
             }
             OmicronZoneType::ClickhouseKeeper { address, .. } => {
-                let port = parse_port(&address);
+                let port = parse_port(&address).with_context(context)?;
                 (ServiceName::ClickhouseKeeper, port)
             }
             OmicronZoneType::CockroachDb { address, .. } => {
-                let port = parse_port(&address);
+                let port = parse_port(&address).with_context(context)?;
                 (ServiceName::Cockroach, port)
             }
             OmicronZoneType::Nexus { internal_address, .. } => {
-                let port = parse_port(internal_address);
+                let port =
+                    parse_port(internal_address).with_context(context)?;
                 (ServiceName::Nexus, port)
             }
             OmicronZoneType::Crucible { address, .. } => {
-                let port = parse_port(address);
+                let port = parse_port(address).with_context(context)?;
                 (ServiceName::Crucible(omicron_zone.id), port)
             }
             OmicronZoneType::CruciblePantry { address } => {
-                let port = parse_port(address);
+                let port = parse_port(address).with_context(context)?;
                 (ServiceName::CruciblePantry, port)
             }
             OmicronZoneType::Oximeter { address } => {
-                let port = parse_port(address);
+                let port = parse_port(address).with_context(context)?;
                 (ServiceName::Oximeter, port)
             }
             OmicronZoneType::ExternalDns { http_address, .. } => {
-                let port = parse_port(http_address);
+                let port = parse_port(http_address).with_context(context)?;
                 (ServiceName::ExternalDns, port)
             }
             OmicronZoneType::InternalDns { http_address, .. } => {
-                let port = parse_port(http_address);
+                let port = parse_port(http_address).with_context(context)?;
                 (ServiceName::InternalDns, port)
             }
         };
@@ -322,7 +340,7 @@ pub fn blueprint_internal_dns_config(
     // whatever it was when this blueprint was generated.  This will only be
     // used if the generated DNS contents are different from what's current.
     dns_builder.generation(blueprint.internal_dns_version.next());
-    dns_builder.build()
+    Ok(dns_builder.build())
 }
 
 pub fn blueprint_external_dns_config(
@@ -520,7 +538,8 @@ mod test {
             &blueprint,
             &BTreeMap::new(),
             &Default::default(),
-        );
+        )
+        .unwrap();
         assert!(blueprint_dns.sole_zone().unwrap().records.is_empty());
     }
 
@@ -621,7 +640,8 @@ mod test {
             &blueprint,
             &sleds_by_id,
             &Default::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(
             dns_config_blueprint.generation,
             u64::from(initial_dns_generation.next())
