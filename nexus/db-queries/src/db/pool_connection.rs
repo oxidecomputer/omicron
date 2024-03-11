@@ -44,6 +44,7 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "caboose_which",
     "dataset_kind",
     "dns_group",
+    "downstairs_client_stop_reason_type",
     "hw_power_state",
     "hw_rot_slot",
     "identity_type",

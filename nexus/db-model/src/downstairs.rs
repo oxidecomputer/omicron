@@ -32,8 +32,12 @@ impl_enum_type!(
     Deactivated => b"deactivated"
 );
 
-impl From<internal::nexus::DownstairsClientStopReason> for DownstairsClientStopReason {
-    fn from(v: internal::nexus::DownstairsClientStopReason) -> DownstairsClientStopReason {
+impl From<internal::nexus::DownstairsClientStopReason>
+    for DownstairsClientStopReason
+{
+    fn from(
+        v: internal::nexus::DownstairsClientStopReason,
+    ) -> DownstairsClientStopReason {
         match v {
             internal::nexus::DownstairsClientStopReason::Replacing => DownstairsClientStopReason::Replacing,
             internal::nexus::DownstairsClientStopReason::Disabled => DownstairsClientStopReason::Disabled,
