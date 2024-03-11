@@ -149,7 +149,7 @@ pub fn process_running(pid: u32) -> bool {
 
 /// Returns a DiskIdentity that can be passed to ensure_partition_layout when
 /// not operating on a real disk.
-pub fn mock_device_identity() -> DiskIdentity {
+pub fn mock_disk_identity() -> DiskIdentity {
     DiskIdentity {
         vendor: "MockVendor".to_string(),
         serial: "MOCKSERIAL".to_string(),

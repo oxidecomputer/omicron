@@ -348,7 +348,7 @@ mod test {
     use crate::DiskPaths;
     use camino::Utf8PathBuf;
     use illumos_utils::zpool::MockZpool;
-    use omicron_test_utils::dev::{mock_device_identity, test_setup_log};
+    use omicron_test_utils::dev::{mock_disk_identity, test_setup_log};
     use std::path::Path;
 
     struct FakePartition {
@@ -384,7 +384,7 @@ mod test {
             &log,
             &DiskPaths { devfs_path, dev_path: None },
             DiskVariant::U2,
-            &mock_device_identity(),
+            &mock_disk_identity(),
         );
         match result {
             Err(PooledDiskError::CannotFormatMissingDevPath { .. }) => {}
@@ -418,7 +418,7 @@ mod test {
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
             DiskVariant::U2,
-            &mock_device_identity(),
+            &mock_disk_identity(),
         )
         .expect("Should have succeeded partitioning disk");
 
@@ -443,7 +443,7 @@ mod test {
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH))
             },
             DiskVariant::M2,
-            &mock_device_identity(),
+            &mock_disk_identity(),
         )
         .is_err());
 
@@ -481,7 +481,7 @@ mod test {
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
             DiskVariant::U2,
-            &mock_device_identity(),
+            &mock_disk_identity(),
         )
         .expect("Should be able to parse disk");
 
@@ -524,7 +524,7 @@ mod test {
                 dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
             },
             DiskVariant::M2,
-            &mock_device_identity(),
+            &mock_disk_identity(),
         )
         .expect("Should be able to parse disk");
 
@@ -564,7 +564,7 @@ mod test {
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
                 },
                 DiskVariant::M2,
-                &mock_device_identity(),
+                &mock_disk_identity(),
             )
             .expect_err("Should have failed parsing empty GPT"),
             PooledDiskError::BadPartitionLayout { .. }
@@ -590,7 +590,7 @@ mod test {
                     dev_path: Some(Utf8PathBuf::from(DEV_PATH)),
                 },
                 DiskVariant::U2,
-                &mock_device_identity(),
+                &mock_disk_identity(),
             )
             .expect_err("Should have failed parsing empty GPT"),
             PooledDiskError::BadPartitionLayout { .. }
