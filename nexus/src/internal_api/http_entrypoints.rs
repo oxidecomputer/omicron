@@ -25,6 +25,7 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
+use nexus_db_queries::db::datastore::ProbeInfo;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
@@ -94,6 +95,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(sled_list_uninitialized)?;
         api.register(sled_add)?;
+
+        api.register(probes_get)?;
 
         Ok(())
     }
@@ -636,7 +639,7 @@ struct RpwNatQueryParam {
 /// change or until the `limit` is reached. If there are no changes, an
 /// empty vec is returned.
 #[endpoint {
-   method = GET,
+    method = GET,
     path = "/nat/ipv4/changeset/{from_gen}"
 }]
 async fn ipv4_nat_changeset(
@@ -882,6 +885,36 @@ async fn sled_add(
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.sled_add(&opctx, sled.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for probes
+#[derive(Deserialize, JsonSchema)]
+struct ProbePathParam {
+    sled: Uuid,
+}
+
+/// Get all the probes associated with a given sled.
+#[endpoint {
+    method = GET,
+    path = "/probes/{sled}"
+}]
+async fn probes_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<ProbePathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        Ok(HttpResponseOk(
+            nexus.probe_list_for_sled(&opctx, &pagparams, path.sled).await?,
+        ))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

@@ -158,6 +158,7 @@ resolver = "2"
 
 [workspace.dependencies]
 anyhow = "1.0"
+anstyle = "1.0"
 api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
@@ -184,6 +185,7 @@ ciborium = "0.2.2"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
+colored = "2.1"
 cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
@@ -246,8 +248,11 @@ installinator-common = { path = "installinator-common" }
 internal-dns = { path = "internal-dns" }
 ipcc = { path = "ipcc" }
 ipnet = "2.9"
-ipnetwork = { version = "0.20", features = ["schemars"] }
 itertools = "0.12.1"
+internet-checksum = "0.2"
+ipcc-key-value = { path = "ipcc-key-value" }
+ipnetwork = { version = "0.20", features = ["schemars"] }
+ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.3"
 libc = "0.2.153"
@@ -373,6 +378,8 @@ slog-envlogger = "2.2"
 slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
 slog-term = "2.9"
 smf = "0.2"
+snafu = "0.7"
+socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
@@ -654,3 +661,7 @@ branch = "oxide/omicron"
 # See also: uuid-kinds/README.adoc.
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
+
+[patch.crates-io.zone]
+git = 'https://github.com/oxidecomputer/zone'
+branch = 'state-derive-eq-hash'

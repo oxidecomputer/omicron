@@ -217,6 +217,9 @@ retry ./tools/ci_download_maghemite_mgd
 # xcvradm binary which is bundled with the switch zone.
 retry ./tools/ci_download_transceiver_control
 
+# Download thundermuffin. This is required to launch network probes.
+retry ./tools/ci_download_thundermuffin
+
 # Validate the PATH:
 expected_in_path=(
   'pg_config'

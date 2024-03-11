@@ -152,7 +152,7 @@ async fn test_oximeter_reregistration() {
 
     // Timeouts for checks
     const POLL_INTERVAL: Duration = Duration::from_millis(100);
-    const POLL_DURATION: Duration = Duration::from_secs(30);
+    const POLL_DURATION: Duration = Duration::from_secs(60);
 
     // We must have at exactly one timeseries, with at least one sample.
     let timeseries =

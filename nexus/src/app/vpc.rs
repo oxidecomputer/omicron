@@ -30,10 +30,10 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::internal::nexus::HostIdentifier;
-use sled_agent_client::types::NetworkInterface;
 
 use futures::future::join_all;
 use ipnetwork::IpNetwork;
+use omicron_common::api::internal::shared::NetworkInterface;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::Arc;
