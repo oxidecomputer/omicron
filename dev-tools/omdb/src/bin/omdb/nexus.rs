@@ -23,6 +23,7 @@ use nexus_client::types::LastResult;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_types::inventory::BaseboardId;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
 use reedline::Reedline;
@@ -1137,15 +1138,21 @@ async fn cmd_nexus_sled_expunge(
         .context("loading latest collection")?
     {
         Some(collection) => {
-            let sled_present =
+            let sled_baseboard = BaseboardId {
+                part_number: sled.part_number().to_string(),
+                serial_number: sled.serial_number().to_string(),
+            };
+            // Check the collection for either the sled-id or the baseboard. In
+            // general a sled-agent's self report should result in both the
+            // sled-id and the baseboard being present in the collection, but
+            // there are some test environments (e.g., `omicron-dev run-all`)
+            // where that isn't guaranteed.
+            let sled_present_in_collection =
                 collection.sled_agents.contains_key(&args.sled_id)
-                    || collection.sps.keys().any(|baseboard| {
-                        baseboard.part_number == sled.part_number()
-                            && baseboard.serial_number == sled.serial_number()
-                    });
-            if sled_present {
+                    || collection.baseboards.contains(&sled_baseboard);
+            if sled_present_in_collection {
                 eprintln!(
-                    "WARNING: sled {} IS PRESENT in the most recent inventory \
+                    "WARNING: sled {} is PRESENT in the most recent inventory \
                     collection; are you sure you want to mark it expunged?",
                     args.sled_id,
                 );
