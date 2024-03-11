@@ -3610,6 +3610,27 @@ CREATE TABLE IF NOT EXISTS upstairs_repair_progress (
     PRIMARY KEY (repair_id, time, current_item, total_items)
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_reason_type AS ENUM (
+  'replacing',
+  'disabled',
+  'failed_reconcile',
+  'io_error',
+  'bad_negotiation_order',
+  'incompatible',
+  'failed_live_repair',
+  'too_many_outstanding_jobs',
+  'deactivated'
+);
+
+CREATE TABLE IF NOT EXISTS downstairs_client_stopped_notification (
+    time TIMESTAMPTZ NOT NULL,
+    upstairs_id UUID NOT NULL,
+    downstairs_id UUID NOT NULL,
+    reason omicron.public.downstairs_client_stop_reason_type NOT NULL,
+
+    PRIMARY KEY (time, upstairs_id, downstairs_id, reason)
+);
+
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
