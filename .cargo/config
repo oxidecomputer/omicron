@@ -52,9 +52,8 @@ rustdocflags = "--document-private-items"
 rustflags = [
     "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64"
 ]
-runner = "/home/ajs/omicron/test-utils/src/bin/falcon_runner.sh"
+runner = "test-utils/src/bin/falcon_runner.sh"
 
 # Set up `cargo xtask`.
 [alias]
 xtask = "run --package xtask -- "
-

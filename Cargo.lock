@@ -4006,7 +4006,7 @@ checksum = "b024e211b1b371da58cd69e4fb8fa4ed16915edcc0e2e1fb04ac4bad61959f25"
 [[package]]
 name = "libfalcon"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/falcon?rev=9fecec91e6bea6650641b36d9c89025d4f2cf322#9fecec91e6bea6650641b36d9c89025d4f2cf322"
+source = "git+https://github.com/oxidecomputer/falcon?branch=long-serial-commands#38fe9c0202ac1cefed20649620ec8ca49c9c635a"
 dependencies = [
  "anstyle",
  "anyhow",

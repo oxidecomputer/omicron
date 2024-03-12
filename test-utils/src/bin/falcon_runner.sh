@@ -1,9 +1,11 @@
 #!/bin/bash
 
+# Override on the command line for your path to Omicron
+OMICRON=${OMICRON:-~/omicron}
+
 if [[ "$*" == *--list* ]]; then
   exec "$@"
 else
-   ##cargo build --bin falcon_runner
-   # Nextest appears to set this when run from the omicron dir
-   pfexec $OLDPWD/target/debug/falcon_runner $@
+   cargo build --bin falcon_runner
+   pfexec $OMICRON/target/debug/falcon_runner $@
 fi

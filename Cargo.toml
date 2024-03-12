@@ -256,7 +256,8 @@ ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.3"
 libc = "0.2.153"
-libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "9fecec91e6bea6650641b36d9c89025d4f2cf322" }
+#libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "9fecec91e6bea6650641b36d9c89025d4f2cf322" }
+libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "long-serial-commands" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe" }
 linear-map = "1.2.0"
 macaddr = { version = "1.0.1", features = ["serde_std"] }
