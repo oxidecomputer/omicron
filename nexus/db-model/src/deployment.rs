@@ -18,6 +18,7 @@ use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZonePolicy;
 use nexus_types::deployment::BlueprintZonesConfig;
+use omicron_common::api::internal::shared::NetworkInterface;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -255,7 +256,7 @@ impl BpOmicronZoneNic {
     pub fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+    ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
     }

@@ -106,7 +106,7 @@ impl DataStore {
         // This will soon be replaced with an extra column in the
         // `bp_omicron_zone` table, coupled with other data migrations.
         let omicron_zones_not_in_service = blueprint
-            .all_omicron_zones()
+            .all_blueprint_zones()
             .filter_map(|(_, zone)| {
                 // Exhaustive match so this fails if we add a new variant.
                 match zone.zone_policy {
@@ -1245,10 +1245,8 @@ mod tests {
             [blueprint1.id]
         );
 
-        // There ought to be no sleds or zones in service, and no parent
-        // blueprint.
+        // There ought to be no sleds or zones, and no parent blueprint.
         assert_eq!(blueprint1.omicron_zones.len(), 0);
-        assert_eq!(blueprint1.zones_in_service.len(), 0);
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
         // Trying to insert the same blueprint again should fail.
@@ -1299,14 +1297,11 @@ mod tests {
             collection.omicron_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones().count(),
+            blueprint1.all_blueprint_zones().count(),
             collection.all_omicron_zones().count()
         );
         // All zones should be in service.
-        assert_eq!(
-            blueprint1.zones_in_service.len(),
-            blueprint1.all_omicron_zones().count()
-        );
+        assert_all_zones_in_service(&blueprint1);
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
         // Set blueprint1 as the current target, and ensure that we cannot
@@ -1377,15 +1372,12 @@ mod tests {
             blueprint2.omicron_zones.len()
         );
         assert_eq!(
-            blueprint1.all_omicron_zones().count() + num_new_sled_zones,
-            blueprint2.all_omicron_zones().count()
+            blueprint1.all_blueprint_zones().count() + num_new_sled_zones,
+            blueprint2.all_blueprint_zones().count()
         );
 
         // All zones should be in service.
-        assert_eq!(
-            blueprint2.zones_in_service.len(),
-            blueprint2.all_omicron_zones().count()
-        );
+        assert_all_zones_in_service(&blueprint2);
         assert_eq!(blueprint2.parent_blueprint_id, Some(blueprint1.id));
 
         // Check that we can write it to the DB and read it back.
@@ -1630,5 +1622,17 @@ mod tests {
         // Clean up.
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
+    }
+
+    fn assert_all_zones_in_service(blueprint: &Blueprint) {
+        let not_in_service = blueprint
+            .all_blueprint_zones()
+            .filter(|(_, z)| z.zone_policy != BlueprintZonePolicy::InService)
+            .collect::<Vec<_>>();
+        assert!(
+            not_in_service.is_empty(),
+            "expected all zones to be in service, \
+             found these zones not in service: {not_in_service:?}"
+        );
     }
 }

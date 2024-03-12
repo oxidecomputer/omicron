@@ -28,6 +28,7 @@ use ipnetwork::IpNetwork;
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
+use omicron_common::api::internal::shared::NetworkInterface;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -872,7 +873,7 @@ impl InvOmicronZoneNic {
     pub fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+    ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
     }

@@ -553,6 +553,15 @@ source.sha256 = "151aeb26414989cad571b3886786efbeeafd91c41a93a747c784cdc654d5876
 output.type = "zone"
 output.intermediate_only = true
 
+[package.lldp]
+service_name = "lldp"
+source.type = "prebuilt"
+source.repo = "lldp"
+source.commit = "e165090e393df90874329265799480e221884236"
+source.sha256 = "004a6488a948d894fa203222aa42e159e1ae12c13751607852302d111e2c58e6"
+output.type = "zone"
+output.intermediate_only = true
+
 [package.dendrite-stub]
 service_name = "dendrite"
 only_for_targets.switch = "stub"
@@ -626,6 +635,15 @@ output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `./tools/ci_download_transceiver_control` to download the necessary binaries"
 
+[package.thundermuffin]
+service_name = "thundermuffin"
+source.type = "prebuilt"
+source.repo = "thundermuffin"
+source.commit = "a4a6108d7c9aac2464a0b6898e88132a8f701a13"
+source.sha256 = "dc55a2accd33a347df4cbdc0026cbaccea2c004940c3fec8cadcdd633d440dfa"
+output.type = "zone"
+output.intermediate_only = true
+
 # To package and install the asic variant of the switch, do:
 #
 # $ cargo run --release --bin omicron-package -- -t default target create -i standard -m gimlet -s asic
@@ -639,6 +657,7 @@ source.type = "composite"
 source.packages = [
   "omicron-gateway-asic.tar.gz",
   "dendrite-asic.tar.gz",
+  "lldp.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
@@ -662,6 +681,7 @@ source.type = "composite"
 source.packages = [
   "omicron-gateway-stub.tar.gz",
   "dendrite-stub.tar.gz",
+  "lldp.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
@@ -685,6 +705,7 @@ source.type = "composite"
 source.packages = [
   "omicron-gateway-softnpu.tar.gz",
   "dendrite-softnpu.tar.gz",
+  "lldp.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
@@ -740,3 +761,11 @@ source.type = "local"
 source.rust.binary_names = ["oxlog"]
 source.rust.release = true
 output.type = "tarball"
+
+[package.probe]
+service_name = "probe"
+source.type = "composite"
+source.packages = [
+  "thundermuffin.tar.gz",
+]
+output.type = "zone"

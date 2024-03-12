@@ -74,7 +74,7 @@ where
     resource_allocation::ensure_zone_resources_allocated(
         &opctx,
         datastore,
-        &blueprint.omicron_zones,
+        blueprint.all_blueprint_zones().map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;
@@ -93,7 +93,7 @@ where
     datasets::ensure_crucible_dataset_records_exist(
         &opctx,
         datastore,
-        blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
+        blueprint.all_blueprint_zones().map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;

@@ -35,11 +35,14 @@ pub(crate) async fn deploy_zones(
                 }
             };
             let client = sled_client(opctx, &db_sled);
+            let omicron_zones = config.to_omicron_zones_config();
             let result = client
-                .omicron_zones_put(&config.to_omicron_zones_config())
+                .omicron_zones_put(&omicron_zones)
                 .await
                 .with_context(|| {
-                    format!("Failed to put {config:#?} to sled {sled_id}")
+                    format!(
+                        "Failed to put {omicron_zones:#?} to sled {sled_id}"
+                    )
                 });
             match result {
                 Err(error) => {
@@ -97,14 +100,14 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, BlueprintZonesConfig,
+        Blueprint, BlueprintTarget, BlueprintZoneConfig, BlueprintZonePolicy,
+        BlueprintZonesConfig,
     };
     use nexus_types::inventory::{
         OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
     };
     use omicron_common::api::external::Generation;
     use std::collections::BTreeMap;
-    use std::collections::BTreeSet;
     use std::net::SocketAddr;
     use std::sync::Arc;
     use uuid::Uuid;
@@ -175,23 +178,28 @@ mod test {
         // Zones are updated in a particular order, but each request contains
         // the full set of zones that must be running.
         // See `rack_setup::service::ServiceInner::run` for more details.
-        fn make_zones() -> OmicronZonesConfig {
-            OmicronZonesConfig {
+        fn make_zones() -> BlueprintZonesConfig {
+            BlueprintZonesConfig {
                 generation: Generation::new(),
-                zones: vec![OmicronZoneConfig {
-                    id: Uuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
-                    zone_type: OmicronZoneType::InternalDns {
-                        dataset: OmicronZoneDataset {
-                            pool_name: format!("oxp_{}", Uuid::new_v4())
-                                .parse()
-                                .unwrap(),
+                zones: vec![BlueprintZoneConfig {
+                    config: OmicronZoneConfig {
+                        id: Uuid::new_v4(),
+                        underlay_address: "::1".parse().unwrap(),
+                        zone_type: OmicronZoneType::InternalDns {
+                            dataset: OmicronZoneDataset {
+                                pool_name: format!("oxp_{}", Uuid::new_v4())
+                                    .parse()
+                                    .unwrap(),
+                            },
+                            dns_address: "oh-hello-internal-dns".into(),
+                            gz_address: "::1".parse().unwrap(),
+                            gz_address_index: 0,
+                            http_address: "some-ipv6-address".into(),
                         },
-                        dns_address: "oh-hello-internal-dns".into(),
-                        gz_address: "::1".parse().unwrap(),
-                        gz_address_index: 0,
-                        http_address: "some-ipv6-address".into(),
                     },
+                    // XXX: NotInService retains the previous test behavior --
+                    // we may wish to change this to InService.
+                    zone_policy: BlueprintZonePolicy::NotInService,
                 }],
             }
         }
@@ -277,17 +285,22 @@ mod test {
         s2.verify_and_clear();
 
         // Add an `InternalNtp` zone for our next update
-        fn append_zone(zones: &mut OmicronZonesConfig) {
+        fn append_zone(zones: &mut BlueprintZonesConfig) {
             zones.generation = zones.generation.next();
-            zones.zones.push(OmicronZoneConfig {
-                id: Uuid::new_v4(),
-                underlay_address: "::1".parse().unwrap(),
-                zone_type: OmicronZoneType::InternalNtp {
-                    address: "::1".into(),
-                    dns_servers: vec!["::1".parse().unwrap()],
-                    domain: None,
-                    ntp_servers: vec!["some-ntp-server-addr".into()],
+            zones.zones.push(BlueprintZoneConfig {
+                config: OmicronZoneConfig {
+                    id: Uuid::new_v4(),
+                    underlay_address: "::1".parse().unwrap(),
+                    zone_type: OmicronZoneType::InternalNtp {
+                        address: "::1".into(),
+                        dns_servers: vec!["::1".parse().unwrap()],
+                        domain: None,
+                        ntp_servers: vec!["some-ntp-server-addr".into()],
+                    },
                 },
+                // XXX: NotInService retains the previous test behavior -- we
+                // may wish to change this to InService.
+                zone_policy: BlueprintZonePolicy::NotInService,
             });
         }
 

@@ -15,8 +15,6 @@
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledState;
 use crate::inventory::Collection;
-pub use crate::inventory::NetworkInterface;
-pub use crate::inventory::NetworkInterfaceKind;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;
@@ -165,7 +163,7 @@ pub struct Blueprint {
 impl Blueprint {
     /// Iterate over all the Omicron zones in the blueprint, along with
     /// associated sled id
-    pub fn all_omicron_zones(
+    pub fn all_blueprint_zones(
         &self,
     ) -> impl Iterator<Item = (Uuid, &BlueprintZoneConfig)> {
         self.omicron_zones
@@ -319,9 +317,9 @@ impl BlueprintZonesConfig {
             .collect();
 
         let mut ret = Self {
-            // An initial blueprint zones starts from a fresh generation -- it
-            // does not reuse the collection's generation.
-            generation: Generation::new(),
+            // An initial `BlueprintZonesConfig` reuses the generation from
+            // `OmicronZonesConfig`.
+            generation: collection.generation,
             zones,
         };
         ret.sort();
@@ -373,10 +371,11 @@ impl fmt::Display for BlueprintZoneConfig {
 
 /// The policy for an Omicron-managed zone in a blueprint.
 ///
-/// Part of [`BlueprintOmicronZoneConfig`].
+/// Part of [`BlueprintZoneConfig`].
 #[derive(
     Debug, Copy, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
 )]
+#[serde(rename_all = "snake_case")]
 pub enum BlueprintZonePolicy {
     InService,
     NotInService,

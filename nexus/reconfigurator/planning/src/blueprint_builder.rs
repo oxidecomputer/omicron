@@ -16,8 +16,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZonePolicy;
 use nexus_types::deployment::BlueprintZonesConfig;
-use nexus_types::deployment::NetworkInterface;
-use nexus_types::deployment::NetworkInterfaceKind;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneType;
@@ -37,6 +35,8 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::IpNet;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use slog::o;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -133,7 +133,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// Directly construct a `Blueprint` from the contents of a particular
     /// collection (representing no changes from the collection state)
     pub fn build_initial_from_collection(
-        collection: &'a Collection,
+        collection: &Collection,
         internal_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
@@ -235,7 +235,7 @@ impl<'a> BlueprintBuilder<'a> {
         let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
-        for (_, z) in parent_blueprint.all_omicron_zones() {
+        for (_, z) in parent_blueprint.all_blueprint_zones() {
             let zone_type = &z.config.zone_type;
             if let OmicronZoneType::Nexus { nic, .. } = zone_type {
                 match nic.ip {
@@ -372,7 +372,7 @@ impl<'a> BlueprintBuilder<'a> {
         // currently exist.
         let ntp_servers = self
             .parent_blueprint
-            .all_omicron_zones()
+            .all_blueprint_zones()
             .filter_map(|(_, z)| {
                 if matches!(
                     z.config.zone_type,
@@ -543,14 +543,14 @@ impl<'a> BlueprintBuilder<'a> {
                             .next()
                             .ok_or(Error::ExhaustedNexusIps)?
                             .into(),
-                        IpNet::from(*NEXUS_OPTE_IPV4_SUBNET).into(),
+                        IpNet::from(*NEXUS_OPTE_IPV4_SUBNET),
                     ),
                     IpAddr::V6(_) => (
                         self.nexus_v6_ips
                             .next()
                             .ok_or(Error::ExhaustedNexusIps)?
                             .into(),
-                        IpNet::from(*NEXUS_OPTE_IPV6_SUBNET).into(),
+                        IpNet::from(*NEXUS_OPTE_IPV6_SUBNET),
                     ),
                 };
                 let mac = self
@@ -559,7 +559,7 @@ impl<'a> BlueprintBuilder<'a> {
                     .ok_or(Error::NoSystemMacAddressAvailable)?;
                 NetworkInterface {
                     id: Uuid::new_v4(),
-                    kind: NetworkInterfaceKind::Service(nexus_id),
+                    kind: NetworkInterfaceKind::Service { id: nexus_id },
                     name: format!("nexus-{nexus_id}").parse().unwrap(),
                     ip,
                     mac,
@@ -1210,7 +1210,7 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut policy = policy.clone();
             let mut used_ip_ranges = Vec::new();
-            for (_, z) in parent.all_omicron_zones() {
+            for (_, z) in parent.all_blueprint_zones() {
                 if let Some(ip) = z
                     .config
                     .zone_type

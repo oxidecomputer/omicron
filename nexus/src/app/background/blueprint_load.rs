@@ -186,7 +186,7 @@ mod test {
     use nexus_types::deployment::{Blueprint, BlueprintTarget};
     use omicron_common::api::external::Generation;
     use serde::Deserialize;
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =

@@ -54,6 +54,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::Probe;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
@@ -681,8 +682,8 @@ async fn lookup_service_kind(
     };
 
     let Some(zone_config) =
-        blueprint.all_omicron_zones().find_map(|(_sled_id, zone_config)| {
-            if zone_config.id == service_id {
+        blueprint.all_blueprint_zones().find_map(|(_sled_id, zone_config)| {
+            if zone_config.config.id == service_id {
                 Some(zone_config)
             } else {
                 None
@@ -692,7 +693,7 @@ async fn lookup_service_kind(
         return Ok(None);
     };
 
-    let service_kind = match &zone_config.zone_type {
+    let service_kind = match &zone_config.config.zone_type {
         OmicronZoneType::BoundaryNtp { .. }
         | OmicronZoneType::InternalNtp { .. } => ServiceKind::Ntp,
         OmicronZoneType::Clickhouse { .. } => ServiceKind::Clickhouse,
@@ -711,7 +712,25 @@ async fn lookup_service_kind(
     Ok(Some(service_kind))
 }
 
-/// Helper function to look up a project with the given ID.
+/// Helper function to looks up a probe with the given ID.
+async fn lookup_probe(
+    datastore: &DataStore,
+    probe_id: Uuid,
+) -> anyhow::Result<Option<Probe>> {
+    use db::schema::probe::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::probe
+        .filter(dsl::id.eq(probe_id))
+        .limit(1)
+        .select(Probe::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading probe {probe_id}"))
+}
+
+/// Helper function to looks up a project with the given ID.
 async fn lookup_project(
     datastore: &DataStore,
     project_id: Uuid,
@@ -2120,6 +2139,28 @@ async fn cmd_db_network_list_vnics(
                     None => {
                         ("instance?", "parent instance not found".to_string())
                     }
+                }
+            }
+            NetworkInterfaceKind::Probe => {
+                match lookup_probe(datastore, nic.parent_id).await? {
+                    Some(probe) => {
+                        match lookup_project(datastore, probe.project_id)
+                            .await?
+                        {
+                            Some(project) => (
+                                "probe",
+                                format!("{}/{}", project.name(), probe.name()),
+                            ),
+                            None => {
+                                eprintln!(
+                                    "project with id {} not found",
+                                    probe.project_id
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    None => ("probe?", "parent probe not found".to_string()),
                 }
             }
             NetworkInterfaceKind::Service => {

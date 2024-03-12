@@ -180,7 +180,7 @@ pub fn blueprint_dns_config(
     // represented as strings, so we'd need to parse all of them and handle all
     // the errors, even though they should never happen.
     // See oxidecomputer/omicron#4988.
-    for (_, zone) in blueprint.all_omicron_zones() {
+    for (_, zone) in blueprint.all_blueprint_zones() {
         match zone.zone_policy {
             BlueprintZonePolicy::InService => {}
             BlueprintZonePolicy::NotInService => {
@@ -327,6 +327,8 @@ mod test {
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZonePolicy;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
     use nexus_types::deployment::Policy;
@@ -448,18 +450,21 @@ mod test {
         let out_of_service_id = Uuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
         blueprint.omicron_zones.values_mut().next().unwrap().zones.push(
-            OmicronZoneConfig {
-                id: out_of_service_id,
-                underlay_address: out_of_service_addr,
-                zone_type: OmicronZoneType::Oximeter {
-                    address: SocketAddrV6::new(
-                        out_of_service_addr,
-                        12345,
-                        0,
-                        0,
-                    )
-                    .to_string(),
+            BlueprintZoneConfig {
+                config: OmicronZoneConfig {
+                    id: out_of_service_id,
+                    underlay_address: out_of_service_addr,
+                    zone_type: OmicronZoneType::Oximeter {
+                        address: SocketAddrV6::new(
+                            out_of_service_addr,
+                            12345,
+                            0,
+                            0,
+                        )
+                        .to_string(),
+                    },
                 },
+                zone_policy: BlueprintZonePolicy::NotInService,
             },
         );
 
@@ -515,9 +520,9 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones()
-            .filter(|(_, zone)| zone.id != out_of_service_id)
-            .map(|(_, zone)| (zone.underlay_address, zone.id))
+            .all_blueprint_zones()
+            .filter(|(_, zone)| zone.config.id != out_of_service_id)
+            .map(|(_, zone)| (zone.config.underlay_address, zone.config.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
