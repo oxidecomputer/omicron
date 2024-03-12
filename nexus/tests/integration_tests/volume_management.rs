@@ -2574,25 +2574,25 @@ async fn test_upstairs_repair_notify_idempotent(
     let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
     let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
 
-    // Notify start
+    // Send the same start request.
     let notify_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
 
+    let request = internal::nexus::RepairStartInfo {
+        time: Utc::now(),
+        session_id,
+        repair_id,
+        repair_type: internal::nexus::UpstairsRepairType::Live,
+        repairs: vec![internal::nexus::DownstairsUnderRepair {
+            region_uuid: region_id,
+            target_addr: "[fd00:1122:3344:101::8]:12345".parse().unwrap(),
+        }],
+    };
+
     int_client
         .make_request(
             Method::POST,
             &notify_url,
-            Some(internal::nexus::RepairStartInfo {
-                time: Utc::now(),
-                session_id,
-                repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
-                    region_uuid: region_id,
-                    target_addr: "[fd00:1122:3344:101::8]:12345"
-                        .parse()
-                        .unwrap(),
-                }],
-            }),
+            Some(request.clone()),
             StatusCode::NO_CONTENT,
         )
         .await
@@ -2602,43 +2602,33 @@ async fn test_upstairs_repair_notify_idempotent(
         .make_request(
             Method::POST,
             &notify_url,
-            Some(internal::nexus::RepairStartInfo {
-                time: Utc::now(),
-                session_id,
-                repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
-                    region_uuid: region_id,
-                    target_addr: "[fd00:1122:3344:101::8]:12345"
-                        .parse()
-                        .unwrap(),
-                }],
-            }),
+            Some(request),
             StatusCode::NO_CONTENT,
         )
         .await
         .unwrap();
 
-    // Notify finish
-    let notify_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
+    // Send the same finish request.
+    let notify_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
+
+    let request = internal::nexus::RepairFinishInfo {
+        time: Utc::now(),
+        session_id,
+        repair_id,
+        repair_type: internal::nexus::UpstairsRepairType::Live,
+        repairs: vec![internal::nexus::DownstairsUnderRepair {
+            region_uuid: region_id,
+            target_addr: "[fd00:1122:3344:101::8]:12345".parse().unwrap(),
+        }],
+        aborted: false,
+    };
 
     int_client
         .make_request(
             Method::POST,
             &notify_url,
-            Some(internal::nexus::RepairFinishInfo {
-                time: Utc::now(),
-                session_id,
-                repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
-                    region_uuid: region_id,
-                    target_addr: "[fd00:1122:3344:101::8]:12345"
-                        .parse()
-                        .unwrap(),
-                }],
-                aborted: false,
-            }),
+            Some(request.clone()),
             StatusCode::NO_CONTENT,
         )
         .await
@@ -2648,19 +2638,7 @@ async fn test_upstairs_repair_notify_idempotent(
         .make_request(
             Method::POST,
             &notify_url,
-            Some(internal::nexus::RepairFinishInfo {
-                time: Utc::now(),
-                session_id,
-                repair_id,
-                repair_type: internal::nexus::UpstairsRepairType::Live,
-                repairs: vec![internal::nexus::DownstairsUnderRepair {
-                    region_uuid: region_id,
-                    target_addr: "[fd00:1122:3344:101::8]:12345"
-                        .parse()
-                        .unwrap(),
-                }],
-                aborted: false,
-            }),
+            Some(request),
             StatusCode::NO_CONTENT,
         )
         .await
