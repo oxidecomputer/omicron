@@ -20,6 +20,8 @@ use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
+pub use dns::silo_dns_name;
+
 mod datasets;
 mod dns;
 mod omicron_zones;

@@ -1487,6 +1487,7 @@ mod test {
         extra.into_iter().next().unwrap()
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_silo_and_verify_dns(
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
@@ -1578,14 +1579,11 @@ mod test {
     }
 }
 
-// XXX-dap duplicated -- figure out where to put this
 /// Returns the (relative) DNS name for this Silo's API and console endpoints
 /// _within_ the external DNS zone (i.e., without that zone's suffix)
 ///
 /// This specific naming scheme is determined under RFD 357.
-pub(crate) fn silo_dns_name(
-    name: &omicron_common::api::external::Name,
-) -> String {
+pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
     // RFD 4 constrains resource names (including Silo names) to DNS-safe
     // strings, which is why it's safe to directly put the name of the
     // resource into the DNS name rather than doing any kind of escaping.
