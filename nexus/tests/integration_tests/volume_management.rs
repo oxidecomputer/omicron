@@ -2560,7 +2560,7 @@ async fn test_volume_hard_delete_idempotent(
     datastore.volume_hard_delete(volume_id).await.unwrap();
 }
 
-// upstairs related tests
+// internal API related tests
 
 /// Test that an Upstairs can reissue live repair notifications
 #[nexus_test]
@@ -2575,7 +2575,7 @@ async fn test_upstairs_repair_notify_idempotent(
     let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
 
     // Notify start
-    let notify_url = format!("/upstairs/{upstairs_id}/repair-start");
+    let notify_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
 
     int_client
         .make_request(
@@ -2620,7 +2620,7 @@ async fn test_upstairs_repair_notify_idempotent(
         .unwrap();
 
     // Notify finish
-    let notify_url = format!("/upstairs/{upstairs_id}/repair-finish");
+    let notify_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
 
     int_client
         .make_request(
@@ -2680,7 +2680,7 @@ async fn test_upstairs_repair_notify_different_finish_status(
     let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
     let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
 
-    let notify_url = format!("/upstairs/{upstairs_id}/repair-finish");
+    let notify_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
 
     int_client
         .make_request(
@@ -2741,8 +2741,8 @@ async fn test_upstairs_repair_same_upstairs_retry(
 
     // Simulate one failed repair
 
-    let notify_start_url = format!("/upstairs/{upstairs_id}/repair-start");
-    let notify_finish_url = format!("/upstairs/{upstairs_id}/repair-finish");
+    let notify_start_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+    let notify_finish_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
 
     int_client
         .make_request(
@@ -2849,8 +2849,8 @@ async fn test_upstairs_repair_different_upstairs_retry(
 
     // Simulate one failed repair by one Upstairs
 
-    let notify_start_url = format!("/upstairs/{upstairs_id}/repair-start");
-    let notify_finish_url = format!("/upstairs/{upstairs_id}/repair-finish");
+    let notify_start_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+    let notify_finish_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
 
     int_client
         .make_request(
@@ -2959,8 +2959,8 @@ async fn test_upstairs_repair_different_upstairs_retry_interrupted(
     // Simulate one failed repair by one Upstairs, which was interrupted (which
     // leads to no finish message).
 
-    let notify_start_url = format!("/upstairs/{upstairs_id}/repair-start");
-    let notify_finish_url = format!("/upstairs/{upstairs_id}/repair-finish");
+    let notify_start_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+    let notify_finish_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
 
     int_client
         .make_request(
@@ -3045,7 +3045,7 @@ async fn test_upstairs_repair_repair_id_and_type_conflict(
     let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
     let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
 
-    let notify_start_url = format!("/upstairs/{upstairs_id}/repair-start");
+    let notify_start_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
 
     int_client
         .make_request(
@@ -3105,7 +3105,7 @@ async fn test_upstairs_repair_submit_progress(
 
     // A repair must be started before progress can be submitted
 
-    let notify_start_url = format!("/upstairs/{upstairs_id}/repair-start");
+    let notify_start_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
 
     int_client
         .make_request(
@@ -3129,7 +3129,7 @@ async fn test_upstairs_repair_submit_progress(
         .unwrap();
 
     let progress_url =
-        format!("/upstairs/{upstairs_id}/repair/{repair_id}/progress");
+        format!("/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress");
 
     for i in 0..100 {
         int_client
@@ -3159,7 +3159,7 @@ async fn test_upstairs_repair_reject_submit_progress_when_no_repair(
     let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
 
     let progress_url =
-        format!("/upstairs/{upstairs_id}/repair/{repair_id}/progress");
+        format!("/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress");
 
     int_client
         .make_request(
