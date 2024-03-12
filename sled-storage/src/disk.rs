@@ -69,7 +69,11 @@ impl SyntheticDisk {
             serial: format!("synthetic-serial-{id}"),
             model: "synthetic-model".to_string(),
         };
-        SyntheticDisk { identity, zpool_name, slot: slot + SYNTHETIC_SLOT_OFFSET }
+        SyntheticDisk {
+            identity,
+            zpool_name,
+            slot: slot + SYNTHETIC_SLOT_OFFSET,
+        }
     }
 }
 
