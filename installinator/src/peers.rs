@@ -25,7 +25,7 @@ use itertools::Itertools;
 use omicron_common::address::BOOTSTRAP_ARTIFACT_PORT;
 use omicron_common::update::ArtifactHashId;
 use reqwest::StatusCode;
-use sled_hardware::underlay::BootstrapInterface;
+use sled_hardware_types::underlay::BootstrapInterface;
 use tokio::{sync::mpsc, time::Instant};
 use update_engine::events::ProgressUnits;
 use uuid::Uuid;
