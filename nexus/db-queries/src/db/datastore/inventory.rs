@@ -131,17 +131,9 @@ impl DataStore {
             .sled_agents
             .iter()
             .flat_map(|(sled_id, sled_agent)| {
-                sled_agent
-                    .disks
-                    .iter()
-                    .map(|disk| {
-                        InvPhysicalDisk::new(
-                            collection_id,
-                            *sled_id,
-                            disk.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>()
+                sled_agent.disks.iter().map(|disk| {
+                    InvPhysicalDisk::new(collection_id, *sled_id, disk.clone())
+                })
             })
             .collect();
 
@@ -663,11 +655,16 @@ impl DataStore {
             {
                 use db::schema::inv_physical_disk::dsl;
 
-                let mut iter =
-                    disks.chunks(SQL_BATCH_SIZE.get().try_into().unwrap());
-                while let Some(some_disks) = iter.next() {
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut disks = disks.into_iter();
+                loop {
+                    let some_disks =
+                        disks.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_disks.is_empty() {
+                        break;
+                    }
                     let _ = diesel::insert_into(dsl::inv_physical_disk)
-                        .values(some_disks.to_vec())
+                        .values(some_disks)
                         .execute_async(&conn)
                         .await?;
                 }
