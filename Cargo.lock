@@ -4563,6 +4563,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-networking"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "ipnetwork",
+ "nexus-db-queries",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "reqwest",
+ "sled-agent-client",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
@@ -4578,6 +4593,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-inventory",
+ "nexus-networking",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
  "nexus-test-utils-macros",
@@ -5176,6 +5192,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-defaults",
  "nexus-inventory",
+ "nexus-networking",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",

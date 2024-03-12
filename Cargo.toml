@@ -45,6 +45,7 @@ members = [
     "nexus/defaults",
     "nexus/inventory",
     "nexus/macros-common",
+    "nexus/networking",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -120,6 +121,7 @@ default-members = [
     "nexus-config",
     "nexus/authz-macros",
     "nexus/macros-common",
+    "nexus/networking",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -272,6 +274,7 @@ nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-macros-common = { path = "nexus/macros-common" }
+nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
