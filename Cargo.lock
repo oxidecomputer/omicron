@@ -3945,6 +3945,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "libnvme"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+dependencies = [
+ "libnvme-sys",
+ "thiserror",
+]
+
+[[package]]
+name = "libnvme-sys"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+
+[[package]]
 name = "libsw"
 version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8310,6 +8324,7 @@ dependencies = [
  "illumos-utils",
  "libc",
  "libefi-illumos",
+ "libnvme",
  "macaddr",
  "omicron-common",
  "omicron-test-utils",
