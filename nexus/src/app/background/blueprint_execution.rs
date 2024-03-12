@@ -147,7 +147,7 @@ mod test {
             },
             Blueprint {
                 id,
-                omicron_zones: blueprint_zones,
+                blueprint_zones,
                 parent_blueprint_id: None,
                 internal_dns_version,
                 time_created: chrono::Utc::now(),

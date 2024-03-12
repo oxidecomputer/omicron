@@ -447,7 +447,7 @@ mod test {
                     source: String::from("test suite"),
                     sled_id: new_sled_id,
                     zones: blueprint4
-                        .omicron_zones
+                        .blueprint_zones
                         .get(&new_sled_id)
                         .expect("blueprint should contain zones for new sled")
                         .to_omicron_zones_config()
@@ -553,10 +553,10 @@ mod test {
 
         // This blueprint should only have 1 Nexus instance on the one sled we
         // kept.
-        assert_eq!(blueprint1.omicron_zones.len(), 1);
+        assert_eq!(blueprint1.blueprint_zones.len(), 1);
         assert_eq!(
             blueprint1
-                .omicron_zones
+                .blueprint_zones
                 .get(&sled_id)
                 .expect("missing kept sled")
                 .zones
@@ -623,8 +623,8 @@ mod test {
         .expect("failed to create initial blueprint");
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
-        assert_eq!(blueprint1.omicron_zones.len(), 3);
-        for sled_config in blueprint1.omicron_zones.values() {
+        assert_eq!(blueprint1.blueprint_zones.len(), 3);
+        for sled_config in blueprint1.blueprint_zones.values() {
             assert_eq!(
                 sled_config
                     .zones
@@ -710,8 +710,8 @@ mod test {
         .expect("failed to create initial blueprint");
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
-        assert_eq!(blueprint1.omicron_zones.len(), 5);
-        for sled_config in blueprint1.omicron_zones.values() {
+        assert_eq!(blueprint1.blueprint_zones.len(), 5);
+        for sled_config in blueprint1.blueprint_zones.values() {
             assert_eq!(
                 sled_config
                     .zones

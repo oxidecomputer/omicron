@@ -109,14 +109,13 @@ mod test {
     use omicron_common::api::external::Generation;
     use std::collections::BTreeMap;
     use std::net::SocketAddr;
-    use std::sync::Arc;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn create_blueprint(
-        omicron_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -127,7 +126,7 @@ mod test {
             },
             Blueprint {
                 id,
-                omicron_zones,
+                blueprint_zones,
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
                 time_created: chrono::Utc::now(),
@@ -170,8 +169,8 @@ mod test {
 
         // Get a success result back when the blueprint has an empty set of
         // zones.
-        let blueprint = Arc::new(create_blueprint(BTreeMap::new()));
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+        let (_, blueprint) = create_blueprint(BTreeMap::new());
+        deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
             .await
             .expect("failed to deploy no zones");
 
@@ -209,10 +208,10 @@ mod test {
         // matter for this test.
         let mut zones1 = make_zones();
         let mut zones2 = make_zones();
-        let blueprint = Arc::new(create_blueprint(BTreeMap::from([
+        let (_, blueprint) = create_blueprint(BTreeMap::from([
             (sled_id1, zones1.clone()),
             (sled_id2, zones2.clone()),
-        ])));
+        ]));
 
         // Set expectations for the initial requests sent to the fake
         // sled-agents.
@@ -231,7 +230,7 @@ mod test {
         }
 
         // Execute it.
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+        deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
             .await
             .expect("failed to deploy initial zones");
 
@@ -248,7 +247,7 @@ mod test {
                 .respond_with(status_code(204)),
             );
         }
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+        deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
             .await
             .expect("failed to deploy same zones");
         s1.verify_and_clear();
@@ -272,7 +271,7 @@ mod test {
         );
 
         let errors =
-            deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+            deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
                 .await
                 .expect_err("unexpectedly succeeded in deploying zones");
 
@@ -306,10 +305,10 @@ mod test {
 
         append_zone(&mut zones1);
         append_zone(&mut zones2);
-        let blueprint = Arc::new(create_blueprint(BTreeMap::from([
+        let (_, blueprint) = create_blueprint(BTreeMap::from([
             (sled_id1, zones1),
             (sled_id2, zones2),
-        ])));
+        ]));
 
         // Set our new expectations
         for s in [&mut s1, &mut s2] {
@@ -327,7 +326,7 @@ mod test {
         }
 
         // Activate the task
-        deploy_zones(&opctx, &sleds_by_id, &blueprint.1.omicron_zones)
+        deploy_zones(&opctx, &sleds_by_id, &blueprint.blueprint_zones)
             .await
             .expect("failed to deploy last round of zones");
         s1.verify_and_clear();

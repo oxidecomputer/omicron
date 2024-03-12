@@ -1659,7 +1659,7 @@ mod tests {
         // Create a blueprint that has a Nexus on our third sled. (This
         // blueprint is completely invalid in many ways, but all we care about
         // here is inserting relevant records in `bp_omicron_zone`.)
-        let bp1_omicron_zones = {
+        let bp1_zones = {
             let (sled_id, zone_config) = harness
                 .blueprint_zone_configs()
                 .nth(2)
@@ -1677,7 +1677,7 @@ mod tests {
         let bp1_id = Uuid::new_v4();
         let bp1 = Blueprint {
             id: bp1_id,
-            omicron_zones: bp1_omicron_zones,
+            blueprint_zones: bp1_zones,
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             time_created: Utc::now(),
@@ -1727,7 +1727,7 @@ mod tests {
         let bp2_id = Uuid::new_v4();
         let bp2 = Blueprint {
             id: bp2_id,
-            omicron_zones: BTreeMap::new(),
+            blueprint_zones: BTreeMap::new(),
             parent_blueprint_id: Some(bp1_id),
             internal_dns_version: Generation::new(),
             time_created: Utc::now(),
@@ -1768,7 +1768,7 @@ mod tests {
 
         // Create a blueprint that has a Nexus on our fourth sled. This
         // shouldn't change our VPC resolution.
-        let bp3_omicron_zones = {
+        let bp3_zones = {
             let (sled_id, zone_config) = harness
                 .blueprint_zone_configs()
                 .nth(3)
@@ -1786,7 +1786,7 @@ mod tests {
         let bp3_id = Uuid::new_v4();
         let bp3 = Blueprint {
             id: bp3_id,
-            omicron_zones: bp3_omicron_zones,
+            blueprint_zones: bp3_zones,
             parent_blueprint_id: Some(bp2_id),
             internal_dns_version: Generation::new(),
             time_created: Utc::now(),
@@ -1820,7 +1820,7 @@ mod tests {
 
         // Finally, create a blueprint that includes our third and fourth sleds,
         // make it the target, and ensure we resolve to all four sleds.
-        let bp4_omicron_zones = {
+        let bp4_zones = {
             let mut zones = BTreeMap::new();
             for (sled_id, zone_config) in
                 harness.blueprint_zone_configs().skip(2)
@@ -1838,7 +1838,7 @@ mod tests {
         let bp4_id = Uuid::new_v4();
         let bp4 = Blueprint {
             id: bp4_id,
-            omicron_zones: bp4_omicron_zones,
+            blueprint_zones: bp4_zones,
             parent_blueprint_id: Some(bp3_id),
             internal_dns_version: Generation::new(),
             time_created: Utc::now(),

@@ -87,8 +87,12 @@ where
         .into_iter()
         .map(|db_sled| (db_sled.id(), Sled::from(db_sled)))
         .collect();
-    omicron_zones::deploy_zones(&opctx, &sleds_by_id, &blueprint.omicron_zones)
-        .await?;
+    omicron_zones::deploy_zones(
+        &opctx,
+        &sleds_by_id,
+        &blueprint.blueprint_zones,
+    )
+    .await?;
 
     datasets::ensure_crucible_dataset_records_exist(
         &opctx,

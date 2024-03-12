@@ -682,8 +682,8 @@ async fn lookup_service_kind(
     };
 
     let Some(zone_config) =
-        blueprint.all_blueprint_zones().find_map(|(_sled_id, zone_config)| {
-            if zone_config.config.id == service_id {
+        blueprint.all_omicron_zones().find_map(|(_sled_id, zone_config)| {
+            if zone_config.id == service_id {
                 Some(zone_config)
             } else {
                 None
@@ -693,7 +693,7 @@ async fn lookup_service_kind(
         return Ok(None);
     };
 
-    let service_kind = match &zone_config.config.zone_type {
+    let service_kind = match &zone_config.zone_type {
         OmicronZoneType::BoundaryNtp { .. }
         | OmicronZoneType::InternalNtp { .. } => ServiceKind::Ntp,
         OmicronZoneType::Clickhouse { .. } => ServiceKind::Clickhouse,

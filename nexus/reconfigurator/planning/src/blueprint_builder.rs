@@ -114,7 +114,7 @@ pub struct BlueprintBuilder<'a> {
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
-    zones: BlueprintZones<'a>,
+    zones: BlueprintZonesBuilder<'a>,
     creator: String,
     comments: Vec<String>,
 
@@ -138,7 +138,7 @@ impl<'a> BlueprintBuilder<'a> {
         policy: &'a Policy,
         creator: &str,
     ) -> Result<Blueprint, Error> {
-        let omicron_zones = policy
+        let blueprint_zones = policy
             .sleds
             .keys()
             .map(|sled_id| {
@@ -175,7 +175,7 @@ impl<'a> BlueprintBuilder<'a> {
             .collect::<Result<_, Error>>()?;
         Ok(Blueprint {
             id: Uuid::new_v4(),
-            omicron_zones,
+            blueprint_zones,
             parent_blueprint_id: None,
             internal_dns_version,
             time_created: now_db_precision(),
@@ -300,7 +300,7 @@ impl<'a> BlueprintBuilder<'a> {
             internal_dns_version,
             policy,
             sled_ip_allocators: BTreeMap::new(),
-            zones: BlueprintZones::new(parent_blueprint),
+            zones: BlueprintZonesBuilder::new(parent_blueprint),
             creator: creator.to_owned(),
             comments: Vec::new(),
             nexus_v4_ips,
@@ -313,11 +313,11 @@ impl<'a> BlueprintBuilder<'a> {
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(self) -> Blueprint {
         // Collect the Omicron zones config for each in-service sled.
-        let omicron_zones =
-            self.zones.into_omicron_zones(self.policy.sleds.keys().copied());
+        let blueprint_zones =
+            self.zones.into_zones_map(self.policy.sleds.keys().copied());
         Blueprint {
             id: Uuid::new_v4(),
-            omicron_zones,
+            blueprint_zones,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.internal_dns_version,
             time_created: now_db_precision(),
@@ -482,21 +482,14 @@ impl<'a> BlueprintBuilder<'a> {
         // settings should be part of `Policy` instead?
         let (external_tls, external_dns_servers) = self
             .parent_blueprint
-            .omicron_zones
-            .values()
-            .find_map(|sled_zones| {
-                sled_zones.zones.iter().find_map(|z| {
-                    match &z.config.zone_type {
-                        OmicronZoneType::Nexus {
-                            external_tls,
-                            external_dns_servers,
-                            ..
-                        } => {
-                            Some((*external_tls, external_dns_servers.clone()))
-                        }
-                        _ => None,
-                    }
-                })
+            .all_omicron_zones()
+            .find_map(|(_, z)| match &z.zone_type {
+                OmicronZoneType::Nexus {
+                    external_tls,
+                    external_dns_servers,
+                    ..
+                } => Some((*external_tls, external_dns_servers.clone())),
+                _ => None,
             })
             .ok_or(Error::NoNexusZonesInParentBlueprint)?;
         self.sled_ensure_zone_multiple_nexus_with_config(
@@ -673,16 +666,16 @@ impl<'a> BlueprintBuilder<'a> {
 /// blueprint.  We do this by keeping a copy of any [`BlueprintZonesConfig`]
 /// that we've changed and a _reference_ to the parent blueprint's zones.  This
 /// struct makes it easy for callers iterate over the right set of zones.
-struct BlueprintZones<'a> {
+struct BlueprintZonesBuilder<'a> {
     changed_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
     parent_zones: &'a BTreeMap<Uuid, BlueprintZonesConfig>,
 }
 
-impl<'a> BlueprintZones<'a> {
-    pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintZones {
-        BlueprintZones {
+impl<'a> BlueprintZonesBuilder<'a> {
+    pub fn new(parent_blueprint: &'a Blueprint) -> BlueprintZonesBuilder {
+        BlueprintZonesBuilder {
             changed_zones: BTreeMap::new(),
-            parent_zones: &parent_blueprint.omicron_zones,
+            parent_zones: &parent_blueprint.blueprint_zones,
         }
     }
 
@@ -731,7 +724,7 @@ impl<'a> BlueprintZones<'a> {
     }
 
     /// Produces an owned map of zones for the requested sleds
-    pub fn into_omicron_zones(
+    pub fn into_zones_map(
         mut self,
         sled_ids: impl Iterator<Item = Uuid>,
     ) -> BTreeMap<Uuid, BlueprintZonesConfig> {
@@ -852,7 +845,8 @@ pub mod test {
                 .expect("failed to build collection");
 
             for sled_id in blueprint.sleds() {
-                let Some(zones) = blueprint.omicron_zones.get(&sled_id) else {
+                let Some(zones) = blueprint.blueprint_zones.get(&sled_id)
+                else {
                     continue;
                 };
                 builder
@@ -885,22 +879,17 @@ pub mod test {
 
     /// Checks various conditions that should be true for all blueprints
     pub fn verify_blueprint(blueprint: &Blueprint) {
-        let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
+        let mut underlay_ips: BTreeMap<Ipv6Addr, &OmicronZoneConfig> =
             BTreeMap::new();
-        for sled_zones in blueprint.omicron_zones.values() {
-            for zone in &sled_zones.zones {
-                if let Some(previous) =
-                    underlay_ips.insert(zone.config.underlay_address, zone)
-                {
-                    panic!(
-                        "found duplicate underlay IP {} in zones {} and \
+        for (_, zone) in blueprint.all_omicron_zones() {
+            if let Some(previous) =
+                underlay_ips.insert(zone.underlay_address, zone)
+            {
+                panic!(
+                    "found duplicate underlay IP {} in zones {} and \
                         {}\n\nblueprint: {:#?}",
-                        zone.config.underlay_address,
-                        zone.config.id,
-                        previous.config.id,
-                        blueprint
-                    );
-                }
+                    zone.underlay_address, zone.id, previous.id, blueprint
+                );
             }
         }
     }

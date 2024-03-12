@@ -204,7 +204,7 @@ mod test {
             },
             Blueprint {
                 id,
-                omicron_zones: BTreeMap::new(),
+                blueprint_zones: BTreeMap::new(),
                 parent_blueprint_id,
                 internal_dns_version: Generation::new(),
                 time_created: now_db_precision(),

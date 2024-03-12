@@ -122,14 +122,14 @@ impl DataStore {
             .collect::<Vec<_>>();
 
         let sled_omicron_zones = blueprint
-            .omicron_zones
+            .blueprint_zones
             .iter()
             .map(|(sled_id, zones_config)| {
                 BpSledOmicronZones::new(blueprint_id, *sled_id, zones_config)
             })
             .collect::<Vec<_>>();
         let omicron_zones = blueprint
-            .omicron_zones
+            .blueprint_zones
             .iter()
             .flat_map(|(sled_id, zones_config)| {
                 zones_config.zones.iter().map(move |zone| {
@@ -139,7 +139,7 @@ impl DataStore {
             })
             .collect::<Result<Vec<_>, Error>>()?;
         let omicron_zone_nics = blueprint
-            .omicron_zones
+            .blueprint_zones
             .values()
             .flat_map(|zones_config| {
                 zones_config.zones.iter().filter_map(|zone| {
@@ -272,10 +272,10 @@ impl DataStore {
         // the `OmicronZonesConfig` generation number for each sled that is a
         // part of this blueprint. Construct the BTreeMap we ultimately need,
         // but all the `zones` vecs will be empty until our next query below.
-        let mut omicron_zones: BTreeMap<Uuid, BlueprintZonesConfig> = {
+        let mut blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig> = {
             use db::schema::bp_sled_omicron_zones::dsl;
 
-            let mut omicron_zones = BTreeMap::new();
+            let mut blueprint_zones = BTreeMap::new();
             let mut paginator = Paginator::new(SQL_BATCH_SIZE);
             while let Some(p) = paginator.next() {
                 let batch = paginated(
@@ -294,7 +294,7 @@ impl DataStore {
                 paginator = p.found_batch(&batch, &|s| s.sled_id);
 
                 for s in batch {
-                    let old = omicron_zones.insert(
+                    let old = blueprint_zones.insert(
                         s.sled_id,
                         BlueprintZonesConfig {
                             generation: *s.generation,
@@ -309,7 +309,7 @@ impl DataStore {
                 }
             }
 
-            omicron_zones
+            blueprint_zones
         };
 
         // Assemble a mutable map of all the NICs found, by NIC id.  As we
@@ -432,8 +432,9 @@ impl DataStore {
                             })
                         })
                         .transpose()?;
-                    let sled_zones =
-                        omicron_zones.get_mut(&z.sled_id).ok_or_else(|| {
+                    let sled_zones = blueprint_zones
+                        .get_mut(&z.sled_id)
+                        .ok_or_else(|| {
                             // This error means that we found a row in
                             // bp_omicron_zone with no associated record in
                             // bp_sled_omicron_zones.  This should be
@@ -480,7 +481,7 @@ impl DataStore {
 
         Ok(Blueprint {
             id: blueprint_id,
-            omicron_zones,
+            blueprint_zones,
             parent_blueprint_id,
             internal_dns_version,
             time_created,
@@ -1246,7 +1247,7 @@ mod tests {
         );
 
         // There ought to be no sleds or zones, and no parent blueprint.
-        assert_eq!(blueprint1.omicron_zones.len(), 0);
+        assert_eq!(blueprint1.blueprint_zones.len(), 0);
         assert_eq!(blueprint1.parent_blueprint_id, None);
 
         // Trying to insert the same blueprint again should fail.
@@ -1291,9 +1292,9 @@ mod tests {
         );
 
         // Check the number of blueprint elements against our collection.
-        assert_eq!(blueprint1.omicron_zones.len(), policy.sleds.len());
+        assert_eq!(blueprint1.blueprint_zones.len(), policy.sleds.len());
         assert_eq!(
-            blueprint1.omicron_zones.len(),
+            blueprint1.blueprint_zones.len(),
             collection.omicron_zones.len()
         );
         assert_eq!(
@@ -1368,8 +1369,8 @@ mod tests {
 
         // Check that we added the new sled and its zones.
         assert_eq!(
-            blueprint1.omicron_zones.len() + 1,
-            blueprint2.omicron_zones.len()
+            blueprint1.blueprint_zones.len() + 1,
+            blueprint2.blueprint_zones.len()
         );
         assert_eq!(
             blueprint1.all_blueprint_zones().count() + num_new_sled_zones,

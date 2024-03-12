@@ -449,7 +449,7 @@ mod test {
         // not currently in service.
         let out_of_service_id = Uuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.omicron_zones.values_mut().next().unwrap().zones.push(
+        blueprint.blueprint_zones.values_mut().next().unwrap().zones.push(
             BlueprintZoneConfig {
                 config: OmicronZoneConfig {
                     id: out_of_service_id,
@@ -520,9 +520,9 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_blueprint_zones()
-            .filter(|(_, zone)| zone.config.id != out_of_service_id)
-            .map(|(_, zone)| (zone.config.underlay_address, zone.config.id))
+            .all_omicron_zones()
+            .filter(|(_, zone)| zone.id != out_of_service_id)
+            .map(|(_, zone)| (zone.underlay_address, zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 

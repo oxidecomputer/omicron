@@ -138,10 +138,12 @@ pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
 
-    /// mapping: sled id -> zones deployed on each sled
+    /// A map of sled id -> zones deployed on each sled, along with the
+    /// [`BlueprintZonePolicy`] for each zone.
+    ///
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
-    pub omicron_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+    pub blueprint_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
@@ -161,19 +163,29 @@ pub struct Blueprint {
 }
 
 impl Blueprint {
-    /// Iterate over all the Omicron zones in the blueprint, along with
-    /// associated sled id
+    /// Iterate over all the [`BlueprintZoneConfig`] instances in the
+    /// blueprint, along with the associated sled id.
     pub fn all_blueprint_zones(
         &self,
     ) -> impl Iterator<Item = (Uuid, &BlueprintZoneConfig)> {
-        self.omicron_zones
+        self.blueprint_zones
             .iter()
             .flat_map(|(sled_id, z)| z.zones.iter().map(|z| (*sled_id, z)))
     }
 
+    /// Iterate over all the [`OmicronZoneConfig`] instances in the blueprint,
+    /// along with the associated sled id.
+    pub fn all_omicron_zones(
+        &self,
+    ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> {
+        self.blueprint_zones.iter().flat_map(|(sled_id, z)| {
+            z.zones.iter().map(|z| (*sled_id, &z.config))
+        })
+    }
+
     /// Iterate over the ids of all sleds in the blueprint
     pub fn sleds(&self) -> impl Iterator<Item = Uuid> + '_ {
-        self.omicron_zones.keys().copied()
+        self.blueprint_zones.keys().copied()
     }
 
     /// Summarize the difference between sleds and zones between two blueprints
@@ -183,9 +195,9 @@ impl Blueprint {
     ) -> OmicronZonesDiff<'a> {
         OmicronZonesDiff {
             before_label: format!("blueprint {}", self.id),
-            before_zones: self.omicron_zones.clone(),
+            before_zones: self.blueprint_zones.clone(),
             after_label: format!("blueprint {}", other.id),
-            after_zones: &other.omicron_zones,
+            after_zones: &other.blueprint_zones,
         }
     }
 
@@ -229,7 +241,7 @@ impl Blueprint {
             before_label: format!("collection {}", collection.id),
             before_zones,
             after_label: format!("blueprint {}", self.id),
-            after_zones: &self.omicron_zones,
+            after_zones: &self.blueprint_zones,
         }
     }
 }
@@ -268,7 +280,7 @@ impl fmt::Debug for Blueprint {
         writeln!(f, "internal DNS version: {}", self.internal_dns_version)?;
         writeln!(f, "comment: {}", self.comment)?;
         writeln!(f, "zones:\n")?;
-        for (sled_id, sled_zones) in &self.omicron_zones {
+        for (sled_id, sled_zones) in &self.blueprint_zones {
             writeln!(
                 f,
                 "  sled {}: Omicron zones at generation {}",
@@ -346,7 +358,10 @@ impl BlueprintZonesConfig {
 
 /// Describes one Omicron-managed zone in a blueprint.
 ///
-/// Part of [`BlueprintOmicronZonesConfig`].
+/// This is a wrapper around an [`OmicronZoneConfig`] that also includes a
+/// [`BlueprintZonePolicy`].
+///
+/// Part of [`BlueprintZonesConfig`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct BlueprintZoneConfig {
     /// The underlying zone configuration.
@@ -393,11 +408,6 @@ impl fmt::Display for BlueprintZonePolicy {
         }
     }
 }
-
-/// Represents a map of zone ID to policy.
-///
-/// Returned by [`Blueprint::zone_policy_map`].
-pub type ZonePolicyMap = BTreeMap<Uuid, BlueprintZonePolicy>;
 
 /// Describe high-level metadata about a blueprint
 // These fields are a subset of [`Blueprint`], and include only the data we can
@@ -504,38 +514,29 @@ pub struct DiffZoneCommon<'a> {
     pub zone_before: &'a BlueprintZoneConfig,
     /// full zone configuration after
     pub zone_after: &'a BlueprintZoneConfig,
-
-    /// Whether details (not policy) changed.
-    ///
-    /// This is a cache of information that can be computed from `zone_before`
-    /// and `zone_after`.
-    details_changed: bool,
 }
 
 impl<'a> DiffZoneCommon<'a> {
     /// Returns true if there are any differences between `zone_before` and
     /// `zone_after`.
     ///
-    /// This is equivalent to `policy_changed() || details_changed()`.
+    /// This is equivalent to `config_changed() || policy_changed()`.
     #[inline]
     pub fn is_changed(&self) -> bool {
-        self.policy_changed() || self.details_changed
+        // policy is smaller and easier to compare than config.
+        self.policy_changed() || self.config_changed()
+    }
+
+    /// Returns true if the zone configuration (excluding the policy) changed.
+    #[inline]
+    pub fn config_changed(&self) -> bool {
+        self.zone_before.config != self.zone_after.config
     }
 
     /// Returns true if the policy for the zone changed.
     #[inline]
     pub fn policy_changed(&self) -> bool {
         self.zone_before.zone_policy != self.zone_after.zone_policy
-    }
-
-    /// Returns true if details about the zone changed.
-    ///
-    /// This does not take into account whether the policy for the zone
-    /// changed: that can be computed by simply comparing
-    /// `zone_before.zone_policy` and `zone_after.zone_policy`.
-    #[inline]
-    pub fn details_changed(&self) -> bool {
-        self.details_changed
     }
 }
 
@@ -608,14 +609,8 @@ impl<'a> OmicronZonesDiff<'a> {
             // Now go through each zone and compare them.
             for (zone_id, zone_before) in &b1_zones {
                 if let Some(zone_after) = b2_zones.remove(zone_id) {
-                    let details_changed =
-                        zone_before.config != zone_after.config;
-
-                    zones_common.push(DiffZoneCommon {
-                        zone_before,
-                        zone_after,
-                        details_changed,
-                    });
+                    zones_common
+                        .push(DiffZoneCommon { zone_before, zone_after });
                 } else {
                     zones_removed.push(*zone_before);
                 }
@@ -710,7 +705,7 @@ impl<'a> fmt::Display for OmicronZonesDiff<'a> {
             }
 
             for zone_changes in sled_changes.zones_in_common() {
-                if zone_changes.details_changed() {
+                if zone_changes.config_changed() {
                     writeln!(
                         f,
                         "-         {} (changed)",
@@ -721,9 +716,7 @@ impl<'a> fmt::Display for OmicronZonesDiff<'a> {
                         "+         {} (changed)",
                         zone_changes.zone_after
                     )?;
-                } else if zone_changes.zone_before.zone_policy
-                    != zone_changes.zone_after.zone_policy
-                {
+                } else if zone_changes.policy_changed() {
                     writeln!(
                         f,
                         "-         {} (policy changed)",

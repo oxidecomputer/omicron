@@ -1124,7 +1124,7 @@
           "reservoir_size": 869286281216
         }
       },
-      "omicron_zones": {
+      "blueprint_zones": {
         "04eb5888-376d-4a3c-91ee-a0acfc56c9d7": {
           "time_collected": "2024-03-12T02:48:39.939293Z",
           "source": "http://[fd00:1122:3344:104::1]:12345",
@@ -2982,7 +2982,7 @@
           "reservoir_size": 869286281216
         }
       },
-      "omicron_zones": {
+      "blueprint_zones": {
         "04eb5888-376d-4a3c-91ee-a0acfc56c9d7": {
           "time_collected": "2024-03-12T02:49:04.994984Z",
           "source": "http://[fd00:1122:3344:104::1]:12345",
@@ -4840,7 +4840,7 @@
           "reservoir_size": 869286281216
         }
       },
-      "omicron_zones": {
+      "blueprint_zones": {
         "04eb5888-376d-4a3c-91ee-a0acfc56c9d7": {
           "time_collected": "2024-03-12T02:49:35.048941Z",
           "source": "http://[fd00:1122:3344:104::1]:12345",
@@ -6698,7 +6698,7 @@
           "reservoir_size": 869286281216
         }
       },
-      "omicron_zones": {
+      "blueprint_zones": {
         "04eb5888-376d-4a3c-91ee-a0acfc56c9d7": {
           "time_collected": "2024-03-12T02:49:37.541948Z",
           "source": "http://[fd00:1122:3344:104::1]:12345",
@@ -8556,7 +8556,7 @@
           "reservoir_size": 869286281216
         }
       },
-      "omicron_zones": {
+      "blueprint_zones": {
         "04eb5888-376d-4a3c-91ee-a0acfc56c9d7": {
           "time_collected": "2024-03-12T02:49:41.019176Z",
           "source": "http://[fd00:1122:3344:104::1]:12345",
@@ -9390,7 +9390,7 @@
   "blueprints": [
     {
       "id": "55959d3c-9a2e-448b-a5c1-4e16fac4ddeb",
-      "omicron_zones": {
+      "blueprint_zones": {
         "04eb5888-376d-4a3c-91ee-a0acfc56c9d7": {
           "generation": 5,
           "zones": [
@@ -10384,7 +10384,7 @@
     },
     {
       "id": "ae15d282-3b47-4b9a-8b6a-656d99fe3c54",
-      "omicron_zones": {
+      "blueprint_zones": {
         "04eb5888-376d-4a3c-91ee-a0acfc56c9d7": {
           "generation": 5,
           "zones": [
