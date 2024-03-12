@@ -26,6 +26,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal;
+use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
@@ -3152,4 +3153,82 @@ async fn test_upstairs_repair_reject_submit_progress_when_no_repair(
         )
         .await
         .unwrap_err();
+}
+
+/// Test that an Upstairs can notify Nexus when a Downstairs client task stops
+#[nexus_test]
+async fn test_upstairs_notify_downstairs_client_stop(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let downstairs_id: TypedUuid<DownstairsKind> = TypedUuid::new_v4();
+
+    let stopped_url = format!(
+        "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped"
+    );
+
+    // Make sure an Upstairs can re-send the notification
+
+    let request = internal::nexus::DownstairsClientStopped {
+        time: Utc::now(),
+        reason:
+            internal::nexus::DownstairsClientStopReason::TooManyOutstandingJobs,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stopped_url,
+            Some(request.clone()),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stopped_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // The client can stop for the same reason a different time
+
+    let request = internal::nexus::DownstairsClientStopped {
+        time: Utc::now(),
+        reason:
+            internal::nexus::DownstairsClientStopReason::TooManyOutstandingJobs,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stopped_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // The client can also stop for a different reason
+
+    let request = internal::nexus::DownstairsClientStopped {
+        time: Utc::now(),
+        reason: internal::nexus::DownstairsClientStopReason::IOError,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stopped_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
 }
