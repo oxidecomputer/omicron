@@ -8346,6 +8346,7 @@ dependencies = [
  "illumos-utils",
  "macaddr",
  "omicron-common",
+ "omicron-workspace-hack",
  "schemars",
  "serde",
 ]

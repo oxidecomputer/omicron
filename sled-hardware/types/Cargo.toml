@@ -9,6 +9,7 @@ illumos-utils.workspace = true
 omicron-common.workspace = true
 schemars.workspace = true
 serde.workspace = true
+omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 macaddr.workspace = true
