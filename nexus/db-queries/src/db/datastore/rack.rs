@@ -597,7 +597,8 @@ impl DataStore {
                     let blueprint = rack_init.blueprint;
                     let services = rack_init.services;
                     let datasets = rack_init.datasets;
-                    let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
+                    let service_ip_pool_ranges =
+                        rack_init.service_ip_pool_ranges;
                     let internal_dns = rack_init.internal_dns;
                     let external_dns = rack_init.external_dns;
 
@@ -608,11 +609,15 @@ impl DataStore {
                         .get_result_async(&conn)
                         .await
                         .map_err(|e| {
-                            warn!(log, "Initializing Rack: Rack UUID not found");
+                            warn!(
+                                log,
+                                "Initializing Rack: Rack UUID not found"
+                            );
                             err.set(RackInitError::RackUpdate {
                                 err: e,
                                 rack_id,
-                            }).unwrap();
+                            })
+                            .unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     if rack.initialized {
@@ -643,18 +648,17 @@ impl DataStore {
 
                     // Insert the RSS-generated blueprint.
                     Self::blueprint_insert_on_connection(
-                        &conn,
-                        opctx,
-                        &blueprint,
-                        ).await
-                        .map_err(|e| {
-                            warn!(
-                                log,
-                                "Initializing Rack: Failed to insert blueprint"
-                            );
-                            err.set(RackInitError::BlueprintInsert(e)).unwrap();
-                            DieselError::RollbackTransaction
-                        })?;
+                        &conn, opctx, &blueprint,
+                    )
+                    .await
+                    .map_err(|e| {
+                        warn!(
+                            log,
+                            "Initializing Rack: Failed to insert blueprint"
+                        );
+                        err.set(RackInitError::BlueprintInsert(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
 
                     // Mark the RSS-generated blueprint as the current target,
                     // DISABLED. We may change this to enabled in the future
@@ -668,18 +672,17 @@ impl DataStore {
                             enabled: false,
                             time_made_target: Utc::now(),
                         },
-                        )
-                        .await
-                        .map_err(|e| {
-                            warn!(
-                                log,
-                                "Initializing Rack: \
+                    )
+                    .await
+                    .map_err(|e| {
+                        warn!(
+                            log,
+                            "Initializing Rack: \
                                  Failed to set blueprint as target"
-                            );
-                            err.set(RackInitError::BlueprintTargetSet(e))
-                                .unwrap();
-                            DieselError::RollbackTransaction
-                        })?;
+                        );
+                        err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
 
                     // Allocate records for all services.
                     for service in services {
@@ -700,7 +703,7 @@ impl DataStore {
                     for dataset in datasets {
                         use db::schema::dataset::dsl;
                         let zpool_id = dataset.pool_id;
-                        <Zpool as DatastoreCollection<Dataset>>::insert_resource(
+                        Zpool::insert_resource(
                             zpool_id,
                             diesel::insert_into(dsl::dataset)
                                 .values(dataset.clone())
@@ -720,7 +723,8 @@ impl DataStore {
                             err.set(RackInitError::DatasetInsert {
                                 err: e,
                                 zpool_id,
-                            }).unwrap();
+                            })
+                            .unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     }
@@ -728,20 +732,22 @@ impl DataStore {
 
                     // Insert the initial contents of the internal and external DNS
                     // zones.
-                    Self::load_dns_data(&conn, internal_dns)
-                        .await
-                        .map_err(|e| {
-                            err.set(RackInitError::DnsSerialization(e)).unwrap();
+                    Self::load_dns_data(&conn, internal_dns).await.map_err(
+                        |e| {
+                            err.set(RackInitError::DnsSerialization(e))
+                                .unwrap();
                             DieselError::RollbackTransaction
-                        })?;
+                        },
+                    )?;
                     info!(log, "Populated DNS tables for internal DNS");
 
-                    Self::load_dns_data(&conn, external_dns)
-                        .await
-                        .map_err(|e| {
-                           err.set(RackInitError::DnsSerialization(e)).unwrap();
-                           DieselError::RollbackTransaction
-                        })?;
+                    Self::load_dns_data(&conn, external_dns).await.map_err(
+                        |e| {
+                            err.set(RackInitError::DnsSerialization(e))
+                                .unwrap();
+                            DieselError::RollbackTransaction
+                        },
+                    )?;
                     info!(log, "Populated DNS tables for external DNS");
 
                     // Create the initial Recovery Silo
@@ -761,7 +767,7 @@ impl DataStore {
                         _ => {
                             err.set(e).unwrap();
                             DieselError::RollbackTransaction
-                        },
+                        }
                     })?;
 
                     let rack = diesel::update(rack_dsl::rack)
@@ -780,13 +786,13 @@ impl DataStore {
                             err.set(RackInitError::RackUpdate {
                                 err: e,
                                 rack_id,
-                            }).unwrap();
+                            })
+                            .unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     Ok(rack)
                 }
-            },
-            )
+            })
             .await
             .map_err(|e| {
                 if let Some(err) = Arc::try_unwrap(err).unwrap().take() {
