@@ -97,6 +97,7 @@ mod check_allow_destructive {
     /// ensure `Omdb::check_allow_destructive` has been called.
     // This is tucked away inside a module to prevent it from being constructed
     // by anything other than `Omdb::check_allow_destructive`.
+    #[must_use]
     pub(crate) struct DestructiveOperationToken(());
 
     impl super::Omdb {
@@ -106,7 +107,7 @@ mod check_allow_destructive {
             anyhow::ensure!(
                 self.allow_destructive,
                 "This command is potentially destructive. \
-             Pass the `-w` / `--destructive` flag to allow it."
+                 Pass the `-w` / `--destructive` flag to allow it."
             );
             Ok(DestructiveOperationToken(()))
         }
