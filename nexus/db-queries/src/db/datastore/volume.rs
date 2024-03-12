@@ -963,8 +963,7 @@ impl DataStore {
                             .optional()?;
 
                     if matching_repair.is_none() {
-                        // XXX should be 404
-                        return Err(err.bail(Error::invalid_request(&format!(
+                        return Err(err.bail(Error::non_resourcetype_not_found(&format!(
                             "upstairs {upstairs_id} repair {repair_id} not found"
                         ))));
                     }
@@ -1011,6 +1010,13 @@ impl DataStore {
                 downstairs_id: downstairs_id.into(),
                 reason: downstairs_client_stopped.reason.into(),
             })
+            .on_conflict((
+                dsl::time,
+                dsl::upstairs_id,
+                dsl::downstairs_id,
+                dsl::reason,
+            ))
+            .do_nothing()
             .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;

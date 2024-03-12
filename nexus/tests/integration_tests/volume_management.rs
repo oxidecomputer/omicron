@@ -3170,7 +3170,7 @@ async fn test_upstairs_repair_reject_submit_progress_when_no_repair(
                 current_item: 10,
                 total_items: 100,
             }),
-            StatusCode::BAD_REQUEST, // XXX 404 instead?
+            StatusCode::NOT_FOUND,
         )
         .await
         .unwrap_err();
