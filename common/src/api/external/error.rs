@@ -311,7 +311,7 @@ impl Error {
     /// This is used in cases where a generic 404 is required. For cases where
     /// there is a ResourceType, use a function that produces
     /// [`Error::ObjectNotFound`] instead.
-    pub fn not_found(message: impl Into<String>) -> Error {
+    pub fn non_resourcetype_not_found(message: impl Into<String>) -> Error {
         Error::NotFound { message: MessagePair::new(message.into()) }
     }
 
