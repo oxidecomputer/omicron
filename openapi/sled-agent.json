@@ -5287,12 +5287,17 @@
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
           },
+          "slot": {
+            "type": "integer",
+            "format": "int64"
+          },
           "variant": {
             "$ref": "#/components/schemas/DiskVariant"
           }
         },
         "required": [
           "identity",
+          "slot",
           "variant"
         ]
       },

@@ -475,6 +475,7 @@ impl CrucibleServer {
 
 pub(crate) struct PhysicalDisk {
     pub(crate) variant: DiskVariant,
+    pub(crate) slot: i64,
 }
 
 struct Zpool {
@@ -538,6 +539,7 @@ pub struct Storage {
     nexus_client: Arc<NexusClient>,
     log: Logger,
     physical_disks: HashMap<DiskIdentity, PhysicalDisk>,
+    next_disk_slot: i64,
     zpools: HashMap<Uuid, Zpool>,
     crucible_ip: IpAddr,
     next_crucible_port: u16,
@@ -555,6 +557,7 @@ impl Storage {
             nexus_client,
             log,
             physical_disks: HashMap::new(),
+            next_disk_slot: 0,
             zpools: HashMap::new(),
             crucible_ip,
             next_crucible_port: 100,
@@ -578,7 +581,9 @@ impl Storage {
             serial: serial.clone(),
             model: model.clone(),
         };
-        self.physical_disks.insert(identifier, PhysicalDisk { variant });
+        let slot = self.next_disk_slot;
+        self.next_disk_slot += 1;
+        self.physical_disks.insert(identifier, PhysicalDisk { variant, slot });
 
         let variant = match variant {
             DiskVariant::U2 => PhysicalDiskKind::U2,

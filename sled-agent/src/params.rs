@@ -877,6 +877,7 @@ pub type SledRole = nexus_client::types::SledRole;
 pub struct InventoryDisk {
     pub identity: omicron_common::disk::DiskIdentity,
     pub variant: sled_hardware::DiskVariant,
+    pub slot: i64,
 }
 
 /// Identity and basic status information about this sled agent

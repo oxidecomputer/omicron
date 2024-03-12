@@ -282,6 +282,7 @@ pub fn representative() -> Representative {
                 serial: "XXIV".to_string(),
             },
             variant: sled_agent_client::types::DiskVariant::M2,
+            slot: 0,
         },
         // ... and a couple different vendors for our U.2s
         sled_agent_client::types::InventoryDisk {
@@ -291,6 +292,7 @@ pub fn representative() -> Representative {
                 serial: "0001".to_string(),
             },
             variant: sled_agent_client::types::DiskVariant::U2,
+            slot: 1,
         },
         sled_agent_client::types::InventoryDisk {
             identity: sled_agent_client::types::DiskIdentity {
@@ -299,6 +301,7 @@ pub fn representative() -> Representative {
                 serial: "0002".to_string(),
             },
             variant: sled_agent_client::types::DiskVariant::U2,
+            slot: 2,
         },
         sled_agent_client::types::InventoryDisk {
             identity: sled_agent_client::types::DiskIdentity {
@@ -307,6 +310,7 @@ pub fn representative() -> Representative {
                 serial: "5".to_string(),
             },
             variant: sled_agent_client::types::DiskVariant::U2,
+            slot: 3,
         },
     ];
 

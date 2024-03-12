@@ -762,6 +762,7 @@ impl SledAgent {
                 .map(|(identity, info)| crate::params::InventoryDisk {
                     identity: identity.clone(),
                     variant: info.variant,
+                    slot: info.slot,
                 })
                 .collect(),
         })

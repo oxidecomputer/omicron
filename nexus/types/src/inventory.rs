@@ -354,6 +354,7 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
 pub struct PhysicalDisk {
     pub identity: omicron_common::disk::DiskIdentity,
     pub variant: PhysicalDiskKind,
+    pub slot: i64,
 }
 
 impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
@@ -361,6 +362,7 @@ impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
         PhysicalDisk {
             identity: disk.identity.into(),
             variant: disk.variant.into(),
+            slot: disk.slot,
         }
     }
 }

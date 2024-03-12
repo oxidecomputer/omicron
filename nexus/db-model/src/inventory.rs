@@ -660,6 +660,7 @@ impl InvSledAgent {
 pub struct InvPhysicalDisk {
     pub inv_collection_id: Uuid,
     pub sled_id: Uuid,
+    pub slot: i64,
     pub vendor: String,
     pub model: String,
     pub serial: String,
@@ -675,6 +676,7 @@ impl InvPhysicalDisk {
         Self {
             inv_collection_id,
             sled_id,
+            slot: disk.slot,
             vendor: disk.identity.vendor,
             model: disk.identity.model,
             serial: disk.identity.serial,
@@ -692,6 +694,7 @@ impl From<InvPhysicalDisk> for nexus_types::inventory::PhysicalDisk {
                 model: disk.model,
             },
             variant: disk.variant.into(),
+            slot: disk.slot,
         }
     }
 }

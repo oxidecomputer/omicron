@@ -2970,6 +2970,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     -- unique id for this sled (should be foreign keys into `sled` table, though
     -- it's conceivable a sled will report an id that we don't know about)
     sled_id UUID NOT NULL,
+    -- The slot where this disk was last observed
+    slot INT8 CHECK (slot >= 0) NOT NULL,
 
     vendor STRING(63) NOT NULL,
     model STRING(63) NOT NULL,
@@ -2980,11 +2982,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     -- FK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
-    -- - Attributes which **should** uniquely identify the disk
-    --
-    -- However, this imposes no constraint that the combination of vendor, serial
-    -- and model are universally unique - just unique on a single sled.
-    PRIMARY KEY (inv_collection_id, sled_id, vendor, model, serial)
+    -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (

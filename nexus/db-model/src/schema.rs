@@ -1362,9 +1362,10 @@ table! {
 }
 
 table! {
-    inv_physical_disk (inv_collection_id, sled_id, vendor, model, serial) {
+    inv_physical_disk (inv_collection_id, sled_id, slot) {
         inv_collection_id -> Uuid,
         sled_id -> Uuid,
+        slot -> Int8,
 
         vendor -> Text,
         model -> Text,

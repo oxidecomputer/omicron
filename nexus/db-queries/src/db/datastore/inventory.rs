@@ -1449,75 +1449,24 @@ impl DataStore {
             >::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
-                // The primary key of physical disks is more than two columns,
-                // which complicates a bit of the pagination query. This
-                // code below is effectively an implementation of
-                // "paginated_multicolumn" for these four columns (sled_id,
-                // vendor, model, serial).
-                type Marker = (Uuid, String, String, String);
-
-                let pagparams = &p.current_pagparams();
-                let mut query = dsl::inv_physical_disk
-                    .into_boxed()
-                    .limit(pagparams.limit.get().into())
-                    .filter(dsl::inv_collection_id.eq(id));
-                let marker = pagparams.marker.map(|m: &Marker| m.clone());
-                if let Some((sled_id, vendor, serial, model)) = marker {
-                    query = query.filter(
-                        dsl::inv_collection_id
-                            .eq(id)
-                            .and(dsl::sled_id.eq(sled_id))
-                            .and(dsl::vendor.eq(vendor.clone()))
-                            .and(dsl::model.eq(model.clone()))
-                            .and(dsl::serial.gt(serial.clone())),
-                    );
-                    query = query.or_filter(
-                        dsl::inv_collection_id
-                            .eq(id)
-                            .and(dsl::sled_id.eq(sled_id))
-                            .and(dsl::vendor.eq(vendor.clone()))
-                            .and(dsl::model.gt(model.clone())),
-                    );
-                    query = query.or_filter(
-                        dsl::inv_collection_id
-                            .eq(id)
-                            .and(dsl::sled_id.eq(sled_id))
-                            .and(dsl::vendor.gt(vendor.clone())),
-                    );
-                    query = query.or_filter(
-                        dsl::inv_collection_id
-                            .eq(id)
-                            .and(dsl::sled_id.gt(sled_id)),
-                    );
-                }
-                query = query
-                    .order_by(dsl::inv_collection_id.asc())
-                    .then_order_by(dsl::sled_id.asc())
-                    .then_order_by(dsl::vendor.asc())
-                    .then_order_by(dsl::model.asc())
-                    .then_order_by(dsl::serial.asc());
-
-                let batch: Vec<_> = query
-                    .select(InvPhysicalDisk::as_select())
-                    .load_async(&*conn)
-                    .await
-                    .map_err(|e| {
-                        public_error_from_diesel(e, ErrorHandler::Server)
-                    })?;
-                paginator = p.found_batch(&batch, &|row| {
-                    (
-                        row.sled_id,
-                        row.vendor.clone(),
-                        row.serial.clone(),
-                        row.model.clone(),
-                    )
-                });
-
+                let batch = paginated_multicolumn(
+                    dsl::inv_physical_disk,
+                    (dsl::sled_id, dsl::slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvPhysicalDisk::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id, row.slot));
                 for disk in batch {
                     disks.entry(disk.sled_id).or_default().push(disk.into());
                 }
             }
-
             disks
         };
 
