@@ -19,7 +19,7 @@ use bootstore::trust_quorum::RackSecret;
 use common::CommonTestState;
 use proptest::prelude::*;
 use secrecy::ExposeSecret;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 

@@ -9,7 +9,7 @@ use camino::Utf8Path;
 use dropshot::ConfigDropshot;
 use serde::Deserialize;
 use serde::Serialize;
-pub use sled_hardware::Baseboard;
+pub use sled_hardware_types::Baseboard;
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, SocketAddr};
 use uuid::Uuid;

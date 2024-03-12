@@ -5431,6 +5431,7 @@ dependencies = [
  "sha3",
  "sled-agent-client",
  "sled-hardware",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -8344,6 +8345,7 @@ name = "sled-hardware-types"
 version = "0.1.0"
 dependencies = [
  "illumos-utils",
+ "macaddr",
  "omicron-common",
  "schemars",
  "serde",

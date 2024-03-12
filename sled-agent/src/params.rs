@@ -21,7 +21,7 @@ use omicron_common::api::internal::shared::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 pub use sled_hardware::DendriteAsic;
 use sled_storage::dataset::DatasetKind;
 use sled_storage::dataset::DatasetName;

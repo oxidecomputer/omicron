@@ -98,19 +98,3 @@ pub fn ensure_links_have_global_zone_link_local_v6_addresses(
 
     Ok(addr_objs)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use macaddr::MacAddr6;
-
-    #[test]
-    fn test_mac_to_bootstrap_ip() {
-        let mac = MacAddr("a8:40:25:10:00:01".parse::<MacAddr6>().unwrap());
-
-        assert_eq!(
-            mac_to_bootstrap_ip(mac, 1),
-            "fdb0:a840:2510:1::1".parse::<Ipv6Addr>().unwrap(),
-        );
-    }
-}
