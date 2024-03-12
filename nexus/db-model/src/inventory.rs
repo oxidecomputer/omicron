@@ -13,8 +13,8 @@ use crate::schema::{
 };
 use crate::PhysicalDiskKind;
 use crate::{
-    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SqlU16, SqlU32,
-    SqlU8,
+    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, ServiceKind,
+    SqlU16, SqlU32, SqlU8,
 };
 use anyhow::anyhow;
 use chrono::DateTime;
@@ -29,6 +29,7 @@ use ipnetwork::IpNetwork;
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
+use omicron_common::api::internal::shared::NetworkInterface;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -758,6 +759,23 @@ impl_enum_type!(
     Oximeter => b"oximeter"
 );
 
+impl From<ZoneType> for ServiceKind {
+    fn from(zone_type: ZoneType) -> Self {
+        match zone_type {
+            ZoneType::BoundaryNtp | ZoneType::InternalNtp => Self::Ntp,
+            ZoneType::Clickhouse => Self::Clickhouse,
+            ZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
+            ZoneType::CockroachDb => Self::Cockroach,
+            ZoneType::Crucible => Self::Crucible,
+            ZoneType::CruciblePantry => Self::CruciblePantry,
+            ZoneType::ExternalDns => Self::ExternalDns,
+            ZoneType::InternalDns => Self::InternalDns,
+            ZoneType::Nexus => Self::Nexus,
+            ZoneType::Oximeter => Self::Oximeter,
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_zone)]
@@ -898,7 +916,7 @@ impl InvOmicronZoneNic {
     pub fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+    ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
     }

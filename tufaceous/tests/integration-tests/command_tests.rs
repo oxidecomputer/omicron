@@ -25,7 +25,7 @@ async fn test_init_and_add() -> Result<()> {
     cmd.assert().success();
 
     // Create a couple of stub files on disk.
-    let nexus_path = tempdir.path().join("omicron-nexus.tar.gz");
+    let nexus_path = tempdir.path().join("nexus.tar.gz");
     fs_err::write(&nexus_path, "test")?;
     let unknown_path = tempdir.path().join("my-unknown-kind.tar.gz");
     fs_err::write(&unknown_path, "unknown test")?;
@@ -65,7 +65,7 @@ async fn test_init_and_add() -> Result<()> {
 
     let mut artifacts_iter = artifacts.artifacts.into_iter();
     let artifact = artifacts_iter.next().unwrap();
-    assert_eq!(artifact.name, "omicron-nexus", "artifact name");
+    assert_eq!(artifact.name, "nexus", "artifact name");
     assert_eq!(artifact.version, "42.0.0".parse().unwrap(), "artifact version");
     assert_eq!(
         artifact.kind,
@@ -73,7 +73,7 @@ async fn test_init_and_add() -> Result<()> {
         "artifact kind"
     );
     assert_eq!(
-        artifact.target, "gimlet_sp-omicron-nexus-42.0.0.tar.gz",
+        artifact.target, "gimlet_sp-nexus-42.0.0.tar.gz",
         "artifact target"
     );
 

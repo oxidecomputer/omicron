@@ -44,14 +44,13 @@ pub const DNS_PORT: u16 = 53;
 pub const DNS_HTTP_PORT: u16 = 5353;
 pub const SLED_AGENT_PORT: u16 = 12345;
 
-/// The port propolis-server listens on inside the propolis zone.
-pub const PROPOLIS_PORT: u16 = 12400;
 pub const COCKROACH_PORT: u16 = 32221;
 pub const CRUCIBLE_PORT: u16 = 32345;
 pub const CLICKHOUSE_PORT: u16 = 8123;
 pub const CLICKHOUSE_KEEPER_PORT: u16 = 9181;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
+pub const LLDP_PORT: u16 = 12230;
 pub const MGD_PORT: u16 = 4676;
 pub const DDMD_PORT: u16 = 8000;
 pub const MGS_PORT: u16 = 12225;

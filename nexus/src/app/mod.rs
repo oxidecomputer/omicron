@@ -7,7 +7,6 @@
 use self::external_endpoints::NexusCertResolver;
 use crate::app::oximeter::LazyTimeseriesClient;
 use crate::app::sagas::SagaRequest;
-use crate::config;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -16,6 +15,10 @@ use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
 use internal_dns::ServiceName;
+use nexus_config::NexusConfig;
+use nexus_config::RegionAllocationStrategy;
+use nexus_config::Tunables;
+use nexus_config::UpdatesConfig;
 use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -25,7 +28,6 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::RegionAllocationStrategy;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr};
@@ -53,6 +55,7 @@ mod ip_pool;
 mod metrics;
 mod network_interface;
 mod oximeter;
+mod probe;
 mod project;
 mod quota;
 mod rack;
@@ -147,10 +150,10 @@ pub struct Nexus {
 
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
-    updates_config: Option<config::UpdatesConfig>,
+    updates_config: Option<UpdatesConfig>,
 
     /// The tunable parameters from a configuration file
-    tunables: config::Tunables,
+    tunables: Tunables,
 
     /// Operational context used for Instance allocation
     opctx_alloc: OpContext,
@@ -200,7 +203,7 @@ impl Nexus {
         resolver: internal_dns::resolver::Resolver,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
-        config: &config::Config,
+        config: &NexusConfig,
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
@@ -515,7 +518,7 @@ impl Nexus {
     }
 
     /// Return the tunable configuration parameters, e.g. for use in tests.
-    pub fn tunables(&self) -> &config::Tunables {
+    pub fn tunables(&self) -> &Tunables {
         &self.tunables
     }
 

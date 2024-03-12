@@ -6,8 +6,6 @@ use serde::Serialize;
 use std::io::{self, Cursor, Write};
 use uuid::Uuid;
 
-pub use nexus_types::external_api::params::MAX_USER_DATA_BYTES;
-
 pub trait InstanceCiData {
     fn generate_cidata(&self, public_keys: &[String])
         -> Result<Vec<u8>, Error>;
@@ -93,6 +91,8 @@ fn build_vfat(meta_data: &[u8], user_data: &[u8]) -> io::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use nexus_types::external_api::params::MAX_USER_DATA_BYTES;
+
     /// the fatfs crate has some unfortunate panics if you ask it to do
     /// incredibly stupid things, like format an empty disk or create a
     /// filesystem with an invalid cluster size.
@@ -104,7 +104,7 @@ mod tests {
     /// little further.)
     #[test]
     fn build_vfat_works_with_arbitrarily_sized_input() {
-        let upper = crate::cidata::MAX_USER_DATA_BYTES + 4096;
+        let upper = MAX_USER_DATA_BYTES + 4096;
         // somewhat arbitrarily-chosen prime numbers near 1 KiB and 256 bytes
         for md_size in (0..upper).step_by(1019) {
             for ud_size in (0..upper).step_by(269) {

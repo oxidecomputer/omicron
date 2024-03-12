@@ -98,6 +98,7 @@ async fn instance_register(
             body_args.hardware,
             body_args.instance_runtime,
             body_args.vmm_runtime,
+            body_args.metadata,
         )
         .await?,
     ))

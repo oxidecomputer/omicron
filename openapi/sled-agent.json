@@ -4735,6 +4735,14 @@
               }
             ]
           },
+          "metadata": {
+            "description": "Metadata used to track instance statistics.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMetadata"
+              }
+            ]
+          },
           "propolis_addr": {
             "description": "The address at which this VMM should serve a Propolis server API.",
             "type": "string"
@@ -4756,6 +4764,7 @@
         "required": [
           "hardware",
           "instance_runtime",
+          "metadata",
           "propolis_addr",
           "propolis_id",
           "vmm_runtime"
@@ -4885,6 +4894,24 @@
         },
         "required": [
           "snapshot_id"
+        ]
+      },
+      "InstanceMetadata": {
+        "description": "Metadata used to track statistics about an instance.",
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "silo_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "project_id",
+          "silo_id"
         ]
       },
       "InstanceMigrationSourceParams": {
@@ -5686,6 +5713,26 @@
                 "type": "string",
                 "enum": [
                   "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
                 ]
               }
             },

@@ -41,21 +41,17 @@ use uuid::Uuid;
 impl DataStore {
     /// Stores a new sled in the database.
     ///
-    /// Produces `SledUpsertOutput::Decommissioned` if the sled is
-    /// decommissioned. This is not an error, because `sled_upsert`'s only
-    /// caller (sled-agent) is not expected to receive this error.
+    /// Returns an error if `sled_agent_gen` is stale, or the sled is
+    /// decommissioned.
     pub async fn sled_upsert(
         &self,
         sled_update: SledUpdate,
-    ) -> CreateResult<SledUpsertOutput> {
+    ) -> CreateResult<Sled> {
         use db::schema::sled::dsl;
         // required for conditional upsert
         use diesel::query_dsl::methods::FilterDsl;
 
-        // TODO: figure out what to do with time_deleted. We want to replace it
-        // with a time_decommissioned, most probably.
-
-        let query = diesel::insert_into(dsl::sled)
+        diesel::insert_into(dsl::sled)
             .values(sled_update.clone().into_insertable())
             .on_conflict(dsl::id)
             .do_update()
@@ -69,14 +65,13 @@ impl DataStore {
                     .eq(sled_update.usable_hardware_threads),
                 dsl::usable_physical_ram.eq(sled_update.usable_physical_ram),
                 dsl::reservoir_size.eq(sled_update.reservoir_size),
+                dsl::sled_agent_gen.eq(sled_update.sled_agent_gen),
             ))
+            .filter(dsl::sled_agent_gen.lt(sled_update.sled_agent_gen))
             .filter(dsl::sled_state.ne(SledState::Decommissioned))
-            .returning(Sled::as_returning());
-
-        let sled: Option<Sled> = query
+            .returning(Sled::as_returning())
             .get_result_async(&*self.pool_connection_unauthorized().await?)
             .await
-            .optional()
             .map_err(|e| {
                 public_error_from_diesel(
                     e,
@@ -85,19 +80,7 @@ impl DataStore {
                         &sled_update.id().to_string(),
                     ),
                 )
-            })?;
-
-        // The only situation in which a sled is not returned is if the
-        // `.filter(dsl::sled_state.ne(SledState::Decommissioned))` is not
-        // satisfied.
-        //
-        // If we want to return a sled even if it's decommissioned here, we may
-        // have to do something more complex. See
-        // https://stackoverflow.com/q/34708509.
-        match sled {
-            Some(sled) => Ok(SledUpsertOutput::Updated(sled)),
-            None => Ok(SledUpsertOutput::Decommissioned),
-        }
+            })
     }
 
     pub async fn sled_list(
@@ -247,11 +230,20 @@ impl DataStore {
                     }
 
                     sql_function!(fn random() -> diesel::sql_types::Float);
+
+                    // We only actually care about one target here, so this
+                    // query should have a `.limit(1)` attached. We fetch all
+                    // sled targets to leave additional debugging information in
+                    // the logs, for now.
                     let sled_targets = sled_targets
                         .order(random())
-                        .limit(1)
                         .get_results_async::<Uuid>(&conn)
                         .await?;
+                    info!(
+                        opctx.log,
+                        "found {} available sled targets", sled_targets.len();
+                        "sled_ids" => ?sled_targets,
+                    );
 
                     if sled_targets.is_empty() {
                         return Err(err.bail(SledReservationError::NotFound));
@@ -523,28 +515,6 @@ impl DataStore {
     }
 }
 
-/// The result of [`DataStore::sled_upsert`].
-#[derive(Clone, Debug)]
-#[must_use]
-pub enum SledUpsertOutput {
-    /// The sled was updated.
-    Updated(Sled),
-    /// The sled was not updated because it is decommissioned.
-    Decommissioned,
-}
-
-impl SledUpsertOutput {
-    /// Returns the sled if it was updated, or panics if it was not.
-    pub fn unwrap(self) -> Sled {
-        match self {
-            SledUpsertOutput::Updated(sled) => sled,
-            SledUpsertOutput::Decommissioned => {
-                panic!("sled was decommissioned, not updated")
-            }
-        }
-    }
-}
-
 // ---
 // State transition validators
 // ---
@@ -704,6 +674,7 @@ mod test {
     use crate::db::model::SqlU32;
     use anyhow::{Context, Result};
     use itertools::Itertools;
+    use nexus_db_model::Generation;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
@@ -723,7 +694,7 @@ mod test {
 
         let mut sled_update = test_new_sled_update();
         let observed_sled =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap().unwrap();
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
         assert_eq!(
             observed_sled.usable_hardware_threads,
             sled_update.usable_hardware_threads
@@ -751,12 +722,14 @@ mod test {
             .unwrap(),
         );
 
+        // Bump the generation number so the insert succeeds.
+        sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
+
         // Test that upserting the sled propagates those changes to the DB.
         let observed_sled = datastore
             .sled_upsert(sled_update.clone())
             .await
-            .expect("Could not upsert sled during test prep")
-            .unwrap();
+            .expect("Could not upsert sled during test prep");
         assert_eq!(
             observed_sled.usable_hardware_threads,
             sled_update.usable_hardware_threads
@@ -772,6 +745,70 @@ mod test {
     }
 
     #[tokio::test]
+    async fn upsert_sled_updates_fails_with_stale_sled_agent_gen() {
+        let logctx = dev::test_setup_log(
+            "upsert_sled_updates_fails_with_stale_sled_agent_gen",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let mut sled_update = test_new_sled_update();
+        let observed_sled =
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
+
+        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
+
+        // Modify the reservoir size
+        const MIB: u64 = 1024 * 1024;
+
+        sled_update.reservoir_size = ByteCount::from(
+            external::ByteCount::try_from(
+                sled_update.reservoir_size.0.to_bytes() + MIB,
+            )
+            .unwrap(),
+        );
+
+        // Fail the update, since the generation number didn't change.
+        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+
+        // Bump the generation number so the next insert succeeds.
+        sled_update.sled_agent_gen.0 = sled_update.sled_agent_gen.0.next();
+
+        // Test that upserting the sled propagates those changes to the DB.
+        let observed_sled = datastore
+            .sled_upsert(sled_update.clone())
+            .await
+            .expect("Could not upsert sled during test prep");
+        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
+
+        // Now reset the generation to a lower value and try again.
+        // This should fail.
+        let current_gen = sled_update.sled_agent_gen;
+        sled_update.sled_agent_gen = Generation::new();
+        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
+
+        // Now bump the generation from the saved `current_gen`
+        // Change the reservoir value again. This should succeed.
+        sled_update.reservoir_size = ByteCount::from(
+            external::ByteCount::try_from(
+                sled_update.reservoir_size.0.to_bytes() + MIB,
+            )
+            .unwrap(),
+        );
+        sled_update.sled_agent_gen.0 = current_gen.0.next();
+        // Test that upserting the sled propagates those changes to the DB.
+        let observed_sled = datastore
+            .sled_upsert(sled_update.clone())
+            .await
+            .expect("Could not upsert sled during test prep");
+        assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
+        assert_eq!(observed_sled.sled_agent_gen, sled_update.sled_agent_gen);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn upsert_sled_doesnt_update_decommissioned() {
         let logctx =
             dev::test_setup_log("upsert_sled_doesnt_update_decommissioned");
@@ -780,7 +817,7 @@ mod test {
 
         let mut sled_update = test_new_sled_update();
         let observed_sled =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap().unwrap();
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
         assert_eq!(
             observed_sled.usable_hardware_threads,
             sled_update.usable_hardware_threads
@@ -821,15 +858,8 @@ mod test {
             .unwrap(),
         );
 
-        // Upserting the sled should produce the `Decommisioned` variant.
-        let sled = datastore
-            .sled_upsert(sled_update.clone())
-            .await
-            .expect("updating a decommissioned sled should succeed");
-        assert!(
-            matches!(sled, SledUpsertOutput::Decommissioned),
-            "sled should be decommissioned"
-        );
+        // Upserting the sled should produce an error, because it is decommissioend.
+        assert!(datastore.sled_upsert(sled_update.clone()).await.is_err());
 
         // The sled should not have been updated.
         let (_, observed_sled_2) = LookupPath::new(&opctx, &datastore)
@@ -865,26 +895,14 @@ mod test {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Define some sleds that resources cannot be provisioned on.
-        let non_provisionable_sled = datastore
-            .sled_upsert(test_new_sled_update())
-            .await
-            .unwrap()
-            .unwrap();
-        let expunged_sled = datastore
-            .sled_upsert(test_new_sled_update())
-            .await
-            .unwrap()
-            .unwrap();
-        let decommissioned_sled = datastore
-            .sled_upsert(test_new_sled_update())
-            .await
-            .unwrap()
-            .unwrap();
-        let illegal_decommissioned_sled = datastore
-            .sled_upsert(test_new_sled_update())
-            .await
-            .unwrap()
-            .unwrap();
+        let non_provisionable_sled =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let expunged_sled =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let decommissioned_sled =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
+        let illegal_decommissioned_sled =
+            datastore.sled_upsert(test_new_sled_update()).await.unwrap();
 
         let ineligible_sleds = IneligibleSleds {
             non_provisionable: non_provisionable_sled.id(),
@@ -917,7 +935,7 @@ mod test {
         // Now add a provisionable sled and try again.
         let sled_update = test_new_sled_update();
         let provisionable_sled =
-            datastore.sled_upsert(sled_update.clone()).await.unwrap().unwrap();
+            datastore.sled_upsert(sled_update.clone()).await.unwrap();
 
         // Try a few times to ensure that resources never get allocated to the
         // non-provisionable sled.
@@ -1039,11 +1057,7 @@ mod test {
             .enumerate();
 
         // Set up a sled to test against.
-        let sled = datastore
-            .sled_upsert(test_new_sled_update())
-            .await
-            .unwrap()
-            .unwrap();
+        let sled = datastore.sled_upsert(test_new_sled_update()).await.unwrap();
         let sled_id = sled.id();
 
         for (i, ((policy, state), after)) in all_transitions {
@@ -1164,6 +1178,7 @@ mod test {
             sled_baseboard_for_test(),
             sled_system_hardware_for_test(),
             rack_id(),
+            Generation::new(),
         )
     }
 

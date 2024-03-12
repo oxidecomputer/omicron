@@ -413,6 +413,7 @@ async fn instance_register(
             body_args.instance_runtime,
             body_args.vmm_runtime,
             body_args.propolis_addr,
+            body_args.metadata,
         )
         .await?,
     ))

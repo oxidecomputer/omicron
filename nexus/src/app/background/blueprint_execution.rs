@@ -20,6 +20,7 @@ pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     nexus_label: String,
+    tx: watch::Sender<usize>,
 }
 
 impl BlueprintExecutor {
@@ -30,7 +31,12 @@ impl BlueprintExecutor {
         >,
         nexus_label: String,
     ) -> BlueprintExecutor {
-        BlueprintExecutor { datastore, rx_blueprint, nexus_label }
+        let (tx, _) = watch::channel(0);
+        BlueprintExecutor { datastore, rx_blueprint, nexus_label, tx }
+    }
+
+    pub fn watcher(&self) -> watch::Receiver<usize> {
+        self.tx.subscribe()
     }
 }
 
@@ -63,13 +69,16 @@ impl BackgroundTask for BlueprintExecutor {
                 });
             }
 
-            let result = nexus_blueprint_execution::realize_blueprint(
+            let result = nexus_reconfigurator_execution::realize_blueprint(
                 opctx,
                 &self.datastore,
                 blueprint,
                 &self.nexus_label,
             )
             .await;
+
+            // Trigger anybody waiting for this to finish.
+            self.tx.send_modify(|count| *count = *count + 1);
 
             // Return the result as a `serde_json::Value`
             match result {
@@ -182,12 +191,12 @@ mod test {
                     reservoir_size: ByteCount(999.into()),
                 },
                 rack_id,
+                nexus_db_model::Generation::new(),
             );
             datastore
                 .sled_upsert(update)
                 .await
-                .expect("Failed to insert sled to db")
-                .unwrap();
+                .expect("Failed to insert sled to db");
         }
 
         let (blueprint_tx, blueprint_rx) = watch::channel(None);
@@ -249,7 +258,7 @@ mod test {
 
         // Make sure that requests get made to the sled agent.  This is not a
         // careful check of exactly what gets sent.  For that, see the tests in
-        // nexus-blueprint-execution.
+        // nexus-reconfigurator-execution.
         for s in [&mut s1, &mut s2] {
             s.expect(
                 Expectation::matching(all_of![request::method_path(

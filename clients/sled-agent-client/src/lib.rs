@@ -6,6 +6,7 @@
 
 use anyhow::Context;
 use async_trait::async_trait;
+use omicron_common::api::internal::shared::NetworkInterface;
 use std::convert::TryFrom;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -39,6 +40,7 @@ progenitor::generate_api!(
         PortSpeed = omicron_common::api::internal::shared::PortSpeed,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         Vni = omicron_common::api::external::Vni,
+        NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
     }
 );
 
@@ -141,7 +143,7 @@ impl types::OmicronZoneType {
     }
 
     /// The service vNIC providing external connectivity to this zone
-    pub fn service_vnic(&self) -> Option<&types::NetworkInterface> {
+    pub fn service_vnic(&self) -> Option<&NetworkInterface> {
         match self {
             types::OmicronZoneType::Nexus { nic, .. }
             | types::OmicronZoneType::ExternalDns { nic, .. }
@@ -566,26 +568,7 @@ impl From<omicron_common::api::internal::shared::NetworkInterfaceKind>
         match s {
             Instance { id } => Self::Instance(id),
             Service { id } => Self::Service(id),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::shared::NetworkInterface>
-    for types::NetworkInterface
-{
-    fn from(
-        s: omicron_common::api::internal::shared::NetworkInterface,
-    ) -> Self {
-        Self {
-            id: s.id,
-            kind: s.kind.into(),
-            name: s.name,
-            ip: s.ip,
-            mac: s.mac,
-            subnet: s.subnet.into(),
-            vni: s.vni,
-            primary: s.primary,
-            slot: s.slot,
+            Probe { id } => Self::Probe(id),
         }
     }
 }

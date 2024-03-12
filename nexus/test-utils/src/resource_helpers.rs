@@ -18,6 +18,7 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::params::PhysicalDiskKind;
 use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
@@ -29,7 +30,6 @@ use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
-use nexus_types::internal_api::params::Baseboard;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -267,7 +267,7 @@ pub async fn create_floating_ip(
     client: &ClientTestContext,
     fip_name: &str,
     project: &str,
-    address: Option<IpAddr>,
+    ip: Option<IpAddr>,
     parent_pool_name: Option<&str>,
 ) -> FloatingIp {
     object_create(
@@ -278,7 +278,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            address,
+            ip,
             pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
         },
     )
@@ -325,8 +325,8 @@ pub async fn create_switch(
         "/switches",
         &internal_params::SwitchPutRequest {
             baseboard: Baseboard {
-                serial_number: serial.to_string(),
-                part_number: part.to_string(),
+                serial: serial.to_string(),
+                part: part.to_string(),
                 revision,
             },
             rack_id,

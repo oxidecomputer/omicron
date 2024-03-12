@@ -93,11 +93,14 @@ impl CollectionBuilder {
     /// `collector` is an arbitrary string describing the agent that collected
     /// this data.  It's generally a Nexus instance uuid but it can be anything.
     /// It's just for debugging.
-    pub fn new(collector: &str) -> Self {
+    pub fn new<S>(collector: S) -> Self
+    where
+        String: From<S>,
+    {
         CollectionBuilder {
             errors: vec![],
             time_started: now_db_precision(),
-            collector: collector.to_owned(),
+            collector: String::from(collector),
             baseboards: BTreeSet::new(),
             cabooses: BTreeSet::new(),
             rot_pages: BTreeSet::new(),

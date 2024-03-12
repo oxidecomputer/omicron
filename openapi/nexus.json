@@ -101,6 +101,206 @@
         }
       }
     },
+    "/experimental/v1/probes": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "List instrumentation probes",
+        "operationId": "probe_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeInfoResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "project"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Create instrumentation probe",
+        "operationId": "probe_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProbeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probe"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/experimental/v1/probes/{probe}": {
+      "get": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "View instrumentation probe",
+        "operationId": "probe_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "probe",
+            "description": "Name or ID of the probe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProbeInfo"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "hidden"
+        ],
+        "summary": "Delete instrumentation probe",
+        "operationId": "probe_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "probe",
+            "description": "Name or ID of the probe",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/login/{silo_name}/saml/{provider_name}": {
       "post": {
         "tags": [
@@ -945,6 +1145,60 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FloatingIp"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "floating-ips"
+        ],
+        "summary": "Update floating IP",
+        "operationId": "floating_ip_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "floating_ip",
+            "description": "Name or ID of the floating IP",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FloatingIpUpdate"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "successful operation",
@@ -11864,14 +12118,14 @@
         "description": "Parameters for creating a new floating IP address for instances.",
         "type": "object",
         "properties": {
-          "address": {
+          "description": {
+            "type": "string"
+          },
+          "ip": {
             "nullable": true,
             "description": "An IP address to reserve for use as a floating IP. This field is optional: when not set, an address will be automatically chosen from `pool`. If set, then the IP must be available in the resolved `pool`.",
             "type": "string",
             "format": "ip"
-          },
-          "description": {
-            "type": "string"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -11918,6 +12172,24 @@
         "required": [
           "items"
         ]
+      },
+      "FloatingIpUpdate": {
+        "description": "Updateable identity-related parameters",
+        "type": "object",
+        "properties": {
+          "description": {
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          }
+        }
       },
       "Group": {
         "description": "View of a Group",
@@ -13138,6 +13410,14 @@
           }
         ]
       },
+      "IpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
+        ]
+      },
       "IpNet": {
         "oneOf": [
           {
@@ -13842,6 +14122,119 @@
           }
         ]
       },
+      "NetworkInterface": {
+        "description": "Information required to construct a virtual network interface",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/NetworkInterfaceKind"
+          },
+          "mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "primary": {
+            "type": "boolean"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "subnet": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "id",
+          "ip",
+          "kind",
+          "mac",
+          "name",
+          "primary",
+          "slot",
+          "subnet",
+          "vni"
+        ]
+      },
+      "NetworkInterfaceKind": {
+        "description": "The type of network interface",
+        "oneOf": [
+          {
+            "description": "A vNIC attached to a guest instance",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "instance"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with an internal service",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          }
+        ]
+      },
       "Password": {
         "title": "A password used to authenticate a user",
         "description": "Passwords may be subject to additional constraints.",
@@ -13945,6 +14338,161 @@
         "type": "string",
         "enum": [
           "ok"
+        ]
+      },
+      "Probe": {
+        "description": "Identity-related metadata that's included in nearly all public API objects",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "sled",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "ProbeCreate": {
+        "description": "Create time parameters for probes.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip_pool": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "sled"
+        ]
+      },
+      "ProbeExternalIp": {
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IpKind"
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "kind",
+          "last_port"
+        ]
+      },
+      "ProbeInfo": {
+        "type": "object",
+        "properties": {
+          "external_ips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeExternalIp"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/NetworkInterface"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "external_ips",
+          "id",
+          "interface",
+          "name",
+          "sled"
+        ]
+      },
+      "ProbeInfoResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeInfo"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "Project": {
@@ -16431,6 +16979,12 @@
           "storage"
         ]
       },
+      "Vni": {
+        "description": "A Geneve Virtual Network Identifier",
+        "type": "integer",
+        "format": "uint32",
+        "minimum": 0
+      },
       "Vpc": {
         "description": "View of a VPC",
         "type": "object",
@@ -17378,6 +17932,13 @@
       "description": "This provides rack-level network configuration.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-networking"
+      }
+    },
+    {
+      "name": "system/probes",
+      "description": "Probes for testing network connectivity",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/probes"
       }
     },
     {

@@ -19,7 +19,8 @@ DOWNLOAD_DIR="$TARGET_DIR/downloads"
 # Location where the final clickhouse directory should end up.
 DEST_DIR="./$TARGET_DIR/clickhouse"
 
-# If you change this, you must also update the md5sums below
+# If you change the version in clickhouse_version, you must also update the
+# md5sums in clickhouse_checksums
 CIDL_VERSION="$(cat "$SOURCE_DIR/clickhouse_version")"
 source "$SOURCE_DIR/clickhouse_checksums"
 
@@ -83,6 +84,12 @@ function main
 	# Unpack the tarball into a local directory
 	do_untar "$TARBALL_FILE" "$DEST_DIR"
 
+	# on macOS, we need to take the binary out of quarantine after download
+	# https://github.com/ClickHouse/clickhouse-docs/blob/08d7a329d/knowledgebase/fix-developer-verification-error-in-macos.md
+	if [[ $CIDL_OS == darwin* ]]; then
+		xattr -d com.apple.quarantine "$DEST_DIR/clickhouse"
+	fi
+
 	# Run the binary as a sanity-check.
 	"$DEST_DIR/clickhouse" server --version
 }
@@ -113,7 +120,6 @@ function configure_os
 			CIDL_PLATFORM="illumos"
 			CIDL_MD5="$CIDL_MD5_ILLUMOS"
 			CIDL_MD5FUNC="do_md5sum"
-			CIDL_DASHREV=-1
 			;;
 		*)
 			fail "unsupported OS: $1"

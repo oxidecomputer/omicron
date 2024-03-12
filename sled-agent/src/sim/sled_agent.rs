@@ -13,7 +13,7 @@ use super::storage::Storage;
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, Inventory,
     OmicronZonesConfig, SledRole,
 };
@@ -26,7 +26,6 @@ use futures::lock::Mutex;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -239,6 +238,9 @@ impl SledAgent {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
+        // This is currently unused, but will be included as part of work
+        // tracked in https://github.com/oxidecomputer/omicron/issues/4851.
+        _metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -683,14 +685,15 @@ impl SledAgent {
     }
 
     /// Used for integration tests that require a component to talk to a
-    /// mocked propolis-server API.
-    // TODO: fix schemas so propolis-server's port isn't hardcoded in nexus
-    // such that we can run more than one of these.
-    // (this is only needed by test_instance_serial at present)
+    /// mocked propolis-server API. Returns the socket on which the dropshot
+    /// service is listening, which *must* be patched into Nexus with
+    /// `nexus_db_queries::db::datastore::vmm_overwrite_addr_for_test` after
+    /// the instance creation saga if functionality touching propolis-server
+    /// is to be tested (e.g. serial console connection).
     pub async fn start_local_mock_propolis_server(
         &self,
         log: &Logger,
-    ) -> Result<(), Error> {
+    ) -> Result<SocketAddr, Error> {
         let mut mock_lock = self.mock_propolis.lock().await;
         if mock_lock.is_some() {
             return Err(Error::ObjectAlreadyExists {
@@ -699,7 +702,7 @@ impl SledAgent {
             });
         }
         let propolis_bind_address =
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), PROPOLIS_PORT);
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: propolis_bind_address,
             ..Default::default()
@@ -720,12 +723,10 @@ impl SledAgent {
             Error::unavail(&format!("initializing propolis-server: {}", error))
         })?
         .start();
-        let client = propolis_client::Client::new(&format!(
-            "http://{}",
-            srv.local_addr()
-        ));
+        let addr = srv.local_addr();
+        let client = propolis_client::Client::new(&format!("http://{}", addr));
         *mock_lock = Some((srv, client));
-        Ok(())
+        Ok(addr)
     }
 
     pub async fn inventory(
@@ -741,7 +742,7 @@ impl SledAgent {
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Gimlet,
+            sled_role: SledRole::Scrimlet,
             baseboard: self.config.hardware.baseboard.clone(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(

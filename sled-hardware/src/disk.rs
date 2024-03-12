@@ -40,6 +40,8 @@ pub enum PooledDiskError {
     CannotFormatMissingDevPath { path: Utf8PathBuf },
     #[error("Formatting M.2 devices is not yet implemented")]
     CannotFormatM2NotImplemented,
+    #[error(transparent)]
+    NvmeFormatAndResize(#[from] NvmeFormattingError),
 }
 
 /// A partition (or 'slice') of a disk.
@@ -198,9 +200,11 @@ impl PooledDisk {
     ) -> Result<Self, PooledDiskError> {
         let paths = &unparsed_disk.paths;
         let variant = unparsed_disk.variant;
+        let identity = unparsed_disk.identity();
         // Ensure the GPT has the right format. This does not necessarily
         // mean that the partitions are populated with the data we need.
-        let partitions = ensure_partition_layout(&log, &paths, variant)?;
+        let partitions =
+            ensure_partition_layout(&log, &paths, variant, identity)?;
 
         // Find the path to the zpool which exists on this disk.
         //

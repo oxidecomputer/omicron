@@ -21,6 +21,7 @@ use diesel::{
     Insertable, IntoSql, JoinOnDsl, NullableExpressionMethods, QueryDsl,
     RunQueryDsl,
 };
+use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::queries::region_allocation::{
     candidate_datasets, candidate_regions, candidate_zpools, cockroach_md5,
     do_insert, inserted_regions, old_regions, old_zpool_usage,
@@ -31,7 +32,6 @@ use nexus_db_model::to_db_sled_policy;
 use nexus_db_model::SledState;
 use nexus_types::external_api::views::SledPolicy;
 use omicron_common::api::external;
-use omicron_common::nexus_config::RegionAllocationStrategy;
 
 const NOT_ENOUGH_DATASETS_SENTINEL: &'static str = "Not enough datasets";
 const NOT_ENOUGH_ZPOOL_SPACE_SENTINEL: &'static str = "Not enough space";
