@@ -5,11 +5,13 @@
 //! Configuration parameters to Nexus that are usually only known
 //! at deployment time.
 
-use crate::address::NEXUS_TECHPORT_EXTERNAL_PORT;
-use crate::api::internal::shared::SwitchLocation;
+use crate::PostgresConfigWithUrl;
 
-use super::address::{Ipv6Subnet, RACK_PREFIX};
-use super::postgres_config::PostgresConfigWithUrl;
+use omicron_common::address::Ipv6Subnet;
+use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
+use omicron_common::address::RACK_PREFIX;
+use omicron_common::api::internal::shared::SwitchLocation;
+
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
 use dropshot::ConfigDropshot;
@@ -27,6 +29,31 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+pub struct NexusConfig {
+    /// Configuration parameters known at compile-time.
+    #[serde(flatten)]
+    pub pkg: PackageConfig,
+
+    /// A variety of configuration parameters only known at deployment time.
+    pub deployment: DeploymentConfig,
+}
+
+impl NexusConfig {
+    /// Load a `Config` from the given TOML file
+    ///
+    /// This config object can then be used to create a new `Nexus`.
+    /// The format is described in the README.
+    pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, LoadError> {
+        let path = path.as_ref();
+        let file_contents = std::fs::read_to_string(path)
+            .map_err(|e| (path.to_path_buf(), e))?;
+        let config_parsed: Self = toml::from_str(&file_contents)
+            .map_err(|e| (path.to_path_buf(), e))?;
+        Ok(config_parsed)
+    }
+}
 
 #[derive(Debug)]
 pub struct LoadError {
@@ -499,31 +526,6 @@ pub struct PackageConfig {
     pub default_region_allocation_strategy: RegionAllocationStrategy,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-pub struct Config {
-    /// Configuration parameters known at compile-time.
-    #[serde(flatten)]
-    pub pkg: PackageConfig,
-
-    /// A variety of configuration parameters only known at deployment time.
-    pub deployment: DeploymentConfig,
-}
-
-impl Config {
-    /// Load a `Config` from the given TOML file
-    ///
-    /// This config object can then be used to create a new `Nexus`.
-    /// The format is described in the README.
-    pub fn from_file<P: AsRef<Utf8Path>>(path: P) -> Result<Self, LoadError> {
-        let path = path.as_ref();
-        let file_contents = std::fs::read_to_string(path)
-            .map_err(|e| (path.to_path_buf(), e))?;
-        let config_parsed: Self = toml::from_str(&file_contents)
-            .map_err(|e| (path.to_path_buf(), e))?;
-        Ok(config_parsed)
-    }
-}
-
 /// List of supported external authn schemes
 ///
 /// Note that the authn subsystem doesn't know about this type.  It allows
@@ -563,27 +565,16 @@ impl std::fmt::Display for SchemeName {
 
 #[cfg(test)]
 mod test {
-    use super::{
-        default_techport_external_server_port, AuthnConfig,
-        BackgroundTaskConfig, BlueprintTasksConfig, Config,
-        ConfigDropshotWithTls, ConsoleConfig, Database, DeploymentConfig,
-        DnsTasksConfig, DpdConfig, ExternalEndpointsConfig, InternalDns,
-        InventoryConfig, LoadError, LoadErrorKind, MgdConfig, NatCleanupConfig,
-        PackageConfig, PhantomDiskConfig, RegionReplacementConfig, SchemeName,
-        TimeseriesDbConfig, Tunables, UpdatesConfig,
-    };
-    use crate::address::{Ipv6Subnet, RACK_PREFIX};
-    use crate::api::internal::shared::SwitchLocation;
-    use crate::nexus_config::{
-        BfdManagerConfig, SwitchPortSettingsManagerConfig,
-        SyncServiceZoneNatConfig,
-    };
+    use super::*;
+
+    use omicron_common::address::{Ipv6Subnet, RACK_PREFIX};
+    use omicron_common::api::internal::shared::SwitchLocation;
+
     use camino::{Utf8Path, Utf8PathBuf};
     use dropshot::ConfigDropshot;
     use dropshot::ConfigLogging;
     use dropshot::ConfigLoggingIfExists;
     use dropshot::ConfigLoggingLevel;
-    use libc;
     use std::collections::HashMap;
     use std::fs;
     use std::net::{Ipv6Addr, SocketAddr};
@@ -608,13 +599,16 @@ mod test {
     /// loads the config from that file, then removes the file.  `label` is used
     /// as a unique string for the filename and error messages.  It should be
     /// unique for each test.
-    fn read_config(label: &str, contents: &str) -> Result<Config, LoadError> {
+    fn read_config(
+        label: &str,
+        contents: &str,
+    ) -> Result<NexusConfig, LoadError> {
         let pathbuf = temp_path(label);
         let path = pathbuf.as_path();
         eprintln!("writing test config {}", path);
         fs::write(path, contents).expect("write to tempfile failed");
 
-        let result = Config::from_file(path);
+        let result = NexusConfig::from_file(path);
         fs::remove_file(path).expect("failed to remove temporary file");
         eprintln!("{:?}", result);
         result
@@ -624,7 +618,7 @@ mod test {
 
     #[test]
     fn test_config_nonexistent() {
-        let error = Config::from_file(Utf8Path::new("/nonexistent"))
+        let error = NexusConfig::from_file(Utf8Path::new("/nonexistent"))
             .expect_err("expected config to fail from /nonexistent");
         let expected = std::io::Error::from_raw_os_error(libc::ENOENT);
         assert_eq!(error, expected);
@@ -741,7 +735,7 @@ mod test {
 
         assert_eq!(
             config,
-            Config {
+            NexusConfig {
                 deployment: DeploymentConfig {
                     id: "28b90dc4-c22a-65ba-f49a-f051fe01208f".parse().unwrap(),
                     rack_id: "38b90dc4-c22a-65ba-f49a-f051fe01208f"
@@ -1040,7 +1034,7 @@ mod test {
         // The example config file should be valid.
         let config_path = "../nexus/examples/config.toml";
         println!("checking {:?}", config_path);
-        let example_config = Config::from_file(config_path)
+        let example_config = NexusConfig::from_file(config_path)
             .expect("example config file is not valid");
 
         // The config file used for the tests should also be valid.  The tests
@@ -1048,7 +1042,7 @@ mod test {
         // helpful to verify this here explicitly as well.
         let config_path = "../nexus/examples/config.toml";
         println!("checking {:?}", config_path);
-        let _ = Config::from_file(config_path)
+        let _ = NexusConfig::from_file(config_path)
             .expect("test config file is not valid");
 
         // The partial config file that's used to deploy Nexus must also be
@@ -1082,7 +1076,7 @@ mod test {
             \n\n\n",
             );
             contents.push_str(&example_deployment);
-            let _: Config = toml::from_str(&contents)
+            let _: NexusConfig = toml::from_str(&contents)
                 .expect("Nexus SMF config file is not valid");
         }
     }

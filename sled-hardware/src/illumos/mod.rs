@@ -26,7 +26,7 @@ mod gpt;
 mod partitions;
 mod sysconf;
 
-pub use partitions::ensure_partition_layout;
+pub use partitions::{ensure_partition_layout, NvmeFormattingError};
 
 #[derive(thiserror::Error, Debug)]
 enum Error {

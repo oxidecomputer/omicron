@@ -358,11 +358,6 @@ impl<'a> LookupPath<'a> {
         Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type Service, identified by its id
-    pub fn service_id(self, id: Uuid) -> Service<'a> {
-        Service::PrimaryKey(Root { lookup_root: self }, id)
-    }
-
     /// Select a resource of type Switch, identified by its id
     pub fn switch_id(self, id: Uuid) -> Switch<'a> {
         Switch::PrimaryKey(Root { lookup_root: self }, id)
@@ -824,15 +819,6 @@ lookup_resource! {
     lookup_by_name = false,
     soft_deletes = false,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ],
-}
-
-lookup_resource! {
-    name = "Service",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {

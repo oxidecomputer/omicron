@@ -36,6 +36,8 @@ pub enum NetworkInterfaceKind {
     Instance { id: Uuid },
     /// A vNIC associated with an internal service
     Service { id: Uuid },
+    /// A vNIC associated with a probe
+    Probe { id: Uuid },
 }
 
 /// Information required to construct a virtual network interface

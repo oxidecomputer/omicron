@@ -5,13 +5,12 @@
 //! Sleds, and the hardware and services within them.
 
 use crate::internal_api::params::{
-    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
-    SledRole, ZpoolPutRequest,
+    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentInfo, SledRole,
+    ZpoolPutRequest,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::SledUpsertOutput;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::DatasetKind;
@@ -45,7 +44,7 @@ impl super::Nexus {
         &self,
         _opctx: &OpContext,
         id: Uuid,
-        info: SledAgentStartupInfo,
+        info: SledAgentInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
 
@@ -58,8 +57,8 @@ impl super::Nexus {
             id,
             info.sa_address,
             db::model::SledBaseboard {
-                serial_number: info.baseboard.serial_number,
-                part_number: info.baseboard.part_number,
+                serial_number: info.baseboard.serial,
+                part_number: info.baseboard.part,
                 revision: info.baseboard.revision,
             },
             db::model::SledSystemHardware {
@@ -69,21 +68,9 @@ impl super::Nexus {
                 reservoir_size: info.reservoir_size.into(),
             },
             self.rack_id,
+            info.generation.into(),
         );
-        match self.db_datastore.sled_upsert(sled).await? {
-            SledUpsertOutput::Updated(_) => {}
-            SledUpsertOutput::Decommissioned => {
-                // We currently don't bubble up errors for decommissioned sleds
-                // -- if it ever happens, a decommissioned sled-agent doesn't
-                // know about that.
-                warn!(
-                    self.log,
-                    "decommissioned sled-agent reached out for upserts";
-                    "sled_uuid" => id.to_string()
-                );
-            }
-        }
-
+        self.db_datastore.sled_upsert(sled).await?;
         Ok(())
     }
 

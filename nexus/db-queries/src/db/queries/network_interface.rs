@@ -25,11 +25,11 @@ use diesel::QueryResult;
 use diesel::RunQueryDsl;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_db_model::{NetworkInterfaceKind, MAX_NICS_PER_INSTANCE};
 use nexus_db_model::{NetworkInterfaceKindEnum, SqlU8};
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
-use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use once_cell::sync::Lazy;
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -158,6 +158,9 @@ impl InsertError {
             }
             InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Service) => {
                 unimplemented!("service network interface")
+            }
+            InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Probe) => {
+                unimplemented!("probe network interface")
             }
             InsertError::NoAvailableIpAddresses => {
                 external::Error::invalid_request(
@@ -408,6 +411,9 @@ fn decode_database_error(
                     NetworkInterfaceKind::Service => {
                         external::ResourceType::ServiceNetworkInterface
                     }
+                    NetworkInterfaceKind::Probe => {
+                        external::ResourceType::ProbeNetworkInterface
+                    }
                 };
                 InsertError::External(error::public_error_from_diesel(
                     err,
@@ -647,7 +653,7 @@ impl NextMacShifts {
 impl NextMacAddress {
     pub fn new(vpc_id: Uuid, kind: NetworkInterfaceKind) -> Self {
         let (base, max_shift, min_shift) = match kind {
-            NetworkInterfaceKind::Instance => {
+            NetworkInterfaceKind::Instance | NetworkInterfaceKind::Probe => {
                 let NextMacShifts { base, min_shift, max_shift } =
                     NextMacShifts::for_guest();
                 (base.into(), max_shift, min_shift)
@@ -2730,6 +2736,7 @@ mod tests {
             NetworkInterfaceKind::Service => {
                 (inserted.mac.is_system(), "system")
             }
+            NetworkInterfaceKind::Probe => (inserted.mac.is_system(), "probe"),
         };
         assert!(
             mac_in_range,

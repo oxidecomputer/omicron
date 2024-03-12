@@ -82,6 +82,17 @@ pub struct InstanceHardware {
     pub cloud_init_bytes: Option<String>,
 }
 
+/// Metadata used to track statistics about an instance.
+///
+// NOTE: The instance ID is not here, since it's already provided in other
+// pieces of the instance-related requests. It is pulled from there when
+// publishing metrics for the instance.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InstanceMetadata {
+    pub silo_id: Uuid,
+    pub project_id: Uuid,
+}
+
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -103,6 +114,9 @@ pub struct InstanceEnsureBody {
 
     /// The address at which this VMM should serve a Propolis server API.
     pub propolis_addr: SocketAddr,
+
+    /// Metadata used to track instance statistics.
+    pub metadata: InstanceMetadata,
 }
 
 /// The body of a request to move a previously-ensured instance into a specific
@@ -728,7 +742,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 domain,
                 ntp_servers,
                 snat_cfg,
-                nic: nic.into(),
+                nic: nic,
             },
             OmicronZoneType::Clickhouse { address, dataset } => {
                 Other::Clickhouse {
@@ -764,7 +778,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 dataset: dataset.into(),
                 http_address: http_address.to_string(),
                 dns_address: dns_address.to_string(),
-                nic: nic.into(),
+                nic: nic,
             },
             OmicronZoneType::InternalDns {
                 dataset,
@@ -801,7 +815,7 @@ impl From<OmicronZoneType> for sled_agent_client::types::OmicronZoneType {
                 external_ip,
                 external_tls,
                 internal_address: internal_address.to_string(),
-                nic: nic.into(),
+                nic: nic,
             },
             OmicronZoneType::Oximeter { address } => {
                 Other::Oximeter { address: address.to_string() }

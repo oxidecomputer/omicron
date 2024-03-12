@@ -40,9 +40,9 @@ impl super::Nexus {
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        //TODO(ry) race conditions on exists check versus update/create.
-        //         Normally I would use a DB lock here, but not sure what
-        //         the Omicron way of doing things here is.
+        //TODO race conditions on exists check versus update/create.
+        //     Normally I would use a DB lock here, but not sure what
+        //     the Omicron way of doing things here is.
 
         match self
             .db_datastore

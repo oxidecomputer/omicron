@@ -102,19 +102,6 @@ z_swadm () {
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
 
-# XXX remove. This is just to test against a development branch of OPTE in CI.
-set +x
-OPTE_COMMIT="73d4669ea213d0b7aca35c4babb6fd09ed51d29e"
-curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
-pfexec rem_drv xde || true
-pfexec mv xde /kernel/drv/amd64/xde
-pfexec add_drv xde || true
-curl -sSfOL https://buildomat.eng.oxide.computer/wg/0/artefact/01HM09S4M15WNXB2B2MX8R1GBT/yLalJU5vT4S4IEpwSeY4hPuspxw3JcINokZmlfNU14npHkzG/01HM09SJ2RQSFGW7MVKC9JKZ8D/01HM0A58D888AJ7YP6N1Q6T6ZD/opteadm
-chmod +x opteadm
-cp opteadm /tmp/opteadm
-pfexec mv opteadm /opt/oxide/opte/bin/opteadm
-set -x
-
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
 # is probably not yet fixed in xde branch?  Once the xde branch merges from
@@ -161,7 +148,7 @@ cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
 cp /input/package/work/zones/* out/
-mv out/omicron-nexus-single-sled.tar.gz out/omicron-nexus.tar.gz
+mv out/nexus-single-sled.tar.gz out/nexus.tar.gz
 mkdir tests
 for p in /input/ci-tools/work/end-to-end-tests/*.gz; do
 	ptime -m gunzip < "$p" > "tests/$(basename "${p%.gz}")"

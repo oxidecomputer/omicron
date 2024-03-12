@@ -15,13 +15,14 @@ use crucible_agent_client::types::State as RegionState;
 use internal_dns::ServiceName;
 use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
-use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use omicron_common::FileKv;
 use slog::{info, Drain, Logger};
 use std::collections::HashMap;
@@ -101,15 +102,15 @@ impl Server {
                 nexus_client
                     .sled_agent_put(
                         &config.id,
-                        &NexusTypes::SledAgentStartupInfo {
+                        &NexusTypes::SledAgentInfo {
                             sa_address: sa_address.to_string(),
                             role: NexusTypes::SledRole::Scrimlet,
                             baseboard: NexusTypes::Baseboard {
-                                serial_number: format!(
+                                serial: format!(
                                     "sim-{}",
                                     &config.id.to_string()[0..8]
                                 ),
-                                part_number: String::from("Unknown"),
+                                part: String::from("Unknown"),
                                 revision: 0,
                             },
                             usable_hardware_threads: config
@@ -124,6 +125,8 @@ impl Server {
                                 config.hardware.reservoir_ram,
                             )
                             .unwrap(),
+                            generation: Generation::new(),
+                            decommissioned: false,
                         },
                     )
                     .await

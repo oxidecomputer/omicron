@@ -13,7 +13,7 @@ use super::storage::Storage;
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, Inventory,
     OmicronZonesConfig, SledRole,
 };
@@ -239,6 +239,9 @@ impl SledAgent {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
+        // This is currently unused, but will be included as part of work
+        // tracked in https://github.com/oxidecomputer/omicron/issues/4851.
+        _metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -737,7 +740,7 @@ impl SledAgent {
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Gimlet,
+            sled_role: SledRole::Scrimlet,
             baseboard: self.config.hardware.baseboard.clone(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
