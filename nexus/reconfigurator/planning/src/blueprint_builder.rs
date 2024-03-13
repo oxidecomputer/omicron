@@ -306,9 +306,10 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
             if let Some(external_ip) = z.zone_type.external_ip()? {
-                // In the test suite, ignore localhost.  It gets reused many
-                // times and that's okay.
-                if (!cfg!(test) || !external_ip.is_loopback())
+                // For the test suite, ignore localhost.  It gets reused many
+                // times and that's okay.  We don't expect to see localhost
+                // outside the test suite.
+                if !external_ip.is_loopback()
                     && !used_external_ips.insert(external_ip)
                 {
                     bail!("duplicate external IP: {external_ip}");

@@ -456,6 +456,8 @@ mod test {
     use internal_dns::DNS_ZONE;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
+    use nexus_db_queries::authn;
+    use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
     use nexus_inventory::CollectionBuilder;
@@ -503,6 +505,7 @@ mod test {
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::str::FromStr;
+    use std::sync::Arc;
     use std::time::Duration;
     use uuid::Uuid;
 
@@ -1161,7 +1164,12 @@ mod test {
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
         let log = &cptestctx.logctx.log;
-        let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+        let opctx = OpContext::for_background(
+            log.clone(),
+            Arc::new(authz::Authz::new(log)),
+            authn::Context::internal_api(),
+            datastore.clone(),
+        );
 
         // First, wait until Nexus has successfully completed an inventory
         // collection.
