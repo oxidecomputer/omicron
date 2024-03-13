@@ -1760,6 +1760,7 @@ mod tests {
         propolis_addr: SocketAddr,
         nexus_client_with_resolver: NexusClientWithResolver,
         storage_handle: StorageHandle,
+        temp_dir: String,
     ) -> Instance {
         let id = Uuid::new_v4();
         let propolis_id = Uuid::new_v4();
@@ -1773,6 +1774,7 @@ mod tests {
             logctx,
             storage_handle,
             nexus_client_with_resolver,
+            temp_dir,
         );
 
         let metadata = InstanceMetadata {
@@ -1842,6 +1844,7 @@ mod tests {
         logctx: &LogContext,
         storage_handle: StorageHandle,
         nexus_client_with_resolver: NexusClientWithResolver,
+        temp_dir: String,
     ) -> InstanceManagerServices {
         let vnic_allocator =
             VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
@@ -1863,7 +1866,7 @@ mod tests {
             port_manager,
             storage: storage_handle,
             zone_bundler,
-            zone_builder_factory: ZoneBuilderFactory::fake(None),
+            zone_builder_factory: ZoneBuilderFactory::fake(Some(temp_dir)),
         }
     }
 
@@ -1894,6 +1897,9 @@ mod tests {
 
         let storage_handle = fake_storage_manager_with_u2().await;
 
+        let temp_guard = Utf8TempDir::new().unwrap();
+        let temp_dir = temp_guard.path().to_string();
+
         let inst = timeout(
             TIMEOUT_DURATION,
             instance_struct(
@@ -1901,6 +1907,7 @@ mod tests {
                 propolis_addr,
                 nexus_client_with_resolver,
                 storage_handle,
+                temp_dir,
             ),
         )
         .await
@@ -1958,6 +1965,9 @@ mod tests {
 
         let storage_handle = fake_storage_manager_with_u2().await;
 
+        let temp_guard = Utf8TempDir::new().unwrap();
+        let temp_dir = temp_guard.path().to_string();
+
         let inst = timeout(
             TIMEOUT_DURATION,
             instance_struct(
@@ -1966,6 +1976,7 @@ mod tests {
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
                 nexus_client_with_resolver,
                 storage_handle,
+                temp_dir,
             ),
         )
         .await
@@ -2025,6 +2036,9 @@ mod tests {
 
         let storage_handle = fake_storage_manager_with_u2().await;
 
+        let temp_guard = Utf8TempDir::new().unwrap();
+        let temp_dir = temp_guard.path().to_string();
+
         let inst = timeout(
             TIMEOUT_DURATION,
             instance_struct(
@@ -2033,6 +2047,7 @@ mod tests {
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
                 nexus_client_with_resolver,
                 storage_handle,
+                temp_dir,
             ),
         )
         .await
@@ -2082,6 +2097,9 @@ mod tests {
         let nexus_client_with_resolver =
             NexusClientWithResolver::new_with_client(nexus_client, resolver);
 
+        let temp_guard = Utf8TempDir::new().unwrap();
+        let temp_dir = temp_guard.path().to_string();
+
         let InstanceManagerServices {
             nexus_client,
             vnic_allocator: _,
@@ -2093,6 +2111,7 @@ mod tests {
             &logctx,
             storage_handle,
             nexus_client_with_resolver,
+            temp_dir,
         );
 
         let etherstub = Etherstub("mystub".to_string());
