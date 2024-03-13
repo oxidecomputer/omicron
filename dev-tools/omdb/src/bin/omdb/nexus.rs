@@ -1153,8 +1153,10 @@ async fn cmd_nexus_sled_expunge(
             if sled_present_in_collection {
                 eprintln!(
                     "WARNING: sled {} is PRESENT in the most recent inventory \
-                    collection; are you sure you want to mark it expunged?",
-                    args.sled_id,
+                     collection (spotted at {}). It is dangerous to expunge a \
+                     sled that is still running. Are you sure you want to \
+                     proceed anyway?",
+                    args.sled_id, collection.time_done,
                 );
                 let confirm = read_with_prompt("y/N")?;
                 if confirm != "y" {
@@ -1164,7 +1166,11 @@ async fn cmd_nexus_sled_expunge(
             }
         }
         None => {
-            eprintln!("WARNING: no inventory collections present");
+            eprintln!(
+                "WARNING: cannot verify that the sled is physically gone \
+                 because there are no inventory collections present. Please \
+                 make sure that the sled has been physically removed."
+            );
         }
     }
 
