@@ -108,7 +108,7 @@ cargo nextest run
 
 === Adding a new system library dependency
 
-We check that certain system library dependencies are not leaked outside of their intended binaries via `cargo xtask verify-libraries` in CI. If you are adding a new dependency on a illumos/helios library it is recommended that you update xref:verify-libraries.toml[] with a whitelist of where you expect the dependency to show up. For example some libraries such as `libnvme.so.1` are only available in the global zone and therefore will not be present in any other zone. This check is here to help us catch any leakage before we go to deploy on a rack. You can inspect a compiled binary in the target directory for what it requires by using `elfedit` - for example `elfedit -r -e 'dyn:tag NEEDED' /path/to/omicron/target/debug/sled-agent`.
+We check that certain system library dependencies are not leaked outside of their intended binaries via `cargo xtask verify-libraries` in CI. If you are adding a new dependency on a illumos/helios library it is recommended that you update xref:library-verification.toml[] with a whitelist of where you expect the dependency to show up. For example some libraries such as `libnvme.so.1` are only available in the global zone and therefore will not be present in any other zone. This check is here to help us catch any leakage before we go to deploy on a rack. You can inspect a compiled binary in the target directory for what it requires by using `elfedit` - for example `elfedit -r -e 'dyn:tag NEEDED' /path/to/omicron/target/debug/sled-agent`.
 
 === Rust packages in Omicron
 
