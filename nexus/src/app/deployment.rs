@@ -123,7 +123,7 @@ impl super::Nexus {
             &sled_rows,
             &zpool_rows,
             &ip_pool_range_rows,
-            NEXUS_REDUNDANCY + 1, // XXX-dap
+            NEXUS_REDUNDANCY,
         )?;
 
         // The choice of which inventory collection to use here is not

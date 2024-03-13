@@ -34,7 +34,8 @@ pub struct Overridables {
 
 impl Overridables {
     /// Specify the TCP port on which this sled's Dendrite is listening
-    pub fn override_dendrite_port(&mut self, sled_id: Uuid, port: u16) {
+    #[cfg(test)]
+    fn override_dendrite_port(&mut self, sled_id: Uuid, port: u16) {
         self.dendrite_ports.insert(sled_id, port);
     }
 
@@ -44,7 +45,8 @@ impl Overridables {
     }
 
     /// Specify the TCP port on which this sled's MGS is listening
-    pub fn override_mgs_port(&mut self, sled_id: Uuid, port: u16) {
+    #[cfg(test)]
+    fn override_mgs_port(&mut self, sled_id: Uuid, port: u16) {
         self.mgs_ports.insert(sled_id, port);
     }
 
@@ -54,7 +56,8 @@ impl Overridables {
     }
 
     /// Specify the TCP port on which this sled's MGD is listening
-    pub fn override_mgd_port(&mut self, sled_id: Uuid, port: u16) {
+    #[cfg(test)]
+    fn override_mgd_port(&mut self, sled_id: Uuid, port: u16) {
         self.mgd_ports.insert(sled_id, port);
     }
 
@@ -64,7 +67,8 @@ impl Overridables {
     }
 
     /// Specify the IP address of this switch zone
-    pub fn override_switch_zone_ip(&mut self, sled_id: Uuid, addr: Ipv6Addr) {
+    #[cfg(test)]
+    fn override_switch_zone_ip(&mut self, sled_id: Uuid, addr: Ipv6Addr) {
         self.switch_zone_ips.insert(sled_id, addr);
     }
 

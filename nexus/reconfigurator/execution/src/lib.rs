@@ -60,6 +60,25 @@ pub async fn realize_blueprint<S>(
     datastore: &DataStore,
     blueprint: &Blueprint,
     nexus_label: S,
+) -> Result<(), Vec<anyhow::Error>>
+where
+    String: From<S>,
+{
+    realize_blueprint_with_overrides(
+        opctx,
+        datastore,
+        blueprint,
+        nexus_label,
+        &Default::default(),
+    )
+    .await
+}
+
+pub async fn realize_blueprint_with_overrides<S>(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+    nexus_label: S,
     overrides: &Overridables,
 ) -> Result<(), Vec<anyhow::Error>>
 where

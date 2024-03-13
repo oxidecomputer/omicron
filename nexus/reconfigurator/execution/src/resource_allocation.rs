@@ -93,9 +93,11 @@ impl<'a> ResourceAllocator<'a> {
         external_ip: IpAddr,
         port_range: Option<(u16, u16)>,
     ) -> anyhow::Result<bool> {
-        // Treat localhost as always allocated.  We only use this in the test
-        // suite.
-        if external_ip.is_loopback() {
+        // localhost is used by many components in the test suite.  We can't use
+        // the normal path because normally a given external IP must only be
+        // used once.  Just treat localhost in the test suite as though it's
+        // already allocated.  We do the same in is_nic_already_allocated().
+        if cfg!(test) && external_ip.is_loopback() {
             return Ok(true);
         }
 
@@ -163,9 +165,8 @@ impl<'a> ResourceAllocator<'a> {
         zone_id: Uuid,
         nic: &NetworkInterface,
     ) -> anyhow::Result<bool> {
-        // Treat localhost as always allocated.  We only use this in the test
-        // suite.
-        if nic.ip.is_loopback() {
+        // See the comment in is_external_ip_already_allocated().
+        if cfg!(test) && nic.ip.is_loopback() {
             return Ok(true);
         }
 

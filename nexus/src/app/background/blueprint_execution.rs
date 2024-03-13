@@ -74,7 +74,6 @@ impl BackgroundTask for BlueprintExecutor {
                 &self.datastore,
                 blueprint,
                 &self.nexus_label,
-                &Default::default(),
             )
             .await;
 

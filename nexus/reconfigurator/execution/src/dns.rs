@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Propagates internal DNS changes in a given blueprint
+//! Propagates DNS changes in a given blueprint
 
 use crate::overridables::Overridables;
 use crate::Sled;
@@ -84,7 +84,7 @@ pub(crate) async fn deploy_dns(
     let external_dns_config_blueprint = blueprint_external_dns_config(
         blueprint,
         &nexus_external_ips,
-        &silos.iter().collect::<Vec<_>>(),
+        &silos,
         &nexus_external_dns_zone_names,
     );
 
@@ -346,7 +346,7 @@ pub fn blueprint_internal_dns_config(
 pub fn blueprint_external_dns_config(
     blueprint: &Blueprint,
     nexus_external_ips: &[IpAddr],
-    silos: &[&Silo],
+    silos: &[Silo],
     external_dns_zone_names: &[String],
 ) -> DnsConfigParams {
     let dns_records: Vec<DnsRecord> = nexus_external_ips
@@ -435,12 +435,20 @@ fn dns_compute_update(
     Ok(Some(update))
 }
 
+/// Returns the (relative) DNS name for this Silo's API and console endpoints
+/// _within_ the external DNS zone (i.e., without that zone's suffix)
+///
+/// This specific naming scheme is determined under RFD 357.
+pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
+    // RFD 4 constrains resource names (including Silo names) to DNS-safe
+    // strings, which is why it's safe to directly put the name of the
+    // resource into the DNS name rather than doing any kind of escaping.
+    format!("{}.sys", name)
+}
+
 #[cfg(test)]
 mod test {
-    use super::blueprint_internal_dns_config;
-    use super::dns_compute_update;
-    use crate::dns::blueprint_external_dns_config;
-    use crate::dns::silo_dns_name;
+    use super::*;
     use crate::overridables::Overridables;
     use crate::Sled;
     use dns_service_client::DnsDiff;
@@ -876,7 +884,7 @@ mod test {
         let external_dns_config = blueprint_external_dns_config(
             &blueprint,
             &nexus_external_ips,
-            &[&my_silo],
+            std::slice::from_ref(&my_silo),
             &[],
         );
         assert_eq!(
@@ -889,7 +897,7 @@ mod test {
         let external_dns_config = blueprint_external_dns_config(
             &blueprint,
             &[],
-            &[&my_silo],
+            std::slice::from_ref(&my_silo),
             &[String::from("oxide.test")],
         );
         assert_eq!(
@@ -903,7 +911,7 @@ mod test {
         let external_dns_config = blueprint_external_dns_config(
             &blueprint,
             &nexus_external_ips,
-            &[&my_silo],
+            std::slice::from_ref(&my_silo),
             &[String::from("oxide1.test"), String::from("oxide2.test")],
         );
         assert_eq!(
@@ -1196,7 +1204,8 @@ mod test {
             .await
             .expect("fetching initial external DNS");
 
-        // Now, use it to construct an initial blueprint.
+        // Now, use the collection to construct an initial blueprint.
+        // This stores it into the database, too.
         info!(log, "using collection"; "collection_id" => %collection.id);
         let blueprint = nexus
             .blueprint_generate_from_collection(&opctx, collection.id)
@@ -1204,9 +1213,22 @@ mod test {
             .expect("failed to generate initial blueprint");
         eprintln!("blueprint: {:?}", blueprint);
 
+        // Set it as the current target.  We'll need this later.
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: false,
+                    time_made_target: chrono::Utc::now(),
+                },
+            )
+            .await
+            .expect("failed to set blueprint as target");
+
         // Now, execute the blueprint.
         let overrides = Overridables::for_test(cptestctx);
-        crate::realize_blueprint(
+        crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
             &blueprint,
@@ -1306,19 +1328,6 @@ mod test {
         // Set this blueprint as the current target.  We set it to disabled
         // because we're controlling the execution directly here.  But we need
         // to do this so that silo creation sees the change.
-        //
-        // Doing this requires writing the whole history of this blueprint.
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: blueprint.id,
-                    enabled: false,
-                    time_made_target: chrono::Utc::now(),
-                },
-            )
-            .await
-            .expect("failed to set blueprint as target");
         datastore
             .blueprint_insert(&opctx, &blueprint2)
             .await
@@ -1335,7 +1344,7 @@ mod test {
             .await
             .expect("failed to set blueprint as target");
 
-        crate::realize_blueprint(
+        crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
             &blueprint2,
@@ -1410,7 +1419,7 @@ mod test {
         }
 
         // If we execute it again, we should see no more changes.
-        crate::realize_blueprint(
+        crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
             &blueprint2,
@@ -1444,7 +1453,7 @@ mod test {
 
         // One more time, make sure that executing the blueprint does not do
         // anything.
-        crate::realize_blueprint(
+        crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
             &blueprint2,
@@ -1536,7 +1545,7 @@ mod test {
         );
 
         // If we execute the blueprint, DNS should not be changed.
-        crate::realize_blueprint(
+        crate::realize_blueprint_with_overrides(
             &opctx,
             datastore,
             &blueprint,
@@ -1577,15 +1586,4 @@ mod test {
         assert_eq!(old_internal.generation, dns_latest_internal.generation);
         assert_eq!(old_external.generation, dns_latest_external.generation);
     }
-}
-
-/// Returns the (relative) DNS name for this Silo's API and console endpoints
-/// _within_ the external DNS zone (i.e., without that zone's suffix)
-///
-/// This specific naming scheme is determined under RFD 357.
-pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
-    // RFD 4 constrains resource names (including Silo names) to DNS-safe
-    // strings, which is why it's safe to directly put the name of the
-    // resource into the DNS name rather than doing any kind of escaping.
-    format!("{}.sys", name)
 }

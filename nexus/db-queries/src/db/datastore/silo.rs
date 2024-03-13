@@ -47,7 +47,7 @@ use ref_cast::RefCast;
 use uuid::Uuid;
 
 /// Filter a "silo_list" query based on silos' discoverability
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub enum Discoverability {
     /// Show all Silos
     All,
