@@ -637,7 +637,7 @@ dependencies = [
  "serde",
  "serde_with",
  "sha3",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "slog-async",
  "slog-term",
@@ -660,7 +660,7 @@ dependencies = [
  "reqwest",
  "schemars",
  "serde",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "uuid",
 ]
@@ -1595,7 +1595,7 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_json",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "thiserror",
  "tokio",
@@ -3556,6 +3556,7 @@ dependencies = [
  "reqwest",
  "sha2",
  "sled-hardware",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -4181,7 +4182,6 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_json",
- "sled-hardware",
  "slog",
  "thiserror",
  "tokio",
@@ -5447,6 +5447,7 @@ dependencies = [
  "sha3",
  "sled-agent-client",
  "sled-hardware",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -8346,12 +8347,25 @@ dependencies = [
  "rand 0.8.5",
  "schemars",
  "serde",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "thiserror",
  "tofino",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "sled-hardware-types"
+version = "0.1.0"
+dependencies = [
+ "illumos-utils",
+ "macaddr",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
 ]
 
 [[package]]
@@ -10623,7 +10637,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "slog-dtrace",
  "subprocess",

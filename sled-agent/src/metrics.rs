@@ -6,7 +6,7 @@
 
 use oximeter::types::MetricsError;
 use oximeter::types::ProducerRegistry;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use slog::Logger;
 use std::sync::Arc;
 use std::time::Duration;
