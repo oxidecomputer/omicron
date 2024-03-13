@@ -2097,8 +2097,7 @@ mod tests {
 
         let etherstub = Etherstub("mystub".to_string());
 
-        let vmm_reservoir_manager =
-            VmmReservoirManagerHandle::stub_for_test();
+        let vmm_reservoir_manager = VmmReservoirManagerHandle::stub_for_test();
 
         let mgr = crate::instance_manager::InstanceManager::new(
             logctx.log.new(o!("component" => "InstanceManager")),
