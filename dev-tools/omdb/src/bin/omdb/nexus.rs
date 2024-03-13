@@ -130,11 +130,11 @@ enum BlueprintTargetCommands {
     Set(BlueprintTargetSetArgs),
     /// Enable the current target blueprint
     ///
-    /// Fails if the specified blueprint id is not the curren target
+    /// Fails if the specified blueprint id is not the current target
     Enable(BlueprintIdArgs),
     /// Disable the current target blueprint
     ///
-    /// Fails if the specified blueprint id is not the curren target
+    /// Fails if the specified blueprint id is not the current target
     Disable(BlueprintIdArgs),
 }
 

@@ -617,7 +617,9 @@ impl DataStore {
     /// Set the current target blueprint
     ///
     /// In order to become the target blueprint, `target`'s parent blueprint
-    /// must be the current target
+    /// must be the current target. To instead change the current target's
+    /// properties (particularly whether it's enabled), use
+    /// [`DataStore::blueprint_target_set_current_enabled`].
     pub async fn blueprint_target_set_current(
         &self,
         opctx: &OpContext,
@@ -646,7 +648,8 @@ impl DataStore {
     /// Set the current target blueprint's `enabled` field
     ///
     /// In order to change the enabled field, `target` must already be the
-    /// current target blueprint
+    /// current target blueprint. To instead set a new blueprint target, use
+    /// [`DataStore::blueprint_target_set_current`].
     pub async fn blueprint_target_set_current_enabled(
         &self,
         opctx: &OpContext,
@@ -674,7 +677,7 @@ impl DataStore {
         //    FROM bp_target
         //    WHERE
         //        -- This part of the subquery restricts us to only the
-        //        -- current target (i.e., the bp_target with maximal versio)
+        //        -- current target (i.e., the bp_target with maximal version)
         //        version IN (SELECT version FROM bp_target
         //                    ORDER BY version DESC LIMIT 1)
         //
