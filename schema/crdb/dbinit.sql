@@ -3161,7 +3161,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- identifies the latest internal DNS version when blueprint planning began
     internal_dns_version INT8 NOT NULL,
     -- identifies the latest external DNS version when blueprint planning began
-    -- XXX-dap migration code must set the value for existing blueprints
     external_dns_version INT8 NOT NULL
 );
 
@@ -3587,7 +3586,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '41.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '42.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
