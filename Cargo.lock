@@ -4618,6 +4618,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "expectorate",
  "gateway-client",
  "indexmap 2.2.5",
  "internal-dns",
@@ -4629,6 +4630,8 @@ dependencies = [
  "omicron-common",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "rand 0.8.5",
+ "rand_seeder",
  "sled-agent-client",
  "slog",
  "thiserror",
@@ -7020,6 +7023,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca3129af7b92a17112d59ad498c6f81eaf463253766b90396d39ea7a39d6613c"
 dependencies = [
  "rand_core 0.5.1",
+]
+
+[[package]]
+name = "rand_seeder"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf2890aaef0aa82719a50e808de264f9484b74b442e1a3a0e5ee38243ac40bdb"
+dependencies = [
+ "rand_core 0.6.4",
 ]
 
 [[package]]

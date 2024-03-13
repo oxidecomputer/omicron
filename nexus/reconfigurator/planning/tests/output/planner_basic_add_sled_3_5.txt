@@ -1,0 +1,59 @@
+diff blueprint a8c45f8b-43c3-4f1f-a5f6-790b25ecef44 blueprint c6207eae-30c0-47de-bf19-20cc65616f02
+--- blueprint a8c45f8b-43c3-4f1f-a5f6-790b25ecef44
++++ blueprint c6207eae-30c0-47de-bf19-20cc65616f02
+  sled 41f45d9f-766e-4ca6-a881-61ee45c80f57
+      zone config generation 2
+         zone 035f584a-953a-41ee-b9e9-08d5368382f3 type crucible underlay IP fd00:1122:3344:103::26 (unchanged)
+         zone 0bd35784-d784-4a45-a7ef-e7d864682835 type crucible underlay IP fd00:1122:3344:103::2c (unchanged)
+         zone 2ab4b4db-6cc7-4cba-8248-a48d27a8be81 type crucible underlay IP fd00:1122:3344:103::27 (unchanged)
+         zone 2c0dedfa-e461-48f5-91a4-65aca65eab10 type crucible underlay IP fd00:1122:3344:103::28 (unchanged)
+         zone 5d332804-e29e-4c20-941c-2631e57bfceb type internal_ntp underlay IP fd00:1122:3344:103::21 (unchanged)
+         zone 67a7dc7f-5014-4ce2-9fda-9b0cd8041fe0 type crucible underlay IP fd00:1122:3344:103::2b (unchanged)
+         zone 68b5216d-fd3c-4e10-8da0-578b2eaafe7d type crucible underlay IP fd00:1122:3344:103::23 (unchanged)
+         zone 7273ffdb-97a4-4672-a4fe-60d312c4447c type crucible underlay IP fd00:1122:3344:103::2a (unchanged)
+         zone 7731f5a1-f92e-4634-b7a9-f8ce36e9a0a6 type crucible underlay IP fd00:1122:3344:103::29 (unchanged)
+         zone 89403689-3b2a-49c6-a499-a94049917b4a type nexus underlay IP fd00:1122:3344:103::22 (unchanged)
+         zone ec439517-bb78-4244-8882-a1dcedfcf01e type crucible underlay IP fd00:1122:3344:103::24 (unchanged)
+         zone f66fb13e-cd45-4c98-bf42-4fca1aa833f3 type crucible underlay IP fd00:1122:3344:103::25 (unchanged)
+  sled 43677374-8d2f-4deb-8a41-eeea506db8e0
+      zone config generation 2
+         zone 1666bf1a-a2cc-44b2-b66f-04fdad5ed8c2 type crucible underlay IP fd00:1122:3344:101::2c (unchanged)
+         zone 4683e4b9-92eb-45a3-bac1-576cb9417719 type crucible underlay IP fd00:1122:3344:101::23 (unchanged)
+         zone 518441eb-d61f-4ee2-a864-162679584f00 type crucible underlay IP fd00:1122:3344:101::25 (unchanged)
+         zone 6d5af00b-6b44-42d7-945c-9ddc87e90a00 type crucible underlay IP fd00:1122:3344:101::27 (unchanged)
+         zone 7e2314a9-a336-4c7d-800a-60769ee67655 type crucible underlay IP fd00:1122:3344:101::2a (unchanged)
+         zone 8b97478b-c353-4357-bfcf-e09cba3a849c type crucible underlay IP fd00:1122:3344:101::2b (unchanged)
+         zone 9090c3d8-5ee5-4dbf-bb5f-e2abc28487aa type crucible underlay IP fd00:1122:3344:101::29 (unchanged)
+         zone a682cbd4-8754-4f01-a63a-29c786b914f8 type nexus underlay IP fd00:1122:3344:101::22 (unchanged)
+         zone b077d166-6ed8-437e-a38b-36afcbc3795c type internal_ntp underlay IP fd00:1122:3344:101::21 (unchanged)
+         zone b891c0bb-83df-4b47-95ed-ef188b0a5cf8 type crucible underlay IP fd00:1122:3344:101::24 (unchanged)
+         zone ddf13264-11be-4431-be43-c43053480524 type crucible underlay IP fd00:1122:3344:101::26 (unchanged)
+         zone ef04da49-25d3-4878-97b1-f1395d3d20c9 type crucible underlay IP fd00:1122:3344:101::28 (unchanged)
+  sled 590e3034-d946-4166-b0e5-2d0034197a07
+      zone config generation 2
+         zone 0520fbe0-9e2e-431f-95d7-d01a1c6eba0b type crucible underlay IP fd00:1122:3344:102::25 (unchanged)
+         zone 32eff6a1-7d3d-43c2-951e-556b2a2595f1 type crucible underlay IP fd00:1122:3344:102::27 (unchanged)
+         zone 3d310489-99be-4543-97f4-d1daa01cbf19 type crucible underlay IP fd00:1122:3344:102::2b (unchanged)
+         zone 5e06169e-b2dd-4bac-9963-43cbf0876fc1 type crucible underlay IP fd00:1122:3344:102::23 (unchanged)
+         zone 896f0955-9eab-4151-83dc-8c4b2dacbd5a type crucible underlay IP fd00:1122:3344:102::29 (unchanged)
+         zone 9aad5bd5-c430-4b0d-94f5-59c6c6c3d00c type crucible underlay IP fd00:1122:3344:102::24 (unchanged)
+         zone 9d15cd85-9f8a-4b73-ad2d-55d924ebf11d type crucible underlay IP fd00:1122:3344:102::28 (unchanged)
+         zone 9ed3b37b-bd9e-4944-8ef5-7835c76faf43 type crucible underlay IP fd00:1122:3344:102::26 (unchanged)
+         zone b7807e61-8d38-4cfb-be94-7af6072a14a1 type internal_ntp underlay IP fd00:1122:3344:102::21 (unchanged)
+         zone b8b67587-3928-4a92-a1ad-8bb19353667f type nexus underlay IP fd00:1122:3344:102::22 (unchanged)
+         zone e7496ea9-0263-4b63-9084-42dafd314791 type crucible underlay IP fd00:1122:3344:102::2c (unchanged)
+         zone f4ca0c7c-49f2-4563-b9e6-273fd03a2423 type crucible underlay IP fd00:1122:3344:102::2a (unchanged)
+  sled b59ec570-2abb-4017-80ce-129d94e7a025
+-     zone config generation 2
++     zone config generation 3
+         zone 741bfd5c-a356-4c16-b29d-0d992595b064 type internal_ntp underlay IP fd00:1122:3344:104::21 (unchanged)
++        zone 01cc633d-bda2-4b0b-ba4d-38b8b22c1ce6 type crucible underlay IP fd00:1122:3344:104::24 (added)
++        zone 0bd61424-a6ce-4612-9a08-aabccbe52a1e type crucible underlay IP fd00:1122:3344:104::23 (added)
++        zone 17da81a4-674e-4c39-876e-0f62be6caa73 type crucible underlay IP fd00:1122:3344:104::25 (added)
++        zone 1c565533-e4e5-447b-ab77-a2faea3d3261 type crucible underlay IP fd00:1122:3344:104::26 (added)
++        zone 302d39b4-f222-4787-b443-2119bd2ca0f2 type crucible underlay IP fd00:1122:3344:104::29 (added)
++        zone 642b0b77-ac86-4544-95c2-beda63cb0926 type crucible underlay IP fd00:1122:3344:104::2b (added)
++        zone 8fdffaa6-b93b-4f0e-9d7d-60e3559da97d type crucible underlay IP fd00:1122:3344:104::28 (added)
++        zone bac06639-06c4-4622-af5e-ff183cc0aee9 type crucible underlay IP fd00:1122:3344:104::2a (added)
++        zone be9b904d-0d8e-44ab-8d63-9ed919a7e848 type crucible underlay IP fd00:1122:3344:104::27 (added)
++        zone c82cd057-70cd-420b-a64c-e7c8cfbd11e9 type crucible underlay IP fd00:1122:3344:104::22 (added)

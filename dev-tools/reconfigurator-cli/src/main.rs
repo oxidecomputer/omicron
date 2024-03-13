@@ -456,6 +456,7 @@ fn cmd_blueprint_from_inventory(
         dns_version,
         &policy,
         creator,
+        None,
     )
     .context("building collection")?;
     let rv = format!(
@@ -509,7 +510,7 @@ fn cmd_blueprint_show(
         .blueprints
         .get(&args.blueprint_id)
         .ok_or_else(|| anyhow!("no such blueprint: {}", args.blueprint_id))?;
-    Ok(Some(format!("{:?}", blueprint)))
+    Ok(Some(format!("{}", blueprint.display())))
 }
 
 fn cmd_blueprint_diff(
@@ -528,7 +529,7 @@ fn cmd_blueprint_diff(
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
 
     let diff = blueprint1.diff_sleds(&blueprint2);
-    Ok(Some(diff.to_string()))
+    Ok(Some(diff.display().to_string()))
 }
 
 fn cmd_blueprint_diff_inventory(
@@ -547,7 +548,7 @@ fn cmd_blueprint_diff_inventory(
 
     let zones = collection.all_omicron_zones().map(|z| z.id).collect();
     let diff = blueprint.diff_sleds_from_collection(&collection, &zones);
-    Ok(Some(diff.to_string()))
+    Ok(Some(diff.display().to_string()))
 }
 
 fn cmd_save(
