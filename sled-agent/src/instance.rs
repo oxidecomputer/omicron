@@ -1760,7 +1760,7 @@ mod tests {
         propolis_addr: SocketAddr,
         nexus_client_with_resolver: NexusClientWithResolver,
         storage_handle: StorageHandle,
-        temp_dir: String,
+        temp_dir: &String,
     ) -> Instance {
         let id = Uuid::new_v4();
         let propolis_id = Uuid::new_v4();
@@ -1844,7 +1844,7 @@ mod tests {
         logctx: &LogContext,
         storage_handle: StorageHandle,
         nexus_client_with_resolver: NexusClientWithResolver,
-        temp_dir: String,
+        temp_dir: &String,
     ) -> InstanceManagerServices {
         let vnic_allocator =
             VnicAllocator::new("Foo", Etherstub("mystub".to_string()));
@@ -1907,7 +1907,7 @@ mod tests {
                 propolis_addr,
                 nexus_client_with_resolver,
                 storage_handle,
-                temp_dir,
+                &temp_dir,
             ),
         )
         .await
@@ -1976,7 +1976,7 @@ mod tests {
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
                 nexus_client_with_resolver,
                 storage_handle,
-                temp_dir,
+                &temp_dir,
             ),
         )
         .await
@@ -2047,7 +2047,7 @@ mod tests {
                 SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 1, 0, 0)),
                 nexus_client_with_resolver,
                 storage_handle,
-                temp_dir,
+                &temp_dir,
             ),
         )
         .await
@@ -2111,7 +2111,7 @@ mod tests {
             &logctx,
             storage_handle,
             nexus_client_with_resolver,
-            temp_dir,
+            &temp_dir,
         );
 
         let etherstub = Etherstub("mystub".to_string());
