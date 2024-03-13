@@ -81,7 +81,7 @@ ptime -m cargo build -Z unstable-options --timings=json --workspace --tests --lo
 # before running any tests.
 # NB: This must be ran after we have built the binaries with cargo build.
 if [[ $target_os == "illumos" ]]; then
-    ptime -m cargo xtask verify-libraries
+    ptime -m timeout 5m cargo xtask verify-libraries
 fi
 
 #
