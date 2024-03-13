@@ -1533,6 +1533,7 @@ mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
     use crate::nexus::NexusClient;
+    use crate::vmm_reservoir::VmmReservoirManagerHandle;
     use crate::zone_bundle::CleanupContext;
     use camino_tempfile::Utf8TempDir;
     use dns_server::dns_server::ServerHandle as DnsServerHandle;
@@ -1774,6 +1775,11 @@ mod tests {
             nexus_client_with_resolver,
         );
 
+        let metadata = InstanceMetadata {
+            silo_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+        };
+
         Instance::new(
             logctx.log.new(o!("component" => "Instance")),
             id,
@@ -1781,6 +1787,7 @@ mod tests {
             ticket,
             initial_state,
             services,
+            metadata,
         )
         .unwrap()
     }
@@ -1856,7 +1863,7 @@ mod tests {
             port_manager,
             storage: storage_handle,
             zone_bundler,
-            zone_builder_factory: ZoneBuilderFactory::fake(),
+            zone_builder_factory: ZoneBuilderFactory::fake(None),
         }
     }
 
@@ -2090,6 +2097,9 @@ mod tests {
 
         let etherstub = Etherstub("mystub".to_string());
 
+        let vmm_reservoir_manager =
+            VmmReservoirManagerHandle::stub_for_test();
+
         let mgr = crate::instance_manager::InstanceManager::new(
             logctx.log.new(o!("component" => "InstanceManager")),
             nexus_client,
@@ -2098,6 +2108,7 @@ mod tests {
             storage,
             zone_bundler,
             zone_builder_factory,
+            vmm_reservoir_manager,
         )
         .unwrap();
 
@@ -2114,6 +2125,11 @@ mod tests {
             propolis_addr,
         } = fake_instance_initial_state(propolis_id, propolis_addr);
 
+        let metadata = InstanceMetadata {
+            silo_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+        };
+
         mgr.ensure_registered(
             instance_id,
             propolis_id,
@@ -2121,6 +2137,7 @@ mod tests {
             instance_runtime,
             vmm_runtime,
             propolis_addr,
+            metadata,
         )
         .await
         .unwrap();
