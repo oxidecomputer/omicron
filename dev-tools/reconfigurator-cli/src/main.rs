@@ -11,7 +11,7 @@ use clap::FromArgMatches;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
-use nexus_reconfigurator_execution::blueprint_dns_config;
+use nexus_reconfigurator_execution::blueprint_internal_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
@@ -48,6 +48,8 @@ struct ReconfiguratorSim {
 
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
+    /// external DNS configurations
+    external_dns: BTreeMap<Generation, DnsConfigParams>,
 
     log: slog::Logger,
 }
@@ -74,6 +76,7 @@ fn main() -> anyhow::Result<()> {
         collections: IndexMap::new(),
         blueprints: IndexMap::new(),
         internal_dns: BTreeMap::new(),
+        external_dns: BTreeMap::new(),
         log,
     };
 
@@ -562,10 +565,19 @@ fn cmd_blueprint_diff(
             (*sled_id, sled)
         })
         .collect();
-    let dns_config1 = blueprint_dns_config(&blueprint1, &sleds_by_id);
-    let dns_config2 = blueprint_dns_config(&blueprint2, &sleds_by_id);
+    let dns_config1 = blueprint_internal_dns_config(
+        &blueprint1,
+        &sleds_by_id,
+        &Default::default(),
+    )?;
+    let dns_config2 = blueprint_internal_dns_config(
+        &blueprint2,
+        &sleds_by_id,
+        &Default::default(),
+    )?;
     let dns_diff = DnsDiff::new(&dns_config1, &dns_config2)
         .context("failed to assemble DNS diff")?;
+    // XXX-dap add external DNS diff too
 
     // XXX-dap should not be Debug, that's just to get it to build for now
     Ok(Some(format!("{}\n{:?}", sled_diff, dns_diff)))
@@ -600,6 +612,7 @@ fn cmd_save(
         collections: sim.collections.values().cloned().collect(),
         blueprints: sim.blueprints.values().cloned().collect(),
         internal_dns: sim.internal_dns.clone(),
+        external_dns: sim.external_dns.clone(),
     };
 
     let output_path = &args.filename;

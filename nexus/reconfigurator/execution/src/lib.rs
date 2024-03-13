@@ -28,7 +28,8 @@ mod omicron_zones;
 mod overridables;
 mod resource_allocation;
 
-pub use dns::blueprint_dns_config;
+pub use dns::blueprint_external_dns_config;
+pub use dns::blueprint_internal_dns_config;
 
 pub struct Sled {
     id: Uuid,

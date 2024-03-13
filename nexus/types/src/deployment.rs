@@ -763,4 +763,5 @@ pub struct UnstableReconfiguratorState {
     pub collections: Vec<Collection>,
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
+    pub external_dns: BTreeMap<Generation, DnsConfigParams>,
 }

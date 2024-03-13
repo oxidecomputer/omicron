@@ -3373,11 +3373,26 @@ async fn cmd_db_reconfigurator_save(
         internal_dns.insert(gen, config);
     }
 
+    let external_dns_generations_needed: BTreeSet<_> =
+        blueprints.iter().map(|b| b.external_dns_version).collect();
+    let mut external_dns = BTreeMap::new();
+    for gen in external_dns_generations_needed {
+        let dns_group = DnsGroup::External;
+        let config = datastore
+            .dns_config_read_version(&opctx, DnsGroup::External, gen)
+            .await
+            .with_context(|| {
+                format!("reading {:?} DNS version {}", dns_group, gen)
+            })?;
+        external_dns.insert(gen, config);
+    }
+
     let state = UnstableReconfiguratorState {
         policy: policy,
         collections,
         blueprints,
         internal_dns,
+        external_dns,
     };
 
     let output_path = &reconfig_save_args.output_file;
