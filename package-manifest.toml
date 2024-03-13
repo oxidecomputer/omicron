@@ -553,6 +553,15 @@ source.sha256 = "151aeb26414989cad571b3886786efbeeafd91c41a93a747c784cdc654d5876
 output.type = "zone"
 output.intermediate_only = true
 
+[package.lldp]
+service_name = "lldp"
+source.type = "prebuilt"
+source.repo = "lldp"
+source.commit = "e165090e393df90874329265799480e221884236"
+source.sha256 = "004a6488a948d894fa203222aa42e159e1ae12c13751607852302d111e2c58e6"
+output.type = "zone"
+output.intermediate_only = true
+
 [package.dendrite-stub]
 service_name = "dendrite"
 only_for_targets.switch = "stub"
@@ -648,6 +657,7 @@ source.type = "composite"
 source.packages = [
   "omicron-gateway-asic.tar.gz",
   "dendrite-asic.tar.gz",
+  "lldp.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
@@ -671,6 +681,7 @@ source.type = "composite"
 source.packages = [
   "omicron-gateway-stub.tar.gz",
   "dendrite-stub.tar.gz",
+  "lldp.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",
@@ -694,6 +705,7 @@ source.type = "composite"
 source.packages = [
   "omicron-gateway-softnpu.tar.gz",
   "dendrite-softnpu.tar.gz",
+  "lldp.tar.gz",
   "wicketd.tar.gz",
   "wicket.tar.gz",
   "mg-ddm.tar.gz",

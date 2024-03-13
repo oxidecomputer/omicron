@@ -637,7 +637,7 @@ dependencies = [
  "serde",
  "serde_with",
  "sha3",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "slog-async",
  "slog-term",
@@ -660,7 +660,7 @@ dependencies = [
  "reqwest",
  "schemars",
  "serde",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "uuid",
 ]
@@ -1595,7 +1595,7 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_json",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "thiserror",
  "tokio",
@@ -3556,6 +3556,7 @@ dependencies = [
  "reqwest",
  "sha2",
  "sled-hardware",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -3945,6 +3946,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "libnvme"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+dependencies = [
+ "libnvme-sys",
+ "thiserror",
+]
+
+[[package]]
+name = "libnvme-sys"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+
+[[package]]
 name = "libsw"
 version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4167,7 +4182,6 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_json",
- "sled-hardware",
  "slog",
  "thiserror",
  "tokio",
@@ -4549,6 +4563,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-networking"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "ipnetwork",
+ "nexus-db-queries",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "reqwest",
+ "sled-agent-client",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
@@ -4564,6 +4593,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-inventory",
+ "nexus-networking",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
  "nexus-test-utils-macros",
@@ -5162,6 +5192,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-defaults",
  "nexus-inventory",
+ "nexus-networking",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
@@ -5416,6 +5447,7 @@ dependencies = [
  "sha3",
  "sled-agent-client",
  "sled-hardware",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -8307,6 +8339,7 @@ dependencies = [
  "illumos-utils",
  "libc",
  "libefi-illumos",
+ "libnvme",
  "macaddr",
  "omicron-common",
  "omicron-test-utils",
@@ -8314,12 +8347,25 @@ dependencies = [
  "rand 0.8.5",
  "schemars",
  "serde",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "thiserror",
  "tofino",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "sled-hardware-types"
+version = "0.1.0"
+dependencies = [
+ "illumos-utils",
+ "macaddr",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
 ]
 
 [[package]]
@@ -10591,7 +10637,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "slog-dtrace",
  "subprocess",
