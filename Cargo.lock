@@ -5311,6 +5311,7 @@ dependencies = [
  "oximeter-client",
  "pq-sys",
  "ratatui",
+ "reedline",
  "serde",
  "serde_json",
  "sled-agent-client",
