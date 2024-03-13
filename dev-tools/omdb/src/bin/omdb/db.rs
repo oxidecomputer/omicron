@@ -72,6 +72,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
+use nexus_db_queries::db::datastore::DataStoreDnsTest;
 use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
@@ -3356,8 +3357,28 @@ async fn cmd_db_reconfigurator_save(
         .await;
     eprintln!("done.");
 
-    let state =
-        UnstableReconfiguratorState { policy: policy, collections, blueprints };
+    // It's also useful to include information about any DNS generations
+    // mentioned in any blueprints.
+    let internal_dns_generations_needed: BTreeSet<_> =
+        blueprints.iter().map(|b| b.internal_dns_version).collect();
+    let mut internal_dns = BTreeMap::new();
+    for gen in internal_dns_generations_needed {
+        let dns_group = DnsGroup::Internal;
+        let config = datastore
+            .dns_config_read_version(&opctx, DnsGroup::Internal, gen)
+            .await
+            .with_context(|| {
+                format!("reading {:?} DNS version {}", dns_group, gen)
+            })?;
+        internal_dns.insert(gen, config);
+    }
+
+    let state = UnstableReconfiguratorState {
+        policy: policy,
+        collections,
+        blueprints,
+        internal_dns,
+    };
 
     let output_path = &reconfig_save_args.output_file;
     let file = std::fs::OpenOptions::new()

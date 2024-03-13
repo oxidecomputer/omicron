@@ -9,17 +9,22 @@ use camino::Utf8PathBuf;
 use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::{Args, Parser, Subcommand};
+use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
+use nexus_reconfigurator_execution::blueprint_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
+use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::OmicronZonesConfig;
+use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use reedline::{Reedline, Signal};
+use std::collections::BTreeMap;
 use std::io::BufRead;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
@@ -40,6 +45,9 @@ struct ReconfiguratorSim {
 
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
+
+    /// internal DNS configurations
+    internal_dns: BTreeMap<Generation, DnsConfigParams>,
 
     log: slog::Logger,
 }
@@ -65,6 +73,7 @@ fn main() -> anyhow::Result<()> {
         system: SystemDescription::new(),
         collections: IndexMap::new(),
         blueprints: IndexMap::new(),
+        internal_dns: BTreeMap::new(),
         log,
     };
 
@@ -529,8 +538,37 @@ fn cmd_blueprint_diff(
         .get(&blueprint2_id)
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
 
-    let diff = blueprint1.diff_sleds(&blueprint2);
-    Ok(Some(diff.display().to_string()))
+    let sled_diff = blueprint1.diff_sleds(&blueprint2).display().to_string();
+
+    // Diff'ing DNS is a little trickier.  First, compute what DNS should be for
+    // each blueprint.  To do that we need to construct a list of sleds suitable
+    // for the executor.
+    let collection = sim
+        .system
+        .to_collection_builder()
+        .context(
+            "unexpectedly failed to create collection for current set of sleds",
+        )?
+        .build();
+    let sleds_by_id: BTreeMap<_, _> = collection
+        .sled_agents
+        .iter()
+        .map(|(sled_id, sled_agent_info)| {
+            let sled = nexus_reconfigurator_execution::Sled::new(
+                *sled_id,
+                sled_agent_info.sled_agent_address,
+                sled_agent_info.sled_role == SledRole::Scrimlet,
+            );
+            (*sled_id, sled)
+        })
+        .collect();
+    let dns_config1 = blueprint_dns_config(&blueprint1, &sleds_by_id);
+    let dns_config2 = blueprint_dns_config(&blueprint2, &sleds_by_id);
+    let dns_diff = DnsDiff::new(&dns_config1, &dns_config2)
+        .context("failed to assemble DNS diff")?;
+
+    // XXX-dap should not be Debug, that's just to get it to build for now
+    Ok(Some(format!("{}\n{:?}", sled_diff, dns_diff)))
 }
 
 fn cmd_blueprint_diff_inventory(
@@ -561,6 +599,7 @@ fn cmd_save(
         policy,
         collections: sim.collections.values().cloned().collect(),
         blueprints: sim.blueprints.values().cloned().collect(),
+        internal_dns: sim.internal_dns.clone(),
     };
 
     let output_path = &args.filename;

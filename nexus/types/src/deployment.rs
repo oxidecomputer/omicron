@@ -14,6 +14,7 @@
 
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledState;
+use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
@@ -761,4 +762,5 @@ pub struct UnstableReconfiguratorState {
     pub policy: Policy,
     pub collections: Vec<Collection>,
     pub blueprints: Vec<Blueprint>,
+    pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
 }

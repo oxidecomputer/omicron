@@ -104,6 +104,7 @@ pub use db_metadata::{
     all_sql_for_version_migration, SchemaUpgrade, SchemaUpgradeStep,
     EARLIEST_SUPPORTED_VERSION,
 };
+pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
