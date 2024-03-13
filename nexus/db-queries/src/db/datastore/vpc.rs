@@ -651,7 +651,7 @@ impl DataStore {
         // Sleds to notify when firewall rules change.
         use db::schema::{
             bp_omicron_zone, bp_target, instance, instance_network_interface,
-            service, service_network_interface, sled, vmm,
+            service_network_interface, sled, vmm,
         };
         // Diesel requires us to use aliases in order to refer to the
         // `bp_target` table twice in the same query.
@@ -677,24 +677,8 @@ impl DataStore {
             .filter(vmm::time_deleted.is_null())
             .select(Sled::as_select());
 
-        // When Nexus accepts the rack initialization handoff from RSS, it
-        // populates the `service` table. We eventually want to retire it
-        // (https://github.com/oxidecomputer/omicron/issues/4947), and the
-        // Reconfigurator does not add new entries to it. We still need to query
-        // it for systems that are not yet under Reconfigurator control...
-        let rss_service_query = service_network_interface::table
-            .inner_join(
-                service::table
-                    .on(service::id.eq(service_network_interface::service_id)),
-            )
-            .inner_join(sled::table.on(sled::id.eq(service::sled_id)))
-            .filter(service_network_interface::vpc_id.eq(vpc_id))
-            .filter(service_network_interface::time_deleted.is_null())
-            .select(Sled::as_select());
-
-        // ... and we also need to query for the current target blueprint to
-        // support systems that _are_ under Reconfigurator control.
-        let reconfig_service_query = service_network_interface::table
+        // Query the current target blueprint to map service NICs to sleds.
+        let service_query = service_network_interface::table
             .inner_join(bp_omicron_zone::table.on(
                 bp_omicron_zone::id.eq(service_network_interface::service_id),
             ))
@@ -733,11 +717,7 @@ impl DataStore {
 
         let conn = self.pool_connection_unauthorized().await?;
         sleds
-            .intersect(
-                instance_query
-                    .union(rss_service_query)
-                    .union(reconfig_service_query),
-            )
+            .intersect(instance_query.union(service_query))
             .get_results_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -1498,6 +1478,7 @@ mod tests {
 
     #[derive(Debug)]
     struct HarnessNexus {
+        sled_id: Uuid,
         id: Uuid,
         ip: IpAddr,
         mac: MacAddr,
@@ -1515,8 +1496,11 @@ mod tests {
                 .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES)
                 .map(IpAddr::from);
             let mut nexus_macs = MacAddr::iter_system();
-            let nexuses = (0..num_sleds)
-                .map(|_| HarnessNexus {
+            let nexuses = sled_ids
+                .iter()
+                .copied()
+                .map(|sled_id| HarnessNexus {
+                    sled_id,
                     id: Uuid::new_v4(),
                     ip: nexus_ips.next().unwrap(),
                     mac: nexus_macs.next().unwrap(),
@@ -1539,21 +1523,13 @@ mod tests {
             })
         }
 
-        fn db_services(
+        fn db_nics(
             &self,
-        ) -> impl Iterator<
-            Item = (db::model::Service, db::model::IncompleteNetworkInterface),
-        > + '_ {
-            self.sled_ids.iter().zip(&self.nexuses).map(|(sled_id, nexus)| {
-                let service = db::model::Service::new(
-                    nexus.id,
-                    *sled_id,
-                    Some(nexus.id),
-                    "[::1]:0".parse().unwrap(),
-                    db::model::ServiceKind::Nexus,
-                );
+        ) -> impl Iterator<Item = db::model::IncompleteNetworkInterface> + '_
+        {
+            self.nexuses.iter().map(|nexus| {
                 let name = format!("test-nexus-{}", nexus.id);
-                let nic = db::model::IncompleteNetworkInterface::new_service(
+                db::model::IncompleteNetworkInterface::new_service(
                     nexus.nic_id,
                     nexus.id,
                     NEXUS_VPC_SUBNET.clone(),
@@ -1565,17 +1541,16 @@ mod tests {
                     nexus.mac,
                     0,
                 )
-                .expect("failed to create incomplete Nexus NIC");
-                (service, nic)
+                .expect("failed to create incomplete Nexus NIC")
             })
         }
 
         fn omicron_zone_configs(
             &self,
         ) -> impl Iterator<Item = (Uuid, OmicronZoneConfig)> + '_ {
-            self.db_services().map(|(service, nic)| {
+            self.nexuses.iter().zip(self.db_nics()).map(|(nexus, nic)| {
                 let zone_config = OmicronZoneConfig {
-                    id: service.id(),
+                    id: nexus.id,
                     underlay_address: "::1".parse().unwrap(),
                     zone_type: OmicronZoneType::Nexus {
                         internal_address: "[::1]:0".to_string(),
@@ -1583,7 +1558,7 @@ mod tests {
                         nic: NetworkInterface {
                             id: nic.identity.id,
                             kind: NetworkInterfaceKind::Service {
-                                id: service.id(),
+                                id: nexus.id,
                             },
                             name: format!("test-nic-{}", nic.identity.id)
                                 .parse()
@@ -1599,7 +1574,7 @@ mod tests {
                         external_dns_servers: Vec::new(),
                     },
                 };
-                (service.sled_id, zone_config)
+                (nexus.sled_id, zone_config)
             })
         }
     }
@@ -1634,20 +1609,9 @@ mod tests {
             datastore.sled_upsert(sled).await.expect("failed to upsert sled");
         }
 
-        // Insert two Nexus records into `service`, emulating RSS.
-        for (service, nic) in harness.db_services().take(2) {
-            datastore
-                .service_upsert(&opctx, service)
-                .await
-                .expect("failed to insert RSS-like service");
-            datastore
-                .service_create_network_interface_raw(&opctx, nic)
-                .await
-                .expect("failed to insert Nexus NIC");
-        }
-
-        // Ensure we find the two sleds we expect after adding Nexus records.
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+        // We don't have a blueprint yet, so we shouldn't find any services on
+        // sleds.
+        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
 
         // Create a blueprint that has a Nexus on our third sled. (This
         // blueprint is completely invalid in many ways, but all we care about
@@ -1684,9 +1648,9 @@ mod tests {
             .await
             .expect("failed to insert blueprint");
 
-        // We haven't set a blueprint target yet, so we should still only see
-        // the two RSS-inserted service-running sleds.
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+        // We haven't set a blueprint target yet, so we should still fail to see
+        // any services on sleds.
+        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
 
         // Make bp1 the current target.
         datastore
@@ -1702,21 +1666,24 @@ mod tests {
             .expect("failed to set blueprint target");
 
         // bp1 is the target, but we haven't yet inserted a vNIC record, so
-        // we'll still only see the original 2 sleds.
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+        // we still won't see any services on sleds.
+        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
 
         // Insert the relevant service NIC record (normally performed by the
         // reconfigurator's executor).
         datastore
             .service_create_network_interface_raw(
                 &opctx,
-                harness.db_services().nth(2).unwrap().1,
+                harness.db_nics().nth(2).unwrap(),
             )
             .await
             .expect("failed to insert service VNIC");
 
-        // We should now see _three_ sleds running services.
-        assert_eq!(&harness.sled_ids[..3], fetch_service_sled_ids().await);
+        // We should now see our third sled running a service.
+        assert_eq!(
+            &[harness.sled_ids[2]] as &[Uuid],
+            fetch_service_sled_ids().await
+        );
 
         // Create another blueprint with no services and make it the target.
         let bp2_id = Uuid::new_v4();
@@ -1748,20 +1715,19 @@ mod tests {
             .expect("failed to set blueprint target");
 
         // We haven't removed the service NIC record, but we should no longer
-        // see the third sled here, because we should be back to just the
-        // original two services in the `service` table.
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+        // see the third sled here. We should be back to no sleds with services.
+        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
 
         // Insert a service NIC record for our fourth sled's Nexus. This
         // shouldn't change our VPC resolution.
         datastore
             .service_create_network_interface_raw(
                 &opctx,
-                harness.db_services().nth(3).unwrap().1,
+                harness.db_nics().nth(3).unwrap(),
             )
             .await
             .expect("failed to insert service VNIC");
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
 
         // Create a blueprint that has a Nexus on our fourth sled. This
         // shouldn't change our VPC resolution.
@@ -1796,7 +1762,7 @@ mod tests {
             .blueprint_insert(&opctx, &bp3)
             .await
             .expect("failed to insert blueprint");
-        assert_eq!(&harness.sled_ids[..2], fetch_service_sled_ids().await);
+        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
 
         // Make this blueprint the target. We've already created the service
         // VNIC, so we should immediately see our fourth sled in VPC resolution.
@@ -1812,13 +1778,12 @@ mod tests {
             .await
             .expect("failed to set blueprint target");
         assert_eq!(
-            &[harness.sled_ids[0], harness.sled_ids[1], harness.sled_ids[3]]
-                as &[Uuid],
+            &[harness.sled_ids[3]] as &[Uuid],
             fetch_service_sled_ids().await
         );
 
         // Finally, create a blueprint that includes our third and fourth sleds,
-        // make it the target, and ensure we resolve to all four sleds.
+        // make it the target, and ensure we resolve to both of them.
         let bp4_omicron_zones = {
             let mut zones = BTreeMap::new();
             for (sled_id, zone_config) in harness.omicron_zone_configs().skip(2)
@@ -1860,7 +1825,7 @@ mod tests {
             )
             .await
             .expect("failed to set blueprint target");
-        assert_eq!(harness.sled_ids, fetch_service_sled_ids().await);
+        assert_eq!(&harness.sled_ids[2..], fetch_service_sled_ids().await);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
