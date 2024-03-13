@@ -367,6 +367,22 @@ impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
     }
 }
 
+/// A zpool reported by a sled agent.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Zpool {
+    pub id: Uuid,
+    pub total_size: ByteCount,
+}
+
+impl From<sled_agent_client::types::InventoryZpool> for Zpool {
+    fn from(pool: sled_agent_client::types::InventoryZpool) -> Zpool {
+        Zpool {
+            id: pool.id,
+            total_size: pool.total_size,
+        }
+    }
+}
+
 /// Inventory reported by sled agent
 ///
 /// This is a software notion of a sled, distinct from an underlying baseboard.
@@ -385,6 +401,7 @@ pub struct SledAgent {
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
     pub disks: Vec<PhysicalDisk>,
+    pub zpools: Vec<Zpool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

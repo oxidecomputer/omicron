@@ -478,13 +478,17 @@ pub(crate) struct PhysicalDisk {
     pub(crate) slot: i64,
 }
 
-struct Zpool {
+pub(crate) struct Zpool {
     datasets: HashMap<Uuid, CrucibleServer>,
+    total_size: u64,
 }
 
 impl Zpool {
-    fn new() -> Self {
-        Zpool { datasets: HashMap::new() }
+    fn new(total_size: u64,) -> Self {
+        Zpool {
+            datasets: HashMap::new(),
+            total_size,
+        }
     }
 
     fn insert_dataset(
@@ -499,6 +503,10 @@ impl Zpool {
         self.datasets
             .get(&id)
             .expect("Failed to get the dataset we just inserted")
+    }
+
+    pub fn total_size(&self) -> u64 {
+        self.total_size
     }
 
     pub async fn get_dataset_for_region(
@@ -614,7 +622,7 @@ impl Storage {
         size: u64,
     ) {
         // Update our local data
-        self.zpools.insert(zpool_id, Zpool::new());
+        self.zpools.insert(zpool_id, Zpool::new(size));
 
         // Notify Nexus
         let request = ZpoolPutRequest {
@@ -629,6 +637,10 @@ impl Storage {
             .expect("Failed to notify Nexus about new Zpool");
     }
 
+    /// Returns an immutable reference to all zpools
+    pub fn zpools(&self) -> &HashMap<Uuid, Zpool> {
+        &self.zpools
+    }
     /// Adds a Dataset to the sled's simulated storage.
     pub async fn insert_dataset(
         &mut self,

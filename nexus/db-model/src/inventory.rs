@@ -9,7 +9,8 @@ use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
     inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
     inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    inv_sled_agent, inv_sled_omicron_zones, sw_caboose, sw_root_of_trust_page,
+    inv_sled_agent, inv_sled_omicron_zones, inv_zpool,
+    sw_caboose, sw_root_of_trust_page,
 };
 use crate::PhysicalDiskKind;
 use crate::{
@@ -695,6 +696,41 @@ impl From<InvPhysicalDisk> for nexus_types::inventory::PhysicalDisk {
             },
             variant: disk.variant.into(),
             slot: disk.slot,
+        }
+    }
+}
+
+/// See [`nexus_types::inventory::Zpool`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_zpool)]
+pub struct InvZpool {
+    pub inv_collection_id: Uuid,
+    pub id: Uuid,
+    pub sled_id: Uuid,
+    pub total_size: ByteCount,
+}
+
+impl InvZpool {
+    pub fn new(
+        inv_collection_id: Uuid,
+        id: Uuid,
+        sled_id: Uuid,
+        total_size: ByteCount,
+    ) -> Self {
+        Self {
+            inv_collection_id,
+            id,
+            sled_id,
+            total_size,
+        }
+    }
+}
+
+impl From<InvZpool> for nexus_types::inventory::Zpool {
+    fn from(pool: InvZpool) -> Self {
+        Self {
+            id: pool.id,
+            total_size: *pool.total_size,
         }
     }
 }

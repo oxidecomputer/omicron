@@ -480,7 +480,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     /* FK into the Physical Disk table */
     physical_disk_id UUID NOT NULL,
 
-    total_size INT NOT NULL
+    -- The total size is optional, since we learn
+    -- about it eventually through the inventory system.
+    --
+    -- A "NULL" size means "we don't know what it is yet".
+    total_size INT
 );
 
 /* Create an index on the physical disk id */
@@ -2986,6 +2990,23 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- The control plane ID of the zpool
+    id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    total_size INT NOT NULL,
+
+    -- FK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3599,7 +3620,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '41.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '42.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -27,9 +27,12 @@ pub struct Zpool {
     // The physical disk to which this Zpool is attached.
     pub physical_disk_id: Uuid,
 
-    // TODO: In the future, we may expand this structure to include
-    // size, allocation, and health information.
-    pub total_size: ByteCount,
+    // There is much more information we can extract, including:
+    // - Size used, health, etc.
+    //
+    // However, we should also consider adding this information to "inv_zpool"
+    // instead, which acts more as the "observed" zpool.
+    pub total_size: Option<ByteCount>,
 }
 
 impl Zpool {
@@ -45,7 +48,7 @@ impl Zpool {
             rcgen: Generation::new(),
             sled_id,
             physical_disk_id,
-            total_size,
+            total_size: Some(total_size),
         }
     }
 }

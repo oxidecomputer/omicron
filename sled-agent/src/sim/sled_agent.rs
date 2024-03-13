@@ -739,6 +739,8 @@ impl SledAgent {
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        let storage = self.storage.lock().await;
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
@@ -753,10 +755,7 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
-            disks: self
-                .storage
-                .lock()
-                .await
+            disks: storage
                 .physical_disks()
                 .iter()
                 .map(|(identity, info)| crate::params::InventoryDisk {
@@ -765,6 +764,14 @@ impl SledAgent {
                     slot: info.slot,
                 })
                 .collect(),
+            zpools: storage
+                .zpools()
+                .iter()
+                .map(|(id, zpool)| Ok(crate::params::InventoryZpool {
+                    id: *id,
+                    total_size: ByteCount::try_from(zpool.total_size())?,
+                }))
+                .collect::<Result<Vec<_>, anyhow::Error>>()?,
         })
     }
 
