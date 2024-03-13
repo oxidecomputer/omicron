@@ -45,6 +45,7 @@ members = [
     "nexus/defaults",
     "nexus/inventory",
     "nexus/macros-common",
+    "nexus/networking",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
     "nexus/reconfigurator/preparation",
@@ -63,6 +64,7 @@ members = [
     "rpaths",
     "sled-agent",
     "sled-hardware",
+    "sled-hardware/types",
     "sled-storage",
     "sp-sim",
     "test-utils",
@@ -120,6 +122,7 @@ default-members = [
     "nexus-config",
     "nexus/authz-macros",
     "nexus/macros-common",
+    "nexus/networking",
     "nexus/db-macros",
     "nexus/db-model",
     "nexus/db-queries",
@@ -140,6 +143,7 @@ default-members = [
     "rpaths",
     "sled-agent",
     "sled-hardware",
+    "sled-hardware/types",
     "sled-storage",
     "sp-sim",
     "test-utils",
@@ -272,6 +276,7 @@ nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-macros-common = { path = "nexus/macros-common" }
+nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
 nexus-reconfigurator-preparation = { path = "nexus/reconfigurator/preparation" }
@@ -370,6 +375,7 @@ similar-asserts = "1.5.0"
 sled = "0.34"
 sled-agent-client = { path = "clients/sled-agent-client" }
 sled-hardware = { path = "sled-hardware" }
+sled-hardware-types = { path = "sled-hardware/types" }
 sled-storage = { path = "sled-storage" }
 slog = { version = "2.7", features = [ "dynamic-keys", "max_level_trace", "release_max_level_debug" ] }
 slog-async = "2.8"
