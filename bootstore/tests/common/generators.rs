@@ -6,7 +6,7 @@
 
 use bootstore::schemes::v0::{FsmConfig, MsgError};
 use proptest::prelude::*;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::BTreeSet;
 use std::ops::RangeInclusive;
 use std::time::Duration;

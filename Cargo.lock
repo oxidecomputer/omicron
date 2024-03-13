@@ -412,6 +412,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d297deb1925b89f2ccc13d7635fa0714f12c87adce1c75356b39ca9b7178567"
 
 [[package]]
+name = "base64"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9475866fec1451be56a3c2400fd081ff546538961565ccb5b7142cbd22bc7a51"
+
+[[package]]
 name = "base64ct"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -637,7 +643,7 @@ dependencies = [
  "serde",
  "serde_with",
  "sha3",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "slog-async",
  "slog-term",
@@ -656,11 +662,11 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "uuid",
 ]
@@ -1448,9 +1454,9 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "4.1.1"
+version = "4.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e89b8c6a2e4b1f45971ad09761aafb85514a84744b67a95e32c3cc1352d1f65c"
+checksum = "0a677b8922c94e01bdbb12126b0bc852f00447528dee1782229af9c720c3f348"
 dependencies = [
  "cfg-if",
  "cpufeatures",
@@ -1595,7 +1601,7 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_json",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "thiserror",
  "tokio",
@@ -2002,7 +2008,7 @@ dependencies = [
  "progenitor-client",
  "quote",
  "rand 0.8.5",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "rustfmt-wrapper",
  "schemars",
@@ -2020,7 +2026,7 @@ source = "git+https://github.com/oxidecomputer/dropshot?branch=main#29ae98d1f909
 dependencies = [
  "async-stream",
  "async-trait",
- "base64",
+ "base64 0.21.7",
  "bytes",
  "camino",
  "chrono",
@@ -2210,7 +2216,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "async-trait",
- "base64",
+ "base64 0.22.0",
  "chrono",
  "clap 4.5.1",
  "colored",
@@ -2642,7 +2648,7 @@ dependencies = [
 name = "gateway-client"
 version = "0.1.0"
 dependencies = [
- "base64",
+ "base64 0.22.0",
  "chrono",
  "gateway-messages",
  "omicron-workspace-hack",
@@ -2941,7 +2947,7 @@ version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06683b93020a07e3dbcf5f8c0f6d40080d725bea7936fc01ad345c01b97dc270"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "bytes",
  "headers-core",
  "http 0.2.12",
@@ -3443,7 +3449,7 @@ dependencies = [
  "opte-ioctl",
  "oxide-vpc",
  "oxlog",
- "regress",
+ "regress 0.9.0",
  "schemars",
  "serde",
  "serde_json",
@@ -3556,6 +3562,7 @@ dependencies = [
  "reqwest",
  "sha2",
  "sled-hardware",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -3579,7 +3586,7 @@ dependencies = [
  "installinator-common",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
@@ -3945,6 +3952,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "libnvme"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+dependencies = [
+ "libnvme-sys",
+ "thiserror",
+]
+
+[[package]]
+name = "libnvme-sys"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/libnvme?rev=6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe#6fffcc81d2c423ed2d2e6c5c2827485554c4ecbe"
+
+[[package]]
 name = "libsw"
 version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4167,7 +4188,6 @@ dependencies = [
  "rustfmt-wrapper",
  "serde",
  "serde_json",
- "sled-hardware",
  "slog",
  "thiserror",
  "tokio",
@@ -4351,7 +4371,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
@@ -4427,7 +4447,7 @@ dependencies = [
  "async-bb8-diesel",
  "async-trait",
  "authz-macros",
- "base64",
+ "base64 0.22.0",
  "bb8",
  "camino",
  "camino-tempfile",
@@ -4516,7 +4536,7 @@ name = "nexus-inventory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.0",
  "chrono",
  "expectorate",
  "futures",
@@ -4549,6 +4569,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-networking"
+version = "0.1.0"
+dependencies = [
+ "futures",
+ "ipnetwork",
+ "nexus-db-queries",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "reqwest",
+ "sled-agent-client",
+ "slog",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-reconfigurator-execution"
 version = "0.1.0"
 dependencies = [
@@ -4564,6 +4599,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-inventory",
+ "nexus-networking",
  "nexus-reconfigurator-planning",
  "nexus-test-utils",
  "nexus-test-utils-macros",
@@ -4688,7 +4724,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "api_identity",
- "base64",
+ "base64 0.22.0",
  "chrono",
  "dns-service-client",
  "futures",
@@ -5019,7 +5055,7 @@ dependencies = [
  "progenitor",
  "proptest",
  "rand 0.8.5",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "semver 1.0.22",
@@ -5075,7 +5111,7 @@ name = "omicron-gateway"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.0",
  "camino",
  "clap 4.5.1",
  "dropshot",
@@ -5121,7 +5157,7 @@ dependencies = [
  "assert_matches",
  "async-bb8-diesel",
  "async-trait",
- "base64",
+ "base64 0.22.0",
  "buf-list",
  "bytes",
  "camino",
@@ -5162,6 +5198,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-defaults",
  "nexus-inventory",
+ "nexus-networking",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
@@ -5274,6 +5311,7 @@ dependencies = [
  "oximeter-client",
  "pq-sys",
  "ratatui",
+ "reedline",
  "serde",
  "serde_json",
  "sled-agent-client",
@@ -5352,7 +5390,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "async-trait",
- "base64",
+ "base64 0.22.0",
  "bootstore",
  "bootstrap-agent-client",
  "bytes",
@@ -5416,6 +5454,7 @@ dependencies = [
  "sha3",
  "sled-agent-client",
  "sled-hardware",
+ "sled-hardware-types",
  "sled-storage",
  "slog",
  "slog-async",
@@ -5801,7 +5840,7 @@ name = "oxide-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "base64",
+ "base64 0.22.0",
  "chrono",
  "futures",
  "http 0.2.12",
@@ -5809,7 +5848,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor",
  "rand 0.8.5",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -6244,7 +6283,7 @@ version = "3.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3163d2912b7c3b52d651a055f2c7eec9ba5cd22d26ef75b8dd3a59980b185923"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "serde",
 ]
 
@@ -6513,7 +6552,7 @@ version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49b6c5ef183cd3ab4ba005f1ca64c21e8bd97ce4699cfea9e8d9a2c4958ca520"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "byteorder",
  "bytes",
  "fallible-iterator",
@@ -6750,7 +6789,7 @@ version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c#a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c"
 dependencies = [
  "async-trait",
- "base64",
+ "base64 0.21.7",
  "futures",
  "progenitor",
  "rand 0.8.5",
@@ -6772,7 +6811,7 @@ source = "git+https://github.com/oxidecomputer/propolis?rev=a9fdbc464db4cbd4ac0f
 dependencies = [
  "anyhow",
  "atty",
- "base64",
+ "base64 0.21.7",
  "clap 4.5.1",
  "dropshot",
  "futures",
@@ -7220,6 +7259,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "regress"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d06f9a1f7cd8473611ba1a480cf35f9c5cffc2954336ba90a982fdb7e7d7f51e"
+dependencies = [
+ "hashbrown 0.14.3",
+ "memchr",
+]
+
+[[package]]
 name = "relative-path"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7240,7 +7289,7 @@ version = "0.11.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c6920094eb85afde5e4a138be3f2de8bbdf28000f0029e72c45025a56b042251"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "bytes",
  "cookie 0.17.0",
  "cookie_store",
@@ -7338,7 +7387,7 @@ version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b91f7eff05f748767f183df4320a63d6936e9c6107d97c9e6bdd9784f4289c94"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "bitflags 2.4.2",
  "serde",
  "serde_derive",
@@ -7508,7 +7557,7 @@ version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a5885493fdf0be6cdff808d1533ce878d21cfa49c7086fa00c66355cd9141bfc"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "blake2b_simd",
  "constant_time_eq 0.3.0",
  "crossbeam-utils",
@@ -7615,7 +7664,7 @@ version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2d3987094b1d07b653b7dfdc3f70ce9a1da9c51ac18c1b06b662e4f9a0e9f4b2"
 dependencies = [
- "base64",
+ "base64 0.21.7",
 ]
 
 [[package]]
@@ -7624,7 +7673,7 @@ version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f48172685e6ff52a556baa527774f61fcaa884f59daf3375c62a3f1cd2549dab"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "rustls-pki-types",
 ]
 
@@ -7735,7 +7784,7 @@ name = "samael"
 version = "0.0.14"
 source = "git+https://github.com/oxidecomputer/samael?branch=oxide/omicron#9e609a8f6fa0dd84e3bb8f579f46bd780c8be62b"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "bindgen",
  "chrono",
  "data-encoding",
@@ -8085,7 +8134,7 @@ version = "3.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "15d167997bd841ec232f5b2b8e0e26606df2e7caa4c31b95ea9ca52b200bd270"
 dependencies = [
- "base64",
+ "base64 0.21.7",
  "chrono",
  "hex",
  "indexmap 1.9.3",
@@ -8286,7 +8335,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
@@ -8307,6 +8356,7 @@ dependencies = [
  "illumos-utils",
  "libc",
  "libefi-illumos",
+ "libnvme",
  "macaddr",
  "omicron-common",
  "omicron-test-utils",
@@ -8314,12 +8364,25 @@ dependencies = [
  "rand 0.8.5",
  "schemars",
  "serde",
+ "sled-hardware-types",
  "slog",
  "slog-error-chain",
  "thiserror",
  "tofino",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "sled-hardware-types"
+version = "0.1.0"
+dependencies = [
+ "illumos-utils",
+ "macaddr",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
 ]
 
 [[package]]
@@ -9880,7 +9943,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress",
+ "regress 0.8.0",
  "schemars",
  "serde_json",
  "syn 2.0.51",
@@ -10247,9 +10310,9 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "vsss-rs"
-version = "3.3.4"
+version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "196bbee60607a195bc850e94f0e040bd090e45794ad8df0e9c5a422b9975a00f"
+checksum = "14d9b5a415d1bbbf1a9c5982babc0d8054fa10effe9c5b7086cd2fdd36be79d9"
 dependencies = [
  "curve25519-dalek",
  "elliptic-curve",
@@ -10544,7 +10607,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64",
+ "base64 0.22.0",
  "bootstrap-agent-client",
  "buf-list",
  "bytes",
@@ -10591,7 +10654,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "sled-hardware",
+ "sled-hardware-types",
  "slog",
  "slog-dtrace",
  "subprocess",
@@ -10622,7 +10685,7 @@ dependencies = [
  "ipnetwork",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",

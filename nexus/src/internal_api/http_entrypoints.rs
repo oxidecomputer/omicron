@@ -30,8 +30,10 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
+use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::UninitializedSled;
+use nexus_types::external_api::views::SledPolicy;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -95,6 +97,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
 
         api.register(sled_list_uninitialized)?;
         api.register(sled_add)?;
+        api.register(sled_expunge)?;
 
         api.register(probes_get)?;
 
@@ -885,6 +888,31 @@ async fn sled_add(
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.sled_add(&opctx, sled.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Mark a sled as expunged
+///
+/// This is an irreversible process! It should only be called after
+/// sufficient warning to the operator.
+///
+/// This is idempotent, and it returns the old policy of the sled.
+#[endpoint {
+    method = POST,
+    path = "/sleds/expunge",
+}]
+async fn sled_expunge(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    sled: TypedBody<SledSelector>,
+) -> Result<HttpResponseOk<SledPolicy>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let previous_policy =
+            nexus.sled_expunge(&opctx, sled.into_inner().sled).await?;
+        Ok(HttpResponseOk(previous_policy))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

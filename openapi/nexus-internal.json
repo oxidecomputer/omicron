@@ -1081,6 +1081,41 @@
         }
       }
     },
+    "/sleds/expunge": {
+      "post": {
+        "summary": "Mark a sled as expunged",
+        "description": "This is an irreversible process! It should only be called after sufficient warning to the operator.\nThis is idempotent, and it returns the old policy of the sled.",
+        "operationId": "sled_expunge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledSelector"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledPolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/sleds/uninitialized": {
       "get": {
         "summary": "List uninitialized sleds",
@@ -6735,6 +6770,69 @@
           "vmm_state"
         ]
       },
+      "SledPolicy": {
+        "description": "The operator-defined policy of a sled.",
+        "oneOf": [
+          {
+            "description": "The operator has indicated that the sled is in-service.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "in_service"
+                ]
+              },
+              "provision_policy": {
+                "description": "Determines whether new resources can be provisioned onto the sled.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SledProvisionPolicy"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "provision_policy"
+            ]
+          },
+          {
+            "description": "The operator has indicated that the sled has been permanently removed from service.\n\nThis is a terminal state: once a particular sled ID is expunged, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new sled.)\n\nAn expunged sled is always non-provisionable.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "expunged"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "SledProvisionPolicy": {
+        "description": "The operator-defined provision policy of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
+        "oneOf": [
+          {
+            "description": "New resources will be provisioned on this sled.",
+            "type": "string",
+            "enum": [
+              "provisionable"
+            ]
+          },
+          {
+            "description": "New resources will not be provisioned on this sled. However, if the sled is currently in service, existing resources will continue to be on this sled unless manually migrated off.",
+            "type": "string",
+            "enum": [
+              "non_provisionable"
+            ]
+          }
+        ]
+      },
       "SledRole": {
         "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
@@ -6752,6 +6850,19 @@
               "scrimlet"
             ]
           }
+        ]
+      },
+      "SledSelector": {
+        "type": "object",
+        "properties": {
+          "sled": {
+            "description": "ID of the sled",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "sled"
         ]
       },
       "SourceNatConfig": {

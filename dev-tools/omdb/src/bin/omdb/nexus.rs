@@ -4,7 +4,10 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::DbUrlOptions;
 use crate::Omdb;
+use anyhow::bail;
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::SecondsFormat;
@@ -17,7 +20,13 @@ use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
+use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_types::inventory::BaseboardId;
+use reedline::DefaultPrompt;
+use reedline::DefaultPromptSegment;
+use reedline::Reedline;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -36,6 +45,7 @@ pub struct NexusArgs {
 }
 
 /// Subcommands for the "omdb nexus" subcommand
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum NexusCommands {
     /// print information about background tasks
@@ -153,11 +163,14 @@ struct SledsArgs {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum SledsCommands {
     /// List all uninitialized sleds
     ListUninitialized,
     /// Add an uninitialized sled
     Add(SledAddArgs),
+    /// Expunge a sled (DANGEROUS)
+    Expunge(SledExpungeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -166,6 +179,17 @@ struct SledAddArgs {
     serial: String,
     /// sled's part number
     part: String,
+}
+
+#[derive(Debug, Args)]
+struct SledExpungeArgs {
+    // expunge is _extremely_ dangerous, so we also require a database
+    // connection to perform some safety checks
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
+
+    /// sled ID
+    sled_id: Uuid,
 }
 
 impl NexusArgs {
@@ -220,8 +244,8 @@ impl NexusArgs {
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Delete(args),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_delete(&client, args).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_delete(&client, args, token).await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command:
@@ -235,8 +259,8 @@ impl NexusArgs {
                         command: BlueprintTargetCommands::Set(args),
                     }),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_target_set(&client, args).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set(&client, args, token).await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command:
@@ -261,15 +285,17 @@ impl NexusArgs {
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_regenerate(&client).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_regenerate(&client, token).await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::GenerateFromCollection(args),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_generate_from_collection(&client, args)
-                    .await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_generate_from_collection(
+                    &client, args, token,
+                )
+                .await
             }
 
             NexusCommands::Sleds(SledsArgs {
@@ -278,8 +304,14 @@ impl NexusArgs {
             NexusCommands::Sleds(SledsArgs {
                 command: SledsCommands::Add(args),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_sled_add(&client, args).await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_sled_add(&client, args, token).await
+            }
+            NexusCommands::Sleds(SledsArgs {
+                command: SledsCommands::Expunge(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_sled_expunge(&client, args, omdb, log, token).await
             }
         }
     }
@@ -943,6 +975,7 @@ async fn cmd_nexus_blueprints_diff(
 async fn cmd_nexus_blueprints_delete(
     client: &nexus_client::Client,
     args: &BlueprintIdArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let _ = client
         .blueprint_delete(&args.blueprint_id)
@@ -968,6 +1001,7 @@ async fn cmd_nexus_blueprints_target_show(
 async fn cmd_nexus_blueprints_target_set(
     client: &nexus_client::Client,
     args: &BlueprintTargetSetArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let enabled = match args.enabled {
         BlueprintTargetSetEnabled::Enabled => true,
@@ -1024,6 +1058,7 @@ async fn cmd_nexus_blueprints_target_set_enabled(
 async fn cmd_nexus_blueprints_generate_from_collection(
     client: &nexus_client::Client,
     args: &CollectionIdArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let blueprint = client
         .blueprint_generate_from_collection(
@@ -1039,6 +1074,7 @@ async fn cmd_nexus_blueprints_generate_from_collection(
 
 async fn cmd_nexus_blueprints_regenerate(
     client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let blueprint =
         client.blueprint_regenerate().await.context("generating blueprint")?;
@@ -1092,6 +1128,7 @@ async fn cmd_nexus_sleds_list_uninitialized(
 async fn cmd_nexus_sled_add(
     client: &nexus_client::Client,
     args: &SledAddArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     client
         .sled_add(&UninitializedSledId {
@@ -1101,5 +1138,117 @@ async fn cmd_nexus_sled_add(
         .await
         .context("adding sled")?;
     eprintln!("added sled {} ({})", args.serial, args.part);
+    Ok(())
+}
+
+/// Runs `omdb nexus sleds expunge`
+async fn cmd_nexus_sled_expunge(
+    client: &nexus_client::Client,
+    args: &SledExpungeArgs,
+    omdb: &Omdb,
+    log: &slog::Logger,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    // This is an extremely dangerous and irreversible operation. We put a
+    // couple of safeguards in place to ensure this cannot be called without
+    // due consideration:
+    //
+    // 1. We'll require manual input on stdin to confirm the sled to be removed
+    // 2. We'll warn sternly if the sled-to-be-expunged is still present in the
+    //    most recent inventory collection
+    use nexus_db_queries::context::OpContext;
+
+    let datastore = args.db_url_opts.connect(omdb, log).await?;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = &opctx;
+
+    // First, we need to look up the sled so we know its serial number.
+    let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
+        .sled_id(args.sled_id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to find sled {}", args.sled_id))?;
+
+    // Helper to get confirmation messages from the user.
+    let mut line_editor = Reedline::create();
+    let mut read_with_prompt = move |message: &str| {
+        let prompt = DefaultPrompt::new(
+            DefaultPromptSegment::Basic(message.to_string()),
+            DefaultPromptSegment::Empty,
+        );
+        if let Ok(reedline::Signal::Success(input)) =
+            line_editor.read_line(&prompt)
+        {
+            Ok(input)
+        } else {
+            bail!("expungement aborted")
+        }
+    };
+
+    // Now check whether its sled-agent or SP were found in the most recent
+    // inventory collection.
+    match datastore
+        .inventory_get_latest_collection(opctx)
+        .await
+        .context("loading latest collection")?
+    {
+        Some(collection) => {
+            let sled_baseboard = BaseboardId {
+                part_number: sled.part_number().to_string(),
+                serial_number: sled.serial_number().to_string(),
+            };
+            // Check the collection for either the sled-id or the baseboard. In
+            // general a sled-agent's self report should result in both the
+            // sled-id and the baseboard being present in the collection, but
+            // there are some test environments (e.g., `omicron-dev run-all`)
+            // where that isn't guaranteed.
+            let sled_present_in_collection =
+                collection.sled_agents.contains_key(&args.sled_id)
+                    || collection.baseboards.contains(&sled_baseboard);
+            if sled_present_in_collection {
+                eprintln!(
+                    "WARNING: sled {} is PRESENT in the most recent inventory \
+                     collection (spotted at {}). It is dangerous to expunge a \
+                     sled that is still running. Are you sure you want to \
+                     proceed anyway?",
+                    args.sled_id, collection.time_done,
+                );
+                let confirm = read_with_prompt("y/N")?;
+                if confirm != "y" {
+                    eprintln!("expungement not confirmed: aborting");
+                    return Ok(());
+                }
+            }
+        }
+        None => {
+            eprintln!(
+                "WARNING: cannot verify that the sled is physically gone \
+                 because there are no inventory collections present. Please \
+                 make sure that the sled has been physically removed."
+            );
+        }
+    }
+
+    eprintln!(
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark sled \
+        {} ({}) expunged. To proceed, type the sled's serial number.",
+        args.sled_id,
+        sled.serial_number(),
+    );
+    let confirm = read_with_prompt("sled serial number")?;
+    if confirm != sled.serial_number() {
+        eprintln!("sled serial number not confirmed: aborting");
+        return Ok(());
+    }
+
+    let old_policy = client
+        .sled_expunge(&SledSelector { sled: args.sled_id })
+        .await
+        .context("expunging sled")?
+        .into_inner();
+    eprintln!(
+        "expunged sled {} (previous policy: {old_policy:?})",
+        args.sled_id
+    );
     Ok(())
 }
