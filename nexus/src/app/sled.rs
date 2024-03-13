@@ -32,8 +32,7 @@ impl super::Nexus {
         opctx: &'a OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<lookup::Sled<'a>> {
-        let sled = LookupPath::new(opctx, &self.db_datastore).sled_id(*sled_id);
-        Ok(sled)
+        nexus_networking::sled_lookup(&self.db_datastore, opctx, *sled_id)
     }
 
     // TODO-robustness we should have a limit on how many sled agents there can
@@ -121,21 +120,14 @@ impl super::Nexus {
         // Frankly, returning an "Arc" here without a connection pool is a
         // little silly; it's not actually used if each client connection exists
         // as a one-shot.
-        let (.., sled) =
-            self.sled_lookup(&self.opctx_alloc, id)?.fetch().await?;
-
-        let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .unwrap();
-        Ok(Arc::new(SledAgentClient::new_with_client(
-            &format!("http://{}", sled.address()),
-            client,
-            log,
-        )))
+        let client = nexus_networking::sled_client(
+            &self.db_datastore,
+            &self.opctx_alloc,
+            *id,
+            &self.log,
+        )
+        .await?;
+        Ok(Arc::new(client))
     }
 
     pub(crate) async fn reserve_on_random_sled(
@@ -304,18 +296,13 @@ impl super::Nexus {
         opctx: &OpContext,
         sleds_filter: &[Uuid],
     ) -> Result<(), Error> {
-        let svcs_vpc = LookupPath::new(opctx, &self.db_datastore)
-            .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
-        let svcs_fw_rules =
-            self.vpc_list_firewall_rules(opctx, &svcs_vpc).await?;
-        let (_, _, _, svcs_vpc) = svcs_vpc.fetch().await?;
-        self.send_sled_agents_firewall_rules(
+        nexus_networking::plumb_service_firewall_rules(
+            &self.db_datastore,
             opctx,
-            &svcs_vpc,
-            &svcs_fw_rules,
             sleds_filter,
+            &self.opctx_alloc,
+            &self.log,
         )
-        .await?;
-        Ok(())
+        .await
     }
 }

@@ -103,7 +103,7 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
-use sled_hardware::underlay::BootstrapInterface;
+use sled_hardware_types::underlay::BootstrapInterface;
 use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;

@@ -50,11 +50,11 @@ unicode-width.workspace = true
 uuid.workspace = true
 ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
-nexus-test-utils.workspace = true
 multimap.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true

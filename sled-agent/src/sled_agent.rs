@@ -66,7 +66,9 @@ use omicron_common::backoff::{
     retry_policy_internal_service_aggressive, BackoffError,
 };
 use oximeter::types::ProducerRegistry;
-use sled_hardware::{underlay, Baseboard, HardwareManager};
+use sled_hardware::{underlay, HardwareManager};
+use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -1173,9 +1175,7 @@ pub async fn sled_add(
     // Get all known bootstrap addresses via DDM
     let ddm_admin_client = DdmAdminClient::localhost(&log)?;
     let addrs = ddm_admin_client
-        .derive_bootstrap_addrs_from_prefixes(&[
-            underlay::BootstrapInterface::GlobalZone,
-        ])
+        .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
         .await?;
 
     // Create a set of futures to concurrently map the baseboard to bootstrap ip

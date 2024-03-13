@@ -91,9 +91,9 @@ use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
-use sled_hardware::underlay::BOOTSTRAP_PREFIX;
-use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
+use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware_types::Baseboard;
 use sled_storage::dataset::{
     DatasetKind, DatasetName, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
 };
