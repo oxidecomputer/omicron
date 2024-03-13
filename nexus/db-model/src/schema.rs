@@ -1561,11 +1561,20 @@ table! {
 }
 
 table! {
-    downstairs_client_stopped_notification (downstairs_id, time, reason) {
+    downstairs_client_stop_request_notification (time, upstairs_id, downstairs_id, reason) {
         time -> Timestamptz,
         upstairs_id -> Uuid,
         downstairs_id -> Uuid,
-        reason -> crate::DownstairsClientStopReasonEnum,
+        reason -> crate::DownstairsClientStopRequestReasonEnum,
+    }
+}
+
+table! {
+    downstairs_client_stopped_notification (time, upstairs_id, downstairs_id, reason) {
+        time -> Timestamptz,
+        upstairs_id -> Uuid,
+        downstairs_id -> Uuid,
+        reason -> crate::DownstairsClientStoppedReasonEnum,
     }
 }
 

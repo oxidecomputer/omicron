@@ -1,4 +1,4 @@
-CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_reason_type AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_request_reason_type AS ENUM (
   'replacing',
   'disabled',
   'failed_reconcile',

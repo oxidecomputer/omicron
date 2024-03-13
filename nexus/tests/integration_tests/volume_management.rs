@@ -3166,9 +3166,88 @@ async fn test_upstairs_repair_reject_submit_progress_when_no_repair(
         .unwrap_err();
 }
 
+/// Test that an Upstairs can notify Nexus when a Downstairs client task is
+/// requested to stop
+#[nexus_test]
+async fn test_upstairs_notify_downstairs_client_stop_request(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let downstairs_id: TypedUuid<DownstairsKind> = TypedUuid::new_v4();
+
+    let stop_request_url = format!(
+        "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request"
+    );
+
+    // Make sure an Upstairs can re-send the notification
+
+    let request = internal::nexus::DownstairsClientStopRequest {
+        time: Utc::now(),
+        reason:
+            internal::nexus::DownstairsClientStopRequestReason::TooManyOutstandingJobs,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stop_request_url,
+            Some(request.clone()),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stop_request_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // The client can be requested to stop for the same reason a different time
+
+    let request = internal::nexus::DownstairsClientStopRequest {
+        time: Utc::now(),
+        reason:
+            internal::nexus::DownstairsClientStopRequestReason::TooManyOutstandingJobs,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stop_request_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // The client can also be requested to stop for a different reason
+
+    let request = internal::nexus::DownstairsClientStopRequest {
+        time: Utc::now(),
+        reason: internal::nexus::DownstairsClientStopRequestReason::IOError,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stop_request_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+}
+
 /// Test that an Upstairs can notify Nexus when a Downstairs client task stops
 #[nexus_test]
-async fn test_upstairs_notify_downstairs_client_stop(
+async fn test_upstairs_notify_downstairs_client_stops(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let int_client = &cptestctx.internal_client;
@@ -3184,8 +3263,7 @@ async fn test_upstairs_notify_downstairs_client_stop(
 
     let request = internal::nexus::DownstairsClientStopped {
         time: Utc::now(),
-        reason:
-            internal::nexus::DownstairsClientStopReason::TooManyOutstandingJobs,
+        reason: internal::nexus::DownstairsClientStoppedReason::ReadFailed,
     };
 
     int_client
@@ -3212,8 +3290,7 @@ async fn test_upstairs_notify_downstairs_client_stop(
 
     let request = internal::nexus::DownstairsClientStopped {
         time: Utc::now(),
-        reason:
-            internal::nexus::DownstairsClientStopReason::TooManyOutstandingJobs,
+        reason: internal::nexus::DownstairsClientStoppedReason::ReadFailed,
     };
 
     int_client
@@ -3230,7 +3307,7 @@ async fn test_upstairs_notify_downstairs_client_stop(
 
     let request = internal::nexus::DownstairsClientStopped {
         time: Utc::now(),
-        reason: internal::nexus::DownstairsClientStopReason::IOError,
+        reason: internal::nexus::DownstairsClientStoppedReason::Timeout,
     };
 
     int_client

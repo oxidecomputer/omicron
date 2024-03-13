@@ -297,7 +297,7 @@ pub struct RepairProgress {
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum DownstairsClientStopReason {
+pub enum DownstairsClientStopRequestReason {
     Replacing,
     Disabled,
     FailedReconcile,
@@ -310,7 +310,27 @@ pub enum DownstairsClientStopReason {
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+pub struct DownstairsClientStopRequest {
+    pub time: DateTime<Utc>,
+    pub reason: DownstairsClientStopRequestReason,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum DownstairsClientStoppedReason {
+    ConnectionTimeout,
+    ConnectionFailed,
+    Timeout,
+    WriteFailed,
+    ReadFailed,
+    RequestedStop,
+    Finished,
+    QueueClosed,
+    ReceiveTaskCancelled,
+}
+
+#[derive(Debug, Deserialize, Serialize, JsonSchema, Clone)]
 pub struct DownstairsClientStopped {
     pub time: DateTime<Utc>,
-    pub reason: DownstairsClientStopReason,
+    pub reason: DownstairsClientStoppedReason,
 }

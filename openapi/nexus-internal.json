@@ -125,10 +125,57 @@
         }
       }
     },
+    "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request": {
+      "post": {
+        "summary": "An Upstairs will update this endpoint if a Downstairs client task is",
+        "description": "requested to stop",
+        "operationId": "cpapi_downstairs_client_stop_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "downstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDownstairsKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownstairsClientStopRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped": {
       "post": {
-        "summary": "An Upstairs will update this endpoint if a Downstairs client task is stopped",
-        "operationId": "cpapi_downstairs_stopped",
+        "summary": "An Upstairs will update this endpoint if a Downstairs client task stops for",
+        "description": "any reason (not just after being requested to)",
+        "operationId": "cpapi_downstairs_client_stopped",
         "parameters": [
           {
             "in": "path",
@@ -3726,7 +3773,23 @@
           }
         ]
       },
-      "DownstairsClientStopReason": {
+      "DownstairsClientStopRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DownstairsClientStopRequestReason"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reason",
+          "time"
+        ]
+      },
+      "DownstairsClientStopRequestReason": {
         "type": "string",
         "enum": [
           "replacing",
@@ -3744,7 +3807,7 @@
         "type": "object",
         "properties": {
           "reason": {
-            "$ref": "#/components/schemas/DownstairsClientStopReason"
+            "$ref": "#/components/schemas/DownstairsClientStoppedReason"
           },
           "time": {
             "type": "string",
@@ -3754,6 +3817,20 @@
         "required": [
           "reason",
           "time"
+        ]
+      },
+      "DownstairsClientStoppedReason": {
+        "type": "string",
+        "enum": [
+          "connection_timeout",
+          "connection_failed",
+          "timeout",
+          "write_failed",
+          "read_failed",
+          "requested_stop",
+          "finished",
+          "queue_closed",
+          "receive_task_cancelled"
         ]
       },
       "DownstairsUnderRepair": {

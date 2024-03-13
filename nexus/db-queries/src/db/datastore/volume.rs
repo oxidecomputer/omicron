@@ -11,6 +11,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
+use crate::db::model::DownstairsClientStopRequestNotification;
 use crate::db::model::DownstairsClientStoppedNotification;
 use crate::db::model::Region;
 use crate::db::model::RegionSnapshot;
@@ -30,6 +31,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_uuid_kinds::DownstairsKind;
@@ -991,8 +993,41 @@ impl DataStore {
             })
     }
 
+    /// Record when a Downstairs client is requested to stop, and why
+    pub async fn downstairs_client_stop_request_notification(
+        &self,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        downstairs_id: TypedUuid<DownstairsKind>,
+        downstairs_client_stop_request: DownstairsClientStopRequest,
+    ) -> Result<(), Error> {
+        use db::schema::downstairs_client_stop_request_notification::dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        diesel::insert_into(dsl::downstairs_client_stop_request_notification)
+            .values(DownstairsClientStopRequestNotification {
+                time: downstairs_client_stop_request.time,
+                upstairs_id: upstairs_id.into(),
+                downstairs_id: downstairs_id.into(),
+                reason: downstairs_client_stop_request.reason.into(),
+            })
+            .on_conflict((
+                dsl::time,
+                dsl::upstairs_id,
+                dsl::downstairs_id,
+                dsl::reason,
+            ))
+            .do_nothing()
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
     /// Record when a Downstairs client is stopped, and why
-    pub async fn downstairs_stopped_notification(
+    pub async fn downstairs_client_stopped_notification(
         &self,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,

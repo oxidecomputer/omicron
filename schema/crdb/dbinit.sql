@@ -3610,7 +3610,7 @@ CREATE TABLE IF NOT EXISTS upstairs_repair_progress (
     PRIMARY KEY (repair_id, time, current_item, total_items)
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_reason_type AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_request_reason_type AS ENUM (
   'replacing',
   'disabled',
   'failed_reconcile',
@@ -3622,11 +3622,32 @@ CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_reason_type AS E
   'deactivated'
 );
 
+CREATE TABLE IF NOT EXISTS downstairs_client_stop_request_notification (
+    time TIMESTAMPTZ NOT NULL,
+    upstairs_id UUID NOT NULL,
+    downstairs_id UUID NOT NULL,
+    reason omicron.public.downstairs_client_stop_request_reason_type NOT NULL,
+
+    PRIMARY KEY (time, upstairs_id, downstairs_id, reason)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stopped_reason_type AS ENUM (
+  'connection_timeout',
+  'connection_failed',
+  'timeout',
+  'write_failed',
+  'read_failed',
+  'requested_stop',
+  'finished',
+  'queue_closed',
+  'receive_task_cancelled'
+);
+
 CREATE TABLE IF NOT EXISTS downstairs_client_stopped_notification (
     time TIMESTAMPTZ NOT NULL,
     upstairs_id UUID NOT NULL,
     downstairs_id UUID NOT NULL,
-    reason omicron.public.downstairs_client_stop_reason_type NOT NULL,
+    reason omicron.public.downstairs_client_stopped_reason_type NOT NULL,
 
     PRIMARY KEY (time, upstairs_id, downstairs_id, reason)
 );

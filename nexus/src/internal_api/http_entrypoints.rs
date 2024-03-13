@@ -43,6 +43,7 @@ use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
@@ -87,7 +88,8 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_upstairs_repair_start)?;
         api.register(cpapi_upstairs_repair_finish)?;
         api.register(cpapi_upstairs_repair_progress)?;
-        api.register(cpapi_downstairs_stopped)?;
+        api.register(cpapi_downstairs_client_stop_request)?;
+        api.register(cpapi_downstairs_client_stopped)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -627,12 +629,43 @@ struct UpstairsDownstairsPathParam {
     downstairs_id: TypedUuid<DownstairsKind>,
 }
 
-/// An Upstairs will update this endpoint if a Downstairs client task is stopped
+/// An Upstairs will update this endpoint if a Downstairs client task is
+/// requested to stop
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request",
+ }]
+async fn cpapi_downstairs_client_stop_request(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsDownstairsPathParam>,
+    downstairs_client_stop_request: TypedBody<DownstairsClientStopRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .downstairs_client_stop_request_notification(
+                &opctx,
+                path.upstairs_id,
+                path.downstairs_id,
+                downstairs_client_stop_request.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// An Upstairs will update this endpoint if a Downstairs client task stops for
+/// any reason (not just after being requested to)
 #[endpoint {
      method = POST,
      path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped",
  }]
-async fn cpapi_downstairs_stopped(
+async fn cpapi_downstairs_client_stopped(
     rqctx: RequestContext<Arc<ServerContext>>,
     path_params: Path<UpstairsDownstairsPathParam>,
     downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
@@ -644,7 +677,7 @@ async fn cpapi_downstairs_stopped(
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus
-            .downstairs_stopped_notification(
+            .downstairs_client_stopped_notification(
                 &opctx,
                 path.upstairs_id,
                 path.downstairs_id,

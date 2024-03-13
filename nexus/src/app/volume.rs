@@ -10,6 +10,7 @@ use nexus_db_model::UpstairsRepairNotificationType;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::DeleteResult;
+use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
@@ -143,8 +144,33 @@ impl super::Nexus {
             .await
     }
 
+    /// An Upstairs is telling us that a Downstairs client task was requested to
+    /// stop
+    pub(crate) async fn downstairs_client_stop_request_notification(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        downstairs_id: TypedUuid<DownstairsKind>,
+        downstairs_client_stop_request: DownstairsClientStopRequest,
+    ) -> DeleteResult {
+        info!(
+            self.log,
+            "received downstairs_client_stop_request_notification from upstairs {upstairs_id} for downstairs {downstairs_id}: {:?}",
+            downstairs_client_stop_request,
+        );
+
+        self.db_datastore
+            .downstairs_client_stop_request_notification(
+                opctx,
+                upstairs_id,
+                downstairs_id,
+                downstairs_client_stop_request,
+            )
+            .await
+    }
+
     /// An Upstairs is telling us that a Downstairs client task was stopped
-    pub(crate) async fn downstairs_stopped_notification(
+    pub(crate) async fn downstairs_client_stopped_notification(
         self: &Arc<Self>,
         opctx: &OpContext,
         upstairs_id: TypedUuid<UpstairsKind>,
@@ -153,12 +179,12 @@ impl super::Nexus {
     ) -> DeleteResult {
         info!(
             self.log,
-            "received downstairs_stopped_notification from upstairs {upstairs_id} for downstairs {downstairs_id}: {:?}",
+            "received downstairs_client_stopped_notification from upstairs {upstairs_id} for downstairs {downstairs_id}: {:?}",
             downstairs_client_stopped,
         );
 
         self.db_datastore
-            .downstairs_stopped_notification(
+            .downstairs_client_stopped_notification(
                 opctx,
                 upstairs_id,
                 downstairs_id,
