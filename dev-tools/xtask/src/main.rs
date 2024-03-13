@@ -281,6 +281,13 @@ fn cmd_verify_library() -> Result<()> {
                 .output()
                 .context("exec elfedit")?;
 
+            if !command.status.success() {
+                bail!(
+                    "Failed to execute elfedit successfully {}",
+                    command.status
+                );
+            }
+
             let stdout = String::from_utf8(command.stdout)?;
             // `elfedit -o simple -r -e "dyn:tag NEEDED" /file/path` will return
             // a new line seperated list of required libraries so we walk over
