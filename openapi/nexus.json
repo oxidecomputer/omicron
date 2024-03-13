@@ -5728,7 +5728,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Fetch IP pool",
+        "summary": "Fetch IP pool utilization",
         "operationId": "ip_pool_utilization_view",
         "parameters": [
           {

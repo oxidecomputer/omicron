@@ -1558,7 +1558,7 @@ async fn ip_pool_update(
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
-/// Fetch IP pool
+/// Fetch IP pool utilization
 #[endpoint {
     method = GET,
     path = "/v1/system/ip-pools/{pool}/utilization",
