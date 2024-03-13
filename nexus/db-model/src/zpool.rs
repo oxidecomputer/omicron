@@ -40,7 +40,7 @@ impl Zpool {
         id: Uuid,
         sled_id: Uuid,
         physical_disk_id: Uuid,
-        total_size: ByteCount,
+        _total_size: ByteCount,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
@@ -48,7 +48,7 @@ impl Zpool {
             rcgen: Generation::new(),
             sled_id,
             physical_disk_id,
-            total_size: Some(total_size),
+            total_size: None,
         }
     }
 }

@@ -16,6 +16,7 @@ mod init;
 mod inventory_collection;
 mod nat_cleanup;
 mod phantom_disks;
+mod physical_storage_monitor;
 mod region_replacement;
 mod status;
 mod sync_service_zone_nat;

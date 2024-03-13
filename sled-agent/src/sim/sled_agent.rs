@@ -767,10 +767,12 @@ impl SledAgent {
             zpools: storage
                 .zpools()
                 .iter()
-                .map(|(id, zpool)| Ok(crate::params::InventoryZpool {
-                    id: *id,
-                    total_size: ByteCount::try_from(zpool.total_size())?,
-                }))
+                .map(|(id, zpool)| {
+                    Ok(crate::params::InventoryZpool {
+                        id: *id,
+                        total_size: ByteCount::try_from(zpool.total_size())?,
+                    })
+                })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
         })
     }

@@ -376,10 +376,7 @@ pub struct Zpool {
 
 impl From<sled_agent_client::types::InventoryZpool> for Zpool {
     fn from(pool: sled_agent_client::types::InventoryZpool) -> Zpool {
-        Zpool {
-            id: pool.id,
-            total_size: pool.total_size,
-        }
+        Zpool { id: pool.id, total_size: pool.total_size }
     }
 }
 

@@ -331,6 +331,7 @@ impl CandidateZpools {
         let base_query = old_zpool_usage
             .query_source()
             .inner_join(with_zpool)
+            .filter(zpool_dsl::total_size.is_not_null())
             .filter(it_will_fit)
             .filter(sled_is_provisionable)
             .filter(sled_is_active)

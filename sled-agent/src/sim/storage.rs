@@ -484,11 +484,8 @@ pub(crate) struct Zpool {
 }
 
 impl Zpool {
-    fn new(total_size: u64,) -> Self {
-        Zpool {
-            datasets: HashMap::new(),
-            total_size,
-        }
+    fn new(total_size: u64) -> Self {
+        Zpool { datasets: HashMap::new(), total_size }
     }
 
     fn insert_dataset(

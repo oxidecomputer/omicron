@@ -144,7 +144,12 @@ impl DataStore {
             .iter()
             .flat_map(|(sled_id, sled_agent)| {
                 sled_agent.zpools.iter().map(|pool| {
-                    InvZpool::new(collection_id, pool.id, *sled_id, pool.total_size.into())
+                    InvZpool::new(
+                        collection_id,
+                        pool.id,
+                        *sled_id,
+                        pool.total_size.into(),
+                    )
                 })
             })
             .collect();
@@ -1502,16 +1507,11 @@ impl DataStore {
         };
 
         // Mapping of "Sled ID" -> "All zpools reported by that sled"
-        let zpools: BTreeMap<
-            Uuid,
-            Vec<nexus_types::inventory::Zpool>,
-        > = {
+        let zpools: BTreeMap<Uuid, Vec<nexus_types::inventory::Zpool>> = {
             use db::schema::inv_zpool::dsl;
 
-            let mut zpools = BTreeMap::<
-                Uuid,
-                Vec<nexus_types::inventory::Zpool>,
-            >::new();
+            let mut zpools =
+                BTreeMap::<Uuid, Vec<nexus_types::inventory::Zpool>>::new();
             let mut paginator = Paginator::new(batch_size);
             while let Some(p) = paginator.next() {
                 let batch = paginated_multicolumn(
@@ -1526,8 +1526,7 @@ impl DataStore {
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 })?;
-                paginator =
-                    p.found_batch(&batch, &|row| (row.sled_id, row.id));
+                paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
                 for zpool in batch {
                     zpools.entry(zpool.sled_id).or_default().push(zpool.into());
                 }
