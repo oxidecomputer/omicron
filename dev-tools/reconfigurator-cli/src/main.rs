@@ -456,7 +456,6 @@ fn cmd_blueprint_from_inventory(
         dns_version,
         &policy,
         creator,
-        None,
     )
     .context("building collection")?;
     let rv = format!(

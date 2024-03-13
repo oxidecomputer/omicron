@@ -18,6 +18,7 @@ use omicron_common::api::external::Generation;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::hash::Hash;
 use uuid::Uuid;
 
 pub struct Planner<'a> {
@@ -61,7 +62,7 @@ impl<'a> Planner<'a> {
     ///
     /// This will ensure that tests that use this builder will produce the same
     /// results each time they are run.
-    pub fn with_rng_seed(mut self, seed: &str) -> Self {
+    pub fn with_rng_seed<H: Hash>(mut self, seed: H) -> Self {
         // This is an owned builder because it is almost never going to be
         // conditional.
         self.blueprint.set_rng_seed(seed);
@@ -360,14 +361,15 @@ mod test {
 
         // Build the initial blueprint.  We don't bother verifying it here
         // because there's a separate test for that.
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &example.collection,
-            internal_dns_version,
-            &example.policy,
-            "the_test",
-            Some("planner_basic_add_sled_bp1"),
-        )
-        .expect("failed to create initial blueprint");
+        let blueprint1 =
+            BlueprintBuilder::build_initial_from_collection_seeded(
+                &example.collection,
+                internal_dns_version,
+                &example.policy,
+                "the_test",
+                (TEST_NAME, "bp1"),
+            )
+            .expect("failed to create initial blueprint");
         verify_blueprint(&blueprint1);
 
         // Now run the planner.  It should do nothing because our initial
@@ -382,7 +384,7 @@ mod test {
             &example.collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed("planner_basic_add_sled_bp2")
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
 
@@ -409,7 +411,7 @@ mod test {
             &example.collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed("planner_basic_add_sled_bp3")
+        .with_rng_seed((TEST_NAME, "bp3"))
         .plan()
         .expect("failed to plan");
 
@@ -450,7 +452,7 @@ mod test {
             &example.collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed("planner_basic_add_sled_bp4")
+        .with_rng_seed((TEST_NAME, "bp4"))
         .plan()
         .expect("failed to plan");
         let diff = blueprint3.diff_sleds(&blueprint4);
@@ -489,7 +491,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed("planner_basic_add_sled_bp5")
+        .with_rng_seed((TEST_NAME, "bp5"))
         .plan()
         .expect("failed to plan");
 
@@ -530,7 +532,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed("planner_basic_add_sled_bp6")
+        .with_rng_seed((TEST_NAME, "bp6"))
         .plan()
         .expect("failed to plan");
 
@@ -574,14 +576,15 @@ mod test {
         };
 
         // Build the initial blueprint.
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            internal_dns_version,
-            &policy,
-            "the_test",
-            Some("planner_add_multiple_nexus_to_one_sled_bp1"),
-        )
-        .expect("failed to create initial blueprint");
+        let blueprint1 =
+            BlueprintBuilder::build_initial_from_collection_seeded(
+                &collection,
+                internal_dns_version,
+                &policy,
+                "the_test",
+                (TEST_NAME, "bp1"),
+            )
+            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 1 Nexus instance on the one sled we
         // kept.
@@ -610,7 +613,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed("planner_add_multiple_nexus_to_one_sled_bp2")
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
 
@@ -648,14 +651,15 @@ mod test {
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            &policy,
-            "the_test",
-            Some("planner_spread_additional_nexus_zones_across_sleds_bp1"),
-        )
-        .expect("failed to create initial blueprint");
+        let blueprint1 =
+            BlueprintBuilder::build_initial_from_collection_seeded(
+                &collection,
+                Generation::new(),
+                &policy,
+                "the_test",
+                (TEST_NAME, "bp1"),
+            )
+            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.omicron_zones.len(), 3);
@@ -681,7 +685,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed("planner_spread_additional_nexus_zones_across_sleds_bp2")
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
 
@@ -736,14 +740,15 @@ mod test {
         let (collection, mut policy) = example(&logctx.log, TEST_NAME, 5);
 
         // Build the initial blueprint.
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            &policy,
-            "the_test",
-            Some("planner_nexus_allocation_skips_nonprovisionable_sleds_bp1"),
-        )
-        .expect("failed to create initial blueprint");
+        let blueprint1 =
+            BlueprintBuilder::build_initial_from_collection_seeded(
+                &collection,
+                Generation::new(),
+                &policy,
+                "the_test",
+                (TEST_NAME, "bp1"),
+            )
+            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.omicron_zones.len(), 5);
@@ -800,9 +805,7 @@ mod test {
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed(
-            "planner_nexus_allocation_skips_nonprovisionable_sleds_bp2",
-        )
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
 

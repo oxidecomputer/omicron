@@ -144,13 +144,43 @@ impl<'a> BlueprintBuilder<'a> {
         internal_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
-        rng_seed: Option<&str>,
+    ) -> Result<Blueprint, Error> {
+        Self::build_initial_impl(
+            collection,
+            internal_dns_version,
+            policy,
+            creator,
+            BlueprintBuilderRng::new(),
+        )
+    }
+
+    /// A version of [`Self::build_initial_from_collection`] that allows the
+    /// blueprint ID to be generated from a random seed.
+    pub fn build_initial_from_collection_seeded<H: Hash>(
+        collection: &'a Collection,
+        internal_dns_version: Generation,
+        policy: &'a Policy,
+        creator: &str,
+        seed: H,
     ) -> Result<Blueprint, Error> {
         let mut rng = BlueprintBuilderRng::new();
-        if let Some(seed) = rng_seed {
-            rng.set_seed(seed);
-        }
+        rng.set_seed(seed);
+        Self::build_initial_impl(
+            collection,
+            internal_dns_version,
+            policy,
+            creator,
+            rng,
+        )
+    }
 
+    fn build_initial_impl(
+        collection: &'a Collection,
+        internal_dns_version: Generation,
+        policy: &'a Policy,
+        creator: &str,
+        mut rng: BlueprintBuilderRng,
+    ) -> Result<Blueprint, Error> {
         let omicron_zones = policy
             .sleds
             .keys()
@@ -901,12 +931,12 @@ pub mod test {
 
             let empty_zone_inventory = inventory_builder.build();
             let initial_blueprint =
-                BlueprintBuilder::build_initial_from_collection(
+                BlueprintBuilder::build_initial_from_collection_seeded(
                     &empty_zone_inventory,
                     Generation::new(),
                     &policy,
                     "test suite",
-                    None,
+                    (test_name, "ExampleSystem initial"),
                 )
                 .unwrap();
 
@@ -919,7 +949,7 @@ pub mod test {
                 "test suite",
             )
             .unwrap();
-            builder.set_rng_seed((test_name, "make_zones"));
+            builder.set_rng_seed((test_name, "ExampleSystem make_zones"));
             for (sled_id, sled_resources) in &policy.sleds {
                 let _ = builder.sled_ensure_zone_ntp(*sled_id).unwrap();
                 let _ = builder
@@ -1009,12 +1039,12 @@ pub mod test {
         let (collection, policy) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let blueprint_initial =
-            BlueprintBuilder::build_initial_from_collection(
+            BlueprintBuilder::build_initial_from_collection_seeded(
                 &collection,
                 Generation::new(),
                 &policy,
                 "the_test",
-                None,
+                TEST_NAME,
             )
             .expect("failed to create initial blueprint");
         verify_blueprint(&blueprint_initial);
@@ -1198,12 +1228,12 @@ pub mod test {
             });
         }
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
             internal_dns_version,
             &policy,
             "test",
-            None,
+            TEST_NAME,
         )
         .expect("failed to create initial blueprint");
 
@@ -1264,12 +1294,12 @@ pub mod test {
             selected_sled_id.expect("found no sleds with Nexus zone")
         };
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
             Generation::new(),
             &policy,
             "test",
-            None,
+            TEST_NAME,
         )
         .expect("failed to create initial blueprint");
 
@@ -1391,12 +1421,12 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
             Generation::new(),
             &policy,
             "test",
-            None,
+            TEST_NAME,
         )
         .unwrap();
 
@@ -1449,12 +1479,12 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
             Generation::new(),
             &policy,
             "test",
-            None,
+            TEST_NAME,
         )
         .unwrap();
 
@@ -1507,12 +1537,12 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
             Generation::new(),
             &policy,
             "test",
-            None,
+            TEST_NAME,
         )
         .unwrap();
 
