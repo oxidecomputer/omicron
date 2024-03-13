@@ -7,7 +7,7 @@
 use super::{LearnedSharePkg, RackUuid, Share, SharePkg};
 use derive_more::From;
 use serde::{Deserialize, Serialize};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::net::SocketAddrV6;
 use thiserror::Error;
 use uuid::Uuid;
