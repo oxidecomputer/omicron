@@ -2236,10 +2236,10 @@ mod illumos_tests {
         });
 
         // These must be internal zpools
-        for _ in 0..2 {
+        for i in 0..2 {
             let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
             let internal_disk: RawDisk =
-                SyntheticDisk::new(internal_zpool_name.clone()).into();
+                SyntheticDisk::new(internal_zpool_name.clone(), i).into();
             handle.upsert_disk(internal_disk).await;
         }
         handle

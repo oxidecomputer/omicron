@@ -828,8 +828,9 @@ mod test {
 
     #[tokio::test]
     async fn test_blueprint_external_dns_basic() {
-        let logctx = test_setup_log("test_blueprint_external_dns_basic");
-        let (collection, policy) = example(&logctx.log, 5);
+        static TEST_NAME: &str = "test_blueprint_external_dns_basic";
+        let logctx = test_setup_log(TEST_NAME);
+        let (collection, policy) = example(&logctx.log, TEST_NAME, 5);
         let initial_external_dns_generation = Generation::new();
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,

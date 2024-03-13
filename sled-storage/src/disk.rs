@@ -31,7 +31,16 @@ pub enum DiskError {
 pub struct SyntheticDisk {
     pub identity: DiskIdentity,
     pub zpool_name: ZpoolName,
+    pub slot: i64,
 }
+
+// By adding slots at an "offset", this acts as a barrier against synthetic
+// disks overlapping with "real disk" in a mixed-disk deployment.
+//
+// This shouldn't happen in prod, and is an unlikely test-only scenario, but
+// we'd still like to protect against it, since it could confuse the inventory
+// system.
+const SYNTHETIC_SLOT_OFFSET: i64 = 1024;
 
 impl SyntheticDisk {
     // Create a zpool and import it for the synthetic disk
@@ -39,6 +48,7 @@ impl SyntheticDisk {
     pub fn create_zpool(
         dir: &Utf8Path,
         zpool_name: &ZpoolName,
+        slot: i64,
     ) -> SyntheticDisk {
         // 64 MiB (min size of zpool)
         const DISK_SIZE: u64 = 64 * 1024 * 1024;
@@ -49,17 +59,21 @@ impl SyntheticDisk {
         Zpool::create(zpool_name, &path).unwrap();
         Zpool::import(zpool_name).unwrap();
         Zpool::set_failmode_continue(zpool_name).unwrap();
-        Self::new(zpool_name.clone())
+        Self::new(zpool_name.clone(), slot)
     }
 
-    pub fn new(zpool_name: ZpoolName) -> SyntheticDisk {
+    pub fn new(zpool_name: ZpoolName, slot: i64) -> SyntheticDisk {
         let id = zpool_name.id();
         let identity = DiskIdentity {
             vendor: "synthetic-vendor".to_string(),
             serial: format!("synthetic-serial-{id}"),
             model: "synthetic-model".to_string(),
         };
-        SyntheticDisk { identity, zpool_name }
+        SyntheticDisk {
+            identity,
+            zpool_name,
+            slot: slot + SYNTHETIC_SLOT_OFFSET,
+        }
     }
 }
 
@@ -247,7 +261,7 @@ impl Disk {
     pub fn slot(&self) -> i64 {
         match self {
             Self::Real(disk) => disk.slot,
-            Self::Synthetic(_) => unreachable!(),
+            Self::Synthetic(disk) => disk.slot,
         }
     }
 }

@@ -7,7 +7,7 @@
 use super::{
     Envelope, FsmConfig, Msg, RackUuid, Request, RequestType, Share, SharePkg,
 };
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 use uuid::Uuid;

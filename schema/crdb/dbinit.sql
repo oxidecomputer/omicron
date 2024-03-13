@@ -2962,6 +2962,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+    -- The slot where this disk was last observed
+    slot INT8 CHECK (slot >= 0) NOT NULL,
+
+    vendor STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+
+    variant omicron.public.physical_disk_kind NOT NULL,
+
+    -- FK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, slot)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3287,25 +3311,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zones_not_in_service (
 COMMIT;
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
-    -- There should only be one row of this table for the whole DB.
-    -- It's a little goofy, but filter on "singleton = true" before querying
-    -- or applying updates, and you'll access the singleton row.
-    --
-    -- We also add a constraint on this table to ensure it's not possible to
-    -- access the version of this table with "singleton = false".
-    singleton BOOL NOT NULL PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    -- Semver representation of the DB version
-    version STRING(64) NOT NULL,
-
-    -- (Optional) Semver representation of the DB version to which we're upgrading
-    target_version STRING(64),
-
-    CHECK (singleton = true)
-);
-
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -3450,29 +3455,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_sessi
     switch
 ) WHERE time_deleted IS NULL;
 
-/*
- * Metadata for the schema itself. This version number isn't great, as there's
- * nothing to ensure it gets bumped when it should be, but it's a start.
- */
-CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
-    -- There should only be one row of this table for the whole DB.
-    -- It's a little goofy, but filter on "singleton = true" before querying
-    -- or applying updates, and you'll access the singleton row.
-    --
-    -- We also add a constraint on this table to ensure it's not possible to
-    -- access the version of this table with "singleton = false".
-    singleton BOOL NOT NULL PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    -- Semver representation of the DB version
-    version STRING(64) NOT NULL,
-
-    -- (Optional) Semver representation of the DB version to which we're upgrading
-    target_version STRING(64),
-
-    CHECK (singleton = true)
-);
-
 ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS autoneg BOOL NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS ipv4_nat_lookup_by_vni ON omicron.public.ipv4_nat_entry (
@@ -3571,6 +3553,33 @@ ALTER TABLE omicron.public.external_ip ADD COLUMN IF NOT EXISTS is_probe BOOL NO
 
 ALTER TYPE omicron.public.network_interface_kind ADD VALUE IF NOT EXISTS 'probe';
 
+/*
+ * Metadata for the schema itself. This version number isn't great, as there's
+ * nothing to ensure it gets bumped when it should be, but it's a start.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- Semver representation of the DB version
+    version STRING(64) NOT NULL,
+
+    -- (Optional) Semver representation of the DB version to which we're upgrading
+    target_version STRING(64),
+
+    CHECK (singleton = true)
+);
+
+/*
+ * Keep this at the end of file so that the database does not contain a version
+ * until it is fully populated.
+ */
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
@@ -3578,7 +3587,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '40.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '41.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
