@@ -650,6 +650,13 @@ impl DataStore {
     /// In order to change the enabled field, `target` must already be the
     /// current target blueprint. To instead set a new blueprint target, use
     /// [`DataStore::blueprint_target_set_current`].
+    // Although this function is like `blueprint_target_set_current()` in that
+    // both store the given `BlueprintTarget` into the table, the functions are
+    // distinct because the preconditions and error cases are different. We
+    // could reconsider this and make `blueprint_target_set_current` accept
+    // blueprints where either their own or their parent is the current
+    // blueprint, although this would require some rework in the nontrivial
+    // `InsertTargetQuery` CTE.
     pub async fn blueprint_target_set_current_enabled(
         &self,
         opctx: &OpContext,
