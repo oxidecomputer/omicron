@@ -2962,6 +2962,30 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+    -- The slot where this disk was last observed
+    slot INT8 CHECK (slot >= 0) NOT NULL,
+
+    vendor STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+
+    variant omicron.public.physical_disk_kind NOT NULL,
+
+    -- FK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, slot)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3575,7 +3599,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '40.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '41.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

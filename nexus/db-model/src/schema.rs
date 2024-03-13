@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(40, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(41, 0, 0);
 
 table! {
     disk (id) {
@@ -1358,6 +1358,20 @@ table! {
         usable_hardware_threads -> Int8,
         usable_physical_ram -> Int8,
         reservoir_size -> Int8,
+    }
+}
+
+table! {
+    inv_physical_disk (inv_collection_id, sled_id, slot) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        slot -> Int8,
+
+        vendor -> Text,
+        model -> Text,
+        serial -> Text,
+
+        variant -> crate::PhysicalDiskKindEnum,
     }
 }
 
