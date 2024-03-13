@@ -10905,6 +10905,8 @@ dependencies = [
  "cargo_metadata",
  "cargo_toml",
  "clap 4.5.1",
+ "serde",
+ "toml 0.8.10",
 ]
 
 [[package]]

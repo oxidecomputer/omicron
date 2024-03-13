@@ -1,0 +1,9 @@
+[libraries."libnvme.so.1"]
+binaries = [
+  "installinator",
+  "omicron-dev",
+  "omicron-package",
+  "services-ledger-check-migrate",
+  "sled-agent",
+  "sled-agent-sim",
+]

@@ -76,6 +76,14 @@ export RUSTC_BOOTSTRAP=1
 # We report build progress to stderr, and the "--timings=json" output goes to stdout.
 ptime -m cargo build -Z unstable-options --timings=json --workspace --tests --locked --verbose 1> "$OUTPUT_DIR/crate-build-timings.json"
 
+# If we are running on illumos we want to verify that we are not requiring system
+# libraries outside of specific binaries. If we encounter this situation we bail
+# before running any tests.
+# NB: This must be ran after we have built the binaries with cargo build.
+if [[ $target_os == "illumos" ]]; then
+    ptime -m cargo xtask verify-libraries
+fi
+
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
 # rather than a buildomat timeout.  See oxidecomputer/buildomat#8.

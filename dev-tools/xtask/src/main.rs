@@ -11,7 +11,12 @@ use camino::Utf8Path;
 use cargo_metadata::Metadata;
 use cargo_toml::{Dependency, Manifest};
 use clap::{Parser, Subcommand};
-use std::{collections::BTreeMap, process::Command};
+use serde::Deserialize;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    process::Command,
+};
 
 #[derive(Parser)]
 #[command(name = "cargo xtask", about = "Workspace-related developer tools")]
@@ -27,6 +32,9 @@ enum Cmds {
     CheckWorkspaceDeps,
     /// Run configured clippy checks
     Clippy(ClippyArgs),
+    /// Verify we are not leaking library bindings outside of intended
+    /// crates
+    VerifyLibraries,
 }
 
 #[derive(Parser)]
@@ -36,11 +44,27 @@ struct ClippyArgs {
     fix: bool,
 }
 
+#[derive(Parser)]
+struct VerifyLibraryArgs {
+    library: String,
+}
+
+#[derive(Deserialize)]
+struct BinaryWhitelist {
+    binaries: BTreeSet<String>,
+}
+
+#[derive(Deserialize)]
+struct LibraryVerificationConfig {
+    libraries: BTreeMap<String, BinaryWhitelist>,
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     match args.cmd {
         Cmds::Clippy(args) => cmd_clippy(args),
         Cmds::CheckWorkspaceDeps => cmd_check_workspace_deps(),
+        Cmds::VerifyLibraries => cmd_verify_library(),
     }
 }
 
@@ -213,6 +237,68 @@ fn cmd_check_workspace_deps() -> Result<()> {
     Ok(())
 }
 
+fn cmd_verify_library() -> Result<()> {
+    let metadata = load_workspace()?;
+    let mut config_path = metadata.workspace_root;
+    config_path.push("library-verification.toml");
+    let config = read_library_verification_toml(&config_path)?;
+
+    let mut offenders = Vec::new();
+    for entry in fs::read_dir(metadata.target_directory)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+
+        if entry.file_name() != "release" && entry.file_name() != "debug" {
+            continue;
+        }
+
+        for binary in metadata
+            .packages
+            .iter()
+            .flat_map(|p| &p.targets)
+            .filter(|t| t.kind == vec!["bin"])
+            .map(|x| &x.name)
+        {
+            let mut path = entry.path();
+            path.push(binary);
+
+            if !path.is_file() {
+                continue;
+            }
+
+            let command = Command::new("elfedit")
+                .arg("-o")
+                .arg("simple")
+                .arg("-r")
+                .arg("-e")
+                .arg("dyn:tag NEEDED")
+                .arg(&path)
+                .output()
+                .context("exec elfedit")?;
+
+            assert!(command.status.success());
+
+            let stdout = String::from_utf8(command.stdout)?;
+            for library in stdout.lines() {
+                if let Some(whitelist) = config.libraries.get(library.trim()) {
+                    if !whitelist.binaries.contains(binary) {
+                        offenders
+                            .push(anyhow::anyhow!("{binary} NEEDS {library} but it is not whitelisted"));
+                    }
+                }
+            }
+        }
+    }
+
+    if !offenders.is_empty() {
+        bail!("Found the following issues: {offenders:#?}")
+    }
+
+    Ok(())
+}
+
 fn read_cargo_toml(path: &Utf8Path) -> Result<Manifest> {
     let bytes =
         std::fs::read(path).with_context(|| format!("read {:?}", path))?;
@@ -223,4 +309,12 @@ fn load_workspace() -> Result<Metadata> {
     cargo_metadata::MetadataCommand::new()
         .exec()
         .context("loading cargo metadata")
+}
+
+fn read_library_verification_toml(
+    path: &Utf8Path,
+) -> Result<LibraryVerificationConfig> {
+    let config_str = std::fs::read_to_string(path)
+        .with_context(|| format!("read {:?}", path))?;
+    toml::from_str(&config_str).with_context(|| format!("parse {:?}", path))
 }
