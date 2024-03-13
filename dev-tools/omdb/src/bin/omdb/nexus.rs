@@ -268,9 +268,11 @@ impl NexusArgs {
                         command: BlueprintTargetCommands::Enable(args),
                     }),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_target_set_enabled(&client, args, true)
-                    .await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set_enabled(
+                    &client, args, true, token,
+                )
+                .await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command:
@@ -278,9 +280,11 @@ impl NexusArgs {
                         command: BlueprintTargetCommands::Disable(args),
                     }),
             }) => {
-                omdb.check_allow_destructive()?;
-                cmd_nexus_blueprints_target_set_enabled(&client, args, false)
-                    .await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set_enabled(
+                    &client, args, false, token,
+                )
+                .await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
@@ -1038,6 +1042,7 @@ async fn cmd_nexus_blueprints_target_set_enabled(
     client: &nexus_client::Client,
     args: &BlueprintIdArgs,
     enabled: bool,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let description = if enabled { "enabled" } else { "disabled" };
     client
