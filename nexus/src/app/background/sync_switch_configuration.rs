@@ -28,9 +28,8 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig,
-    DeleteStaticRoute4Request, StaticRoute4, StaticRoute4List,
+    DeleteStaticRoute4Request, Prefix4, StaticRoute4, StaticRoute4List,
 };
-use mg_admin_client::Prefix4;
 use nexus_db_queries::{
     context::OpContext,
     db::{datastore::SwitchPortSettingsCombinedResult, DataStore},
