@@ -28,14 +28,25 @@ mod omicron_zones;
 mod overridables;
 mod resource_allocation;
 
-struct Sled {
+pub use dns::blueprint_external_dns_config;
+pub use dns::blueprint_internal_dns_config;
+
+pub struct Sled {
     id: Uuid,
     sled_agent_address: SocketAddrV6,
     is_scrimlet: bool,
 }
 
 impl Sled {
-    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn new(
+        id: Uuid,
+        sled_agent_address: SocketAddrV6,
+        is_scrimlet: bool,
+    ) -> Sled {
+        Sled { id, sled_agent_address, is_scrimlet }
+    }
+
+    pub(crate) fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
         Ipv6Subnet::<SLED_PREFIX>::new(*self.sled_agent_address.ip())
     }
 }
