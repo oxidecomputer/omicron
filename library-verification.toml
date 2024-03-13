@@ -1,3 +1,6 @@
+# libnvme is a global zone only library and therefore we must be sure that only
+# programs running in the gz require it. Additionally only sled-agent should be
+# managing a sled's hardware.
 [libraries."libnvme.so.1"]
 binaries = [
   "installinator",

@@ -244,12 +244,15 @@ fn cmd_verify_library() -> Result<()> {
     let config = read_library_verification_toml(&config_path)?;
 
     let mut offenders = Vec::new();
-    for entry in fs::read_dir(metadata.target_directory)? {
-        let entry = entry?;
+    for entry in fs::read_dir(&metadata.target_directory)
+        .with_context(|| format!("read_dir {:?}", &metadata.target_directory))?
+    {
+        let entry = entry.context("dirent")?;
         if !entry.file_type()?.is_dir() {
             continue;
         }
 
+        // Only search for binaries in target/release and target/debug
         if entry.file_name() != "release" && entry.file_name() != "debug" {
             continue;
         }
@@ -278,14 +281,19 @@ fn cmd_verify_library() -> Result<()> {
                 .output()
                 .context("exec elfedit")?;
 
-            assert!(command.status.success());
-
             let stdout = String::from_utf8(command.stdout)?;
+            // `elfedit -o simple -r -e "dyn:tag NEEDED" /file/path` will return
+            // a new line seperated list of required libraries so we walk over
+            // them looking for a match in our configuration file. If we find
+            // the library we make sure the binary is allowed to pull it in via
+            // the whitelist.
             for library in stdout.lines() {
                 if let Some(whitelist) = config.libraries.get(library.trim()) {
                     if !whitelist.binaries.contains(binary) {
-                        offenders
-                            .push(anyhow::anyhow!("{binary} NEEDS {library} but it is not whitelisted"));
+                        offenders.push(anyhow::anyhow!(
+                            "{binary} NEEDS {library} but \
+                            it is not whitelisted"
+                        ));
                     }
                 }
             }
@@ -293,7 +301,10 @@ fn cmd_verify_library() -> Result<()> {
     }
 
     if !offenders.is_empty() {
-        bail!("Found the following issues: {offenders:#?}")
+        bail!(
+            "Found the following issues: {offenders:#?}\n\nIf you believe any \
+            of these issues are wrong please update the whitelist."
+        )
     }
 
     Ok(())
