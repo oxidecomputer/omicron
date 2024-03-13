@@ -662,7 +662,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
@@ -2008,7 +2008,7 @@ dependencies = [
  "progenitor-client",
  "quote",
  "rand 0.8.5",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "rustfmt-wrapper",
  "schemars",
@@ -3449,7 +3449,7 @@ dependencies = [
  "opte-ioctl",
  "oxide-vpc",
  "oxlog",
- "regress",
+ "regress 0.9.0",
  "schemars",
  "serde",
  "serde_json",
@@ -3586,7 +3586,7 @@ dependencies = [
  "installinator-common",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
@@ -4371,7 +4371,7 @@ dependencies = [
  "omicron-passwords",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
@@ -5055,7 +5055,7 @@ dependencies = [
  "progenitor",
  "proptest",
  "rand 0.8.5",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "semver 1.0.22",
@@ -5847,7 +5847,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor",
  "rand 0.8.5",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "serde",
  "serde_json",
@@ -7258,6 +7258,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "regress"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d06f9a1f7cd8473611ba1a480cf35f9c5cffc2954336ba90a982fdb7e7d7f51e"
+dependencies = [
+ "hashbrown 0.14.3",
+ "memchr",
+]
+
+[[package]]
 name = "relative-path"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8324,7 +8334,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
@@ -9932,7 +9942,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress",
+ "regress 0.8.0",
  "schemars",
  "serde_json",
  "syn 2.0.51",
@@ -10674,7 +10684,7 @@ dependencies = [
  "ipnetwork",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.9.0",
  "reqwest",
  "schemars",
  "serde",
