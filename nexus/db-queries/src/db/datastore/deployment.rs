@@ -1392,7 +1392,7 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        println!("diff: {}", blueprint2.diff_sleds(&blueprint_read));
+        println!("diff: {}", blueprint2.diff_sleds(&blueprint_read).display());
         assert_eq!(blueprint2, blueprint_read);
         assert_eq!(blueprint2.internal_dns_version, new_dns_version);
         {

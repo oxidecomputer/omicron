@@ -109,6 +109,7 @@ mod test {
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate,
     };
+    use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::OmicronZonesConfig;
@@ -158,8 +159,10 @@ mod test {
         // Set up the test.
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
+        let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),
+            nexus.authz.clone(),
+            authn::Context::internal_api(),
             datastore.clone(),
         );
 
