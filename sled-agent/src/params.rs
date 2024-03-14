@@ -288,6 +288,11 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
+pub type OmicronPhysicalDiskConfig =
+    sled_storage::disk::OmicronPhysicalDiskConfig;
+pub type OmicronPhysicalDisksConfig =
+    sled_storage::disk::OmicronPhysicalDisksConfig;
+
 /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
 pub const OMICRON_ZONES_CONFIG_INITIAL_GENERATION: u32 = 1;
 

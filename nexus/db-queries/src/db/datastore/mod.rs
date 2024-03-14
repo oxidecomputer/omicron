@@ -642,6 +642,7 @@ mod test {
         kind: PhysicalDiskKind,
     ) -> Uuid {
         let physical_disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             TEST_VENDOR.into(),
             TEST_SERIAL.into(),
             TEST_MODEL.into(),
@@ -652,17 +653,19 @@ mod test {
             .physical_disk_upsert(opctx, physical_disk.clone())
             .await
             .expect("Failed to upsert physical disk");
-        physical_disk.uuid()
+        physical_disk.id()
     }
 
     // Creates a test zpool, returns its UUID.
     async fn create_test_zpool(
         datastore: &DataStore,
+        opctx: &OpContext,
         sled_id: Uuid,
         physical_disk_id: Uuid,
     ) -> Uuid {
         let zpool_id = create_test_zpool_not_in_inventory(
             datastore,
+            opctx,
             sled_id,
             physical_disk_id,
         )
@@ -678,12 +681,13 @@ mod test {
     // However, don't add the zpool to the inventory just yet.
     async fn create_test_zpool_not_in_inventory(
         datastore: &DataStore,
+        opctx: &OpContext,
         sled_id: Uuid,
         physical_disk_id: Uuid,
     ) -> Uuid {
         let zpool_id = Uuid::new_v4();
         let zpool = Zpool::new(zpool_id, sled_id, physical_disk_id);
-        datastore.zpool_upsert(zpool).await.unwrap();
+        datastore.zpool_upsert(opctx, zpool).await.unwrap();
         zpool_id
     }
 
@@ -858,6 +862,7 @@ mod test {
                 .then(|disk| {
                     let pool_id_future = create_test_zpool(
                         &datastore,
+                        &opctx,
                         disk.sled_id,
                         disk.disk_id,
                     );
@@ -1223,6 +1228,7 @@ mod test {
             .then(|_| {
                 create_test_zpool_not_in_inventory(
                     &datastore,
+                    &opctx,
                     sled_id,
                     physical_disk_id,
                 )
@@ -1318,7 +1324,12 @@ mod test {
         let zpool_ids: Vec<Uuid> =
             stream::iter(0..REGION_REDUNDANCY_THRESHOLD - 1)
                 .then(|_| {
-                    create_test_zpool(&datastore, sled_id, physical_disk_id)
+                    create_test_zpool(
+                        &datastore,
+                        &opctx,
+                        sled_id,
+                        physical_disk_id,
+                    )
                 })
                 .collect()
                 .await;

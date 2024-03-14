@@ -23,6 +23,7 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
 use slog::{info, Drain, Logger};
 use std::collections::HashMap;
@@ -154,20 +155,24 @@ impl Server {
         // Crucible dataset for each. This emulates the setup we expect to have
         // on the physical rack.
         for zpool in &config.storage.zpools {
+            let physical_disk_id = Uuid::new_v4();
             let zpool_id = Uuid::new_v4();
             let vendor = "synthetic-vendor".to_string();
             let serial = format!("synthetic-serial-{zpool_id}");
             let model = "synthetic-model".to_string();
             sled_agent
                 .create_external_physical_disk(
-                    vendor.clone(),
-                    serial.clone(),
-                    model.clone(),
+                    physical_disk_id,
+                    DiskIdentity {
+                        vendor: vendor.clone(),
+                        serial: serial.clone(),
+                        model: model.clone(),
+                    },
                 )
                 .await;
 
             sled_agent
-                .create_zpool(zpool_id, vendor, serial, model, zpool.size)
+                .create_zpool(zpool_id, physical_disk_id, zpool.size)
                 .await;
             let dataset_id = Uuid::new_v4();
             let address =
@@ -430,12 +435,14 @@ pub async fn run_standalone_server(
     };
 
     let mut datasets = vec![];
-    for zpool_id in server.sled_agent.get_zpools().await {
+    let physical_disks = server.sled_agent.get_all_physical_disks().await;
+    let zpools = server.sled_agent.get_zpools().await;
+    for zpool in &zpools {
         for (dataset_id, address) in
-            server.sled_agent.get_datasets(zpool_id).await
+            server.sled_agent.get_datasets(zpool.id).await
         {
             datasets.push(NexusTypes::DatasetCreateRequest {
-                zpool_id,
+                zpool_id: zpool.id,
                 dataset_id,
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
@@ -452,6 +459,8 @@ pub async fn run_standalone_server(
 
     let rack_init_request = NexusTypes::RackInitializationRequest {
         services,
+        physical_disks,
+        zpools,
         datasets,
         internal_services_ip_pool_ranges,
         certs,

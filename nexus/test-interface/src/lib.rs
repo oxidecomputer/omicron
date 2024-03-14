@@ -33,6 +33,9 @@
 
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
+use nexus_types::internal_api::params::{
+    PhysicalDiskPutRequest, ZpoolPutRequest,
+};
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use slog::Logger;
@@ -53,6 +56,8 @@ pub trait NexusServer: Send + Sync + 'static {
         internal_server: Self::InternalServer,
         config: &NexusConfig,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+        physical_disks: Vec<PhysicalDiskPutRequest>,
+        zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
@@ -86,8 +91,9 @@ pub trait NexusServer: Send + Sync + 'static {
     // However, doing so would let us remove this test-only API.
     async fn upsert_crucible_dataset(
         &self,
-        id: Uuid,
-        zpool_id: Uuid,
+        physical_disk: PhysicalDiskPutRequest,
+        zpool: ZpoolPutRequest,
+        dataset_id: Uuid,
         address: SocketAddrV6,
     );
 

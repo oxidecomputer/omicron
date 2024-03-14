@@ -12,9 +12,11 @@ use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
 
-const ZPOOL_EXTERNAL_PREFIX: &str = "oxp_";
-const ZPOOL_INTERNAL_PREFIX: &str = "oxi_";
+pub const ZPOOL_EXTERNAL_PREFIX: &str = "oxp_";
+pub const ZPOOL_INTERNAL_PREFIX: &str = "oxi_";
 const ZPOOL: &str = "/usr/sbin/zpool";
+
+pub const ZPOOL_MOUNTPOINT_ROOT: &str = "/";
 
 #[derive(thiserror::Error, Debug, PartialEq, Eq)]
 #[error("Failed to parse output: {0}")]
@@ -374,9 +376,14 @@ impl ZpoolName {
     /// Returns a path to a dataset's mountpoint within the zpool.
     ///
     /// For example: oxp_(UUID) -> /pool/ext/(UUID)/(dataset)
-    pub fn dataset_mountpoint(&self, dataset: &str) -> Utf8PathBuf {
+    pub fn dataset_mountpoint(
+        &self,
+        root: &Utf8Path,
+        dataset: &str,
+    ) -> Utf8PathBuf {
         let mut path = Utf8PathBuf::new();
-        path.push("/pool");
+        path.push(root);
+        path.push("pool");
         match self.kind {
             ZpoolKind::External => path.push("ext"),
             ZpoolKind::Internal => path.push("int"),

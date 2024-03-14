@@ -23,27 +23,23 @@ function fail {
     exit 1
 }
 
-# Create the ZFS zpools required for the sled agent, backed by file-based vdevs.
-function ensure_zpools {
-    # Find the list of zpools the sled agent expects, from its configuration
+# Create the virtual devices required by the sled agent.
+function ensure_vdevs {
+    # Find the list of virtual devices the sled agent expects, from its configuration
     # file.
-    ZPOOL_TYPES=('oxp_' 'oxi_')
-    for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
-        readarray -t ZPOOLS < <( \
-                grep "\"$ZPOOL_TYPE" "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
+    VDEV_TYPES=('m2_' 'u2_')
+    for VDEV_TYPE in "${VDEV_TYPES[@]}"; do
+        readarray -t VDEVS < <( \
+                grep "\"$VDEV_TYPE" "$OMICRON_TOP/smf/sled-agent/non-gimlet/config.toml" | \
                 sed 's/[ ",]//g' \
             )
-        for ZPOOL in "${ZPOOLS[@]}"; do
-            echo "Zpool: [$ZPOOL]"
-            VDEV_PATH="${ZPOOL_VDEV_DIR:-$OMICRON_TOP}/$ZPOOL.vdev"
+        for VDEV in "${VDEVS[@]}"; do
+            echo "Device: [$VDEV]"
+            VDEV_PATH="${VDEV_DIR:-$OMICRON_TOP}/$VDEV.vdev"
             if ! [[ -f "$VDEV_PATH" ]]; then
                 dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=20G
             fi
-            success "ZFS vdev $VDEV_PATH exists"
-            if [[ -z "$(zpool list -o name | grep $ZPOOL)" ]]; then
-                zpool create -f "$ZPOOL" "$VDEV_PATH"
-            fi
-            success "ZFS zpool $ZPOOL exists"
+            success "vdev $VDEV_PATH exists"
         done
     done
 }
@@ -53,7 +49,7 @@ function try_destroy_zpools {
     for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
         readarray -t ZPOOLS < <(zfs list -d 0 -o name | grep "^$ZPOOL_TYPE")
         for ZPOOL in "${ZPOOLS[@]}"; do
-            VDEV_FILE="${ZPOOL_VDEV_DIR:-$OMICRON_TOP}/$ZPOOL.vdev"
+            VDEV_FILE="${VDEV_DIR:-$OMICRON_TOP}/$VDEV.vdev"
             zfs destroy -r "$ZPOOL" && \
                     (zfs unmount "$ZPOOL" || true) && \
                     zpool destroy "$ZPOOL" && \

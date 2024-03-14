@@ -127,7 +127,7 @@ impl<T: Ledgerable> Ledger<T> {
         let mut one_successful_write = false;
         for path in self.paths.iter() {
             if let Err(e) = self.atomic_write(&path).await {
-                warn!(self.log, "Failed to write to {}: {e}", path);
+                warn!(self.log, "Failed to write ledger"; "path" => ?path, "err" => ?e);
                 failed_paths.push((path.to_path_buf(), e));
             } else {
                 one_successful_write = true;
@@ -135,6 +135,7 @@ impl<T: Ledgerable> Ledger<T> {
         }
 
         if !one_successful_write {
+            warn!(self.log, "No successful writes to ledger");
             return Err(Error::FailedToWrite { failed_paths });
         }
         Ok(())

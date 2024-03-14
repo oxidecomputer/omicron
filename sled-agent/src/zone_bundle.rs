@@ -255,7 +255,7 @@ impl Inner {
     // that can exist but do not, i.e., those whose parent datasets already
     // exist; and returns those.
     async fn bundle_directories(&self) -> Vec<Utf8PathBuf> {
-        let resources = self.storage_handle.get_latest_resources().await;
+        let resources = self.storage_handle.get_latest_disks().await;
         let expected = resources.all_zone_bundle_directories();
         let mut out = Vec::with_capacity(expected.len());
         for each in expected.into_iter() {
@@ -263,6 +263,7 @@ impl Inner {
                 out.push(each);
             }
         }
+        out.sort();
         out
     }
 }
@@ -427,7 +428,7 @@ impl ZoneBundler {
     ) -> Result<ZoneBundleMetadata, BundleError> {
         let inner = self.inner.lock().await;
         let storage_dirs = inner.bundle_directories().await;
-        let resources = inner.storage_handle.get_latest_resources().await;
+        let resources = inner.storage_handle.get_latest_disks().await;
         let extra_log_dirs = resources
             .all_u2_mountpoints(U2_DEBUG_DATASET)
             .into_iter()
@@ -2168,23 +2169,17 @@ mod illumos_tests {
     use super::StorageLimit;
     use super::Utf8Path;
     use super::Utf8PathBuf;
-    use super::Uuid;
     use super::ZoneBundleCause;
     use super::ZoneBundleId;
     use super::ZoneBundleInfo;
     use super::ZoneBundleMetadata;
     use super::ZoneBundler;
-    use super::ZFS;
     use anyhow::Context;
     use chrono::TimeZone;
     use chrono::Utc;
-    use illumos_utils::zpool::ZpoolName;
-    use sled_storage::disk::RawDisk;
-    use sled_storage::disk::SyntheticDisk;
-    use sled_storage::manager::{FakeStorageManager, StorageHandle};
+    use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use slog::Drain;
     use slog::Logger;
-    use tokio::process::Command;
 
     #[tokio::test]
     async fn test_zfs_quota() {
@@ -2208,68 +2203,37 @@ mod illumos_tests {
     // A wrapper around `StorageResources`, that automatically creates dummy
     // directories in the provided test locations and removes them on drop.
     //
-    // I'd much prefer this to be done in $TEMPDIR. However, `StorageResources`
-    // is difficult to mock out or modify in such a way that the underlying
-    // dataset locations can be controlled.
-    //
-    // This creates completely BS disks, and fake names for the zpools on them.
-    // Those pools are _supposed_ to live at directories like:
-    //
-    // `/pool/int/<UUID>`
-    //
     // They don't exist when you just do `StorageResources::new_for_test()`.
     // This type creates the datasets at the expected mountpoints, backed by the
     // ramdisk, and removes them on drop. This is basically a tempdir-like
     // system, that creates the directories implied by the `StorageResources`
     // expected disk structure.
     struct ResourceWrapper {
-        storage_handle: StorageHandle,
+        storage_test_harness: StorageManagerTestHarness,
         dirs: Vec<Utf8PathBuf>,
     }
 
-    async fn setup_storage() -> StorageHandle {
-        let (manager, handle) = FakeStorageManager::new();
+    async fn setup_storage(log: &Logger) -> StorageManagerTestHarness {
+        let mut harness = StorageManagerTestHarness::new(&log).await;
 
-        // Spawn the storage manager as done by sled-agent
-        tokio::spawn(async move {
-            manager.run().await;
-        });
-
-        // These must be internal zpools
-        for i in 0..2 {
-            let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
-            let internal_disk: RawDisk =
-                SyntheticDisk::new(internal_zpool_name.clone(), i).into();
-            handle.upsert_disk(internal_disk).await;
-        }
-        handle
+        harness.handle().key_manager_ready().await;
+        let _raw_disks =
+            harness.add_vdevs(&["m2_left.vdev", "m2_right.vdev"]).await;
+        harness
     }
 
     impl ResourceWrapper {
-        // Create new storage resources, and mount fake datasets at the required
+        // Create new storage resources, and mount datasets at the required
         // locations.
-        async fn new() -> Self {
+        async fn new(log: &Logger) -> Self {
             // Spawn the storage related tasks required for testing and insert
             // synthetic disks.
-            let storage_handle = setup_storage().await;
-            let resources = storage_handle.get_latest_resources().await;
-            let dirs = resources.all_zone_bundle_directories();
-            for d in dirs.iter() {
-                let id =
-                    d.components().nth(3).unwrap().as_str().parse().unwrap();
-                create_test_dataset(&id, d).await.unwrap();
-            }
-            Self { storage_handle, dirs }
-        }
-    }
-
-    impl Drop for ResourceWrapper {
-        fn drop(&mut self) {
-            for d in self.dirs.iter() {
-                let id =
-                    d.components().nth(3).unwrap().as_str().parse().unwrap();
-                remove_test_dataset(&id).unwrap();
-            }
+            let storage_test_harness = setup_storage(log).await;
+            let resources =
+                storage_test_harness.handle().get_latest_disks().await;
+            let mut dirs = resources.all_zone_bundle_directories();
+            dirs.sort();
+            Self { storage_test_harness, dirs }
         }
     }
 
@@ -2285,10 +2249,10 @@ mod illumos_tests {
     async fn setup_fake_cleanup_task() -> anyhow::Result<CleanupTestContext> {
         let log = test_logger();
         let context = CleanupContext::default();
-        let resource_wrapper = ResourceWrapper::new().await;
+        let resource_wrapper = ResourceWrapper::new(&log).await;
         let bundler = ZoneBundler::new(
             log,
-            resource_wrapper.storage_handle.clone(),
+            resource_wrapper.storage_test_harness.handle().clone(),
             context,
         );
         Ok(CleanupTestContext { resource_wrapper, context, bundler })
@@ -2296,14 +2260,15 @@ mod illumos_tests {
 
     #[tokio::test]
     async fn test_context() {
-        let ctx = setup_fake_cleanup_task().await.unwrap();
+        let mut ctx = setup_fake_cleanup_task().await.unwrap();
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, ctx.context, "received incorrect context");
+        ctx.resource_wrapper.storage_test_harness.cleanup().await;
     }
 
     #[tokio::test]
     async fn test_update_context() {
-        let ctx = setup_fake_cleanup_task().await.unwrap();
+        let mut ctx = setup_fake_cleanup_task().await.unwrap();
         let new_context = CleanupContext {
             period: CleanupPeriod::new(ctx.context.period.as_duration() / 2)
                 .unwrap(),
@@ -2323,65 +2288,14 @@ mod illumos_tests {
             .expect("failed to set context");
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, new_context, "failed to update context");
+        ctx.resource_wrapper.storage_test_harness.cleanup().await;
     }
 
     // Quota applied to test datasets.
     //
     // This needs to be at least this big lest we get "out of space" errors when
     // creating. Not sure where those come from, but could be ZFS overhead.
-    const TEST_QUOTA: u64 = 1024 * 32;
-
-    async fn create_test_dataset(
-        id: &Uuid,
-        mountpoint: &Utf8PathBuf,
-    ) -> anyhow::Result<()> {
-        let output = Command::new("/usr/bin/pfexec")
-            .arg(ZFS)
-            .arg("create")
-            .arg("-o")
-            .arg(format!("quota={TEST_QUOTA}"))
-            .arg("-o")
-            .arg(format!("mountpoint={mountpoint}"))
-            .arg(format!("rpool/{id}"))
-            .output()
-            .await
-            .context("failed to spawn zfs create operation")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "zfs create operation failed: {}",
-            String::from_utf8_lossy(&output.stderr),
-        );
-
-        // Make the path operable by the test code.
-        let output = Command::new("/usr/bin/pfexec")
-            .arg("chmod")
-            .arg("a+rw")
-            .arg(&mountpoint)
-            .output()
-            .await
-            .context("failed to spawn chmod operation")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "chmod-ing the dataset failed: {}",
-            String::from_utf8_lossy(&output.stderr),
-        );
-        Ok(())
-    }
-
-    fn remove_test_dataset(id: &Uuid) -> anyhow::Result<()> {
-        let output = std::process::Command::new("/usr/bin/pfexec")
-            .arg(ZFS)
-            .arg("destroy")
-            .arg(format!("rpool/{id}"))
-            .output()
-            .context("failed to spawn zfs destroy operation")?;
-        anyhow::ensure!(
-            output.status.success(),
-            "zfs destroy operation failed: {}",
-            String::from_utf8_lossy(&output.stderr),
-        );
-        Ok(())
-    }
+    const TEST_QUOTA: usize = sled_storage::dataset::DEBUG_DATASET_QUOTA;
 
     async fn run_test_with_zfs_dataset<T, Fut>(test: T)
     where
@@ -2401,7 +2315,7 @@ mod illumos_tests {
     }
 
     async fn test_utilization_body(
-        ctx: CleanupTestContext,
+        mut ctx: CleanupTestContext,
     ) -> anyhow::Result<()> {
         let utilization = ctx.bundler.utilization().await?;
         let paths = utilization.keys().cloned().collect::<Vec<_>>();
@@ -2418,7 +2332,8 @@ mod illumos_tests {
             .next()
             .context("no utilization information?")?;
         anyhow::ensure!(
-            bundle_utilization.dataset_quota == TEST_QUOTA,
+            bundle_utilization.dataset_quota
+                == u64::try_from(TEST_QUOTA).unwrap(),
             "computed incorrect dataset quota"
         );
 
@@ -2493,6 +2408,7 @@ mod illumos_tests {
             used,
             size,
         );
+        ctx.resource_wrapper.storage_test_harness.cleanup().await;
         Ok(())
     }
 
@@ -2501,7 +2417,9 @@ mod illumos_tests {
         run_test_with_zfs_dataset(test_cleanup_body).await;
     }
 
-    async fn test_cleanup_body(ctx: CleanupTestContext) -> anyhow::Result<()> {
+    async fn test_cleanup_body(
+        mut ctx: CleanupTestContext,
+    ) -> anyhow::Result<()> {
         // Let's add a bunch of fake bundles, until we should be over the
         // storage limit. These will all be explicit requests, so the priority
         // should be decided based on time, i.e., the ones first added should be
@@ -2517,16 +2435,25 @@ mod illumos_tests {
         let mut day = 1;
         let mut info = Vec::new();
         let mut utilization = ctx.bundler.utilization().await?;
+        let bundle_dir = &ctx.resource_wrapper.dirs[0];
         loop {
             let us = utilization
-                .values()
-                .next()
+                .get(bundle_dir)
                 .context("no utilization information")?;
+
             if us.bytes_used > us.bytes_available {
                 break;
             }
+
+            assert!(
+                day <= 31,
+                "Fake date-labelled bundles exceeds the number of days in January.
+                This probably means the quota is being calculated incorrectly,
+                as we didn't hit a (low, expected) 'used' > 'available' limit."
+            );
+
             let it = insert_fake_bundle(
-                &ctx.resource_wrapper.dirs[0],
+                bundle_dir,
                 2020,
                 1,
                 day,
@@ -2542,15 +2469,8 @@ mod illumos_tests {
         let counts =
             ctx.bundler.cleanup().await.context("failed to run cleanup")?;
 
-        // We should have cleaned up items in the same paths that we have in the
-        // context.
-        anyhow::ensure!(
-            counts.keys().zip(ctx.resource_wrapper.dirs.iter()).all(|(a, b)| a == b),
-            "cleaned-up directories do not match the context's storage directories",
-        );
-
         // We should have cleaned up the first-inserted bundle.
-        let count = counts.values().next().context("no cleanup counts")?;
+        let count = counts.get(bundle_dir).context("no cleanup counts")?;
         anyhow::ensure!(count.bundles == 1, "expected to cleanup one bundle");
         anyhow::ensure!(
             count.bytes == info[0].bytes,
@@ -2570,6 +2490,7 @@ mod illumos_tests {
             anyhow::ensure!(exists, "cleaned up an unexpected bundle");
         }
 
+        ctx.resource_wrapper.storage_test_harness.cleanup().await;
         Ok(())
     }
 
@@ -2579,7 +2500,7 @@ mod illumos_tests {
     }
 
     async fn test_list_with_filter_body(
-        ctx: CleanupTestContext,
+        mut ctx: CleanupTestContext,
     ) -> anyhow::Result<()> {
         let mut day = 1;
         let mut info = Vec::new();
@@ -2636,6 +2557,7 @@ mod illumos_tests {
                 "Matched incorrect zone bundle with a filter",
             );
         }
+        ctx.resource_wrapper.storage_test_harness.cleanup().await;
         Ok(())
     }
 
@@ -2673,7 +2595,9 @@ mod illumos_tests {
             time_created: Utc
                 .with_ymd_and_hms(year, month, day, 0, 0, 0)
                 .single()
-                .context("invalid year/month/day")?,
+                .context(format!(
+                    "invalid year {year}/month {month}/day {day}"
+                ))?,
             cause,
             version: 0,
         };

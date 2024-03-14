@@ -33,7 +33,13 @@ use uuid::Uuid;
 
 impl DataStore {
     /// Stores a new zpool in the database.
-    pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
+    pub async fn zpool_upsert(
+        &self,
+        opctx: &OpContext,
+        zpool: Zpool,
+    ) -> CreateResult<Zpool> {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
         use db::schema::zpool::dsl;
 
         let sled_id = zpool.sled_id;

@@ -3459,6 +3459,7 @@ dependencies = [
  "tokio",
  "toml 0.8.10",
  "uuid",
+ "whoami",
  "zone",
 ]
 
@@ -8401,11 +8402,14 @@ dependencies = [
 name = "sled-storage"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "camino",
  "camino-tempfile",
  "cfg-if",
+ "debug-ignore",
  "derive_more",
+ "futures",
  "glob",
  "illumos-utils",
  "key-manager",

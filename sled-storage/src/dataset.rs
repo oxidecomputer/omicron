@@ -4,6 +4,7 @@
 
 //! ZFS dataset related functionality
 
+use crate::config::MountConfig;
 use crate::keyfile::KeyFile;
 use camino::Utf8PathBuf;
 use cfg_if::cfg_if;
@@ -279,6 +280,7 @@ pub enum DatasetError {
 /// `None` is for the M.2s touched by the Installinator.
 pub(crate) async fn ensure_zpool_has_datasets(
     log: &Logger,
+    mount_config: &MountConfig,
     zpool_name: &ZpoolName,
     disk_identity: &DiskIdentity,
     key_requester: Option<&StorageKeyRequester>,
@@ -297,8 +299,10 @@ pub(crate) async fn ensure_zpool_has_datasets(
         let Some(key_requester) = key_requester else {
             return Err(DatasetError::MissingStorageKeyRequester);
         };
-        let mountpoint = zpool_name.dataset_mountpoint(dataset);
-        let keypath: Keypath = disk_identity.into();
+        let mountpoint =
+            zpool_name.dataset_mountpoint(&mount_config.root, dataset);
+        let keypath: Keypath =
+            illumos_utils::zfs::Keypath::new(disk_identity, &mount_config.root);
 
         let epoch = if let Ok(epoch_str) =
             Zfs::get_oxide_value(dataset, "epoch")
@@ -324,15 +328,15 @@ pub(crate) async fn ensure_zpool_has_datasets(
             // other reason, but the dataset actually existed, we will
             // try to create the dataset below and that will fail. So
             // there is no harm in just loading the latest secret here.
-            info!(log, "Loading latest secret"; "disk_id"=>#?disk_identity);
+            info!(log, "Loading latest secret"; "disk_id"=>?disk_identity);
             let epoch = key_requester.load_latest_secret().await?;
-            info!(log, "Loaded latest secret"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
+            info!(log, "Loaded latest secret"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
             epoch
         };
 
-        info!(log, "Retrieving key"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
+        info!(log, "Retrieving key"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
         let key = key_requester.get_key(epoch, disk_identity.clone()).await?;
-        info!(log, "Got key"; "epoch"=>%epoch, "disk_id"=>#?disk_identity);
+        info!(log, "Got key"; "epoch"=>%epoch, "disk_id"=>?disk_identity);
 
         let mut keyfile =
             KeyFile::create(keypath.clone(), key.expose_secret(), log)
@@ -366,7 +370,8 @@ pub(crate) async fn ensure_zpool_has_datasets(
     };
 
     for dataset in datasets.into_iter() {
-        let mountpoint = zpool_name.dataset_mountpoint(dataset.name);
+        let mountpoint =
+            zpool_name.dataset_mountpoint(&mount_config.root, dataset.name);
         let name = &format!("{}/{}", zpool_name, dataset.name);
 
         // Use a value that's alive for the duration of this sled agent

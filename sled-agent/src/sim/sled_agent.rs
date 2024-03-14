@@ -15,13 +15,13 @@ use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
     InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, SledRole,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
 };
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
-use dropshot::HttpServer;
+use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
@@ -35,10 +35,12 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
 };
+use omicron_common::disk::DiskIdentity;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_storage::resources::DisksManagementResult;
 use slog::Logger;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -154,7 +156,6 @@ impl SledAgent {
             )),
             storage: Mutex::new(Storage::new(
                 id,
-                Arc::clone(&nexus_client),
                 config.storage.ip,
                 storage_log,
             )),
@@ -498,19 +499,26 @@ impl SledAgent {
     /// Adds a Physical Disk to the simulated sled agent.
     pub async fn create_external_physical_disk(
         &self,
-        vendor: String,
-        serial: String,
-        model: String,
+        id: Uuid,
+        identity: DiskIdentity,
     ) {
         let variant = sled_hardware::DiskVariant::U2;
         self.storage
             .lock()
             .await
-            .insert_physical_disk(vendor, serial, model, variant)
+            .insert_physical_disk(id, identity, variant)
             .await;
     }
 
-    pub async fn get_zpools(&self) -> Vec<Uuid> {
+    pub async fn get_all_physical_disks(
+        &self,
+    ) -> Vec<nexus_client::types::PhysicalDiskPutRequest> {
+        self.storage.lock().await.get_all_physical_disks()
+    }
+
+    pub async fn get_zpools(
+        &self,
+    ) -> Vec<nexus_client::types::ZpoolPutRequest> {
         self.storage.lock().await.get_all_zpools()
     }
 
@@ -525,15 +533,13 @@ impl SledAgent {
     pub async fn create_zpool(
         &self,
         id: Uuid,
-        vendor: String,
-        serial: String,
-        model: String,
+        physical_disk_id: Uuid,
         size: u64,
     ) {
         self.storage
             .lock()
             .await
-            .insert_zpool(id, vendor, serial, model, size)
+            .insert_zpool(id, physical_disk_id, size)
             .await;
     }
 
@@ -757,9 +763,9 @@ impl SledAgent {
             .context("reservoir_size")?,
             disks: storage
                 .physical_disks()
-                .iter()
-                .map(|(identity, info)| crate::params::InventoryDisk {
-                    identity: identity.clone(),
+                .values()
+                .map(|info| crate::params::InventoryDisk {
+                    identity: info.identity.clone(),
                     variant: info.variant,
                     slot: info.slot,
                 })
@@ -775,6 +781,19 @@ impl SledAgent {
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
         })
+    }
+
+    pub async fn omicron_physical_disks_list(
+        &self,
+    ) -> Result<OmicronPhysicalDisksConfig, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_list().await
+    }
+
+    pub async fn omicron_physical_disks_ensure(
+        &self,
+        config: OmicronPhysicalDisksConfig,
+    ) -> Result<DisksManagementResult, HttpError> {
+        self.storage.lock().await.omicron_physical_disks_ensure(config).await
     }
 
     pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {

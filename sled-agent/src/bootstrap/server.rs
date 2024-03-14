@@ -26,7 +26,6 @@ use crate::long_running_tasks::LongRunningTaskHandles;
 use crate::server::Server as SledAgentServer;
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use crate::storage_monitor::UnderlayAccess;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
@@ -177,7 +176,6 @@ impl Server {
             service_manager,
             long_running_task_handles,
             sled_agent_started_tx,
-            underlay_available_tx,
         } = BootstrapAgentStartup::run(config).await?;
 
         // Do we have a StartSledAgentRequest stored in the ledger?
@@ -240,7 +238,6 @@ impl Server {
                 &config,
                 start_sled_agent_request,
                 long_running_task_handles.clone(),
-                underlay_available_tx,
                 service_manager.clone(),
                 &ddm_admin_localhost_client,
                 &base_log,
@@ -262,10 +259,7 @@ impl Server {
             sled_agent.load_services().await;
             SledAgentState::ServerStarted(sled_agent_server)
         } else {
-            SledAgentState::Bootstrapping(
-                Some(sled_agent_started_tx),
-                Some(underlay_available_tx),
-            )
+            SledAgentState::Bootstrapping(Some(sled_agent_started_tx))
         };
 
         // Spawn our inner task that handles any future hardware updates and any
@@ -308,10 +302,7 @@ impl Server {
 // bootstrap server).
 enum SledAgentState {
     // We're still in the bootstrapping phase, waiting for a sled-agent request.
-    Bootstrapping(
-        Option<oneshot::Sender<SledAgent>>,
-        Option<oneshot::Sender<UnderlayAccess>>,
-    ),
+    Bootstrapping(Option<oneshot::Sender<SledAgent>>),
     // ... or the sled agent server is running.
     ServerStarted(SledAgentServer),
 }
@@ -355,7 +346,6 @@ async fn start_sled_agent(
     config: &SledConfig,
     request: StartSledAgentRequest,
     long_running_task_handles: LongRunningTaskHandles,
-    underlay_available_tx: oneshot::Sender<UnderlayAccess>,
     service_manager: ServiceManager,
     ddmd_client: &DdmAdminClient,
     base_log: &Logger,
@@ -416,7 +406,6 @@ async fn start_sled_agent(
         request.clone(),
         long_running_task_handles.clone(),
         service_manager,
-        underlay_available_tx,
     )
     .await
     .map_err(SledAgentServerStartError::FailedStartingServer)?;
@@ -482,7 +471,7 @@ impl From<MissingM2Paths> for SledAgentServerStartError {
 async fn sled_config_paths(
     storage: &StorageHandle,
 ) -> Result<Vec<Utf8PathBuf>, MissingM2Paths> {
-    let resources = storage.get_latest_resources().await;
+    let resources = storage.get_latest_disks().await;
     let paths: Vec<_> = resources
         .all_m2_mountpoints(CONFIG_DATASET)
         .into_iter()
@@ -560,10 +549,7 @@ impl Inner {
         log: &Logger,
     ) {
         match &mut self.state {
-            SledAgentState::Bootstrapping(
-                sled_agent_started_tx,
-                underlay_available_tx,
-            ) => {
+            SledAgentState::Bootstrapping(sled_agent_started_tx) => {
                 let request_id = request.body.id;
 
                 // Extract from options to satisfy the borrow checker.
@@ -574,14 +560,11 @@ impl Inner {
                 // See https://github.com/oxidecomputer/omicron/issues/4494
                 let sled_agent_started_tx =
                     sled_agent_started_tx.take().unwrap();
-                let underlay_available_tx =
-                    underlay_available_tx.take().unwrap();
 
                 let response = match start_sled_agent(
                     &self.config,
                     request,
                     self.long_running_task_handles.clone(),
-                    underlay_available_tx,
                     self.service_manager.clone(),
                     &self.ddm_admin_localhost_client,
                     &self.base_log,
@@ -651,7 +634,7 @@ impl Inner {
         let config_dirs = self
             .long_running_task_handles
             .storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter();

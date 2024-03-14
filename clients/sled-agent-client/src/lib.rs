@@ -30,6 +30,7 @@ progenitor::generate_api!(
     //     replace directives below?
     replace = {
         ByteCount = omicron_common::api::external::ByteCount,
+        DiskIdentity = omicron_common::disk::DiskIdentity,
         Generation = omicron_common::api::external::Generation,
         MacAddr = omicron_common::api::external::MacAddr,
         Name = omicron_common::api::external::Name,
@@ -164,16 +165,6 @@ impl types::OmicronZoneType {
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
-    }
-}
-
-impl From<types::DiskIdentity> for omicron_common::disk::DiskIdentity {
-    fn from(identity: types::DiskIdentity) -> Self {
-        Self {
-            vendor: identity.vendor,
-            serial: identity.serial,
-            model: identity.model,
-        }
     }
 }
 

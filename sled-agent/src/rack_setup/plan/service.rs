@@ -5,7 +5,10 @@
 //! Plan generation for "where should services be initialized".
 
 use crate::bootstrap::params::StartSledAgentRequest;
-use crate::params::{OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType};
+use crate::params::{
+    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, OmicronZoneConfig,
+    OmicronZoneDataset, OmicronZoneType,
+};
 use crate::rack_setup::config::SetupServiceConfig as Config;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
@@ -18,7 +21,7 @@ use omicron_common::address::{
     MGD_PORT, MGS_PORT, NEXUS_REDUNDANCY, NTP_PORT, NUM_SOURCE_NAT_PORTS,
     RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
-use omicron_common::api::external::{MacAddr, Vni};
+use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
     NetworkInterface, NetworkInterfaceKind, SourceNatConfig,
 };
@@ -59,7 +62,7 @@ const CLICKHOUSE_COUNT: usize = 1;
 const CLICKHOUSE_KEEPER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
-const MINIMUM_U2_ZPOOL_COUNT: usize = 3;
+const MINIMUM_U2_COUNT: usize = 3;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions the Pantry.
 const PANTRY_COUNT: usize = 3;
@@ -94,10 +97,16 @@ pub enum PlanError {
 
     #[error("Found only v1 service plan")]
     FoundV1,
+
+    #[error("Found only v2 service plan")]
+    FoundV2,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 pub struct SledConfig {
+    /// Control plane disks configured for this sled
+    pub disks: OmicronPhysicalDisksConfig,
+
     /// zones configured for this sled
     pub zones: Vec<OmicronZoneConfig>,
 }
@@ -115,7 +124,8 @@ impl Ledgerable for Plan {
     fn generation_bump(&mut self) {}
 }
 const RSS_SERVICE_PLAN_V1_FILENAME: &str = "rss-service-plan.json";
-const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v2.json";
+const RSS_SERVICE_PLAN_V2_FILENAME: &str = "rss-service-plan-v2.json";
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v3.json";
 
 impl Plan {
     pub async fn load(
@@ -123,7 +133,7 @@ impl Plan {
         storage_manager: &StorageHandle,
     ) -> Result<Option<Plan>, PlanError> {
         let paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -167,6 +177,14 @@ impl Plan {
             // support a condition that we do not believe can ever happen in any
             // system.
             Err(PlanError::FoundV1)
+        } else if Self::has_v2(storage_manager).await.map_err(|err| {
+            // Same as the comment above, but for version 2.
+            PlanError::Io {
+                message: String::from("looking for v2 RSS plan"),
+                err,
+            }
+        })? {
+            Err(PlanError::FoundV2)
         } else {
             Ok(None)
         }
@@ -176,11 +194,30 @@ impl Plan {
         storage_manager: &StorageHandle,
     ) -> Result<bool, std::io::Error> {
         let paths = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SERVICE_PLAN_V1_FILENAME));
+
+        for p in paths {
+            if p.try_exists()? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn has_v2(
+        storage_manager: &StorageHandle,
+    ) -> Result<bool, std::io::Error> {
+        let paths = storage_manager
+            .get_latest_disks()
+            .await
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_V2_FILENAME));
 
         for p in paths {
             if p.try_exists()? {
@@ -214,11 +251,10 @@ impl Plan {
         }
     }
 
-    // Gets zpool UUIDs from U.2 devices on the sled.
-    async fn get_u2_zpools_from_sled(
+    async fn get_inventory(
         log: &Logger,
         address: SocketAddrV6,
-    ) -> Result<Vec<ZpoolName>, PlanError> {
+    ) -> Result<SledAgentTypes::Inventory, PlanError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -231,52 +267,47 @@ impl Plan {
             log.new(o!("SledAgentClient" => address.to_string())),
         );
 
-        let get_u2_zpools = || async {
-            let zpools: Vec<ZpoolName> = client
-                .zpools_get()
+        let get_inventory = || async {
+            let inventory = client
+                .inventory()
                 .await
-                .map(|response| {
-                    response
-                        .into_inner()
-                        .into_iter()
-                        .filter_map(|zpool| match zpool.disk_type {
-                            SledAgentTypes::DiskType::U2 => {
-                                Some(ZpoolName::new_external(zpool.id))
-                            }
-                            SledAgentTypes::DiskType::M2 => None,
-                        })
-                        .collect()
-                })
+                .map(|response| response.into_inner())
                 .map_err(|err| {
                     BackoffError::transient(PlanError::SledApi(err))
                 })?;
 
-            if zpools.len() < MINIMUM_U2_ZPOOL_COUNT {
+            if inventory
+                .disks
+                .iter()
+                .filter(|disk| {
+                    matches!(disk.variant, SledAgentTypes::DiskVariant::U2)
+                })
+                .count()
+                < MINIMUM_U2_COUNT
+            {
                 return Err(BackoffError::transient(
-                    PlanError::SledInitialization(
-                        "Awaiting zpools".to_string(),
-                    ),
+                    PlanError::SledInitialization("Awaiting disks".to_string()),
                 ));
             }
 
-            Ok(zpools)
+            Ok(inventory)
         };
 
-        let log_failure = |error, call_count, total_duration| {
+        let log_failure = |error: PlanError, call_count, total_duration| {
             if call_count == 0 {
-                info!(log, "failed to get zpools from {address}"; "error" => ?error);
+                info!(log, "failed to get inventory from {address}"; "error" => ?error);
             } else if total_duration > std::time::Duration::from_secs(20) {
-                warn!(log, "failed to get zpools from {address}"; "error" => ?error, "total duration" => ?total_duration);
+                warn!(log, "failed to get inventory from {address}"; "error" => ?error, "total duration" => ?total_duration);
             }
         };
-        let u2_zpools = retry_notify_ext(
+        let inventory = retry_notify_ext(
             retry_policy_internal_service_aggressive(),
-            get_u2_zpools,
+            get_inventory,
             log_failure,
         )
         .await?;
 
-        Ok(u2_zpools)
+        Ok(inventory)
     }
 
     pub fn create_transient(
@@ -305,6 +336,37 @@ impl Plan {
                     MGD_PORT,
                 )
                 .unwrap();
+        }
+
+        // Set up stoarge early, as it'll be necessary for placement of
+        // many subsequent services.
+        //
+        // Our policy at RSS time is currently "adopt all the U.2 disks we can see".
+        for sled_info in sled_info.iter_mut() {
+            let disks = sled_info
+                .inventory
+                .disks
+                .iter()
+                .filter(|disk| {
+                    matches!(disk.variant, SledAgentTypes::DiskVariant::U2)
+                })
+                .map(|disk| OmicronPhysicalDiskConfig {
+                    identity: disk.identity.clone(),
+                    id: Uuid::new_v4(),
+                    pool_id: Uuid::new_v4(),
+                })
+                .collect();
+            sled_info.request.disks = OmicronPhysicalDisksConfig {
+                generation: Generation::new(),
+                disks,
+            };
+            sled_info.u2_zpools = sled_info
+                .request
+                .disks
+                .disks
+                .iter()
+                .map(|disk| ZpoolName::new_external(disk.id))
+                .collect();
         }
 
         // We'll stripe most services across all available Sleds, round-robin
@@ -708,16 +770,15 @@ impl Plan {
                     |sled_request| async {
                         let subnet = sled_request.body.subnet;
                         let sled_address = get_sled_address(subnet);
-                        let u2_zpools =
-                            Self::get_u2_zpools_from_sled(log, sled_address)
-                                .await?;
+                        let inventory =
+                            Self::get_inventory(log, sled_address).await?;
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
                         Ok(SledInfo::new(
                             sled_request.body.id,
                             subnet,
                             sled_address,
-                            u2_zpools,
+                            inventory,
                             is_scrimlet,
                         ))
                     },
@@ -730,7 +791,7 @@ impl Plan {
 
         // Once we've constructed a plan, write it down to durable storage.
         let paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -771,7 +832,9 @@ pub struct SledInfo {
     subnet: Ipv6Subnet<SLED_PREFIX>,
     /// the address of the Sled Agent on the sled's subnet
     pub sled_address: SocketAddrV6,
-    /// the list of zpools on the Sled
+    /// the inventory returned by the Sled
+    inventory: SledAgentTypes::Inventory,
+    /// The Zpools available for usage by services
     u2_zpools: Vec<ZpoolName>,
     /// spreads components across a Sled's zpools
     u2_zpool_allocators:
@@ -789,14 +852,15 @@ impl SledInfo {
         sled_id: Uuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_address: SocketAddrV6,
-        u2_zpools: Vec<ZpoolName>,
+        inventory: SledAgentTypes::Inventory,
         is_scrimlet: bool,
     ) -> SledInfo {
         SledInfo {
             sled_id,
             subnet,
             sled_address,
-            u2_zpools,
+            inventory,
+            u2_zpools: vec![],
             u2_zpool_allocators: HashMap::new(),
             is_scrimlet,
             addr_alloc: AddressBumpAllocator::new(subnet),
@@ -1206,10 +1270,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rss_service_plan_v2_schema() {
+    fn test_rss_service_plan_v3_schema() {
         let schema = schemars::schema_for!(Plan);
         expectorate::assert_contents(
-            "../schema/rss-service-plan-v2.json",
+            "../schema/rss-service-plan-v3.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }

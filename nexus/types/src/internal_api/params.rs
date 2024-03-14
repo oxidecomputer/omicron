@@ -81,6 +81,8 @@ pub struct SwitchPutResponse {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPutRequest {
+    pub id: Uuid,
+
     pub vendor: String,
     pub serial: String,
     pub model: String,
@@ -89,34 +91,14 @@ pub struct PhysicalDiskPutRequest {
     pub sled_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskPutResponse {}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskDeleteRequest {
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
-
-    pub sled_id: Uuid,
-}
-
-/// Sent by a sled agent on startup to Nexus to request further instruction
+/// Identifies information about a Zpool that should be part of the control
+/// plane.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
-    /// Total size of the pool.
-    pub size: ByteCount,
-
-    // Information to identify the disk to which this zpool belongs
-    pub disk_vendor: String,
-    pub disk_serial: String,
-    pub disk_model: String,
-    // TODO: We could include any other data from `ZpoolInfo` we want,
-    // such as "allocated/free" space and pool health?
+    pub id: Uuid,
+    pub sled_id: Uuid,
+    pub physical_disk_id: Uuid,
 }
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ZpoolPutResponse {}
 
 /// Describes the purpose of the dataset.
 #[derive(
@@ -250,6 +232,13 @@ impl std::fmt::Debug for Certificate {
 pub struct RackInitializationRequest {
     /// Services on the rack which have been created by RSS.
     pub services: Vec<ServicePutRequest>,
+
+    /// "Managed" physical disks owned by the control plane
+    pub physical_disks: Vec<PhysicalDiskPutRequest>,
+
+    /// Zpools created withing the physical disks created by the control plane.
+    pub zpools: Vec<ZpoolPutRequest>,
+
     /// Datasets on the rack which have been provisioned by RSS.
     pub datasets: Vec<DatasetCreateRequest>,
     /// Ranges of the service IP pool which may be used for internal services,

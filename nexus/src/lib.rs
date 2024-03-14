@@ -28,7 +28,9 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
 use nexus_types::external_api::views::SledProvisionPolicy;
-use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::internal_api::params::{
+    PhysicalDiskPutRequest, ServiceKind, ZpoolPutRequest,
+};
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
@@ -235,6 +237,10 @@ impl nexus_test_interface::NexusServer for Server {
         internal_server: InternalServer,
         config: &NexusConfig,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
+        physical_disks: Vec<
+            nexus_types::internal_api::params::PhysicalDiskPutRequest,
+        >,
+        zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
@@ -279,6 +285,8 @@ impl nexus_test_interface::NexusServer for Server {
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
                     services,
+                    physical_disks,
+                    zpools,
                     datasets,
                     internal_services_ip_pool_ranges,
                     certs,
@@ -337,14 +345,26 @@ impl nexus_test_interface::NexusServer for Server {
 
     async fn upsert_crucible_dataset(
         &self,
-        id: Uuid,
-        zpool_id: Uuid,
+        physical_disk: PhysicalDiskPutRequest,
+        zpool: ZpoolPutRequest,
+        dataset_id: Uuid,
         address: SocketAddrV6,
     ) {
+        let opctx = self.apictx.nexus.opctx_for_internal_api();
+        self.apictx
+            .nexus
+            .upsert_physical_disk(&opctx, physical_disk)
+            .await
+            .unwrap();
+
+        let zpool_id = zpool.id;
+
+        self.apictx.nexus.upsert_zpool(&opctx, zpool).await.unwrap();
+
         self.apictx
             .nexus
             .upsert_dataset(
-                id,
+                dataset_id,
                 zpool_id,
                 address,
                 nexus_db_queries::db::model::DatasetKind::Crucible,
