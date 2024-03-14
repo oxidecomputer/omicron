@@ -2341,6 +2341,14 @@
             "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
             "type": "string"
           },
+          "external_dns_version": {
+            "description": "external DNS version when thi blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "id": {
             "description": "unique identifier for this blueprint",
             "type": "string",
@@ -2385,6 +2393,7 @@
         "required": [
           "comment",
           "creator",
+          "external_dns_version",
           "id",
           "internal_dns_version",
           "omicron_zones",
@@ -2403,6 +2412,14 @@
           "creator": {
             "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
             "type": "string"
+          },
+          "external_dns_version": {
+            "description": "external DNS version when this blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
           },
           "id": {
             "description": "unique identifier for this blueprint",
@@ -2432,6 +2449,7 @@
         "required": [
           "comment",
           "creator",
+          "external_dns_version",
           "id",
           "internal_dns_version",
           "time_created"

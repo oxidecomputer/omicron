@@ -4601,6 +4601,7 @@ dependencies = [
  "nexus-inventory",
  "nexus-networking",
  "nexus-reconfigurator-planning",
+ "nexus-reconfigurator-preparation",
  "nexus-test-utils",
  "nexus-test-utils-macros",
  "nexus-types",

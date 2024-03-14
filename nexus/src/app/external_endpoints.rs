@@ -26,7 +26,6 @@
 //! "certificate resolver" object that impls
 //! [`rustls::server::ResolvesServerCert`].  See [`NexusCertResolver`].
 
-use super::silo::silo_dns_name;
 use crate::ServerContext;
 use anyhow::anyhow;
 use anyhow::bail;
@@ -39,6 +38,7 @@ use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::fixed_data::silo::SILO_ID;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
+use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::DataPageParams;

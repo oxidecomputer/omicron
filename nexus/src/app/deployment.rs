@@ -35,6 +35,7 @@ struct PlanningContext {
     creator: String,
     inventory: Option<Collection>,
     internal_dns_version: Generation,
+    external_dns_version: Generation,
 }
 
 impl super::Nexus {
@@ -168,21 +169,28 @@ impl super::Nexus {
                 "fetching latest inventory collection for blueprint planner",
             )?;
 
-        // Fetch the current internal DNS version.  This could be made part of
+        // Fetch the current DNS versions.  This could be made part of
         // inventory, but it's enough of a one-off that there's no particular
         // advantage to doing that work now.
-        let dns_version = datastore
+        let internal_dns_version = datastore
             .dns_group_latest_version(opctx, DnsGroup::Internal)
             .await
             .internal_context(
                 "fetching internal DNS version for blueprint planning",
+            )?;
+        let external_dns_version = datastore
+            .dns_group_latest_version(opctx, DnsGroup::External)
+            .await
+            .internal_context(
+                "fetching external DNS version for blueprint planning",
             )?;
 
         Ok(PlanningContext {
             creator,
             policy,
             inventory,
-            internal_dns_version: *dns_version.version,
+            internal_dns_version: *internal_dns_version.version,
+            external_dns_version: *external_dns_version.version,
         })
     }
 
@@ -207,6 +215,7 @@ impl super::Nexus {
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
             planning_context.internal_dns_version,
+            planning_context.external_dns_version,
             &planning_context.policy,
             &planning_context.creator,
         )
@@ -242,6 +251,7 @@ impl super::Nexus {
             opctx.log.clone(),
             &parent_blueprint,
             planning_context.internal_dns_version,
+            planning_context.external_dns_version,
             &planning_context.policy,
             &planning_context.creator,
             &inventory,

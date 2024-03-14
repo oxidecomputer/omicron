@@ -27,4 +27,3 @@ omicron-workspace-hack.workspace = true
 [dev-dependencies]
 expectorate.workspace = true
 omicron-test-utils.workspace = true
-sled-agent-client.workspace = true
