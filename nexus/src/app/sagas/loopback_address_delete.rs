@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::NexusActionContext;
-use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::{
     declare_saga_actions, ActionRegistry, NexusSaga, SagaInitError,
 };
@@ -14,6 +13,7 @@ use nexus_db_queries::authz;
 use nexus_db_queries::db::model::{LoopbackAddress, Name};
 use nexus_types::identity::Asset;
 use omicron_common::api::external::{IpNet, NameOrId};
+use omicron_common::retry_until_known_result;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use steno::ActionError;

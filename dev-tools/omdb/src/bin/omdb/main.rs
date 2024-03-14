@@ -92,16 +92,29 @@ struct Omdb {
     command: OmdbCommands,
 }
 
-impl Omdb {
-    fn check_allow_destructive(&self) -> anyhow::Result<()> {
-        anyhow::ensure!(
-            self.allow_destructive,
-            "This command is potentially destructive. \
-             Pass the `-w` / `--destructive` flag to allow it."
-        );
-        Ok(())
-    }
+mod check_allow_destructive {
+    /// Zero-size type that potentially-destructive functions can accept to
+    /// ensure `Omdb::check_allow_destructive` has been called.
+    // This is tucked away inside a module to prevent it from being constructed
+    // by anything other than `Omdb::check_allow_destructive`.
+    #[must_use]
+    pub(crate) struct DestructiveOperationToken(());
 
+    impl super::Omdb {
+        pub(crate) fn check_allow_destructive(
+            &self,
+        ) -> anyhow::Result<DestructiveOperationToken> {
+            anyhow::ensure!(
+                self.allow_destructive,
+                "This command is potentially destructive. \
+                 Pass the `-w` / `--destructive` flag to allow it."
+            );
+            Ok(DestructiveOperationToken(()))
+        }
+    }
+}
+
+impl Omdb {
     async fn dns_lookup_all(
         &self,
         log: slog::Logger,
