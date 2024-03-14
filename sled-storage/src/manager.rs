@@ -8,7 +8,9 @@ use std::collections::HashSet;
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetName, CONFIG_DATASET};
-use crate::disk::{OmicronPhysicalDisksConfig, OmicronPhysicalDiskConfig, RawDisk};
+use crate::disk::{
+    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, RawDisk,
+};
 use crate::error::Error;
 use crate::resources::{AllDisks, DisksManagementResult, StorageResources};
 use camino::Utf8PathBuf;
@@ -552,14 +554,16 @@ impl StorageManager {
                             }
                         };
 
-                        let zpool_name = match sled_hardware::disk::check_if_zpool_exists(&zpool_path) {
-                            Ok(zpool_name) => zpool_name,
-                            Err(err) => {
-                                info!(self.log, "Zpool does not exist"; "identity" => ?identity, "err" => ?err);
-                                continue;
-                            }
-                        };
-
+                        let zpool_name =
+                            match sled_hardware::disk::check_if_zpool_exists(
+                                &zpool_path,
+                            ) {
+                                Ok(zpool_name) => zpool_name,
+                                Err(err) => {
+                                    info!(self.log, "Zpool does not exist"; "identity" => ?identity, "err" => ?err);
+                                    continue;
+                                }
+                            };
 
                         info!(self.log, "Found existing zpool on device without ledger";
                             "identity" => ?identity,
@@ -576,9 +580,9 @@ impl StorageManager {
                                 identity: identity.clone(),
                                 id: Uuid::nil(),
                                 pool_id: zpool_name.id(),
-                            }
+                            },
                         );
-                    },
+                    }
                     _ => continue,
                 }
             }
@@ -1122,7 +1126,7 @@ mod tests {
             .map(|serial| {
                 let vdev_path =
                     vdev_dir.path().join(format!("u2_{serial}.vdev"));
-                RawSyntheticDisk::new_with_length(&vdev_path, 1 << 30)
+                RawSyntheticDisk::new_with_length(&vdev_path, 1 << 30, serial)
                     .unwrap()
                     .into()
             })

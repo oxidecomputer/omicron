@@ -231,8 +231,10 @@ impl RawDisk {
                 // This is hard-coded to be "0", but that's because we aren't
                 // really parsing the whole partition table before considering
                 // where this would be see.
-                paths.partition_path(0, false).ok_or_else(|| PooledDiskError::ZpoolDoesNotExist)
-            },
+                paths
+                    .partition_path(0, false)
+                    .ok_or_else(|| PooledDiskError::ZpoolDoesNotExist)
+            }
             Self::Synthetic(raw) => Ok(raw.path.clone()),
         }
     }

@@ -77,7 +77,11 @@ pub struct DiskPaths {
 
 impl DiskPaths {
     // Returns the "illumos letter-indexed path" for a device.
-    pub fn partition_path(&self, index: usize, raw: bool) -> Option<Utf8PathBuf> {
+    pub fn partition_path(
+        &self,
+        index: usize,
+        raw: bool,
+    ) -> Option<Utf8PathBuf> {
         let index = u8::try_from(index).ok()?;
 
         let path = &self.devfs_path;

@@ -309,10 +309,7 @@ impl StorageResources {
     /// Does not attempt to manage any of the physical disks previously
     /// observed. To synchronize the "set of requested disks" with the "set of
     /// observed disks", call [Self::synchronize_disk_management].
-    pub fn set_config(
-        &mut self,
-        config: &Vec<OmicronPhysicalDiskConfig>,
-    ) {
+    pub fn set_config(&mut self, config: &Vec<OmicronPhysicalDiskConfig>) {
         self.control_plane_disks = config
             .iter()
             .map(|disk| (disk.identity.clone(), disk.clone()))
@@ -320,7 +317,7 @@ impl StorageResources {
     }
 
     pub async fn get_config(
-        &self
+        &self,
     ) -> &BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig> {
         &self.control_plane_disks
     }
