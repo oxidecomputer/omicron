@@ -74,6 +74,7 @@
     timeout_seconds="60" />
 
   <property_group name="config" type="application">
+  <!-- TODO: Why is this even being set as a property instead of direclty on the method?? -->
     <propval name="file" type="astring" value="/etc/inet/chrony.conf" />
     <propval name="boundary" type="boolean" value="false" />
     <propval name="server" type="astring" value="" />
