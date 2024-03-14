@@ -422,8 +422,7 @@ impl IpRange {
         }
     }
 
-    // Has to be u128 to accommodate IPv6 -- logic around converting back down
-    // to u32 (if possible) lives in the view layer
+    // Has to be u128 to accommodate IPv6
     pub fn len(&self) -> u128 {
         match self {
             IpRange::V4(ip4) => u128::from(ip4.len()),

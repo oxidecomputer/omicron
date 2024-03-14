@@ -348,12 +348,12 @@ impl DataStore {
         //      assume here that it will be a positive i64.
         //   b) It could clearly be a u64, but the calling code immediate
         //      converts it to a u128 anyway, so it would be pointless.
-        Ok(u128::try_from(count).map_err(|_e| {
+        u128::try_from(count).map_err(|_e| {
             Error::internal_error(&format!(
                 "Failed to convert i64 {} SQL count to u64",
                 count
             ))
-        })?)
+        })
     }
 
     // TODO: should this just return the vec of ranges?
