@@ -242,7 +242,8 @@ mod test {
             .expect("Failed second upsert of physical disk");
         // This check is pretty important - note that we return the original
         // UUID, not the new one.
-        assert_eq!(disk_again.id(), second_observed_disk.id());
+        assert_eq!(disk.id(), second_observed_disk.id());
+        assert_ne!(disk_again.id(), second_observed_disk.id());
         assert_disks_equal_ignore_uuid(&disk_again, &second_observed_disk);
         assert!(
             first_observed_disk.time_modified()
