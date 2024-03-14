@@ -15,7 +15,7 @@ use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::OmicronZoneType;
@@ -72,7 +72,7 @@ pub(crate) async fn deploy_dns(
         .internal_context("listing Silos (for configuring external DNS)")?
         .into_iter()
         // We do not generate a DNS name for the "default" Silo.
-        .filter(|silo| silo.id() != *SILO_ID)
+        .filter(|silo| silo.id() != *DEFAULT_SILO_ID)
         .collect::<Vec<_>>();
 
     let (nexus_external_ips, nexus_external_dns_zones) =
