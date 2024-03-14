@@ -52,7 +52,6 @@ use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
-use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -73,7 +72,6 @@ pub struct RackInit {
     pub rack_id: Uuid,
     pub rack_subnet: IpNetwork,
     pub blueprint: Blueprint,
-    pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
     pub internal_dns: InitialDnsGroup,
@@ -624,7 +622,6 @@ impl DataStore {
                 async move {
                     let rack_id = rack_init.rack_id;
                     let blueprint = rack_init.blueprint;
-                    let services = rack_init.services;
                     let datasets = rack_init.datasets;
                     let service_ip_pool_ranges =
                         rack_init.service_ip_pool_ranges;
@@ -920,7 +917,6 @@ mod test {
     use crate::db::model::IpPoolRange;
     use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
-    use internal_params::DnsRecord;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, SledUpdate};
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -932,6 +928,7 @@ mod test {
     use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
+    use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::address::{
@@ -966,7 +963,6 @@ mod test {
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
                 },
-                services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],
                 internal_dns: InitialDnsGroup::new(

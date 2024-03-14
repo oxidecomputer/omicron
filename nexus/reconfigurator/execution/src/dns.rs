@@ -76,7 +76,7 @@ pub(crate) async fn deploy_dns(
         .collect::<Vec<_>>();
 
     let (nexus_external_ips, nexus_external_dns_zones) =
-        datastore.nexus_external_addresses(opctx, Some(blueprint)).await?;
+        datastore.nexus_external_addresses(opctx, blueprint).await?;
     let nexus_external_dns_zone_names = nexus_external_dns_zones
         .into_iter()
         .map(|z| z.zone_name)

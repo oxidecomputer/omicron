@@ -28,8 +28,8 @@ use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::OmicronZoneType;
 use nexus_types::external_api::views::SledProvisionPolicy;
-use nexus_types::internal_api::params::ServiceKind;
 use omicron_common::address::IpRange;
 use omicron_common::api::internal::shared::{
     ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
@@ -234,7 +234,6 @@ impl nexus_test_interface::NexusServer for Server {
         internal_server: InternalServer,
         config: &NexusConfig,
         blueprint: Blueprint,
-        services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
@@ -260,12 +259,19 @@ impl nexus_test_interface::NexusServer for Server {
         // it's 127.0.0.1, having come straight from the stock testing config
         // file.  Whatever it is, we fake up an IP pool range for use by system
         // services that includes solely this IP.
-        let internal_services_ip_pool_ranges = services
-            .iter()
-            .filter_map(|s| match s.kind {
-                ServiceKind::ExternalDns { external_address, .. }
-                | ServiceKind::Nexus { external_address, .. } => {
-                    Some(IpRange::from(external_address))
+        let internal_services_ip_pool_ranges = blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zc)| match &zc.zone_type {
+                OmicronZoneType::ExternalDns { dns_address, .. } => {
+                    // Work around
+                    // https://github.com/oxidecomputer/omicron/issues/4988
+                    let dns_address: SocketAddr = dns_address
+                        .parse()
+                        .expect("invalid DNS socket address");
+                    Some(IpRange::from(dns_address.ip()))
+                }
+                OmicronZoneType::Nexus { external_ip, .. } => {
+                    Some(IpRange::from(*external_ip))
                 }
                 _ => None,
             })
@@ -279,7 +285,6 @@ impl nexus_test_interface::NexusServer for Server {
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
                     blueprint,
-                    services,
                     datasets,
                     internal_services_ip_pool_ranges,
                     certs,

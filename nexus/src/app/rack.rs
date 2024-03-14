@@ -167,15 +167,15 @@ impl super::Nexus {
 
         let silo_name = &request.recovery_silo.silo_name;
         let dns_records = request
-            .services
-            .iter()
-            .filter_map(|s| match &s.kind {
-                nexus_types::internal_api::params::ServiceKind::Nexus {
-                    external_address,
+            .blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zc)| match zc.zone_type {
+                nexus_types::deployment::OmicronZoneType::Nexus {
+                    external_ip,
                     ..
-                } => Some(match external_address {
-                    IpAddr::V4(addr) => DnsRecord::A(*addr),
-                    IpAddr::V6(addr) => DnsRecord::Aaaa(*addr),
+                } => Some(match external_ip {
+                    IpAddr::V4(addr) => DnsRecord::A(addr),
+                    IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
                 }),
                 _ => None,
             })
@@ -229,7 +229,6 @@ impl super::Nexus {
                     rack_subnet: rack_network_config.rack_subnet.into(),
                     rack_id,
                     blueprint,
-                    services: request.services,
                     datasets,
                     service_ip_pool_ranges,
                     internal_dns,
