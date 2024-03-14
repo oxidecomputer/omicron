@@ -250,7 +250,6 @@ impl super::Nexus {
             id,
             sled_id,
             db_disk.uuid(),
-            info.size.into(),
         );
         self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())

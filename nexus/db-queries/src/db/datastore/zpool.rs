@@ -23,7 +23,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use nexus_db_model::PhysicalDiskKind;
-use nexus_types::inventory;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -33,41 +32,6 @@ use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
 impl DataStore {
-    // TODO: Should this be paginated?
-    // TODO: Alternatively, should we have a better way of "inferring what needs
-    // to be updated" from inventory?
-    pub async fn zpool_update_all(
-        &self,
-        opctx: &OpContext,
-        zpools: &Vec<inventory::Zpool>,
-    ) -> Result<(), Error> {
-        let values_str: String = zpools
-            .iter()
-            .map(|zpool| {
-                format!("('{}', {})", zpool.id, zpool.total_size.to_bytes())
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-
-        let query = format!(
-            "UPDATE omicron.public.zpool
-            SET total_size = data.total_size
-            FROM (VALUES {}) AS data(id, total_size)
-            WHERE
-              omicron.public.zpool.id = data.id::uuid AND
-              omicron.public.zpool.time_deleted IS NULL
-            ",
-            values_str
-        );
-
-        diesel::sql_query(query)
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        Ok(())
-    }
-
     /// Stores a new zpool in the database.
     pub async fn zpool_upsert(&self, zpool: Zpool) -> CreateResult<Zpool> {
         use db::schema::zpool::dsl;
@@ -82,7 +46,6 @@ impl DataStore {
                 .set((
                     dsl::time_modified.eq(Utc::now()),
                     dsl::sled_id.eq(excluded(dsl::sled_id)),
-                    dsl::total_size.eq(excluded(dsl::total_size)),
                 )),
         )
         .insert_and_get_result_async(

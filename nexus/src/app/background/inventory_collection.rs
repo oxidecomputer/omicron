@@ -19,7 +19,6 @@ use nexus_types::inventory::Collection;
 use serde_json::json;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use tokio::sync::watch;
 
 /// How many rows to request in each paginated database query
 const DB_PAGE_SIZE: u32 = 1024;
@@ -31,7 +30,6 @@ pub struct InventoryCollector {
     creator: String,
     nkeep: u32,
     disable: bool,
-    tx: watch::Sender<Option<Collection>>,
 }
 
 impl InventoryCollector {
@@ -42,19 +40,13 @@ impl InventoryCollector {
         nkeep: u32,
         disable: bool,
     ) -> InventoryCollector {
-        let (tx, _) = watch::channel(None);
         InventoryCollector {
             datastore,
             resolver,
             creator: creator.to_owned(),
             nkeep,
             disable,
-            tx,
         }
-    }
-
-    pub fn watcher(&self) -> watch::Receiver<Option<Collection>> {
-        self.tx.subscribe()
     }
 }
 
@@ -86,17 +78,11 @@ impl BackgroundTask for InventoryCollector {
                         "collection_id" => collection.id.to_string(),
                         "time_started" => collection.time_started.to_string(),
                     );
-
-                    let result = json!({
+                    json!({
                         "collection_id": collection.id.to_string(),
                         "time_started": collection.time_started.to_string(),
                         "time_done": collection.time_done.to_string()
-                    });
-
-                    // Update anyone monitoring the inventory
-                    self.tx.send_modify(|c| *c = Some(collection));
-
-                    result
+                    })
                 }
             }
         }

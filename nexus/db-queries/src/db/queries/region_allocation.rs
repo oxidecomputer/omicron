@@ -12,19 +12,21 @@ use crate::db::pool::DbConnection;
 use crate::db::subquery::{AsQuerySource, Cte, CteBuilder, CteQuery};
 use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
 use db_macros::Subquery;
+use diesel::Column;
 use diesel::pg::Pg;
 use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::result::Error as DieselError;
 use diesel::PgBinaryExpressionMethods;
 use diesel::{
-    sql_types, BoolExpressionMethods, Column, CombineDsl, ExpressionMethods,
+    sql_types, BoolExpressionMethods, CombineDsl, ExpressionMethods,
     Insertable, IntoSql, JoinOnDsl, NullableExpressionMethods, QueryDsl,
     RunQueryDsl,
 };
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::queries::region_allocation::{
     candidate_datasets, candidate_regions, candidate_zpools, cockroach_md5,
-    do_insert, inserted_regions, old_regions, old_zpool_usage,
+    do_insert, inserted_regions, latest_inv_zpools, old_regions,
+    old_zpool_usage, old_zpool_usage_by_dataset,
     proposed_dataset_changes, shuffled_candidate_datasets, updated_datasets,
 };
 use nexus_db_model::schema;
@@ -254,15 +256,41 @@ impl ProposedChanges {
     }
 }
 
+/// A subquery which finds the most recent zpool collected by inventory.
+#[derive(Subquery, QueryId)]
+#[subquery(name = latest_inv_zpools)]
+struct LatestInvZpools {
+    query: Box<dyn CteQuery<SqlType = latest_inv_zpools::SqlType>>,
+}
+
+impl LatestInvZpools {
+    fn new() -> Self {
+        use crate::db::schema::inv_zpool::dsl as inv_zpool_dsl;
+        Self {
+            query: Box::new(
+                inv_zpool_dsl::inv_zpool
+                    .select((
+                        inv_zpool_dsl::id,
+                        diesel::dsl::sql::<sql_types::Numeric>(
+                            &format!("CAST({} AS NUMERIC) AS total_size", inv_zpool_dsl::total_size::NAME)
+                        ),
+                    ))
+                    .order_by((inv_zpool_dsl::id, inv_zpool_dsl::time_collected.desc()))
+                    .distinct_on(inv_zpool_dsl::id)
+            ),
+        }
+    }
+}
+
 /// A subquery which calculates the old size being used by zpools
 /// under consideration as targets for region allocation.
 #[derive(Subquery, QueryId)]
-#[subquery(name = old_zpool_usage)]
-struct OldPoolUsage {
-    query: Box<dyn CteQuery<SqlType = old_zpool_usage::SqlType>>,
+#[subquery(name = old_zpool_usage_by_dataset)]
+struct OldPoolUsageByDataset {
+    query: Box<dyn CteQuery<SqlType = old_zpool_usage_by_dataset::SqlType>>,
 }
 
-impl OldPoolUsage {
+impl OldPoolUsageByDataset {
     fn new() -> Self {
         use crate::db::schema::dataset::dsl as dataset_dsl;
         Self {
@@ -273,12 +301,40 @@ impl OldPoolUsage {
                     .filter(dataset_dsl::time_deleted.is_null())
                     .select((
                         dataset_dsl::pool_id,
-                        ExpressionAlias::new::<old_zpool_usage::size_used>(
+                        ExpressionAlias::new::<old_zpool_usage_by_dataset::size_used>(
                             diesel::dsl::sum(dataset_dsl::size_used)
                                 .assume_not_null(),
                         ),
                     )),
             ),
+        }
+    }
+}
+
+#[derive(Subquery, QueryId)]
+#[subquery(name = old_zpool_usage)]
+struct OldPoolUsage {
+    query: Box<dyn CteQuery<SqlType = old_zpool_usage::SqlType>>,
+}
+
+impl OldPoolUsage {
+    fn new(
+        latest_inv_zpools: &LatestInvZpools,
+        old_zpool_usage_by_dataset: &OldPoolUsageByDataset,
+    ) -> Self {
+        Self {
+            query: Box::new(
+                latest_inv_zpools.query_source().inner_join(
+                    old_zpool_usage_by_dataset.query_source().on(
+                        latest_inv_zpools::id.eq(old_zpool_usage_by_dataset::pool_id)
+                    )
+                )
+                .select((
+                    old_zpool_usage_by_dataset::pool_id,
+                    old_zpool_usage_by_dataset::size_used,
+                    latest_inv_zpools::total_size
+                ))
+            )
         }
     }
 }
@@ -306,7 +362,7 @@ impl CandidateZpools {
         // is promoted to "numeric" (see: old_zpool_usage::dsl::size_used).
         //
         // However, we'd like to compare that value with a different value
-        // (zpool_dsl::total_size) which is still a "bigint". This comparison
+        // (zpool_dsl::size_total) which is still a "bigint". This comparison
         // is safe (after all, we basically want to promote "total_size" to a
         // Numeric too) but Diesel demands that the input and output SQL types
         // of expression methods like ".le" match exactly.
@@ -314,9 +370,10 @@ impl CandidateZpools {
         // For similar reasons, we use `diesel::dsl::sql` with zpool_size_delta.
         // We would like to add it, but diesel only permits us to `to_sql()` it
         // into a BigInt, not a Numeric. I welcome a better solution.
-        let it_will_fit = (old_zpool_usage::dsl::size_used
-            + diesel::dsl::sql(&zpool_size_delta.to_string()))
-        .le(diesel::dsl::sql(zpool_dsl::total_size::NAME));
+        let it_will_fit = (
+            old_zpool_usage::dsl::size_used
+            + diesel::dsl::sql(&zpool_size_delta.to_string())
+        ).le(old_zpool_usage::dsl::total_size);
 
         // We need to join on the sled table to access provision_state.
         let with_sled = sled_dsl::sled.on(zpool_dsl::sled_id.eq(sled_dsl::id));
@@ -331,7 +388,7 @@ impl CandidateZpools {
         let base_query = old_zpool_usage
             .query_source()
             .inner_join(with_zpool)
-            .filter(zpool_dsl::total_size.is_not_null())
+//            .filter(inv_zpool_total_size.is_not_null())
             .filter(it_will_fit)
             .filter(sled_is_provisionable)
             .filter(sled_is_active)
@@ -577,9 +634,11 @@ impl RegionAllocate {
 
         let old_regions = OldRegions::new(volume_id);
 
-        let old_pool_usage = OldPoolUsage::new();
+        let latest_inv_zpools = LatestInvZpools::new();
+        let old_zpool_usage_by_dataset = OldPoolUsageByDataset::new();
+        let old_zpool_usage = OldPoolUsage::new(&latest_inv_zpools, &old_zpool_usage_by_dataset);
         let candidate_zpools = CandidateZpools::new(
-            &old_pool_usage,
+            &old_zpool_usage,
             size_delta,
             seed,
             distinct_sleds,
@@ -646,7 +705,9 @@ impl RegionAllocate {
 
         let cte = CteBuilder::new()
             .add_subquery(old_regions)
-            .add_subquery(old_pool_usage)
+            .add_subquery(latest_inv_zpools)
+            .add_subquery(old_zpool_usage_by_dataset)
+            .add_subquery(old_zpool_usage)
             .add_subquery(candidate_zpools)
             .add_subquery(candidate_datasets)
             .add_subquery(shuffled_candidate_datasets)

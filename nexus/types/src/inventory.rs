@@ -370,13 +370,14 @@ impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
 /// A zpool reported by a sled agent.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Zpool {
+    pub time_collected: DateTime<Utc>,
     pub id: Uuid,
     pub total_size: ByteCount,
 }
 
-impl From<sled_agent_client::types::InventoryZpool> for Zpool {
-    fn from(pool: sled_agent_client::types::InventoryZpool) -> Zpool {
-        Zpool { id: pool.id, total_size: pool.total_size }
+impl Zpool {
+    pub fn new(time_collected: DateTime<Utc>, pool: sled_agent_client::types::InventoryZpool) -> Zpool {
+        Zpool { time_collected, id: pool.id, total_size: pool.total_size }
     }
 }
 

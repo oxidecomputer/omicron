@@ -666,9 +666,31 @@ mod test {
             zpool_id,
             sled_id,
             physical_disk_id,
-            test_zpool_size().into(),
         );
         datastore.zpool_upsert(zpool).await.unwrap();
+
+        // NOTE: This is a hack! But in lieu of a full inventory collection,
+        // we need *something* to exist in the inventory system.
+
+        use db::schema::inv_zpool::dsl;
+
+        let inv_collection_id = Uuid::new_v4();
+        let time_collected = Utc::now();
+        let inv_pool = nexus_db_model::InvZpool {
+            inv_collection_id,
+            time_collected,
+            id: zpool_id,
+            sled_id,
+            total_size: test_zpool_size().into(),
+        };
+        diesel::insert_into(dsl::inv_zpool)
+            .values(
+                inv_pool
+            )
+            .execute_async(&*datastore.pool_connection_for_tests().await.unwrap())
+            .await
+            .unwrap();
+
         zpool_id
     }
 

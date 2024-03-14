@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{ByteCount, Dataset, Generation};
+use super::{Dataset, Generation};
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{dataset, zpool};
 use chrono::{DateTime, Utc};
@@ -26,13 +26,6 @@ pub struct Zpool {
 
     // The physical disk to which this Zpool is attached.
     pub physical_disk_id: Uuid,
-
-    // There is much more information we can extract, including:
-    // - Size used, health, etc.
-    //
-    // However, we should also consider adding this information to "inv_zpool"
-    // instead, which acts more as the "observed" zpool.
-    pub total_size: Option<ByteCount>,
 }
 
 impl Zpool {
@@ -40,7 +33,6 @@ impl Zpool {
         id: Uuid,
         sled_id: Uuid,
         physical_disk_id: Uuid,
-        _total_size: ByteCount,
     ) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
@@ -48,7 +40,6 @@ impl Zpool {
             rcgen: Generation::new(),
             sled_id,
             physical_disk_id,
-            total_size: None,
         }
     }
 }

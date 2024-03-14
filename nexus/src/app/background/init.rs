@@ -15,7 +15,6 @@ use super::external_endpoints;
 use super::inventory_collection;
 use super::nat_cleanup;
 use super::phantom_disks;
-use super::physical_storage_monitor;
 use super::region_replacement;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use crate::app::sagas::SagaRequest;
@@ -76,9 +75,6 @@ pub struct BackgroundTasks {
 
     /// task handle for the service zone nat tracker
     pub task_service_zone_nat_tracker: common::TaskHandle,
-
-    /// task handle for the physical storage monitor
-    pub task_physical_storage_monitor: common::TaskHandle,
 
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
@@ -228,25 +224,28 @@ impl BackgroundTasks {
         // because the blueprint executor might also depend indirectly on the
         // inventory collector.  In that case, we may need to do something more
         // complicated.  But for now, this works.
-        let collector = inventory_collection::InventoryCollector::new(
-            datastore.clone(),
-            resolver,
-            &nexus_id.to_string(),
-            config.inventory.nkeep,
-            config.inventory.disable,
-        );
-        let rx_inventory_collector = collector.watcher();
-        let task_inventory_collection = driver.register(
-            String::from("inventory_collection"),
-            String::from(
-                "collects hardware and software inventory data from the \
-                whole system",
-            ),
-            config.inventory.period_secs,
-            Box::new(collector),
-            opctx.child(BTreeMap::new()),
-            vec![Box::new(rx_blueprint_exec)],
-        );
+        let task_inventory_collection = {
+            let collector = inventory_collection::InventoryCollector::new(
+                datastore.clone(),
+                resolver,
+                &nexus_id.to_string(),
+                config.inventory.nkeep,
+                config.inventory.disable,
+            );
+            let task = driver.register(
+                String::from("inventory_collection"),
+                String::from(
+                    "collects hardware and software inventory data from the \
+                    whole system",
+                ),
+                config.inventory.period_secs,
+                Box::new(collector),
+                opctx.child(BTreeMap::new()),
+                vec![Box::new(rx_blueprint_exec)],
+            );
+
+            task
+        };
 
         let task_service_zone_nat_tracker = {
             driver.register(
@@ -261,22 +260,6 @@ impl BackgroundTasks {
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
-            )
-        };
-
-        let task_physical_storage_monitor = {
-            driver.register(
-                "physical_storage_monitor".to_string(),
-                String::from(
-                    "Updates physical storage metadata in response to inventory",
-                ),
-                config.sync_service_zone_nat.period_secs,
-                Box::new(physical_storage_monitor::PhysicalStorageMonitor::new(
-                    datastore.clone(),
-                    rx_inventory_collector.clone(),
-                )),
-                opctx.child(BTreeMap::new()),
-                vec![Box::new(rx_inventory_collector)],
             )
         };
 
@@ -315,7 +298,6 @@ impl BackgroundTasks {
             task_blueprint_loader,
             task_blueprint_executor,
             task_service_zone_nat_tracker,
-            task_physical_storage_monitor,
             task_region_replacement,
         }
     }

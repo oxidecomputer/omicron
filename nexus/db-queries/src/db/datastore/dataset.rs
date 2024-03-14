@@ -233,7 +233,6 @@ mod test {
             zpool_id,
             sled_id,
             Uuid::new_v4(),
-            (1 << 30).try_into().unwrap(),
         );
         datastore.zpool_upsert(zpool).await.expect("failed to upsert zpool");
 

@@ -462,10 +462,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     ram_provisioned INT8 NOT NULL
 );
 
-/*
- * ZPools of Storage, attached to Sleds.
- * These are backed by a single physical disk.
- */
+-- ZPools of Storage, attached to Sleds.
+-- These are backed by a single physical disk.
+--
+-- For information about the provisioned zpool, reference the
+-- "omicron.public.inv_zpool" table, which returns information
+-- that has actually been returned from the underlying sled.
 CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -478,13 +480,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     sled_id UUID NOT NULL,
 
     /* FK into the Physical Disk table */
-    physical_disk_id UUID NOT NULL,
-
-    -- The total size is optional, since we learn
-    -- about it eventually through the inventory system.
-    --
-    -- A "NULL" size means "we don't know what it is yet".
-    total_size INT
+    physical_disk_id UUID NOT NULL
 );
 
 /* Create an index on the physical disk id */
@@ -2994,6 +2990,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
     inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
 
     -- The control plane ID of the zpool
     id UUID NOT NULL,
@@ -3006,6 +3004,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     -- - The slot in which this disk was found
     PRIMARY KEY (inv_collection_id, sled_id, id)
 );
+
+-- Allow looking up the most recent Zpool by ID
+CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time ON omicron.public.inv_zpool (id, time_collected DESC NULLS LAST);
+CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time2 ON omicron.public.inv_zpool (time_collected DESC NULLS LAST, id);
+CREATE INDEX IF NOT EXISTS inv_zpool_by_id ON omicron.public.inv_zpool (id);
+CREATE INDEX IF NOT EXISTS inv_zpool_by_time ON omicron.public.inv_zpool (time_collected DESC);
+
+CREATE INDEX ON omicron.public.dataset (time_deleted) STORING (pool_id, size_used);
+CREATE INDEX ON omicron.public.dataset (time_deleted, kind, pool_id, id) STORING (size_used);
+CREATE INDEX ON omicron.public.region (volume_id) STORING (time_created, time_modified, dataset_id, block_size, blocks_per_extent, extent_count);
+CREATE INDEX ON omicron.public.sled (sled_policy, sled_state, id);
+CREATE INDEX ON omicron.public.zpool (sled_id);
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from

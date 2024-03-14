@@ -1,1 +1,1 @@
-ALTER TABLE omicron.public.zpool ALTER COLUMN total_size DROP NOT NULL;
+ALTER TABLE omicron.public.zpool DROP COLUMN IF EXISTS total_size;

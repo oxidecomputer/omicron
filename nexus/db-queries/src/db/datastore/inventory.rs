@@ -146,9 +146,8 @@ impl DataStore {
                 sled_agent.zpools.iter().map(|pool| {
                     InvZpool::new(
                         collection_id,
-                        pool.id,
                         *sled_id,
-                        pool.total_size.into(),
+                        pool,
                     )
                 })
             })

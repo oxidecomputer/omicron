@@ -23,6 +23,7 @@
 // a CTE (where we want the alias name to come first).
 
 use crate::schema::dataset;
+use crate::schema::inv_zpool;
 use crate::schema::sled;
 use crate::schema::zpool;
 
@@ -79,9 +80,24 @@ table! {
 }
 
 table! {
+    latest_inv_zpools {
+        id -> Uuid,
+        total_size -> Numeric,
+    }
+}
+
+table! {
+    old_zpool_usage_by_dataset (pool_id) {
+        pool_id -> Uuid,
+        size_used -> Numeric,
+    }
+}
+
+table! {
     old_zpool_usage (pool_id) {
         pool_id -> Uuid,
         size_used -> Numeric,
+        total_size -> Numeric,
     }
 }
 
@@ -156,6 +172,9 @@ diesel::allow_tables_to_appear_in_same_query!(
 );
 
 diesel::allow_tables_to_appear_in_same_query!(
+    inv_zpool,
+    latest_inv_zpools,
+    old_zpool_usage_by_dataset,
     old_zpool_usage,
     zpool,
     sled,

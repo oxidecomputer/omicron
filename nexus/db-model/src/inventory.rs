@@ -705,6 +705,7 @@ impl From<InvPhysicalDisk> for nexus_types::inventory::PhysicalDisk {
 #[diesel(table_name = inv_zpool)]
 pub struct InvZpool {
     pub inv_collection_id: Uuid,
+    pub time_collected: DateTime<Utc>,
     pub id: Uuid,
     pub sled_id: Uuid,
     pub total_size: ByteCount,
@@ -713,17 +714,26 @@ pub struct InvZpool {
 impl InvZpool {
     pub fn new(
         inv_collection_id: Uuid,
-        id: Uuid,
         sled_id: Uuid,
-        total_size: ByteCount,
+        zpool: &nexus_types::inventory::Zpool,
     ) -> Self {
-        Self { inv_collection_id, id, sled_id, total_size }
+        Self {
+            inv_collection_id,
+            time_collected: zpool.time_collected,
+            id: zpool.id,
+            sled_id,
+            total_size: zpool.total_size.into(),
+        }
     }
 }
 
 impl From<InvZpool> for nexus_types::inventory::Zpool {
     fn from(pool: InvZpool) -> Self {
-        Self { id: pool.id, total_size: *pool.total_size }
+        Self {
+            time_collected: pool.time_collected,
+            id: pool.id,
+            total_size: *pool.total_size
+        }
     }
 }
 
