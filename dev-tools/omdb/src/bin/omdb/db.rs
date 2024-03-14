@@ -252,8 +252,6 @@ enum DbCommands {
     Inventory(InventoryArgs),
     /// Save the current Reconfigurator inputs to a file
     ReconfiguratorSave(ReconfiguratorSaveArgs),
-    /// Print information about control plane services
-    Services(ServicesArgs),
     /// Print information about sleds
     Sleds,
     /// Print information about customer instances
@@ -394,20 +392,6 @@ struct ReconfiguratorSaveArgs {
 }
 
 #[derive(Debug, Args)]
-struct ServicesArgs {
-    #[command(subcommand)]
-    command: ServicesCommands,
-}
-
-#[derive(Debug, Subcommand)]
-enum ServicesCommands {
-    /// List service instances
-    ListInstances,
-    /// List service instances, grouped by sled
-    ListBySled,
-}
-
-#[derive(Debug, Args)]
 struct NetworkArgs {
     #[command(subcommand)]
     command: NetworkCommands,
@@ -513,26 +497,6 @@ impl DbArgs {
                     &datastore,
                     &self.fetch_opts,
                     reconfig_save_args,
-                )
-                .await
-            }
-            DbCommands::Services(ServicesArgs {
-                command: ServicesCommands::ListInstances,
-            }) => {
-                cmd_db_services_list_instances(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
-                )
-                .await
-            }
-            DbCommands::Services(ServicesArgs {
-                command: ServicesCommands::ListBySled,
-            }) => {
-                cmd_db_services_list_by_sled(
-                    &opctx,
-                    &datastore,
-                    &self.fetch_opts,
                 )
                 .await
             }
@@ -674,39 +638,14 @@ async fn lookup_instance(
 
 /// Helper function to look up the kind of the service with the given ID.
 ///
-/// Requires the caller to first have fetched the current target blueprint, so
-/// we can find services that have been added by Reconfigurator.
+/// Requires the caller to first have fetched the current target blueprint.
 async fn lookup_service_kind(
-    datastore: &DataStore,
     service_id: Uuid,
-    current_target_blueprint: Option<&Blueprint>,
+    current_target_blueprint: &Blueprint,
 ) -> anyhow::Result<Option<ServiceKind>> {
-    let conn = datastore.pool_connection_for_tests().await?;
-
-    // We need to check the `service` table (populated during rack setup)...
-    {
-        use db::schema::service::dsl;
-        if let Some(kind) = dsl::service
-            .filter(dsl::id.eq(service_id))
-            .limit(1)
-            .select(dsl::kind)
-            .get_result_async(&*conn)
-            .await
-            .optional()
-            .with_context(|| format!("loading service {service_id}"))?
-        {
-            return Ok(Some(kind));
-        }
-    }
-
-    // ...and if we don't find the service, check the latest blueprint, because
-    // the service might have been added by Reconfigurator after RSS ran.
-    let Some(blueprint) = current_target_blueprint else {
-        return Ok(None);
-    };
-
-    let Some(zone_config) =
-        blueprint.all_omicron_zones().find_map(|(_sled_id, zone_config)| {
+    let Some(zone_config) = current_target_blueprint
+        .all_omicron_zones()
+        .find_map(|(_sled_id, zone_config)| {
             if zone_config.id == service_id {
                 Some(zone_config)
             } else {
@@ -1438,61 +1377,6 @@ async fn cmd_db_snapshot_info(
     Ok(())
 }
 
-/// Run `omdb db services list-instances`.
-async fn cmd_db_services_list_instances(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
-) -> Result<(), anyhow::Error> {
-    let limit = fetch_opts.fetch_limit;
-    let sled_list = datastore
-        .sled_list(&opctx, &first_page(limit))
-        .await
-        .context("listing sleds")?;
-    check_limit(&sled_list, limit, || String::from("listing sleds"));
-
-    let sleds: BTreeMap<Uuid, Sled> =
-        sled_list.into_iter().map(|s| (s.id(), s)).collect();
-
-    let mut rows = vec![];
-
-    for service_kind in ServiceKind::iter() {
-        let context =
-            || format!("listing instances of kind {:?}", service_kind);
-        let instances = datastore
-            .services_list_kind(&opctx, service_kind, &first_page(limit))
-            .await
-            .with_context(&context)?;
-        check_limit(&instances, limit, &context);
-
-        rows.extend(instances.into_iter().map(|instance| {
-            let addr =
-                std::net::SocketAddrV6::new(*instance.ip, *instance.port, 0, 0)
-                    .to_string();
-
-            ServiceInstanceRow {
-                kind: format!("{:?}", service_kind),
-                instance_id: instance.id(),
-                addr,
-                sled_serial: sleds
-                    .get(&instance.sled_id)
-                    .map(|s| s.serial_number())
-                    .unwrap_or("unknown")
-                    .to_string(),
-            }
-        }));
-    }
-
-    let table = tabled::Table::new(rows)
-        .with(tabled::settings::Style::empty())
-        .with(tabled::settings::Padding::new(0, 1, 0, 0))
-        .to_string();
-
-    println!("{}", table);
-
-    Ok(())
-}
-
 // SLEDS
 
 #[derive(Tabled)]
@@ -1502,63 +1386,6 @@ struct ServiceInstanceSledRow {
     kind: String,
     instance_id: Uuid,
     addr: String,
-}
-
-/// Run `omdb db services list-by-sled`.
-async fn cmd_db_services_list_by_sled(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    fetch_opts: &DbFetchOptions,
-) -> Result<(), anyhow::Error> {
-    let limit = fetch_opts.fetch_limit;
-    let sled_list = datastore
-        .sled_list(&opctx, &first_page(limit))
-        .await
-        .context("listing sleds")?;
-    check_limit(&sled_list, limit, || String::from("listing sleds"));
-
-    let sleds: BTreeMap<Uuid, Sled> =
-        sled_list.into_iter().map(|s| (s.id(), s)).collect();
-    let mut services_by_sled: BTreeMap<Uuid, Vec<ServiceInstanceSledRow>> =
-        BTreeMap::new();
-
-    for service_kind in ServiceKind::iter() {
-        let context =
-            || format!("listing instances of kind {:?}", service_kind);
-        let instances = datastore
-            .services_list_kind(&opctx, service_kind, &first_page(limit))
-            .await
-            .with_context(&context)?;
-        check_limit(&instances, limit, &context);
-
-        for i in instances {
-            let addr =
-                std::net::SocketAddrV6::new(*i.ip, *i.port, 0, 0).to_string();
-            let sled_instances =
-                services_by_sled.entry(i.sled_id).or_insert_with(Vec::new);
-            sled_instances.push(ServiceInstanceSledRow {
-                kind: format!("{:?}", service_kind),
-                instance_id: i.id(),
-                addr,
-            })
-        }
-    }
-
-    for (sled_id, instances) in services_by_sled {
-        println!(
-            "sled: {} (id {})\n",
-            sleds.get(&sled_id).map(|s| s.serial_number()).unwrap_or("unknown"),
-            sled_id,
-        );
-        let table = tabled::Table::new(instances)
-            .with(tabled::settings::Style::empty())
-            .with(tabled::settings::Padding::new(0, 1, 0, 0))
-            .to_string();
-        println!("{}", textwrap::indent(&table.to_string(), "  "));
-        println!("");
-    }
-
-    Ok(())
 }
 
 #[derive(Tabled)]
@@ -2003,13 +1830,13 @@ async fn cmd_db_eips(
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let kind = match lookup_service_kind(
-                    datastore,
-                    owner_id,
-                    current_target_blueprint.as_ref(),
-                )
-                .await?
-                {
+                let maybe_kind = match current_target_blueprint.as_ref() {
+                    Some(blueprint) => {
+                        lookup_service_kind(owner_id, blueprint).await?
+                    }
+                    None => None,
+                };
+                let kind = match maybe_kind {
                     Some(kind) => format!("{kind:?}"),
                     None => "UNKNOWN (service ID not found)".to_string(),
                 };
