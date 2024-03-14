@@ -461,6 +461,7 @@ impl CollectionBuilder {
             reservoir_size: inventory.reservoir_size,
             time_collected: now_db_precision(),
             sled_id,
+            disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {
@@ -910,6 +911,11 @@ mod test {
         let sled1_bb = sled1_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled1_bb.part_number, "model1");
         assert_eq!(sled1_bb.serial_number, "s1");
+        assert_eq!(sled1_agent.disks.len(), 4);
+        assert_eq!(sled1_agent.disks[0].identity.vendor, "macrohard");
+        assert_eq!(sled1_agent.disks[0].identity.model, "box");
+        assert_eq!(sled1_agent.disks[0].identity.serial, "XXIV");
+
         let sled4_agent = &collection.sled_agents[&sled_agent_id_extra];
         let sled4_bb = sled4_agent.baseboard_id.as_ref().unwrap();
         assert_eq!(sled4_bb.serial_number, "s4");

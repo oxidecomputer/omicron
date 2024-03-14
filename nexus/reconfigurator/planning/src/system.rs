@@ -472,9 +472,10 @@ impl Sled {
                 reservoir_size: ByteCount::from(1024),
                 sled_role,
                 sled_agent_address,
-                sled_id: sled_id,
+                sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
+                disks: vec![],
             }
         };
 
@@ -556,6 +557,7 @@ impl Sled {
             sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
+            disks: vec![],
         };
 
         Sled {

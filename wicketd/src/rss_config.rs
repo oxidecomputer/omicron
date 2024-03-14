@@ -26,7 +26,7 @@ use gateway_client::types::SpType;
 use omicron_certificates::CertificateError;
 use omicron_common::address;
 use omicron_common::address::Ipv4Range;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use slog::warn;
 use std::collections::BTreeSet;
 use std::mem;
