@@ -415,9 +415,7 @@ impl InstanceRunner {
                         },
                         Some(PutState{ state, tx }) => {
                              tx.send(self.put_state(state).await
-                                .map(|r| InstancePutStateResponse {
-                                    updated_runtime: Some(r),
-                                })
+                                .map(|r| InstancePutStateResponse { updated_runtime: Some(r) })
                                 .map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
