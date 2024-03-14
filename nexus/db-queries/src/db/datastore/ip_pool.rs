@@ -328,21 +328,32 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
-    ) -> Result<i64, Error> {
+    ) -> Result<u128, Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
 
         use db::schema::external_ip;
 
-        external_ip::table
+        let count = external_ip::table
             .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             .filter(external_ip::time_deleted.is_null())
             .select(external_ip::id)
             .count()
-            // TODO: how much do I have to worry about this being bigger than
-            // u32? it seems impossible, but do I have to handle it?
             .first_async::<i64>(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        // This is a bit strange but it should be ok.
+        //   a) SQL tends to represent counts as signed integers even though
+        //      they can't really be negative, and Diesel follows that. We
+        //      assume here that it will be a positive i64.
+        //   b) It could clearly be a u64, but the calling code immediate
+        //      converts it to a u128 anyway, so it would be pointless.
+        Ok(u128::try_from(count).map_err(|_e| {
+            Error::internal_error(&format!(
+                "Failed to convert i64 {} SQL count to u64",
+                count
+            ))
+        })?)
     }
 
     // TODO: should this just return the vec of ranges?

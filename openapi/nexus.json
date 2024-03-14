@@ -13694,18 +13694,18 @@
         "type": "object",
         "properties": {
           "allocated": {
-            "nullable": true,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+            "description": "The number of IPs allocated from the pool\n\nLike total, this is a numeric string with a custom \"uint128\" format representing a 128-bit integer, though in practice it is extremely unlikely to be bigger than 32 bits (2^32 = ~4.29 billion).",
+            "type": "string",
+            "format": "uint128"
           },
           "total": {
-            "description": "The total number of IP addresses in the pool.\n\nAn IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a string with a custom \"uint128\" format.",
+            "description": "The total number of IP addresses in the pool\n\nThis is calculated as the sum of the lengths of the ranges in the pool. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
             "type": "string",
             "format": "uint128"
           }
         },
         "required": [
+          "allocated",
           "total"
         ]
       },

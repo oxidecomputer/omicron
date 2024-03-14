@@ -307,18 +307,24 @@ pub struct IpPool {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IpPoolUtilization {
-    // TODO: correct names
-    // TODO: discuss why this might be too big for u32, it's a different reason
-    // from total
-    // TODO: either handle this as a U128String like total or decide that > u32
-    // is so unlikely we should just error
-    pub allocated: Option<u32>,
+    // TODO: make sure these names are satisfactory
 
-    /// The total number of IP addresses in the pool.
+    // Unlike total, the reason this is bigger than u32 is simply that the
+    // DB count comes back as an i64, and in theory the count could really
+    // be bigger than 2^32 = ~4.29B, though in practice that is virtually
+    // impossible.
+    /// The number of IPs allocated from the pool
     ///
-    /// An IPv6 range can contain up to 2^128 addresses, so we represent this
-    /// value in JSON as a string with a custom "uint128" format.
-    // By contrast, the number of allocated IPs should always be reasonable.
+    /// Like total, this is a numeric string with a custom "uint128" format
+    /// representing a 128-bit integer, though in practice it is extremely
+    /// unlikely to be bigger than 32 bits (2^32 = ~4.29 billion).
+    #[serde(with = "U128String")]
+    pub allocated: u128,
+
+    /// The total number of IP addresses in the pool, i.e., the sum of the
+    /// lengths of the ranges. An IPv6 range can contain up to 2^128 addresses,
+    /// so we represent this value in JSON as a numeric string with a custom
+    /// "uint128" format.
     #[serde(with = "U128String")]
     pub total: u128,
 }

@@ -629,18 +629,15 @@ pub async fn create_router(
 pub async fn assert_ip_pool_utilization(
     client: &ClientTestContext,
     pool_name: &str,
-    allocated: u32,
+    allocated: u128,
     total: u128,
 ) {
     let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
     let utilization: views::IpPoolUtilization = object_get(client, &url).await;
     assert_eq!(
-        utilization.allocated,
-        Some(allocated),
+        utilization.allocated, allocated,
         "IP pool '{}': expected {} IPs allocated, got {:?}",
-        pool_name,
-        allocated,
-        utilization.allocated
+        pool_name, allocated, utilization.allocated
     );
     assert_eq!(
         utilization.total, total,
