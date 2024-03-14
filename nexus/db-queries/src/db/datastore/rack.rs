@@ -932,7 +932,6 @@ mod test {
     use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::external_api::shared::SiloIdentityMode;
     use nexus_types::identity::Asset;
-    use nexus_types::internal_api::params::ServiceNic;
     use nexus_types::inventory::NetworkInterface;
     use nexus_types::inventory::NetworkInterfaceKind;
     use omicron_common::address::{
@@ -1184,6 +1183,17 @@ mod test {
     fn_to_get_all!(ip_pool_range, IpPoolRange);
     fn_to_get_all!(dataset, Dataset);
 
+    fn random_dataset() -> OmicronZoneDataset {
+        OmicronZoneDataset {
+            pool_name: illumos_utils::zpool::ZpoolName::new_external(
+                Uuid::new_v4(),
+            )
+            .to_string()
+            .parse()
+            .unwrap(),
+        }
+    }
+
     #[tokio::test]
     async fn rack_set_initialized_with_services() {
         let test_name = "rack_set_initialized_with_services";
@@ -1240,14 +1250,6 @@ mod test {
 
         // Add services for our sleds to the inventory (which will cause them to
         // be present in the blueprint we'll generate from it).
-        let random_dataset = || OmicronZoneDataset {
-            pool_name: illumos_utils::zpool::ZpoolName::new_external(
-                Uuid::new_v4(),
-            )
-            .to_string()
-            .parse()
-            .unwrap(),
-        };
         inventory_builder
             .found_sled_omicron_zones(
                 "sled1",
@@ -1776,13 +1778,22 @@ mod test {
 
     #[tokio::test]
     async fn rack_set_initialized_missing_service_pool_ip_throws_error() {
-        let logctx = dev::test_setup_log(
-            "rack_set_initialized_missing_service_pool_ip_throws_error",
-        );
+        let test_name =
+            "rack_set_initialized_missing_service_pool_ip_throws_error";
+        let logctx = dev::test_setup_log(test_name);
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let sled = create_test_sled(&datastore).await;
+
+        let mut system = SystemDescription::new();
+        system
+            .sled(SledBuilder::new().id(sled.id()))
+            .expect("failed to add sled");
+        let policy = system.to_policy().expect("failed to make policy");
+        let mut inventory_builder = system
+            .to_collection_builder()
+            .expect("failed to make collection builder");
 
         let nexus_ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
         let nexus_pip = NEXUS_OPTE_IPV4_SUBNET
@@ -1790,27 +1801,56 @@ mod test {
             .unwrap();
         let nexus_id = Uuid::new_v4();
         let mut macs = MacAddr::iter_system();
-        let services = vec![internal_params::ServicePutRequest {
-            service_id: nexus_id,
-            sled_id: sled.id(),
-            zone_id: Some(nexus_id),
-            address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
-            kind: internal_params::ServiceKind::Nexus {
-                external_address: nexus_ip,
-                nic: ServiceNic {
-                    id: Uuid::new_v4(),
-                    name: "nexus".parse().unwrap(),
-                    ip: nexus_pip.into(),
-                    mac: macs.next().unwrap(),
-                    slot: 0,
+        inventory_builder
+            .found_sled_omicron_zones(
+                "sled",
+                sled.id(),
+                OmicronZonesConfig {
+                    generation: Generation::new().next(),
+                    zones: vec![OmicronZoneConfig {
+                        id: nexus_id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        zone_type: OmicronZoneType::Nexus {
+                            internal_address: "[::1]:80".to_string(),
+                            external_ip: nexus_ip.into(),
+                            external_tls: false,
+                            external_dns_servers: vec![],
+                            nic: NetworkInterface {
+                                id: Uuid::new_v4(),
+                                kind: NetworkInterfaceKind::Service {
+                                    id: nexus_id,
+                                },
+                                name: "nexus".parse().unwrap(),
+                                ip: nexus_pip.into(),
+                                mac: macs.next().unwrap(),
+                                subnet: IpNetwork::from(
+                                    **NEXUS_OPTE_IPV4_SUBNET,
+                                )
+                                .into(),
+                                vni: Vni::SERVICES_VNI,
+                                primary: true,
+                                slot: 0,
+                            },
+                        },
+                    }],
                 },
-            },
-        }];
+            )
+            .expect("recording Omicron zones");
+
+        let blueprint = BlueprintBuilder::build_initial_from_collection_seeded(
+            &inventory_builder.build(),
+            *Generation::new(),
+            *Generation::new(),
+            &policy,
+            "test suite",
+            (test_name, "initial blueprint"),
+        )
+        .expect("failed to build blueprint");
 
         let result = datastore
             .rack_set_initialized(
                 &opctx,
-                RackInit { services: services.clone(), ..Default::default() },
+                RackInit { blueprint: blueprint.clone(), ..Default::default() },
             )
             .await;
         assert!(result.is_err());
@@ -1828,16 +1868,27 @@ mod test {
 
     #[tokio::test]
     async fn rack_set_initialized_overlapping_ips_throws_error() {
-        let logctx = dev::test_setup_log(
-            "rack_set_initialized_overlapping_ips_throws_error",
-        );
+        let test_name = "rack_set_initialized_overlapping_ips_throws_error";
+        let logctx = dev::test_setup_log(test_name);
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         let sled = create_test_sled(&datastore).await;
 
-        // Request two services which happen to be using the same IP address.
         let ip = IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4));
+        let service_ip_pool_ranges = vec![IpRange::from(ip)];
+
+        let mut system = SystemDescription::new();
+        system
+            .service_ip_pool_ranges(service_ip_pool_ranges.clone())
+            .sled(SledBuilder::new().id(sled.id()))
+            .expect("failed to add sled");
+        let policy = system.to_policy().expect("failed to make policy");
+        let mut inventory_builder = system
+            .to_collection_builder()
+            .expect("failed to make collection builder");
+
+        // Request two services which happen to be using the same IP address.
         let external_dns_id = Uuid::new_v4();
         let external_dns_pip = DNS_OPTE_IPV4_SUBNET
             .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES as u32 + 1)
@@ -1848,48 +1899,86 @@ mod test {
             .unwrap();
         let mut macs = MacAddr::iter_system();
 
-        let services = vec![
-            internal_params::ServicePutRequest {
-                service_id: external_dns_id,
-                sled_id: sled.id(),
-                zone_id: Some(external_dns_id),
-                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
-                kind: internal_params::ServiceKind::ExternalDns {
-                    external_address: ip,
-                    nic: ServiceNic {
-                        id: Uuid::new_v4(),
-                        name: "external-dns".parse().unwrap(),
-                        ip: external_dns_pip.into(),
-                        mac: macs.next().unwrap(),
-                        slot: 0,
-                    },
+        inventory_builder
+            .found_sled_omicron_zones(
+                "sled",
+                sled.id(),
+                OmicronZonesConfig {
+                    generation: Generation::new().next(),
+                    zones: vec![
+                        OmicronZoneConfig {
+                            id: external_dns_id,
+                            underlay_address: Ipv6Addr::LOCALHOST,
+                            zone_type: OmicronZoneType::ExternalDns {
+                                dataset: random_dataset(),
+                                http_address: "[::1]:80".to_string(),
+                                dns_address: SocketAddr::new(ip, 53)
+                                    .to_string(),
+                                nic: NetworkInterface {
+                                    id: Uuid::new_v4(),
+                                    kind: NetworkInterfaceKind::Service {
+                                        id: external_dns_id,
+                                    },
+                                    name: "external-dns".parse().unwrap(),
+                                    ip: external_dns_pip.into(),
+                                    mac: macs.next().unwrap(),
+                                    subnet: IpNetwork::from(
+                                        **DNS_OPTE_IPV4_SUBNET,
+                                    )
+                                    .into(),
+                                    vni: Vni::SERVICES_VNI,
+                                    primary: true,
+                                    slot: 0,
+                                },
+                            },
+                        },
+                        OmicronZoneConfig {
+                            id: nexus_id,
+                            underlay_address: Ipv6Addr::LOCALHOST,
+                            zone_type: OmicronZoneType::Nexus {
+                                internal_address: "[::1]:80".to_string(),
+                                external_ip: ip.into(),
+                                external_tls: false,
+                                external_dns_servers: vec![],
+                                nic: NetworkInterface {
+                                    id: Uuid::new_v4(),
+                                    kind: NetworkInterfaceKind::Service {
+                                        id: nexus_id,
+                                    },
+                                    name: "nexus".parse().unwrap(),
+                                    ip: nexus_pip.into(),
+                                    mac: macs.next().unwrap(),
+                                    subnet: IpNetwork::from(
+                                        **NEXUS_OPTE_IPV4_SUBNET,
+                                    )
+                                    .into(),
+                                    vni: Vni::SERVICES_VNI,
+                                    primary: true,
+                                    slot: 0,
+                                },
+                            },
+                        },
+                    ],
                 },
-            },
-            internal_params::ServicePutRequest {
-                service_id: nexus_id,
-                sled_id: sled.id(),
-                zone_id: Some(nexus_id),
-                address: SocketAddrV6::new(Ipv6Addr::LOCALHOST, 123, 0, 0),
-                kind: internal_params::ServiceKind::Nexus {
-                    external_address: ip,
-                    nic: ServiceNic {
-                        id: Uuid::new_v4(),
-                        name: "nexus".parse().unwrap(),
-                        ip: nexus_pip.into(),
-                        mac: macs.next().unwrap(),
-                        slot: 0,
-                    },
-                },
-            },
-        ];
-        let service_ip_pool_ranges = vec![IpRange::from(ip)];
+            )
+            .expect("recording Omicron zones");
+
+        let blueprint = BlueprintBuilder::build_initial_from_collection_seeded(
+            &inventory_builder.build(),
+            *Generation::new(),
+            *Generation::new(),
+            &policy,
+            "test suite",
+            (test_name, "initial blueprint"),
+        )
+        .expect("failed to build blueprint");
 
         let result = datastore
             .rack_set_initialized(
                 &opctx,
                 RackInit {
                     rack_id: rack_id(),
-                    services: services.clone(),
+                    blueprint: blueprint.clone(),
                     service_ip_pool_ranges,
                     ..Default::default()
                 },
