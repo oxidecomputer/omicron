@@ -361,9 +361,7 @@ impl nexus_test_interface::NexusServer for Server {
         nexus.activate_inventory_collection();
 
         let opctx = nexus.opctx_for_internal_api();
-        nexus.datastore()
-            .inventory_get_latest_collection(&opctx)
-            .await
+        nexus.datastore().inventory_get_latest_collection(&opctx).await
     }
 
     async fn close(mut self) {

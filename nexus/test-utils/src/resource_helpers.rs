@@ -804,8 +804,10 @@ impl DiskTest {
         // which includes this zpool
         wait_for_condition(
             || async {
-                let result =
-                    cptestctx.server.inventory_collect_and_get_latest_collection().await;
+                let result = cptestctx
+                    .server
+                    .inventory_collect_and_get_latest_collection()
+                    .await;
                 let log_result = match &result {
                     Ok(Some(_)) => Ok("found"),
                     Ok(None) => Ok("not found"),
@@ -820,7 +822,9 @@ impl DiskTest {
                 match result {
                     Ok(None) => Err(CondCheckError::NotYet),
                     Ok(Some(c)) => {
-                        let all_zpools = c.sled_agents.values()
+                        let all_zpools = c
+                            .sled_agents
+                            .values()
                             .flat_map(|sled_agent| {
                                 sled_agent.zpools.iter().map(|z| z.id)
                             })
@@ -831,7 +835,7 @@ impl DiskTest {
                         } else {
                             Err(CondCheckError::NotYet)
                         }
-                    },
+                    }
                     Err(Error::ServiceUnavailable { .. }) => {
                         Err(CondCheckError::NotYet)
                     }

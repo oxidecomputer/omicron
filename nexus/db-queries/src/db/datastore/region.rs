@@ -10,7 +10,6 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::explain::ExplainableAsync;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Dataset;
 use crate::db::model::Region;
@@ -137,12 +136,8 @@ impl DataStore {
             allocation_strategy,
         );
         let conn = self.pool_connection_authorized(&opctx).await?;
-//        println!("{}", query.explain_async(&conn).await.unwrap());
-//        panic!("hi");
-        let dataset_and_regions: Vec<(Dataset, Region)> = query
-            .get_results_async(&*conn)
-            .await
-            .map_err(|e| {
+        let dataset_and_regions: Vec<(Dataset, Region)> =
+            query.get_results_async(&*conn).await.map_err(|e| {
                 crate::db::queries::region_allocation::from_diesel(e)
             })?;
 

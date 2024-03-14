@@ -33,10 +33,10 @@
 
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
-use slog::Logger;
-use std::net::{SocketAddr, SocketAddrV6};
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
+use slog::Logger;
+use std::net::{SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
 #[async_trait]

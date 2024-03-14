@@ -464,7 +464,11 @@ impl CollectionBuilder {
             time_collected,
             sled_id,
             disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
-            zpools: inventory.zpools.into_iter().map(|z| Zpool::new(time_collected, z)).collect(),
+            zpools: inventory
+                .zpools
+                .into_iter()
+                .map(|z| Zpool::new(time_collected, z))
+                .collect(),
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {

@@ -3006,16 +3006,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
 );
 
 -- Allow looking up the most recent Zpool by ID
-CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time ON omicron.public.inv_zpool (id, time_collected DESC NULLS LAST);
-CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time2 ON omicron.public.inv_zpool (time_collected DESC NULLS LAST, id);
-CREATE INDEX IF NOT EXISTS inv_zpool_by_id ON omicron.public.inv_zpool (id);
-CREATE INDEX IF NOT EXISTS inv_zpool_by_time ON omicron.public.inv_zpool (time_collected DESC);
-
-CREATE INDEX ON omicron.public.dataset (time_deleted) STORING (pool_id, size_used);
-CREATE INDEX ON omicron.public.dataset (time_deleted, kind, pool_id, id) STORING (size_used);
-CREATE INDEX ON omicron.public.region (volume_id) STORING (time_created, time_modified, dataset_id, block_size, blocks_per_extent, extent_count);
-CREATE INDEX ON omicron.public.sled (sled_policy, sled_state, id);
-CREATE INDEX ON omicron.public.zpool (sled_id);
+CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time ON omicron.public.inv_zpool (id, time_collected DESC);
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from

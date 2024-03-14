@@ -732,7 +732,7 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
         Self {
             time_collected: pool.time_collected,
             id: pool.id,
-            total_size: *pool.total_size
+            total_size: *pool.total_size,
         }
     }
 }

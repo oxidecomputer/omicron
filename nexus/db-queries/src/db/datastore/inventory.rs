@@ -143,13 +143,10 @@ impl DataStore {
             .sled_agents
             .iter()
             .flat_map(|(sled_id, sled_agent)| {
-                sled_agent.zpools.iter().map(|pool| {
-                    InvZpool::new(
-                        collection_id,
-                        *sled_id,
-                        pool,
-                    )
-                })
+                sled_agent
+                    .zpools
+                    .iter()
+                    .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
             })
             .collect();
 

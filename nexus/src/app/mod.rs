@@ -563,9 +563,7 @@ impl Nexus {
     }
 
     // Called to trigger inventory collection.
-    pub (crate) fn activate_inventory_collection(
-        &self,
-    ) {
+    pub(crate) fn activate_inventory_collection(&self) {
         self.background_tasks
             .activate(&self.background_tasks.task_inventory_collection);
     }

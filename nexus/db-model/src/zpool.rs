@@ -29,11 +29,7 @@ pub struct Zpool {
 }
 
 impl Zpool {
-    pub fn new(
-        id: Uuid,
-        sled_id: Uuid,
-        physical_disk_id: Uuid,
-    ) -> Self {
+    pub fn new(id: Uuid, sled_id: Uuid, physical_disk_id: Uuid) -> Self {
         Self {
             identity: ZpoolIdentity::new(id),
             time_deleted: None,

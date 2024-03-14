@@ -376,7 +376,10 @@ pub struct Zpool {
 }
 
 impl Zpool {
-    pub fn new(time_collected: DateTime<Utc>, pool: sled_agent_client::types::InventoryZpool) -> Zpool {
+    pub fn new(
+        time_collected: DateTime<Utc>,
+        pool: sled_agent_client::types::InventoryZpool,
+    ) -> Zpool {
         Zpool { time_collected, id: pool.id, total_size: pool.total_size }
     }
 }
