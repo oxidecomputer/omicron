@@ -2181,13 +2181,13 @@ mod illumos_tests {
     use chrono::Timelike;
     use chrono::Utc;
     use illumos_utils::zpool::ZpoolName;
+    use rand::RngCore;
     use sled_storage::disk::RawDisk;
     use sled_storage::disk::SyntheticDisk;
     use sled_storage::manager::{FakeStorageManager, StorageHandle};
     use slog::Drain;
     use slog::Logger;
     use tokio::process::Command;
-    use rand::RngCore;
 
     /// An iterator that returns the date of consecutive days beginning with 1st
     /// January 2020. The time portion of each returned date will be fixed at
