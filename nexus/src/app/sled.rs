@@ -14,6 +14,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -71,6 +72,23 @@ impl super::Nexus {
         );
         self.db_datastore.sled_upsert(sled).await?;
         Ok(())
+    }
+
+    /// Mark a sled as expunged
+    ///
+    /// This is an irreversible process! It should only be called after
+    /// sufficient warning to the operator.
+    ///
+    /// This is idempotent, and it returns the old policy of the sled.
+    pub(crate) async fn sled_expunge(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<SledPolicy, Error> {
+        let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
+        let (authz_sled,) =
+            sled_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore.sled_set_policy_to_expunged(opctx, &authz_sled).await
     }
 
     pub(crate) async fn sled_request_firewall_rules(

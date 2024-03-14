@@ -84,7 +84,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                         longer any target blueprint",
                         old.1.id
                     );
-                    let old_id = old.1.id.to_string();
+                    let old_id = old.1.id;
                     self.last = None;
                     self.tx.send_replace(self.last.clone());
                     error!(&log, "{message:?}");
@@ -97,33 +97,33 @@ impl BackgroundTask for TargetBlueprintLoader {
                 (None, Ok(Some((new_bp_target, new_blueprint)))) => {
                     // We've found a target blueprint for the first time.
                     // Save it and notify any watchers.
-                    let target_id = new_blueprint.id.to_string();
-                    let time_created = new_blueprint.time_created.to_string();
+                    let target_id = new_blueprint.id;
+                    let time_created = new_blueprint.time_created;
                     info!(
                         log,
                         "found new target blueprint (first find)";
-                        "target_id" => &target_id,
-                        "time_created" => &time_created
+                        "target_id" => %target_id,
+                        "time_created" => %time_created
                     );
                     self.last = Some(Arc::new((new_bp_target, new_blueprint)));
                     self.tx.send_replace(self.last.clone());
                     json!({
                         "target_id": target_id,
                         "time_created": time_created,
-                        "time_found": chrono::Utc::now().to_string(),
-                        "status": "first target blueprint"
+                        "time_found": chrono::Utc::now(),
+                        "status": "first target blueprint",
                     })
                 }
                 (Some(old), Ok(Some((new_bp_target, new_blueprint)))) => {
-                    let target_id = new_blueprint.id.to_string();
-                    let time_created = new_blueprint.time_created.to_string();
+                    let target_id = new_blueprint.id;
+                    let time_created = new_blueprint.time_created;
                     if old.1.id != new_blueprint.id {
                         // The current target blueprint has been updated
                         info!(
                             log,
                             "found new target blueprint";
-                            "target_id" => &target_id,
-                            "time_created" => &time_created
+                            "target_id" => %target_id,
+                            "time_created" => %time_created
                         );
                         self.last =
                             Some(Arc::new((new_bp_target, new_blueprint)));
@@ -131,7 +131,7 @@ impl BackgroundTask for TargetBlueprintLoader {
                         json!({
                             "target_id": target_id,
                             "time_created": time_created,
-                            "time_found": chrono::Utc::now().to_string(),
+                            "time_found": chrono::Utc::now(),
                             "status": "target blueprint updated"
                         })
                     } else {
@@ -153,15 +153,39 @@ impl BackgroundTask for TargetBlueprintLoader {
                                 "status": "target blueprint unchanged (error)",
                                 "error": message
                             })
+                        } else if old.0.enabled != new_bp_target.enabled {
+                            // The blueprints have the same contents, but its
+                            // enabled bit has flipped.
+                            let status = if new_bp_target.enabled {
+                                "enabled"
+                            } else {
+                                "disabled"
+                            };
+                            info!(
+                                log,
+                                "target blueprint enabled state changed";
+                                "target_id" => %target_id,
+                                "time_created" => %time_created,
+                                "state" => status,
+                            );
+                            self.last =
+                                Some(Arc::new((new_bp_target, new_blueprint)));
+                            self.tx.send_replace(self.last.clone());
+                            json!({
+                                "target_id": target_id,
+                                "time_created": time_created,
+                                "time_found": chrono::Utc::now(),
+                                "status": format!("target blueprint {status}"),
+                            })
                         } else {
-                            // We found a new target blueprint that exactly matches
-                            // the old target blueprint. This is the common case
-                            // when we're activated by a timeout.
+                            // We found a new target blueprint that exactly
+                            // matches the old target blueprint. This is the
+                            // common case when we're activated by a timeout.
                             debug!(
                                log,
                                 "found latest target blueprint (unchanged)";
-                                "target_id" => &target_id,
-                                "time_created" => &time_created.clone()
+                                "target_id" => %target_id,
+                                "time_created" => %time_created.clone()
                             );
                             json!({
                                 "target_id": target_id,

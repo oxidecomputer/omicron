@@ -94,8 +94,33 @@ impl super::Nexus {
             .blueprint_target_set_current(opctx, new_target)
             .await?;
 
-        // When we add a background task executing the target blueprint,
-        // this is the point where we'd signal it to update its target.
+        // We have a new target: trigger the background task to load this
+        // blueprint.
+        self.background_tasks
+            .activate(&self.background_tasks.task_blueprint_loader);
+
+        Ok(new_target)
+    }
+
+    pub async fn blueprint_target_set_enabled(
+        &self,
+        opctx: &OpContext,
+        params: BlueprintTargetSet,
+    ) -> Result<BlueprintTarget, Error> {
+        let new_target = BlueprintTarget {
+            target_id: params.target_id,
+            enabled: params.enabled,
+            time_made_target: chrono::Utc::now(),
+        };
+
+        self.db_datastore
+            .blueprint_target_set_current_enabled(opctx, new_target)
+            .await?;
+
+        // We don't know whether this actually changed the enabled bit; activate
+        // the background task to load this blueprint which does know.
+        self.background_tasks
+            .activate(&self.background_tasks.task_blueprint_loader);
 
         Ok(new_target)
     }
