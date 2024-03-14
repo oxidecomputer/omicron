@@ -36,6 +36,10 @@ pub enum PooledDiskError {
     MissingZpoolUuid,
     #[error("Observed Zpool with unexpected UUID (saw: {observed}, expected: {expected})")]
     UnexpectedUuid { expected: Uuid, observed: Uuid },
+    #[error("Unexpected disk variant")]
+    UnexpectedVariant,
+    #[error("Zpool does not exist")]
+    ZpoolDoesNotExist,
     #[error(transparent)]
     ZpoolCreate(#[from] illumos_utils::zpool::CreateError),
     #[error("Cannot import zpool: {0}")]
@@ -73,7 +77,7 @@ pub struct DiskPaths {
 
 impl DiskPaths {
     // Returns the "illumos letter-indexed path" for a device.
-    fn partition_path(&self, index: usize, raw: bool) -> Option<Utf8PathBuf> {
+    pub fn partition_path(&self, index: usize, raw: bool) -> Option<Utf8PathBuf> {
         let index = u8::try_from(index).ok()?;
 
         let path = &self.devfs_path;
@@ -154,6 +158,10 @@ impl UnparsedDisk {
             identity,
             is_boot_disk,
         }
+    }
+
+    pub fn paths(&self) -> &DiskPaths {
+        &self.paths
     }
 
     pub fn devfs_path(&self) -> &Utf8PathBuf {
@@ -239,6 +247,18 @@ impl PooledDisk {
             zpool_name,
         })
     }
+}
+
+/// Checks if the zpool exists, but makes no modifications,
+/// and does not attempt to import the zpool.
+pub fn check_if_zpool_exists(
+    zpool_path: &Utf8Path,
+) -> Result<ZpoolName, PooledDiskError> {
+    let zpool_name = match Fstyp::get_zpool(&zpool_path) {
+        Ok(zpool_name) => zpool_name,
+        Err(_) => return Err(PooledDiskError::ZpoolDoesNotExist),
+    };
+    Ok(zpool_name)
 }
 
 pub fn ensure_zpool_exists(

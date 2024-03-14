@@ -102,7 +102,6 @@ impl DisksManagementResult {
 // the request of the broader control plane. This enum encompasses that duality,
 // by representing all disks that can exist, managed or not.
 #[derive(Debug, Clone, PartialEq, Eq)]
-// TODO: Does this need to be pub?
 pub enum ManagedDisk {
     // A disk explicitly managed by the control plane.
     //
@@ -310,7 +309,7 @@ impl StorageResources {
     /// Does not attempt to manage any of the physical disks previously
     /// observed. To synchronize the "set of requested disks" with the "set of
     /// observed disks", call [Self::synchronize_disk_management].
-    pub async fn set_config(
+    pub fn set_config(
         &mut self,
         config: &Vec<OmicronPhysicalDiskConfig>,
     ) {
@@ -318,6 +317,12 @@ impl StorageResources {
             .iter()
             .map(|disk| (disk.identity.clone(), disk.clone()))
             .collect();
+    }
+
+    pub async fn get_config(
+        &self
+    ) -> &BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig> {
+        &self.control_plane_disks
     }
 
     /// Attempts to "manage" all the U.2 disks requested by the control plane.

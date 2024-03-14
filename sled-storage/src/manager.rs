@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use crate::config::MountConfig;
 use crate::dataset::{DatasetName, CONFIG_DATASET};
-use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
+use crate::disk::{OmicronPhysicalDisksConfig, OmicronPhysicalDiskConfig, RawDisk};
 use crate::error::Error;
 use crate::resources::{AllDisks, DisksManagementResult, StorageResources};
 use camino::Utf8PathBuf;
@@ -68,9 +68,9 @@ enum StorageManagerState {
     // disks and the set of "observed" disks may be out-of-sync.
     //
     // This can happen when:
-    // 1. The sled boots, and the ledger of "control plane disks" is initially
+    // - The sled boots, and the ledger of "control plane disks" is initially
     //    loaded.
-    // 2. A U.2 is added to the disk after initial boot.
+    // - A U.2 is added to the disk after initial boot.
     //
     // In both of these cases, if trust quorum hasn't been established, it's
     // possible that the request to [Self::manage_disks] will need to retry.
@@ -512,14 +512,85 @@ impl StorageManager {
             // Identify which disks should be managed by the control
             // plane, and adopt all requested disks into the control plane
             // in a background task (see: [Self::manage_disks]).
-            self.resources.set_config(&ledger.data().disks).await;
+            self.resources.set_config(&ledger.data().disks);
             self.state = StorageManagerState::SynchronizationNeeded;
         } else {
-            // XXX XXX XXX we need to consider the case of "no ledger, but pools
-            // exist". This is a special "ImplicitSynchronizationNeeded" case
-            // for the upgrade.
+            info!(self.log, "KeyManager ready, but no ledger detected");
+            if self.resources.get_config().await.is_empty() {
+                // This case seems unlikely -- we'd need to somehow have no
+                // ledger, but have been told to store the configuration
+                // regardless -- but it seems safe to bail out if we have
+                // ANY configuration stored, for any reason.
+                info!(self.log, "Some configuration already exists");
+                return Ok(());
+            } else {
+                info!(self.log, "No configuration exists");
+            }
 
-            self.state = StorageManagerState::Synchronized;
+            // NOTE: What follows is an exceptional case: one where we have
+            // no record of "Control Plane Physical Disks", but we have zpools
+            // on our U.2s, and we want to use them regardless.
+            //
+            // THIS WOULD NORMALLY BE INCORRECT BEHAVIOR. However, because we
+            // are transitioning from "the set of disks / zpools is implicit" to
+            // a world where that set is explicit, this is a necessary
+            // transitional tool.
+            //
+            // TODO: Once we are confident that we have migrated to a world
+            // where this ledger is universally used, we should remove the
+            // following kludge.
+
+            let mut synthetic_config = vec![];
+            for (identity, disk) in self.resources.disks().values.iter() {
+                match disk {
+                    crate::resources::ManagedDisk::Unmanaged(raw) => {
+                        let zpool_path = match raw.u2_zpool_path() {
+                            Ok(zpool_path) => zpool_path,
+                            Err(err) => {
+                                info!(self.log, "Cannot find zpool path"; "identity" => ?identity, "err" => ?err);
+                                continue;
+                            }
+                        };
+
+                        let zpool_name = match sled_hardware::disk::check_if_zpool_exists(&zpool_path) {
+                            Ok(zpool_name) => zpool_name,
+                            Err(err) => {
+                                info!(self.log, "Zpool does not exist"; "identity" => ?identity, "err" => ?err);
+                                continue;
+                            }
+                        };
+
+
+                        info!(self.log, "Found existing zpool on device without ledger";
+                            "identity" => ?identity,
+                            "zpool" => ?zpool_name);
+
+                        // We found an unmanaged disk with a zpool, even though
+                        // we have no prior record of a ledger of control-plane
+                        // disks.
+                        synthetic_config.push(
+                            // These disks don't have a control-plane UUID --
+                            // report "nil" until they're overwritten with real
+                            // values.
+                            OmicronPhysicalDiskConfig {
+                                identity: identity.clone(),
+                                id: Uuid::nil(),
+                                pool_id: zpool_name.id(),
+                            }
+                        );
+                    },
+                    _ => continue,
+                }
+            }
+
+            if !synthetic_config.is_empty() {
+                info!(self.log, "Automatically managing disks"; "count" => synthetic_config.len());
+                self.resources.set_config(&synthetic_config);
+                self.state = StorageManagerState::SynchronizationNeeded;
+            } else {
+                info!(self.log, "No disks to be automatically managed");
+                self.state = StorageManagerState::Synchronized;
+            }
         }
 
         Ok(())
@@ -612,7 +683,7 @@ impl StorageManager {
 
         // Identify which disks should be managed by the control
         // plane, and adopt all requested disks into the control plane.
-        self.resources.set_config(&config.disks).await;
+        self.resources.set_config(&config.disks);
 
         // Actually try to "manage" those disks, which may involve formatting
         // zpools and conforming partitions to those expected by the control
