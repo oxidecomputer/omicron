@@ -15,7 +15,6 @@ use nexus_db_queries::db::fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::SourceNatConfig;
 use nexus_types::inventory::OmicronZoneConfig;
@@ -31,26 +30,6 @@ use uuid::Uuid;
 pub(crate) async fn ensure_zone_resources_allocated(
     opctx: &OpContext,
     datastore: &DataStore,
-    // It would be nice to accept `IntoIterator` here, but that appears to run
-    // into https://github.com/rust-lang/rust/issues/64552.
-    all_blueprint_zones: impl Iterator<Item = &BlueprintZoneConfig>,
-) -> anyhow::Result<()> {
-    ensure_zone_resources_allocated_impl(
-        opctx,
-        datastore,
-        all_blueprint_zones.into_iter().map(|z| &z.config),
-    )
-    .await
-}
-
-/// Private implementation that works against arbitrary `&OmicronZoneConfig`s.
-///
-/// Intended for testing where it's a bit easier to work without blueprints.
-/// Production code should prefer [`ensure_crucible_dataset_records_exist`].
-async fn ensure_zone_resources_allocated_impl(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    // Note `Iterator` here to minimize the number of monomorphizations.
     all_omicron_zones: impl Iterator<Item = &OmicronZoneConfig>,
 ) -> anyhow::Result<()> {
     let allocator = ResourceAllocator { opctx, datastore };
@@ -111,6 +90,14 @@ impl<'a> ResourceAllocator<'a> {
         external_ip: IpAddr,
         port_range: Option<(u16, u16)>,
     ) -> anyhow::Result<bool> {
+        // localhost is used by many components in the test suite.  We can't use
+        // the normal path because normally a given external IP must only be
+        // used once.  Just treat localhost in the test suite as though it's
+        // already allocated.  We do the same in is_nic_already_allocated().
+        if cfg!(test) && external_ip.is_loopback() {
+            return Ok(true);
+        }
+
         let allocated_ips = self
             .datastore
             .service_lookup_external_ips(self.opctx, zone_id)
@@ -175,6 +162,11 @@ impl<'a> ResourceAllocator<'a> {
         zone_id: Uuid,
         nic: &NetworkInterface,
     ) -> anyhow::Result<bool> {
+        // See the comment in is_external_ip_already_allocated().
+        if cfg!(test) && nic.ip.is_loopback() {
+            return Ok(true);
+        }
+
         let allocated_nics = self
             .datastore
             .service_list_network_interfaces(self.opctx, zone_id)
@@ -672,7 +664,7 @@ mod tests {
 
         // Initialize resource allocation: this should succeed and create all
         // the relevant db records.
-        ensure_zone_resources_allocated_impl(&opctx, datastore, zones.iter())
+        ensure_zone_resources_allocated(&opctx, datastore, zones.iter())
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
@@ -756,7 +748,7 @@ mod tests {
 
         // We should be able to run the function again with the same inputs, and
         // it should succeed without inserting any new records.
-        ensure_zone_resources_allocated_impl(&opctx, datastore, zones.iter())
+        ensure_zone_resources_allocated(&opctx, datastore, zones.iter())
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
@@ -869,7 +861,7 @@ mod tests {
             };
 
             // and check that we get the error we expect.
-            let err = ensure_zone_resources_allocated_impl(
+            let err = ensure_zone_resources_allocated(
                 &opctx,
                 datastore,
                 mutated_zones.iter(),
@@ -924,7 +916,7 @@ mod tests {
                 {
                     let expected_error = mutate_nic_fn(zone.id, nic);
 
-                    let err = ensure_zone_resources_allocated_impl(
+                    let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
                         mutated_zones.iter(),
@@ -949,7 +941,7 @@ mod tests {
                 {
                     let expected_error = mutate_nic_fn(zone.id, nic);
 
-                    let err = ensure_zone_resources_allocated_impl(
+                    let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
                         mutated_zones.iter(),
@@ -974,7 +966,7 @@ mod tests {
                 {
                     let expected_error = mutate_nic_fn(zone.id, nic);
 
-                    let err = ensure_zone_resources_allocated_impl(
+                    let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
                         mutated_zones.iter(),

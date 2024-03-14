@@ -23,7 +23,7 @@ use http::StatusCode;
 use omicron_common::api::external::Error;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::Ipv6Addr;

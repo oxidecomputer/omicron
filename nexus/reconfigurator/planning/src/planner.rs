@@ -18,6 +18,7 @@ use omicron_common::api::external::Generation;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::hash::Hash;
 use uuid::Uuid;
 
 pub struct Planner<'a> {
@@ -41,6 +42,7 @@ impl<'a> Planner<'a> {
         log: Logger,
         parent_blueprint: &'a Blueprint,
         internal_dns_version: Generation,
+        external_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
         // NOTE: Right now, we just assume that this is the latest inventory
@@ -51,10 +53,22 @@ impl<'a> Planner<'a> {
             &log,
             parent_blueprint,
             internal_dns_version,
+            external_dns_version,
             policy,
             creator,
         )?;
         Ok(Planner { log, policy, blueprint, inventory })
+    }
+
+    /// Within tests, set a seeded RNG for deterministic results.
+    ///
+    /// This will ensure that tests that use this builder will produce the same
+    /// results each time they are run.
+    pub fn with_rng_seed<H: Hash>(mut self, seed: H) -> Self {
+        // This is an owned builder because it is almost never going to be
+        // conditional.
+        self.blueprint.set_rng_seed(seed);
+        self
     }
 
     pub fn plan(mut self) -> Result<Blueprint, Error> {
@@ -318,12 +332,13 @@ impl<'a> Planner<'a> {
 #[cfg(test)]
 mod test {
     use super::Planner;
-    use crate::blueprint_builder::test::example;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::blueprint_builder::test::ExampleSystem;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
+    use crate::example::example;
+    use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
+    use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
@@ -336,23 +351,29 @@ mod test {
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
     fn test_basic_add_sled() {
-        let logctx = test_setup_log("planner_basic_add_sled");
+        static TEST_NAME: &str = "planner_basic_add_sled";
+        let logctx = test_setup_log(TEST_NAME);
 
-        // For our purposes, we don't care about the internal DNS generation.
+        // For our purposes, we don't care about the DNS generations.
         let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
 
         // Use our example inventory collection.
-        let mut example = ExampleSystem::new(&logctx.log, DEFAULT_N_SLEDS);
+        let mut example =
+            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.  We don't bother verifying it here
         // because there's a separate test for that.
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &example.collection,
-            internal_dns_version,
-            &example.policy,
-            "the_test",
-        )
-        .expect("failed to create initial blueprint");
+        let blueprint1 =
+            BlueprintBuilder::build_initial_from_collection_seeded(
+                &example.collection,
+                internal_dns_version,
+                external_dns_version,
+                &example.policy,
+                "the_test",
+                (TEST_NAME, "bp1"),
+            )
+            .expect("failed to create initial blueprint");
         verify_blueprint(&blueprint1);
 
         // Now run the planner.  It should do nothing because our initial
@@ -362,24 +383,25 @@ mod test {
             logctx.log.clone(),
             &blueprint1,
             internal_dns_version,
+            external_dns_version,
             &example.policy,
             "no-op?",
             &example.collection,
         )
         .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
 
         let diff = blueprint1.diff_sleds(&blueprint2);
-        println!("1 -> 2 (expected no changes):\n{}", diff);
+        println!("1 -> 2 (expected no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
         verify_blueprint(&blueprint2);
 
         // Now add a new sled.
-        let new_sled_id =
-            "7097f5b3-5896-4fff-bd97-63a9a69563a9".parse().unwrap();
+        let new_sled_id = example.sled_rng.next_uuid();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let policy = example.system.to_policy().unwrap();
@@ -389,16 +411,25 @@ mod test {
             logctx.log.clone(),
             &blueprint2,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test: add NTP?",
             &example.collection,
         )
         .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
         .plan()
         .expect("failed to plan");
 
         let diff = blueprint2.diff_sleds(&blueprint3);
-        println!("2 -> 3 (expect new NTP zone on new sled):\n{}", diff);
+        println!(
+            "2 -> 3 (expect new NTP zone on new sled):\n{}",
+            diff.display()
+        );
+        assert_contents(
+            "tests/output/planner_basic_add_sled_2_3.txt",
+            &diff.display().to_string(),
+        );
         let sleds = diff.sleds_added().collect::<Vec<_>>();
         let (sled_id, sled_zones) = sleds[0];
         // We have defined elsewhere that the first generation contains no
@@ -422,15 +453,17 @@ mod test {
             logctx.log.clone(),
             &blueprint3,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test: add nothing more",
             &example.collection,
         )
         .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
         .plan()
         .expect("failed to plan");
         let diff = blueprint3.diff_sleds(&blueprint4);
-        println!("3 -> 4 (expected no changes):\n{}", diff);
+        println!("3 -> 4 (expected no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
@@ -460,16 +493,22 @@ mod test {
             logctx.log.clone(),
             &blueprint3,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test: add Crucible zones?",
             &collection,
         )
         .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp5"))
         .plan()
         .expect("failed to plan");
 
         let diff = blueprint3.diff_sleds(&blueprint5);
-        println!("3 -> 5 (expect Crucible zones):\n{}", diff);
+        println!("3 -> 5 (expect Crucible zones):\n{}", diff.display());
+        assert_contents(
+            "tests/output/planner_basic_add_sled_3_5.txt",
+            &diff.display().to_string(),
+        );
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let sleds = diff.sleds_changed().collect::<Vec<_>>();
@@ -496,16 +535,18 @@ mod test {
             logctx.log.clone(),
             &blueprint5,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test: no-op?",
             &collection,
         )
         .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp6"))
         .plan()
         .expect("failed to plan");
 
         let diff = blueprint5.diff_sleds(&blueprint6);
-        println!("5 -> 6 (expect no changes):\n{}", diff);
+        println!("5 -> 6 (expect no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
@@ -518,16 +559,18 @@ mod test {
     /// needed
     #[test]
     fn test_add_multiple_nexus_to_one_sled() {
-        let logctx = test_setup_log("planner_add_multiple_nexus_to_one_sled");
+        static TEST_NAME: &str = "planner_add_multiple_nexus_to_one_sled";
+        let logctx = test_setup_log(TEST_NAME);
 
-        // For our purposes, we don't care about the internal DNS generation.
+        // For our purposes, we don't care about the DNS generations.
         let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
 
         // Use our example inventory collection as a starting point, but strip
         // it down to just one sled.
         let (sled_id, collection, mut policy) = {
             let (mut collection, mut policy) =
-                example(&logctx.log, DEFAULT_N_SLEDS);
+                example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
             // Pick one sled ID to keep and remove the rest.
             let keep_sled_id =
@@ -543,13 +586,16 @@ mod test {
         };
 
         // Build the initial blueprint.
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            internal_dns_version,
-            &policy,
-            "the_test",
-        )
-        .expect("failed to create initial blueprint");
+        let blueprint1 =
+            BlueprintBuilder::build_initial_from_collection_seeded(
+                &collection,
+                internal_dns_version,
+                external_dns_version,
+                &policy,
+                "the_test",
+                (TEST_NAME, "bp1"),
+            )
+            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 1 Nexus instance on the one sled we
         // kept.
@@ -573,16 +619,18 @@ mod test {
             logctx.log.clone(),
             &blueprint1,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "add more Nexus",
             &collection,
         )
         .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
 
         let diff = blueprint1.diff_sleds(&blueprint2);
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
+        println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let mut sleds = diff.sleds_changed().collect::<Vec<_>>();
@@ -606,21 +654,25 @@ mod test {
     /// sleds as it adds them
     #[test]
     fn test_spread_additional_nexus_zones_across_sleds() {
-        let logctx = test_setup_log(
-            "planner_spread_additional_nexus_zones_across_sleds",
-        );
+        static TEST_NAME: &str =
+            "planner_spread_additional_nexus_zones_across_sleds";
+        let logctx = test_setup_log(TEST_NAME);
 
         // Use our example inventory collection as a starting point.
-        let (collection, mut policy) = example(&logctx.log, DEFAULT_N_SLEDS);
+        let (collection, mut policy) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Build the initial blueprint.
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            &policy,
-            "the_test",
-        )
-        .expect("failed to create initial blueprint");
+        let blueprint1 =
+            BlueprintBuilder::build_initial_from_collection_seeded(
+                &collection,
+                Generation::new(),
+                Generation::new(),
+                &policy,
+                "the_test",
+                (TEST_NAME, "bp1"),
+            )
+            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 3);
@@ -641,16 +693,18 @@ mod test {
             logctx.log.clone(),
             &blueprint1,
             Generation::new(),
+            Generation::new(),
             &policy,
             "add more Nexus",
             &collection,
         )
         .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
 
         let diff = blueprint1.diff_sleds(&blueprint2);
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
+        println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let sleds = diff.sleds_changed().collect::<Vec<_>>();
@@ -688,9 +742,9 @@ mod test {
     /// extra Nexus zones
     #[test]
     fn test_nexus_allocation_skips_nonprovisionable_sleds() {
-        let logctx = test_setup_log(
-            "planner_nexus_allocation_skips_nonprovisionable_sleds",
-        );
+        static TEST_NAME: &str =
+            "planner_nexus_allocation_skips_nonprovisionable_sleds";
+        let logctx = test_setup_log(TEST_NAME);
 
         // Use our example inventory collection as a starting point.
         //
@@ -698,16 +752,19 @@ mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, mut policy) = example(&logctx.log, 5);
+        let (collection, mut policy) = example(&logctx.log, TEST_NAME, 5);
 
         // Build the initial blueprint.
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            &policy,
-            "the_test",
-        )
-        .expect("failed to create initial blueprint");
+        let blueprint1 =
+            BlueprintBuilder::build_initial_from_collection_seeded(
+                &collection,
+                Generation::new(),
+                Generation::new(),
+                &policy,
+                "the_test",
+                (TEST_NAME, "bp1"),
+            )
+            .expect("failed to create initial blueprint");
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 5);
@@ -759,16 +816,22 @@ mod test {
             logctx.log.clone(),
             &blueprint1,
             Generation::new(),
+            Generation::new(),
             &policy,
             "add more Nexus",
             &collection,
         )
         .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
 
         let diff = blueprint1.diff_sleds(&blueprint2);
-        println!("1 -> 2 (added additional Nexus zones):\n{}", diff);
+        println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
+        assert_contents(
+            "tests/output/planner_nonprovisionable_1_2.txt",
+            &diff.display().to_string(),
+        );
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         let sleds = diff.sleds_changed().collect::<Vec<_>>();

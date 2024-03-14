@@ -41,6 +41,7 @@ mime_guess.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
 nexus-config.workspace = true
+nexus-networking.workspace = true
 nexus-test-interface.workspace = true
 num-integer.workspace = true
 once_cell.workspace = true
@@ -96,6 +97,7 @@ rustls = { workspace = true }
 rustls-pemfile = { workspace = true }
 update-common.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true

@@ -11,7 +11,6 @@ use futures::stream;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintZonesConfig;
-use sled_agent_client::Client as SledAgentClient;
 use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
@@ -34,7 +33,12 @@ pub(crate) async fn deploy_zones(
                     return Some(err);
                 }
             };
-            let client = sled_client(opctx, &db_sled);
+
+            let client = nexus_networking::sled_client_from_address(
+                *sled_id,
+                db_sled.sled_agent_address,
+                &opctx.log,
+            );
             let omicron_zones = config.to_omicron_zones_config();
             let result = client
                 .omicron_zones_put(&omicron_zones)
@@ -68,25 +72,6 @@ pub(crate) async fn deploy_zones(
     } else {
         Err(errors)
     }
-}
-
-// This is a modified copy of the functionality from `nexus/src/app/sled.rs`.
-// There's no good way to access this functionality right now since it is a
-// method on the `Nexus` type. We want to have a more constrained type we can
-// pass into background tasks for this type of functionality, but for now we
-// just copy the functionality.
-fn sled_client(opctx: &OpContext, sled: &Sled) -> SledAgentClient {
-    let dur = std::time::Duration::from_secs(60);
-    let client = reqwest::ClientBuilder::new()
-        .connect_timeout(dur)
-        .timeout(dur)
-        .build()
-        .unwrap();
-    SledAgentClient::new_with_client(
-        &format!("http://{}", sled.sled_agent_address),
-        client,
-        opctx.log.clone(),
-    )
 }
 
 #[cfg(test)]
@@ -129,6 +114,7 @@ mod test {
                 blueprint_zones,
                 parent_blueprint_id: None,
                 internal_dns_version: Generation::new(),
+                external_dns_version: Generation::new(),
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),

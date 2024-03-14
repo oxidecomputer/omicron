@@ -22,7 +22,9 @@ use futures::lock::Mutex;
 use nexus_client::types::{
     ByteCount, PhysicalDiskKind, PhysicalDiskPutRequest, ZpoolPutRequest,
 };
+use omicron_common::disk::DiskIdentity;
 use propolis_client::types::VolumeConstructionRequest;
+use sled_hardware::DiskVariant;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -471,8 +473,9 @@ impl CrucibleServer {
     }
 }
 
-struct PhysicalDisk {
-    _variant: PhysicalDiskKind,
+pub(crate) struct PhysicalDisk {
+    pub(crate) variant: DiskVariant,
+    pub(crate) slot: i64,
 }
 
 struct Zpool {
@@ -530,19 +533,13 @@ impl Zpool {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct DiskName {
-    vendor: String,
-    serial: String,
-    model: String,
-}
-
 /// Simulated representation of all storage on a sled.
 pub struct Storage {
     sled_id: Uuid,
     nexus_client: Arc<NexusClient>,
     log: Logger,
-    physical_disks: HashMap<DiskName, PhysicalDisk>,
+    physical_disks: HashMap<DiskIdentity, PhysicalDisk>,
+    next_disk_slot: i64,
     zpools: HashMap<Uuid, Zpool>,
     crucible_ip: IpAddr,
     next_crucible_port: u16,
@@ -560,10 +557,16 @@ impl Storage {
             nexus_client,
             log,
             physical_disks: HashMap::new(),
+            next_disk_slot: 0,
             zpools: HashMap::new(),
             crucible_ip,
             next_crucible_port: 100,
         }
+    }
+
+    /// Returns an immutable reference to all (currently known) physical disks
+    pub fn physical_disks(&self) -> &HashMap<DiskIdentity, PhysicalDisk> {
+        &self.physical_disks
     }
 
     pub async fn insert_physical_disk(
@@ -571,15 +574,21 @@ impl Storage {
         vendor: String,
         serial: String,
         model: String,
-        variant: PhysicalDiskKind,
+        variant: DiskVariant,
     ) {
-        let identifier = DiskName {
+        let identifier = DiskIdentity {
             vendor: vendor.clone(),
             serial: serial.clone(),
             model: model.clone(),
         };
-        self.physical_disks
-            .insert(identifier, PhysicalDisk { _variant: variant });
+        let slot = self.next_disk_slot;
+        self.next_disk_slot += 1;
+        self.physical_disks.insert(identifier, PhysicalDisk { variant, slot });
+
+        let variant = match variant {
+            DiskVariant::U2 => PhysicalDiskKind::U2,
+            DiskVariant::M2 => PhysicalDiskKind::M2,
+        };
 
         // Notify Nexus
         let request = PhysicalDiskPutRequest {

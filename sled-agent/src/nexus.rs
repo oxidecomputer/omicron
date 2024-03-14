@@ -140,7 +140,9 @@ impl ConvertInto<nexus_client::types::PhysicalDiskKind>
     }
 }
 
-impl ConvertInto<nexus_client::types::Baseboard> for sled_hardware::Baseboard {
+impl ConvertInto<nexus_client::types::Baseboard>
+    for sled_hardware_types::Baseboard
+{
     fn convert(self) -> nexus_client::types::Baseboard {
         nexus_client::types::Baseboard {
             serial: self.identifier().to_string(),
@@ -644,7 +646,7 @@ mod test {
         ByteCount, Error, Generation, LookupType, MessagePair, ResourceType,
     };
     use omicron_test_utils::dev::test_setup_log;
-    use sled_hardware::Baseboard;
+    use sled_hardware_types::Baseboard;
 
     /// Pretend to be CRDB storing info about a sled-agent
     #[derive(Default, Clone)]

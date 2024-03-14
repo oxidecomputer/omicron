@@ -10,7 +10,6 @@ use nexus_db_model::Dataset;
 use nexus_db_model::DatasetKind;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::identity::Asset;
@@ -28,26 +27,6 @@ use std::net::SocketAddrV6;
 pub(crate) async fn ensure_crucible_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
-    // It would be nice to accept `IntoIterator` here, but that appears to run
-    // into https://github.com/rust-lang/rust/issues/64552.
-    all_blueprint_zones: impl Iterator<Item = &BlueprintZoneConfig>,
-) -> anyhow::Result<usize> {
-    ensure_crucible_dataset_records_exist_impl(
-        opctx,
-        datastore,
-        all_blueprint_zones.into_iter().map(|zone| &zone.config),
-    )
-    .await
-}
-
-/// Private implementation that works against arbitrary `&OmicronZoneConfig`s.
-///
-/// Intended for testing where it's a bit easier to work without blueprints.
-/// Production code should prefer [`ensure_crucible_dataset_records_exist`].
-async fn ensure_crucible_dataset_records_exist_impl(
-    opctx: &OpContext,
-    datastore: &DataStore,
-    // Note `Iterator` here to minimize the number of monomorphizations.
     all_omicron_zones: impl Iterator<Item = &OmicronZoneConfig>,
 ) -> anyhow::Result<usize> {
     // Before attempting to insert any datasets, first query for any existing
@@ -245,7 +224,7 @@ mod tests {
                 .len(),
             0
         );
-        let ndatasets_inserted = ensure_crucible_dataset_records_exist_impl(
+        let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
             collection.all_omicron_zones(),
@@ -266,7 +245,7 @@ mod tests {
 
         // Ensuring the same crucible datasets again should insert no new
         // records.
-        let ndatasets_inserted = ensure_crucible_dataset_records_exist_impl(
+        let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
             collection.all_omicron_zones(),
@@ -314,7 +293,7 @@ mod tests {
                 },
             },
         };
-        let ndatasets_inserted = ensure_crucible_dataset_records_exist_impl(
+        let ndatasets_inserted = ensure_crucible_dataset_records_exist(
             opctx,
             datastore,
             collection.all_omicron_zones().chain(std::iter::once(&new_zone)),

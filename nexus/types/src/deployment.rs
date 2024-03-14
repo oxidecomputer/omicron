@@ -133,7 +133,7 @@ impl SledResources {
 // zones deployed on each host and some supporting configuration (e.g., DNS).
 // This is aimed at supporting add/remove sleds.  The plan is to grow this to
 // include more of the system as we support more use cases.
-#[derive(Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
@@ -149,8 +149,12 @@ pub struct Blueprint {
     pub parent_blueprint_id: Option<Uuid>,
 
     /// internal DNS version when this blueprint was created
-    // See blueprint generation for more on this.
+    // See blueprint execution for more on this.
     pub internal_dns_version: Generation,
+
+    /// external DNS version when thi blueprint was created
+    // See blueprint execution for more on this.
+    pub external_dns_version: Generation,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -244,29 +248,40 @@ impl Blueprint {
             after_zones: &self.blueprint_zones,
         }
     }
+
+    /// Return a struct that can be displayed to present information about the
+    /// blueprint.
+    pub fn display(&self) -> BlueprintDisplay<'_> {
+        BlueprintDisplay { blueprint: self }
+    }
 }
 
-/// For a [`Blueprint::diff_sleds_from_collection`]
-#[derive(Clone, Copy, Debug)]
-pub enum CollectionPolicy {
-    AllInService,
+/// Wrapper to allow a [`Blueprint`] to be displayed with information.
+///
+/// Returned by [`Blueprint::display()`].
+#[derive(Clone, Debug)]
+#[must_use = "this struct does nothing unless displayed"]
+pub struct BlueprintDisplay<'a> {
+    blueprint: &'a Blueprint,
+    // TODO: add colorization with a stylesheet
 }
 
-impl fmt::Debug for Blueprint {
+impl<'a> fmt::Display for BlueprintDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "blueprint  {}", self.id)?;
+        let b = self.blueprint;
+        writeln!(f, "blueprint  {}", b.id)?;
         writeln!(
             f,
             "parent:    {}",
-            self.parent_blueprint_id
+            b.parent_blueprint_id
                 .map(|u| u.to_string())
                 .unwrap_or_else(|| String::from("<none>"))
         )?;
         writeln!(
             f,
             "created by {}{}",
-            self.creator,
-            if self.creator.parse::<Uuid>().is_ok() {
+            b.creator,
+            if b.creator.parse::<Uuid>().is_ok() {
                 " (likely a Nexus instance)"
             } else {
                 ""
@@ -275,19 +290,20 @@ impl fmt::Debug for Blueprint {
         writeln!(
             f,
             "created at {}",
-            humantime::format_rfc3339_millis(self.time_created.into(),)
+            humantime::format_rfc3339_millis(b.time_created.into(),)
         )?;
-        writeln!(f, "internal DNS version: {}", self.internal_dns_version)?;
-        writeln!(f, "comment: {}", self.comment)?;
+        writeln!(f, "internal DNS version: {}", b.internal_dns_version)?;
+        writeln!(f, "comment: {}", b.comment)?;
         writeln!(f, "zones:\n")?;
-        for (sled_id, sled_zones) in &self.blueprint_zones {
+
+        for (sled_id, sled_zones) in &b.blueprint_zones {
             writeln!(
                 f,
                 "  sled {}: Omicron zones at generation {}",
                 sled_id, sled_zones.generation
             )?;
             for z in &sled_zones.zones {
-                writeln!(f, "    {z}")?;
+                writeln!(f, "    {}", z.display())?;
             }
         }
 
@@ -371,15 +387,34 @@ pub struct BlueprintZoneConfig {
     pub zone_policy: BlueprintZonePolicy,
 }
 
-impl fmt::Display for BlueprintZoneConfig {
+impl BlueprintZoneConfig {
+    /// Return a struct that can be displayed to present information about the
+    /// zone.
+    pub fn display(&self) -> BlueprintZoneConfigDisplay<'_> {
+        BlueprintZoneConfigDisplay { zone: self }
+    }
+}
+
+/// A wrapper to allow a [`BlueprintZoneConfig`] to be displayed with
+/// information.
+///
+/// Returned by [`BlueprintZoneConfig::display()`].
+#[derive(Clone, Debug)]
+#[must_use = "this struct does nothing unless displayed"]
+pub struct BlueprintZoneConfigDisplay<'a> {
+    zone: &'a BlueprintZoneConfig,
+}
+
+impl<'a> fmt::Display for BlueprintZoneConfigDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let z = self.zone;
         write!(
             f,
             "zone {} type {} underlay IP {} policy {}",
-            self.config.id,
-            self.config.zone_type.label(),
-            self.config.underlay_address,
-            self.zone_policy
+            z.config.id,
+            z.config.zone_type.label(),
+            z.config.underlay_address,
+            z.zone_policy
         )
     }
 }
@@ -422,6 +457,8 @@ pub struct BlueprintMetadata {
     pub parent_blueprint_id: Option<Uuid>,
     /// internal DNS version when this blueprint was created
     pub internal_dns_version: Generation,
+    /// external DNS version when this blueprint was created
+    pub external_dns_version: Generation,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -454,6 +491,7 @@ pub struct BlueprintTargetSet {
 }
 
 /// Summarizes the differences between two blueprints
+#[derive(Debug)]
 pub struct OmicronZonesDiff<'a> {
     before_label: String,
     // We store an owned copy of "before_zones" to make it easier to support
@@ -644,6 +682,30 @@ impl<'a> OmicronZonesDiff<'a> {
         })
     }
 
+    /// Return a struct that can be used to display the diff in a
+    /// unified `diff(1)`-like format.
+    pub fn display(&self) -> OmicronZonesDiffDisplay<'_, 'a> {
+        OmicronZonesDiffDisplay::new(self)
+    }
+}
+
+/// Wrapper to allow a [`OmicronZonesDiff`] to be displayed in a unified
+/// `diff(1)`-like format.
+///
+/// Returned by [`OmicronZonesDiff::display()`].
+#[derive(Clone, Debug)]
+#[must_use = "this struct does nothing unless displayed"]
+pub struct OmicronZonesDiffDisplay<'diff, 'a> {
+    diff: &'diff OmicronZonesDiff<'a>,
+    // TODO: add colorization with a stylesheet
+}
+
+impl<'diff, 'a> OmicronZonesDiffDisplay<'diff, 'a> {
+    #[inline]
+    fn new(diff: &'diff OmicronZonesDiff<'a>) -> Self {
+        Self { diff }
+    }
+
     fn print_whole_sled(
         &self,
         f: &mut fmt::Formatter<'_>,
@@ -659,25 +721,25 @@ impl<'a> OmicronZonesDiff<'a> {
             prefix, bbsledzones.generation
         )?;
         for z in &bbsledzones.zones {
-            writeln!(f, "{prefix}         {z}; {label}")?;
+            writeln!(f, "{prefix}         {} ({label})", z.display())?;
         }
 
         Ok(())
     }
 }
 
-/// Implements diff(1)-like output for diff'ing two blueprints
-impl<'a> fmt::Display for OmicronZonesDiff<'a> {
+impl<'diff, 'a> fmt::Display for OmicronZonesDiffDisplay<'diff, 'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "diff {} {}", self.before_label, self.after_label)?;
-        writeln!(f, "--- {}", self.before_label)?;
-        writeln!(f, "+++ {}", self.after_label)?;
+        let diff = self.diff;
+        writeln!(f, "diff {} {}", diff.before_label, diff.after_label)?;
+        writeln!(f, "--- {}", diff.before_label)?;
+        writeln!(f, "+++ {}", diff.after_label)?;
 
-        for (sled_id, sled_zones) in self.sleds_removed() {
+        for (sled_id, sled_zones) in diff.sleds_removed() {
             self.print_whole_sled(f, '-', "removed", sled_zones, sled_id)?;
         }
 
-        for (sled_id, sled_changes) in self.sleds_in_common() {
+        for (sled_id, sled_changes) in diff.sleds_in_common() {
             // Print a line about the sled itself and zone config generation,
             // regardless of whether anything has changed.
             writeln!(f, "  sled {}", sled_id)?;
@@ -701,7 +763,7 @@ impl<'a> fmt::Display for OmicronZonesDiff<'a> {
             }
 
             for zone in sled_changes.zones_removed() {
-                writeln!(f, "-        {zone} (removed)")?;
+                writeln!(f, "-        {} (removed)", zone.display())?;
             }
 
             for zone_changes in sled_changes.zones_in_common() {
@@ -709,39 +771,39 @@ impl<'a> fmt::Display for OmicronZonesDiff<'a> {
                     writeln!(
                         f,
                         "-         {} (changed)",
-                        zone_changes.zone_before,
+                        zone_changes.zone_before.display(),
                     )?;
                     writeln!(
                         f,
                         "+         {} (changed)",
-                        zone_changes.zone_after
+                        zone_changes.zone_after.display(),
                     )?;
                 } else if zone_changes.policy_changed() {
                     writeln!(
                         f,
                         "-         {} (policy changed)",
-                        zone_changes.zone_before,
+                        zone_changes.zone_before.display(),
                     )?;
                     writeln!(
                         f,
                         "+         {} (policy changed)",
-                        zone_changes.zone_after,
+                        zone_changes.zone_after.display(),
                     )?;
                 } else {
                     writeln!(
                         f,
                         "         {} (unchanged)",
-                        zone_changes.zone_before,
+                        zone_changes.zone_before.display(),
                     )?;
                 }
             }
 
             for zone in sled_changes.zones_added() {
-                writeln!(f, "+        {zone} (added)")?;
+                writeln!(f, "+        {} (added)", zone.display())?;
             }
         }
 
-        for (sled_id, sled_zones) in self.sleds_added() {
+        for (sled_id, sled_zones) in diff.sleds_added() {
             self.print_whole_sled(f, '+', "added", sled_zones, sled_id)?;
         }
 
