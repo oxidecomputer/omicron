@@ -2998,7 +2998,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     sled_id UUID NOT NULL,
     total_size INT NOT NULL,
 
-    -- FK consisting of:
+    -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
     -- - The slot in which this disk was found

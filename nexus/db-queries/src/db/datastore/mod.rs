@@ -675,7 +675,7 @@ mod test {
 
     // Creates a test zpool, returns its UUID.
     //
-    // However, don't add the zpool to the inventory just yet.
+    // However, this helper doesn't add the zpool to the inventory just yet.
     async fn create_test_zpool_not_in_inventory(
         datastore: &DataStore,
         sled_id: Uuid,
