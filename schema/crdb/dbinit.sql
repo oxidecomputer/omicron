@@ -2998,7 +2998,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
     sled_id UUID NOT NULL,
     total_size INT NOT NULL,
 
-    -- FK consisting of:
+    -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
     -- - The slot in which this disk was found
@@ -3181,7 +3181,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     comment TEXT NOT NULL,
 
     -- identifies the latest internal DNS version when blueprint planning began
-    internal_dns_version INT8 NOT NULL
+    internal_dns_version INT8 NOT NULL,
+    -- identifies the latest external DNS version when blueprint planning began
+    external_dns_version INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -3572,6 +3574,90 @@ ALTER TABLE omicron.public.external_ip ADD COLUMN IF NOT EXISTS is_probe BOOL NO
 
 ALTER TYPE omicron.public.network_interface_kind ADD VALUE IF NOT EXISTS 'probe';
 
+CREATE TYPE IF NOT EXISTS omicron.public.upstairs_repair_notification_type AS ENUM (
+  'started',
+  'succeeded',
+  'failed'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.upstairs_repair_type AS ENUM (
+  'live',
+  'reconciliation'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.upstairs_repair_notification (
+    time TIMESTAMPTZ NOT NULL,
+
+    repair_id UUID NOT NULL,
+    repair_type omicron.public.upstairs_repair_type NOT NULL,
+
+    upstairs_id UUID NOT NULL,
+    session_id UUID NOT NULL,
+
+    region_id UUID NOT NULL,
+    target_ip INET NOT NULL,
+    target_port INT4 CHECK (target_port BETWEEN 0 AND 65535) NOT NULL,
+
+    notification_type omicron.public.upstairs_repair_notification_type NOT NULL,
+
+    /*
+     * A repair is uniquely identified by the four UUIDs here, and a
+     * notification is uniquely identified by its type.
+     */
+    PRIMARY KEY (repair_id, upstairs_id, session_id, region_id, notification_type)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.upstairs_repair_progress (
+    repair_id UUID NOT NULL,
+    time TIMESTAMPTZ NOT NULL,
+    current_item INT8 NOT NULL,
+    total_items INT8 NOT NULL,
+
+    PRIMARY KEY (repair_id, time, current_item, total_items)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_request_reason_type AS ENUM (
+  'replacing',
+  'disabled',
+  'failed_reconcile',
+  'io_error',
+  'bad_negotiation_order',
+  'incompatible',
+  'failed_live_repair',
+  'too_many_outstanding_jobs',
+  'deactivated'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.downstairs_client_stop_request_notification (
+    time TIMESTAMPTZ NOT NULL,
+    upstairs_id UUID NOT NULL,
+    downstairs_id UUID NOT NULL,
+    reason omicron.public.downstairs_client_stop_request_reason_type NOT NULL,
+
+    PRIMARY KEY (time, upstairs_id, downstairs_id, reason)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stopped_reason_type AS ENUM (
+  'connection_timeout',
+  'connection_failed',
+  'timeout',
+  'write_failed',
+  'read_failed',
+  'requested_stop',
+  'finished',
+  'queue_closed',
+  'receive_task_cancelled'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.downstairs_client_stopped_notification (
+    time TIMESTAMPTZ NOT NULL,
+    upstairs_id UUID NOT NULL,
+    downstairs_id UUID NOT NULL,
+    reason omicron.public.downstairs_client_stopped_reason_type NOT NULL,
+
+    PRIMARY KEY (time, upstairs_id, downstairs_id, reason)
+);
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -3606,7 +3692,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '42.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '44.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

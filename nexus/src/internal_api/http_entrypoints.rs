@@ -42,9 +42,18 @@ use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
+use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::RepairFinishInfo;
+use omicron_common::api::internal::nexus::RepairProgress;
+use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
+use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -71,6 +80,12 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
+
+        api.register(cpapi_upstairs_repair_start)?;
+        api.register(cpapi_upstairs_repair_finish)?;
+        api.register(cpapi_upstairs_repair_progress)?;
+        api.register(cpapi_downstairs_client_stop_request)?;
+        api.register(cpapi_downstairs_client_stopped)?;
 
         api.register(saga_list)?;
         api.register(saga_view)?;
@@ -434,6 +449,171 @@ async fn cpapi_artifact_download(
         .await?;
 
     Ok(HttpResponseOk(Body::from(body).into()))
+}
+
+/// Path parameters for Upstairs requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct UpstairsPathParam {
+    upstairs_id: TypedUuid<UpstairsKind>,
+}
+
+/// An Upstairs will notify this endpoint when a repair starts
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/repair-start",
+ }]
+async fn cpapi_upstairs_repair_start(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsPathParam>,
+    repair_start_info: TypedBody<RepairStartInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .upstairs_repair_start(
+                &opctx,
+                path.upstairs_id,
+                repair_start_info.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// An Upstairs will notify this endpoint when a repair finishes.
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/repair-finish",
+ }]
+async fn cpapi_upstairs_repair_finish(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsPathParam>,
+    repair_finish_info: TypedBody<RepairFinishInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .upstairs_repair_finish(
+                &opctx,
+                path.upstairs_id,
+                repair_finish_info.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Upstairs requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct UpstairsRepairPathParam {
+    upstairs_id: TypedUuid<UpstairsKind>,
+    repair_id: TypedUuid<UpstairsRepairKind>,
+}
+
+/// An Upstairs will update this endpoint with the progress of a repair
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress",
+ }]
+async fn cpapi_upstairs_repair_progress(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsRepairPathParam>,
+    repair_progress: TypedBody<RepairProgress>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .upstairs_repair_progress(
+                &opctx,
+                path.upstairs_id,
+                path.repair_id,
+                repair_progress.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Downstairs requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct UpstairsDownstairsPathParam {
+    upstairs_id: TypedUuid<UpstairsKind>,
+    downstairs_id: TypedUuid<DownstairsKind>,
+}
+
+/// An Upstairs will update this endpoint if a Downstairs client task is
+/// requested to stop
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request",
+ }]
+async fn cpapi_downstairs_client_stop_request(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsDownstairsPathParam>,
+    downstairs_client_stop_request: TypedBody<DownstairsClientStopRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .downstairs_client_stop_request_notification(
+                &opctx,
+                path.upstairs_id,
+                path.downstairs_id,
+                downstairs_client_stop_request.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// An Upstairs will update this endpoint if a Downstairs client task stops for
+/// any reason (not just after being requested to)
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped",
+ }]
+async fn cpapi_downstairs_client_stopped(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsDownstairsPathParam>,
+    downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .downstairs_client_stopped_notification(
+                &opctx,
+                path.upstairs_id,
+                path.downstairs_id,
+                downstairs_client_stopped.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
 // Sagas

@@ -13,15 +13,19 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
+use overridables::Overridables;
 use slog::info;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
+pub use dns::silo_dns_name;
+
 mod datasets;
 mod dns;
 mod omicron_zones;
+mod overridables;
 mod resource_allocation;
 
 struct Sled {
@@ -56,6 +60,26 @@ pub async fn realize_blueprint<S>(
     datastore: &DataStore,
     blueprint: &Blueprint,
     nexus_label: S,
+) -> Result<(), Vec<anyhow::Error>>
+where
+    String: From<S>,
+{
+    realize_blueprint_with_overrides(
+        opctx,
+        datastore,
+        blueprint,
+        nexus_label,
+        &Default::default(),
+    )
+    .await
+}
+
+pub async fn realize_blueprint_with_overrides<S>(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    blueprint: &Blueprint,
+    nexus_label: S,
+    overrides: &Overridables,
 ) -> Result<(), Vec<anyhow::Error>>
 where
     String: From<S>,
@@ -123,6 +147,7 @@ where
         String::from(nexus_label),
         blueprint,
         &sleds_by_id,
+        &overrides,
     )
     .await
     .map_err(|e| vec![anyhow!("{}", InlineErrorChain::new(&e))])?;

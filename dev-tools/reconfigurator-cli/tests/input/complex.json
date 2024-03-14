@@ -7973,6 +7973,7 @@
       ],
       "parent_blueprint_id": null,
       "internal_dns_version": 1,
+      "external_dns_version": 1,
       "time_created": "2024-03-12T19:09:41.953854Z",
       "creator": "0d459323-e414-4f32-9944-76c7331da622",
       "comment": "from collection 3f61b723-cfe7-40ec-b22c-e3e1f35325f9"
@@ -8645,6 +8646,7 @@
       ],
       "parent_blueprint_id": null,
       "internal_dns_version": 1,
+      "external_dns_version": 1,
       "time_created": "2024-03-12T19:11:49.876621Z",
       "creator": "0d459323-e414-4f32-9944-76c7331da622",
       "comment": "from collection 5e1d6ae0-c5b4-4884-ac41-680cd4f5762d"
