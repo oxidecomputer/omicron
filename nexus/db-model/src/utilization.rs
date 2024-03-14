@@ -60,11 +60,11 @@ impl From<SiloUtilization> for views::Utilization {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IpPoolUtilization {
     pub allocated: u128,
-    pub total: u128,
+    pub capacity: u128,
 }
 
 impl From<IpPoolUtilization> for views::IpPoolUtilization {
     fn from(util: IpPoolUtilization) -> Self {
-        Self { allocated: util.allocated, total: util.total }
+        Self { allocated: util.allocated, capacity: util.capacity }
     }
 }

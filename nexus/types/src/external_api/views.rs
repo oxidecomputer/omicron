@@ -326,7 +326,7 @@ pub struct IpPoolUtilization {
     /// so we represent this value in JSON as a numeric string with a custom
     /// "uint128" format.
     #[serde(with = "U128String")]
-    pub total: u128,
+    pub capacity: u128,
 }
 
 // Custom struct for serializing/deserializing u128 as a string. The serde

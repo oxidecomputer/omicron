@@ -1141,7 +1141,7 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_ip_utilization() {
+    async fn test_ip_pool_utilization() {
         let logctx = dev::test_setup_log("test_ip_utilization");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
@@ -1258,6 +1258,27 @@ mod test {
             .await
             .unwrap();
         assert_eq!(max_ips, 5 + 11 + 65536);
+
+        // add a giant range for fun
+        let ipv6_range = IpRange::V6(
+            Ipv6Range::new(
+                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 1, 21),
+                std::net::Ipv6Addr::new(
+                    0xfd00, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+                ),
+            )
+            .unwrap(),
+        );
+        datastore
+            .ip_pool_add_range(&opctx, &authz_pool, &ipv6_range)
+            .await
+            .expect("Could not add range");
+
+        let max_ips = datastore
+            .ip_pool_total_capacity(&opctx, &authz_pool)
+            .await
+            .unwrap();
+        assert_eq!(max_ips, 1208925819614629174706171);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

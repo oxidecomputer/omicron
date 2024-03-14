@@ -43,10 +43,10 @@ impl super::Nexus {
             .db_datastore
             .ip_pool_allocated_count(opctx, &authz_pool)
             .await?;
-        let total = self
+        let capacity = self
             .db_datastore
             .ip_pool_total_capacity(opctx, &authz_pool)
             .await?;
-        Ok(IpPoolUtilization { allocated, total })
+        Ok(IpPoolUtilization { allocated, capacity })
     }
 }

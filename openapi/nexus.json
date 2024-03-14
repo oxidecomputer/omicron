@@ -13698,15 +13698,15 @@
             "type": "string",
             "format": "uint128"
           },
-          "total": {
-            "description": "The total number of IP addresses in the pool\n\nThis is calculated as the sum of the lengths of the ranges in the pool. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
+          "capacity": {
+            "description": "The total number of IP addresses in the pool, i.e., the sum of the lengths of the ranges. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
             "type": "string",
             "format": "uint128"
           }
         },
         "required": [
           "allocated",
-          "total"
+          "capacity"
         ]
       },
       "IpRange": {

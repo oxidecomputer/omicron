@@ -630,7 +630,7 @@ pub async fn assert_ip_pool_utilization(
     client: &ClientTestContext,
     pool_name: &str,
     allocated: u128,
-    total: u128,
+    capacity: u128,
 ) {
     let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
     let utilization: views::IpPoolUtilization = object_get(client, &url).await;
@@ -640,9 +640,9 @@ pub async fn assert_ip_pool_utilization(
         pool_name, allocated, utilization.allocated
     );
     assert_eq!(
-        utilization.total, total,
+        utilization.capacity, capacity,
         "IP pool '{}': expected {} IPs total capacity, got {:?}",
-        pool_name, total, utilization.total
+        pool_name, capacity, utilization.capacity
     );
 }
 
