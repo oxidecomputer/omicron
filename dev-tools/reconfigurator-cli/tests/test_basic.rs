@@ -43,6 +43,11 @@ fn test_basic() {
 // If this test becomes too burdensome, we could drop it.  But for now it's
 // useful to have a smoke test for the command.
 #[test]
+// This test has been a little burdensome, but it would be nice to have it
+// automated when we're able to autogenerate "complex.json" more reliably.
+//
+// Until then, it can be manually executed and used on high-risk PRs.
+#[ignore]
 fn test_complex() {
     let input_path = Utf8Path::new("tests/input/complex.json");
     let input_file = std::fs::File::open(input_path)
