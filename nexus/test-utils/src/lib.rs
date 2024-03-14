@@ -818,6 +818,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                     .generation
                     .try_into()
                     .expect("bad internal DNS generation"),
+                external_dns_version: Generation::new(),
                 time_created: Utc::now(),
                 creator: "nexus-test-utils".to_string(),
                 comment: "initial test blueprint".to_string(),
