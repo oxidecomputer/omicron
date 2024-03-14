@@ -73,3 +73,44 @@ impl From<IpPoolUtilization> for views::IpPoolUtilization {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_ip_pool_utilization_to_view() {
+        let view: views::IpPoolUtilization =
+            IpPoolUtilization { allocated: 40, total: 100 }.into();
+        assert_eq!(view.allocated, Some(40));
+        assert_eq!(view.total, Some(100));
+
+        let view: views::IpPoolUtilization =
+            IpPoolUtilization { allocated: i64::from(u32::MAX), total: 100 }
+                .into();
+        assert_eq!(view.allocated, Some(u32::MAX));
+        assert_eq!(view.total, Some(100));
+
+        let view: views::IpPoolUtilization = IpPoolUtilization {
+            allocated: i64::from(u32::MAX) + 1,
+            total: 100,
+        }
+        .into();
+        assert_eq!(view.allocated, None);
+        assert_eq!(view.total, Some(100));
+
+        let view: views::IpPoolUtilization =
+            IpPoolUtilization { allocated: 40, total: u128::from(u32::MAX) }
+                .into();
+        assert_eq!(view.allocated, Some(40));
+        assert_eq!(view.total, Some(u32::MAX));
+
+        let view: views::IpPoolUtilization = IpPoolUtilization {
+            allocated: 40,
+            total: u128::from(u32::MAX) + 1,
+        }
+        .into();
+        assert_eq!(view.allocated, Some(40));
+        assert_eq!(view.total, None);
+    }
+}
