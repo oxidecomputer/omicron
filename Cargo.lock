@@ -4507,6 +4507,7 @@ dependencies = [
  "serde_with",
  "sled-agent-client",
  "slog",
+ "slog-error-chain",
  "static_assertions",
  "steno",
  "strum 0.26.1",

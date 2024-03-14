@@ -62,6 +62,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
@@ -530,11 +531,12 @@ impl DataStore {
             Self::allocate_external_ip_on_connection(conn, db_ip)
                 .await
                 .map_err(|err| {
-                    warn!(
+                    error!(
                         log,
                         "Initializing Rack: Failed to allocate \
-                        IP address for {}",
-                        service.kind,
+                         IP address for {}",
+                        service.kind;
+                        "err" => %err,
                     );
                     match err.retryable() {
                         Retryable(e) => RackInitError::Retryable(e),
@@ -610,9 +612,10 @@ impl DataStore {
                         .get_result_async(&conn)
                         .await
                         .map_err(|e| {
-                            warn!(
+                            error!(
                                 log,
-                                "Initializing Rack: Rack UUID not found"
+                                "Initializing Rack: Rack UUID not found";
+                                InlineErrorChain::new(&e),
                             );
                             err.set(RackInitError::RackUpdate {
                                 err: e,
@@ -638,9 +641,11 @@ impl DataStore {
                         )
                         .await
                         .map_err(|e| {
-                            warn!(
+                            error!(
                                 log,
-                                "Initializing Rack: Failed to add IP pool range"
+                                "Initializing Rack: Failed to add \
+                                 IP pool range";
+                                &e,
                             );
                             err.set(RackInitError::AddingIp(e)).unwrap();
                             DieselError::RollbackTransaction
@@ -653,9 +658,10 @@ impl DataStore {
                     )
                     .await
                     .map_err(|e| {
-                        warn!(
+                        error!(
                             log,
-                            "Initializing Rack: Failed to insert blueprint"
+                            "Initializing Rack: Failed to insert blueprint";
+                            &e,
                         );
                         err.set(RackInitError::BlueprintInsert(e)).unwrap();
                         DieselError::RollbackTransaction
@@ -676,10 +682,11 @@ impl DataStore {
                     )
                     .await
                     .map_err(|e| {
-                        warn!(
+                        error!(
                             log,
-                            "Initializing Rack: \
-                                 Failed to set blueprint as target"
+                            "Initializing Rack: Failed to set blueprint \
+                             as target";
+                            &e,
                         );
                         err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
                         DieselError::RollbackTransaction
