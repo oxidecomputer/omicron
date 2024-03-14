@@ -337,7 +337,8 @@ impl super::Nexus {
             let address_lot_name: Name =
                 format!("as{}-lot", bgp_config.asn).parse().unwrap();
 
-            self.db_datastore
+            match self
+                .db_datastore
                 .address_lot_create(
                     &opctx,
                     &AddressLotCreate {
@@ -360,14 +361,19 @@ impl super::Nexus {
                     },
                 )
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to create address lot for BGP as {}: {}",
-                        bgp_config.asn, e
-                    ))
-                })?;
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to create address lot for BGP as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
 
-            self.db_datastore
+            match self
+                .db_datastore
                 .bgp_create_announce_set(
                     &opctx,
                     &BgpAnnounceSetCreate {
@@ -393,14 +399,19 @@ impl super::Nexus {
                     },
                 )
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to create bgp announce set for as {}: {}",
-                        bgp_config.asn, e
-                    ))
-                })?;
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to create bgp announce set for as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
 
-            self.db_datastore
+            match self
+                .db_datastore
                 .bgp_config_set(
                     &opctx,
                     &BgpConfigCreate {
@@ -417,12 +428,16 @@ impl super::Nexus {
                     },
                 )
                 .await
-                .map_err(|e| {
-                    Error::internal_error(&format!(
-                        "unable to set bgp config for as {}: {}",
-                        bgp_config.asn, e
-                    ))
-                })?;
+            {
+                Ok(_) => Ok(()),
+                Err(e) => match e {
+                    Error::ObjectAlreadyExists { .. } => Ok(()),
+                    _ => Err(Error::internal_error(&format!(
+                        "unable to set bgp config for as {}: {e}",
+                        bgp_config.asn
+                    ))),
+                },
+            }?;
         }
 
         for (idx, uplink_config) in rack_network_config.ports.iter().enumerate()
