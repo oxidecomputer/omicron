@@ -2014,7 +2014,6 @@ mod tests {
     use super::ZoneBundleMetadata;
     use chrono::TimeZone;
     use chrono::Utc;
-    use rand::RngCore;
 
     #[test]
     fn test_sort_zone_bundle_cause() {
@@ -2188,6 +2187,7 @@ mod illumos_tests {
     use slog::Drain;
     use slog::Logger;
     use tokio::process::Command;
+    use rand::RngCore;
 
     /// An iterator that returns the date of consecutive days beginning with 1st
     /// January 2020. The time portion of each returned date will be fixed at
