@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS upstairs_repair_notification (
+CREATE TABLE IF NOT EXISTS omicron.public.upstairs_repair_notification (
     time TIMESTAMPTZ NOT NULL,
 
     repair_id UUID NOT NULL,

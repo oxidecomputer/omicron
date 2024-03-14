@@ -3579,7 +3579,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.upstairs_repair_type AS ENUM (
   'reconciliation'
 );
 
-CREATE TABLE IF NOT EXISTS upstairs_repair_notification (
+CREATE TABLE IF NOT EXISTS omicron.public.upstairs_repair_notification (
     time TIMESTAMPTZ NOT NULL,
 
     repair_id UUID NOT NULL,
@@ -3601,7 +3601,7 @@ CREATE TABLE IF NOT EXISTS upstairs_repair_notification (
     PRIMARY KEY (repair_id, upstairs_id, session_id, region_id, notification_type)
 );
 
-CREATE TABLE IF NOT EXISTS upstairs_repair_progress (
+CREATE TABLE IF NOT EXISTS omicron.public.upstairs_repair_progress (
     repair_id UUID NOT NULL,
     time TIMESTAMPTZ NOT NULL,
     current_item INT8 NOT NULL,
@@ -3622,7 +3622,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_request_reason_t
   'deactivated'
 );
 
-CREATE TABLE IF NOT EXISTS downstairs_client_stop_request_notification (
+CREATE TABLE IF NOT EXISTS omicron.public.downstairs_client_stop_request_notification (
     time TIMESTAMPTZ NOT NULL,
     upstairs_id UUID NOT NULL,
     downstairs_id UUID NOT NULL,
@@ -3643,7 +3643,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stopped_reason_type A
   'receive_task_cancelled'
 );
 
-CREATE TABLE IF NOT EXISTS downstairs_client_stopped_notification (
+CREATE TABLE IF NOT EXISTS omicron.public.downstairs_client_stopped_notification (
     time TIMESTAMPTZ NOT NULL,
     upstairs_id UUID NOT NULL,
     downstairs_id UUID NOT NULL,

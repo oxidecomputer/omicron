@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS downstairs_client_stop_request_notification (
+CREATE TABLE IF NOT EXISTS omicron.public.downstairs_client_stop_request_notification (
     time TIMESTAMPTZ NOT NULL,
     upstairs_id UUID NOT NULL,
     downstairs_id UUID NOT NULL,
