@@ -1114,7 +1114,10 @@ fn build_initial_blueprint_from_plan(
         let entry = match sled_configs.entry(sled_id) {
             btree_map::Entry::Vacant(entry) => entry,
             btree_map::Entry::Occupied(_) => {
-                bail!("duplicate sled address deriving blueprint: {sled_addr}");
+                bail!(
+                    "duplicate sled address found while deriving blueprint: \
+                     {sled_addr}"
+                );
             }
         };
         let sled_config =
