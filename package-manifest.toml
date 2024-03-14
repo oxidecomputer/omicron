@@ -103,7 +103,7 @@ only_for_targets.image = "standard"
 source.type = "composite"
 source.packages = [
   "omicron-nexus.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz",
   "opte-interface-setup.tar.gz"
 ]
@@ -133,7 +133,7 @@ output.intermediate_only = true
 service_name = "oximeter"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "oximeter-collector.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
+source.packages = [ "oximeter-collector.tar.gz", "zone-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 [package.oximeter-collector]
@@ -156,7 +156,7 @@ source.type = "composite"
 source.packages = [
   "clickhouse_svc.tar.gz",
   "internal-dns-cli.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
 output.type = "zone"
@@ -182,7 +182,7 @@ source.type = "composite"
 source.packages = [
   "clickhouse_keeper_svc.tar.gz",
   "internal-dns-cli.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
 output.type = "zone"
@@ -208,7 +208,7 @@ source.type = "composite"
 source.packages = [ 
   "cockroachdb-service.tar.gz",
   "internal-dns-cli.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
 output.type = "zone"
@@ -244,7 +244,7 @@ source.type = "composite"
 source.packages = [
   "dns-server.tar.gz",
   "internal-dns-customizations.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
 output.type = "zone"
@@ -256,7 +256,7 @@ source.type = "composite"
 source.packages = [ 
   "dns-server.tar.gz",
   "external-dns-customizations.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz",
   "opte-interface-setup.tar.gz"
 ]
@@ -295,7 +295,7 @@ source.type = "composite"
 source.packages = [
   "ntp-svc.tar.gz",
   "opte-interface-setup.tar.gz",
-  "zone-network-setup.tar.gz",
+  "zone-setup.tar.gz",
   "zone-network-install.tar.gz"
 ]
 output.type = "zone"
@@ -445,7 +445,7 @@ output.intermediate_only = true
 service_name = "crucible"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "crucible.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
+source.packages = [ "crucible.tar.gz", "zone-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 
@@ -453,7 +453,7 @@ output.type = "zone"
 service_name = "crucible_pantry"
 only_for_targets.image = "standard"
 source.type = "composite"
-source.packages = [ "crucible-pantry.tar.gz", "zone-network-setup.tar.gz", "zone-network-install.tar.gz" ]
+source.packages = [ "crucible-pantry.tar.gz", "zone-setup.tar.gz", "zone-network-install.tar.gz" ]
 output.type = "zone"
 
 # Packages not built within Omicron, but which must be imported.
@@ -726,11 +726,11 @@ source.paths = [
 output.type = "zone"
 output.intermediate_only = true
 
-[package.zone-network-setup]
-service_name = "zone-network-cli"
+[package.zone-setup]
+service_name = "zone-setup-cli"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["zone-networking"]
+source.rust.binary_names = ["zone-setup"]
 source.rust.release = true
 output.type = "zone"
 output.intermediate_only = true

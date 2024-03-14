@@ -64,12 +64,12 @@ async fn do_run() -> Result<(), CmdError> {
         level: dropshot::ConfigLoggingLevel::Info,
         if_exists: dropshot::ConfigLoggingIfExists::Append,
     }
-    .to_logger("zone-networking")
+    .to_logger("zone-setup")
     .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
     let matches = command!()
         .subcommand(
-            Command::new("set-up")
+            Command::new("common-networking")
                 .about(
                     "Sets up common networking configuration across all zones",
                 )
@@ -96,7 +96,7 @@ async fn do_run() -> Result<(), CmdError> {
                 ),
         )
         .subcommand(
-            Command::new("opte-interface-set-up")
+            Command::new("opte-interface")
                 .about("Sets up OPTE interface")
                 .arg(
                     arg!(
@@ -122,18 +122,18 @@ async fn do_run() -> Result<(), CmdError> {
         )
         .get_matches();
 
-    if let Some(matches) = matches.subcommand_matches("set-up") {
-        set_up(matches, log.clone()).await?;
+    if let Some(matches) = matches.subcommand_matches("common-networking") {
+        common_nw_set_up(matches, log.clone()).await?;
     }
 
-    if let Some(matches) = matches.subcommand_matches("opte-interface-set-up") {
+    if let Some(matches) = matches.subcommand_matches("opte-interface") {
         opte_interface_set_up(matches, log.clone()).await?;
     }
 
     Ok(())
 }
 
-async fn set_up(matches: &ArgMatches, log: Logger) -> Result<(), CmdError> {
+async fn common_nw_set_up(matches: &ArgMatches, log: Logger) -> Result<(), CmdError> {
     let datalink: &String = matches.get_one("datalink").unwrap();
     let static_addr: &Ipv6Addr = matches.get_one("static_addr").unwrap();
     let gateway: Ipv6Addr = *matches.get_one("gateway").unwrap();

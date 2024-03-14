@@ -78,7 +78,7 @@ members = [
     "wicket",
     "wicketd",
     "workspace-hack",
-    "zone-network-setup",
+    "zone-setup",
 ]
 
 default-members = [
@@ -156,7 +156,7 @@ default-members = [
     "wicket-dbg",
     "wicket",
     "wicketd",
-    "zone-network-setup",
+    "zone-setup",
 ]
 resolver = "2"
 

@@ -1,5 +1,5 @@
 [package]
-name = "zone-network-setup"
+name = "zone-setup"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
