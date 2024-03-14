@@ -410,11 +410,12 @@ impl<'a> fmt::Display for BlueprintZoneConfigDisplay<'a> {
         let z = self.zone;
         write!(
             f,
-            "zone {} type {} underlay IP {} policy {}",
+            "{} {:<width$} {} [underlay IP {}]",
             z.config.id,
+            z.zone_policy,
             z.config.zone_type.label(),
             z.config.underlay_address,
-            z.zone_policy
+            width = BlueprintZonePolicy::DISPLAY_WIDTH,
         )
     }
 }
@@ -431,15 +432,18 @@ pub enum BlueprintZonePolicy {
     NotInService,
 }
 
+impl BlueprintZonePolicy {
+    /// The maximum width of `Display` output.
+    const DISPLAY_WIDTH: usize = 14;
+}
+
 impl fmt::Display for BlueprintZonePolicy {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            BlueprintZonePolicy::InService => {
-                write!(f, "in_service")
-            }
-            BlueprintZonePolicy::NotInService => {
-                write!(f, "not_in_service")
-            }
+            // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
+            // and alignment (used above), but this does.
+            BlueprintZonePolicy::InService => "in service".fmt(f),
+            BlueprintZonePolicy::NotInService => "not in service".fmt(f),
         }
     }
 }
@@ -763,7 +767,7 @@ impl<'diff, 'a> fmt::Display for OmicronZonesDiffDisplay<'diff, 'a> {
             }
 
             for zone in sled_changes.zones_removed() {
-                writeln!(f, "-        {} (removed)", zone.display())?;
+                writeln!(f, "-         {} (removed)", zone.display())?;
             }
 
             for zone_changes in sled_changes.zones_in_common() {
@@ -792,14 +796,14 @@ impl<'diff, 'a> fmt::Display for OmicronZonesDiffDisplay<'diff, 'a> {
                 } else {
                     writeln!(
                         f,
-                        "         {} (unchanged)",
+                        "          {} (unchanged)",
                         zone_changes.zone_before.display(),
                     )?;
                 }
             }
 
             for zone in sled_changes.zones_added() {
-                writeln!(f, "+        {} (added)", zone.display())?;
+                writeln!(f, "+         {} (added)", zone.display())?;
             }
         }
 
