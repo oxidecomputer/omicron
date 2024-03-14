@@ -4,7 +4,6 @@
 
 //! Routines that manage instance-related networking state.
 
-use crate::app::sagas::retry_until_known_result;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
 use nexus_db_model::ExternalIp;
@@ -24,6 +23,7 @@ use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::retry_until_known_result;
 use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;

@@ -5,6 +5,7 @@
 //! Tests that Nexus properly manages and cleans up Crucible resources
 //! associated with Volumes
 
+use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
@@ -24,6 +25,13 @@ use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal;
+use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::DownstairsRegionKind;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
+use omicron_uuid_kinds::UpstairsSessionKind;
 use rand::prelude::SliceRandom;
 use rand::{rngs::StdRng, SeedableRng};
 use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
@@ -2551,4 +2559,764 @@ async fn test_volume_hard_delete_idempotent(
 
     datastore.volume_hard_delete(volume_id).await.unwrap();
     datastore.volume_hard_delete(volume_id).await.unwrap();
+}
+
+// internal API related tests
+
+/// Test that an Upstairs can reissue live repair notifications
+#[nexus_test]
+async fn test_upstairs_repair_notify_idempotent(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+
+    // Send the same start request.
+    let notify_url = format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+
+    let request = internal::nexus::RepairStartInfo {
+        time: Utc::now(),
+        session_id,
+        repair_id,
+        repair_type: internal::nexus::UpstairsRepairType::Live,
+        repairs: vec![internal::nexus::DownstairsUnderRepair {
+            region_uuid: region_id,
+            target_addr: "[fd00:1122:3344:101::8]:12345".parse().unwrap(),
+        }],
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_url,
+            Some(request.clone()),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // Send the same finish request.
+    let notify_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
+
+    let request = internal::nexus::RepairFinishInfo {
+        time: Utc::now(),
+        session_id,
+        repair_id,
+        repair_type: internal::nexus::UpstairsRepairType::Live,
+        repairs: vec![internal::nexus::DownstairsUnderRepair {
+            region_uuid: region_id,
+            target_addr: "[fd00:1122:3344:101::8]:12345".parse().unwrap(),
+        }],
+        aborted: false,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_url,
+            Some(request.clone()),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+}
+
+/// Test that an Upstairs cannot issue different finish statuses for the same
+/// repair.
+#[nexus_test]
+async fn test_upstairs_repair_notify_different_finish_status(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+
+    let notify_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_url,
+            Some(internal::nexus::RepairFinishInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+                aborted: false, // live repair was ok
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_url,
+            Some(internal::nexus::RepairFinishInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+                aborted: true, // live repair failed?
+            }),
+            StatusCode::CONFLICT,
+        )
+        .await
+        .unwrap_err();
+}
+
+/// Test that the same Upstairs can rerun a repair again.
+#[nexus_test]
+async fn test_upstairs_repair_same_upstairs_retry(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+
+    // Simulate one failed repair
+
+    let notify_start_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+    let notify_finish_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_finish_url,
+            Some(internal::nexus::RepairFinishInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+                aborted: true,
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // Simulate the same Upstairs restarting the repair, which passes this time
+
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_finish_url,
+            Some(internal::nexus::RepairFinishInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+                aborted: false,
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+}
+
+/// Test that a different Upstairs session can rerun a repair again.
+#[nexus_test]
+async fn test_upstairs_repair_different_upstairs_retry(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+
+    // Simulate one failed repair by one Upstairs
+
+    let notify_start_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+    let notify_finish_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_finish_url,
+            Some(internal::nexus::RepairFinishInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+                aborted: true,
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // Simulate a different Upstairs session restarting the repair, which passes this time
+
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_finish_url,
+            Some(internal::nexus::RepairFinishInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+                aborted: false,
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+}
+
+/// Test that a different Upstairs session can rerun an interrupted repair
+#[nexus_test]
+async fn test_upstairs_repair_different_upstairs_retry_interrupted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+
+    // Simulate one failed repair by one Upstairs, which was interrupted (which
+    // leads to no finish message).
+
+    let notify_start_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+    let notify_finish_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-finish");
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // Simulate a different Upstairs session restarting the interrupted repair,
+    // which passes this time
+
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_finish_url,
+            Some(internal::nexus::RepairFinishInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+                aborted: false,
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+}
+
+/// Test that the same repair ID cannot be used for different repair types
+#[nexus_test]
+async fn test_upstairs_repair_repair_id_and_type_conflict(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+
+    let notify_start_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type:
+                    internal::nexus::UpstairsRepairType::Reconciliation,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::CONFLICT,
+        )
+        .await
+        .unwrap_err();
+}
+
+/// Test that an Upstairs can submit progress for a repair
+#[nexus_test]
+async fn test_upstairs_repair_submit_progress(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let session_id: TypedUuid<UpstairsSessionKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+    let region_id: TypedUuid<DownstairsRegionKind> = TypedUuid::new_v4();
+
+    // A repair must be started before progress can be submitted
+
+    let notify_start_url =
+        format!("/crucible/0/upstairs/{upstairs_id}/repair-start");
+
+    int_client
+        .make_request(
+            Method::POST,
+            &notify_start_url,
+            Some(internal::nexus::RepairStartInfo {
+                time: Utc::now(),
+                session_id,
+                repair_id,
+                repair_type: internal::nexus::UpstairsRepairType::Live,
+                repairs: vec![internal::nexus::DownstairsUnderRepair {
+                    region_uuid: region_id,
+                    target_addr: "[fd00:1122:3344:101::8]:12345"
+                        .parse()
+                        .unwrap(),
+                }],
+            }),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    let progress_url = format!(
+        "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress"
+    );
+
+    for i in 0..100 {
+        int_client
+            .make_request(
+                Method::POST,
+                &progress_url,
+                Some(internal::nexus::RepairProgress {
+                    time: Utc::now(),
+                    current_item: i,
+                    total_items: 100,
+                }),
+                StatusCode::NO_CONTENT,
+            )
+            .await
+            .unwrap();
+    }
+}
+
+/// Test that an Upstairs can't submit progress unless a repair was started
+#[nexus_test]
+async fn test_upstairs_repair_reject_submit_progress_when_no_repair(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let repair_id: TypedUuid<UpstairsRepairKind> = TypedUuid::new_v4();
+
+    let progress_url = format!(
+        "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress"
+    );
+
+    int_client
+        .make_request(
+            Method::POST,
+            &progress_url,
+            Some(internal::nexus::RepairProgress {
+                time: Utc::now(),
+                current_item: 10,
+                total_items: 100,
+            }),
+            StatusCode::NOT_FOUND,
+        )
+        .await
+        .unwrap_err();
+}
+
+/// Test that an Upstairs can notify Nexus when a Downstairs client task is
+/// requested to stop
+#[nexus_test]
+async fn test_upstairs_notify_downstairs_client_stop_request(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let downstairs_id: TypedUuid<DownstairsKind> = TypedUuid::new_v4();
+
+    let stop_request_url = format!(
+        "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request"
+    );
+
+    // Make sure an Upstairs can re-send the notification
+
+    let request = internal::nexus::DownstairsClientStopRequest {
+        time: Utc::now(),
+        reason:
+            internal::nexus::DownstairsClientStopRequestReason::TooManyOutstandingJobs,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stop_request_url,
+            Some(request.clone()),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stop_request_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // The client can be requested to stop for the same reason a different time
+
+    let request = internal::nexus::DownstairsClientStopRequest {
+        time: Utc::now(),
+        reason:
+            internal::nexus::DownstairsClientStopRequestReason::TooManyOutstandingJobs,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stop_request_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // The client can also be requested to stop for a different reason
+
+    let request = internal::nexus::DownstairsClientStopRequest {
+        time: Utc::now(),
+        reason: internal::nexus::DownstairsClientStopRequestReason::IOError,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stop_request_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+}
+
+/// Test that an Upstairs can notify Nexus when a Downstairs client task stops
+#[nexus_test]
+async fn test_upstairs_notify_downstairs_client_stops(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let int_client = &cptestctx.internal_client;
+
+    let upstairs_id: TypedUuid<UpstairsKind> = TypedUuid::new_v4();
+    let downstairs_id: TypedUuid<DownstairsKind> = TypedUuid::new_v4();
+
+    let stopped_url = format!(
+        "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped"
+    );
+
+    // Make sure an Upstairs can re-send the notification
+
+    let request = internal::nexus::DownstairsClientStopped {
+        time: Utc::now(),
+        reason: internal::nexus::DownstairsClientStoppedReason::ReadFailed,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stopped_url,
+            Some(request.clone()),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stopped_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // The client can stop for the same reason a different time
+
+    let request = internal::nexus::DownstairsClientStopped {
+        time: Utc::now(),
+        reason: internal::nexus::DownstairsClientStoppedReason::ReadFailed,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stopped_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
+
+    // The client can also stop for a different reason
+
+    let request = internal::nexus::DownstairsClientStopped {
+        time: Utc::now(),
+        reason: internal::nexus::DownstairsClientStoppedReason::Timeout,
+    };
+
+    int_client
+        .make_request(
+            Method::POST,
+            &stopped_url,
+            Some(request),
+            StatusCode::NO_CONTENT,
+        )
+        .await
+        .unwrap();
 }
