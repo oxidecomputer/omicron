@@ -35,6 +35,10 @@ progenitor::generate_api!(
         NewPasswordHash = omicron_passwords::NewPasswordHash,
         NetworkInterface = omicron_common::api::internal::shared::NetworkInterface,
         NetworkInterfaceKind = omicron_common::api::internal::shared::NetworkInterfaceKind,
+        TypedUuidForDownstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::DownstairsKind>,
+        TypedUuidForUpstairsKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsKind>,
+        TypedUuidForUpstairsRepairKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsRepairKind>,
+        TypedUuidForUpstairsSessionKind = omicron_uuid_kinds::TypedUuid<omicron_uuid_kinds::UpstairsSessionKind>,
     },
     patch = {
         SledAgentInfo = { derives = [PartialEq, Eq] },

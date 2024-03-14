@@ -3,7 +3,6 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{NexusActionContext, NEXUS_DPD_TAG};
-use crate::app::sagas::retry_until_known_result;
 use crate::app::sagas::switch_port_settings_common::{
     api_to_dpd_port_settings, apply_bootstore_update, bootstore_update,
     ensure_switch_port_bgp_settings, ensure_switch_port_uplink,
@@ -23,6 +22,7 @@ use nexus_db_model::NETWORK_KEY;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use omicron_common::api::external::{self, NameOrId, SwitchLocation};
+use omicron_common::retry_until_known_result;
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 use std::str::FromStr;

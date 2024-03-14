@@ -380,7 +380,7 @@ mod test {
     };
     use crate::db::explain::ExplainableAsync;
     use crate::db::fixed_data::silo::DEFAULT_SILO;
-    use crate::db::fixed_data::silo::SILO_ID;
+    use crate::db::fixed_data::silo::DEFAULT_SILO_ID;
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
@@ -499,8 +499,8 @@ mod test {
         // Associate silo with user
         let authz_silo = authz::Silo::new(
             authz::FLEET,
-            *SILO_ID,
-            LookupType::ById(*SILO_ID),
+            *DEFAULT_SILO_ID,
+            LookupType::ById(*DEFAULT_SILO_ID),
         );
         datastore
             .silo_user_create(
@@ -519,7 +519,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(*SILO_ID, db_silo_user.silo_id);
+        assert_eq!(*DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
         let (.., fetched) = LookupPath::new(&opctx, &datastore)
@@ -577,7 +577,7 @@ mod test {
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::for_test_user(
                 silo_user_id,
-                *SILO_ID,
+                *DEFAULT_SILO_ID,
                 SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
             ),
             Arc::clone(&datastore),
@@ -1520,8 +1520,8 @@ mod test {
         // Create a new Silo user so that we can lookup their keys.
         let authz_silo = authz::Silo::new(
             authz::FLEET,
-            *SILO_ID,
-            LookupType::ById(*SILO_ID),
+            *DEFAULT_SILO_ID,
+            LookupType::ById(*DEFAULT_SILO_ID),
         );
         let silo_user_id = Uuid::new_v4();
         datastore
@@ -1571,7 +1571,7 @@ mod test {
                 .fetch()
                 .await
                 .unwrap();
-        assert_eq!(authz_silo.id(), *SILO_ID);
+        assert_eq!(authz_silo.id(), *DEFAULT_SILO_ID);
         assert_eq!(authz_silo_user.id(), silo_user_id);
         assert_eq!(found.silo_user_id, ssh_key.silo_user_id);
         assert_eq!(found.public_key, ssh_key.public_key);

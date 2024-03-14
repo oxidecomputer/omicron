@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(42, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(44, 0, 0);
 
 table! {
     disk (id) {
@@ -1449,6 +1449,7 @@ table! {
         comment -> Text,
 
         internal_dns_version -> Int8,
+        external_dns_version -> Int8,
     }
 }
 
@@ -1553,6 +1554,50 @@ table! {
         time_deleted -> Nullable<Timestamptz>,
         project_id -> Uuid,
         sled -> Uuid,
+    }
+}
+
+table! {
+    upstairs_repair_notification (repair_id, upstairs_id, session_id, region_id, notification_type) {
+        time -> Timestamptz,
+
+        repair_id -> Uuid,
+        repair_type -> crate::UpstairsRepairTypeEnum,
+        upstairs_id -> Uuid,
+        session_id -> Uuid,
+
+        region_id -> Uuid,
+        target_ip -> Inet,
+        target_port -> Int4,
+
+        notification_type -> crate::UpstairsRepairNotificationTypeEnum,
+    }
+}
+
+table! {
+    upstairs_repair_progress (repair_id, time, current_item, total_items) {
+        repair_id -> Uuid,
+        time -> Timestamptz,
+        current_item -> Int8,
+        total_items -> Int8,
+    }
+}
+
+table! {
+    downstairs_client_stop_request_notification (time, upstairs_id, downstairs_id, reason) {
+        time -> Timestamptz,
+        upstairs_id -> Uuid,
+        downstairs_id -> Uuid,
+        reason -> crate::DownstairsClientStopRequestReasonEnum,
+    }
+}
+
+table! {
+    downstairs_client_stopped_notification (time, upstairs_id, downstairs_id, reason) {
+        time -> Timestamptz,
+        upstairs_id -> Uuid,
+        downstairs_id -> Uuid,
+        reason -> crate::DownstairsClientStoppedReasonEnum,
     }
 }
 
