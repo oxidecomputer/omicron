@@ -66,11 +66,7 @@ pub struct IpPoolUtilization {
 
 impl From<IpPoolUtilization> for views::IpPoolUtilization {
     fn from(util: IpPoolUtilization) -> Self {
-        Self {
-            allocated: util.allocated.try_into().ok(),
-            // if u128 is too big to convert to u32, fall back to None (null)
-            total: util.total.try_into().ok(),
-        }
+        Self { allocated: util.allocated.try_into().ok(), total: util.total }
     }
 }
 
@@ -83,13 +79,13 @@ mod test {
         let view: views::IpPoolUtilization =
             IpPoolUtilization { allocated: 40, total: 100 }.into();
         assert_eq!(view.allocated, Some(40));
-        assert_eq!(view.total, Some(100));
+        assert_eq!(view.total, 100);
 
         let view: views::IpPoolUtilization =
             IpPoolUtilization { allocated: i64::from(u32::MAX), total: 100 }
                 .into();
         assert_eq!(view.allocated, Some(u32::MAX));
-        assert_eq!(view.total, Some(100));
+        assert_eq!(view.total, 100);
 
         let view: views::IpPoolUtilization = IpPoolUtilization {
             allocated: i64::from(u32::MAX) + 1,
@@ -97,13 +93,13 @@ mod test {
         }
         .into();
         assert_eq!(view.allocated, None);
-        assert_eq!(view.total, Some(100));
+        assert_eq!(view.total, 100);
 
         let view: views::IpPoolUtilization =
             IpPoolUtilization { allocated: 40, total: u128::from(u32::MAX) }
                 .into();
         assert_eq!(view.allocated, Some(40));
-        assert_eq!(view.total, Some(u32::MAX));
+        assert_eq!(view.total, u128::from(u32::MAX));
 
         let view: views::IpPoolUtilization = IpPoolUtilization {
             allocated: 40,
@@ -111,6 +107,6 @@ mod test {
         }
         .into();
         assert_eq!(view.allocated, Some(40));
-        assert_eq!(view.total, None);
+        assert_eq!(view.total, u128::from(u32::MAX) + 1);
     }
 }

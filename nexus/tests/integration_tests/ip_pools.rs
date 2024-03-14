@@ -40,7 +40,6 @@ use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::Ipv6Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
-use nexus_types::external_api::views;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
 use nexus_types::external_api::views::IpPoolSiloLink;
@@ -759,9 +758,8 @@ async fn create_pool(client: &ClientTestContext, name: &str) -> IpPool {
         .unwrap()
 }
 
-// This is mostly about the threshold where the nullable total field goes
-// from defined to null because the size of the pool gets too big for a
-// u32. testing allocated is done in a bunch of other places. look for
+// This is mostly about testing the total field with huge numbers.
+// testing allocated is done in a bunch of other places. look for
 // assert_ip_pool_utilization calls
 #[nexus_test]
 async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
@@ -785,32 +783,19 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
 
     assert_ip_pool_utilization(client, "p0", 0, 5).await;
 
-    // now lets add the maximum number of addresses we can and still get a total
-    // in the response. that's FFFF FFFF minus five for the above range
+    // now let's add a gigantic range just for fun
     let big_range = IpRange::V6(
         Ipv6Range::new(
             std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1),
-            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0xffff, 0xfffa),
+            std::net::Ipv6Addr::new(
+                0xfd00, 0, 0, 0, 0xffff, 0xfff, 0xffff, 0xffff,
+            ),
         )
         .unwrap(),
     );
     object_create::<IpRange, IpPoolRange>(client, &add_url, &big_range).await;
 
-    assert_ip_pool_utilization(client, "p0", 0, u32::MAX).await;
-
-    // now adding one more address will take us over the threshold, making total None
-    let range = IpRange::V4(
-        Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 0, 0, 6),
-            std::net::Ipv4Addr::new(10, 0, 0, 6),
-        )
-        .unwrap(),
-    );
-    object_create::<IpRange, IpPoolRange>(client, &add_url, &range).await;
-
-    let utilization: views::IpPoolUtilization =
-        object_get(client, "/v1/system/ip-pools/p0/utilization").await;
-    assert_eq!(utilization.total, None);
+    assert_ip_pool_utilization(client, "p0", 0, 18446480190918885380).await;
 }
 
 // Data for testing overlapping IP ranges

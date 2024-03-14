@@ -13700,13 +13700,14 @@
             "minimum": 0
           },
           "total": {
-            "nullable": true,
-            "description": "Total will be null if the actual value is too large to convert to a 32-bit integer. This should be unlikely in practice, but it is possible if the pool contains a large IPv6 range.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
+            "description": "The total number of IP addresses in the pool.\n\nAn IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a string with a custom \"uint128\" format.",
+            "type": "string",
+            "format": "uint128"
           }
-        }
+        },
+        "required": [
+          "total"
+        ]
       },
       "IpRange": {
         "oneOf": [
