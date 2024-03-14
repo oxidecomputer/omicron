@@ -5069,6 +5069,7 @@ dependencies = [
  "serde_urlencoded",
  "serde_with",
  "slog",
+ "slog-error-chain",
  "strum 0.26.1",
  "test-strategy",
  "thiserror",
