@@ -66,7 +66,9 @@ use omicron_common::backoff::{
     retry_policy_internal_service_aggressive, BackoffError,
 };
 use oximeter::types::ProducerRegistry;
-use sled_hardware::{underlay, Baseboard, HardwareManager};
+use sled_hardware::{underlay, HardwareManager};
+use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware_types::Baseboard;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -1090,7 +1092,7 @@ impl SledAgent {
     ///
     /// This is basically a GET version of the information we push to Nexus on
     /// startup.
-    pub(crate) fn inventory(&self) -> Result<Inventory, InventoryError> {
+    pub(crate) async fn inventory(&self) -> Result<Inventory, InventoryError> {
         let sled_id = self.inner.id;
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
@@ -1105,6 +1107,18 @@ impl SledAgent {
         } else {
             crate::params::SledRole::Gimlet
         };
+        let disks = self
+            .storage()
+            .get_latest_resources()
+            .await
+            .disks()
+            .iter()
+            .map(|(identity, (disk, _pool))| crate::params::InventoryDisk {
+                identity: identity.clone(),
+                variant: disk.variant(),
+                slot: disk.slot(),
+            })
+            .collect();
 
         Ok(Inventory {
             sled_id,
@@ -1114,6 +1128,7 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
+            disks,
         })
     }
 }
@@ -1173,9 +1188,7 @@ pub async fn sled_add(
     // Get all known bootstrap addresses via DDM
     let ddm_admin_client = DdmAdminClient::localhost(&log)?;
     let addrs = ddm_admin_client
-        .derive_bootstrap_addrs_from_prefixes(&[
-            underlay::BootstrapInterface::GlobalZone,
-        ])
+        .derive_bootstrap_addrs_from_prefixes(&[BootstrapInterface::GlobalZone])
         .await?;
 
     // Create a set of futures to concurrently map the baseboard to bootstrap ip
