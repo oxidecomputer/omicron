@@ -489,8 +489,6 @@ pub async fn run_standalone_server(
         None => vec![],
     };
 
-    let services =
-        zones.iter().map(|z| z.to_nexus_service_req(config.id)).collect();
     let mut sled_configs = BTreeMap::new();
     sled_configs.insert(config.id, SledConfig { zones });
 
@@ -499,7 +497,6 @@ pub async fn run_standalone_server(
             sled_configs,
             internal_dns_version,
         ),
-        services,
         datasets,
         internal_services_ip_pool_ranges,
         certs,

@@ -566,30 +566,10 @@ impl ServiceInner {
             self.log.new(o!("component" => "NexusClient")),
         );
 
-        // Ensure we can quickly look up "Sled Agent Address" -> "UUID of sled".
-        //
-        // We need the ID when passing info to Nexus.
-        let mut id_map = HashMap::new();
-        for (_, sled_request) in sled_plan.sleds.iter() {
-            id_map.insert(
-                get_sled_address(sled_request.body.subnet),
-                sled_request.body.id,
-            );
-        }
-
-        // Convert all the information we have about services and datasets into
-        // a format which can be processed by Nexus.
-        let mut services: Vec<NexusTypes::ServicePutRequest> = vec![];
+        // Convert all the information we have about datasets into a format
+        // which can be processed by Nexus.
         let mut datasets: Vec<NexusTypes::DatasetCreateRequest> = vec![];
-        for (addr, sled_config) in service_plan.services.iter() {
-            let sled_id = *id_map
-                .get(addr)
-                .expect("Sled address in service plan, but not sled plan");
-
-            for zone in &sled_config.zones {
-                services.push(zone.to_nexus_service_req(sled_id));
-            }
-
+        for sled_config in service_plan.services.values() {
             for zone in &sled_config.zones {
                 if let Some((dataset_name, dataset_address)) =
                     zone.dataset_name_and_address()
@@ -667,7 +647,6 @@ impl ServiceInner {
 
         let request = NexusTypes::RackInitializationRequest {
             blueprint,
-            services,
             datasets,
             internal_services_ip_pool_ranges,
             certs: config.external_certificates.clone(),
