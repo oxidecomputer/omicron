@@ -1808,7 +1808,7 @@ mod test {
                         underlay_address: Ipv6Addr::LOCALHOST,
                         zone_type: OmicronZoneType::Nexus {
                             internal_address: "[::1]:80".to_string(),
-                            external_ip: nexus_ip.into(),
+                            external_ip: nexus_ip,
                             external_tls: false,
                             external_dns_servers: vec![],
                             nic: NetworkInterface {
@@ -1933,7 +1933,7 @@ mod test {
                             underlay_address: Ipv6Addr::LOCALHOST,
                             zone_type: OmicronZoneType::Nexus {
                                 internal_address: "[::1]:80".to_string(),
-                                external_ip: ip.into(),
+                                external_ip: ip,
                                 external_tls: false,
                                 external_dns_servers: vec![],
                                 nic: NetworkInterface {
