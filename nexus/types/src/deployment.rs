@@ -198,17 +198,9 @@ impl Blueprint {
         other: &'a Blueprint,
     ) -> OmicronZonesDiff<'a> {
         OmicronZonesDiff {
-            before_meta: DiffBeforeMetadata::Blueprint(DiffBlueprintMetadata {
-                id: self.id,
-                internal_dns_version: self.internal_dns_version,
-                external_dns_version: self.external_dns_version,
-            }),
+            before_meta: DiffBeforeMetadata::Blueprint(self.diff_metadata()),
             before_zones: self.blueprint_zones.clone(),
-            after_meta: DiffBlueprintMetadata {
-                id: other.id,
-                internal_dns_version: other.internal_dns_version,
-                external_dns_version: other.external_dns_version,
-            },
+            after_meta: other.diff_metadata(),
             after_zones: &other.blueprint_zones,
         }
     }
@@ -252,11 +244,7 @@ impl Blueprint {
         OmicronZonesDiff {
             before_meta: DiffBeforeMetadata::Collection { id: collection.id },
             before_zones,
-            after_meta: DiffBlueprintMetadata {
-                id: self.id,
-                internal_dns_version: self.internal_dns_version,
-                external_dns_version: self.external_dns_version,
-            },
+            after_meta: self.diff_metadata(),
             after_zones: &self.blueprint_zones,
         }
     }
@@ -265,6 +253,18 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
+    }
+
+    // ---
+    // Helper methods
+    // ---
+
+    fn diff_metadata(&self) -> BlueprintDiffMetadata {
+        BlueprintDiffMetadata {
+            id: self.id,
+            internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
+        }
     }
 }
 
@@ -504,18 +504,18 @@ pub struct OmicronZonesDiff<'a> {
     // We store an owned copy of "before_zones" to make it easier to support
     // collections here, where we need to assemble this map ourselves.
     before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
-    after_meta: DiffBlueprintMetadata,
+    after_meta: BlueprintDiffMetadata,
     after_zones: &'a BTreeMap<Uuid, BlueprintZonesConfig>,
 }
 
 #[derive(Debug)]
 enum DiffBeforeMetadata {
     Collection { id: Uuid },
-    Blueprint(DiffBlueprintMetadata),
+    Blueprint(BlueprintDiffMetadata),
 }
 
 #[derive(Debug)]
-struct DiffBlueprintMetadata {
+struct BlueprintDiffMetadata {
     id: Uuid,
     internal_dns_version: Generation,
     external_dns_version: Generation,
