@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap TODO-doc this whole file
-// XXX-dap TODO-doc update README too
+//! Database schema versions and upgrades
+//!
+//! For details, see schema/crdb/README.adoc in the root of this repository.
 
 use anyhow::{bail, ensure, Context};
 use camino::Utf8Path;
@@ -12,90 +13,119 @@ use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
 
 /// The version of the database schema this particular version of Nexus was
-/// built against.
+/// built against
 ///
-/// This should be updated whenever the schema is changed. For more details,
-/// refer to: schema/crdb/README.adoc
+/// This must be updated when you change the database schema.  Refer to
+/// schema/crdb/README.adoc in the root of this repository for details.
 pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(43, 0, 0);
 
-pub const EARLIEST_SUPPORTED_VERSION: SemverVersion =
-    SemverVersion::new(1, 0, 0);
-
+/// List of all past database schema versions, in *reverse* order
+///
+/// If you want to change the Omicron database schema, you must update this.
 static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
     vec![
-        // The first many schema versions only vary by major or micro number and
+        // +- The next version goes here!  Duplicate this line, uncomment
+        // |  the *second* copy, then update that copy for your version,
+        // |  leaving the first copy as an example for the next person.
+        // v
+        // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+
+        // The first many schema versions only vary by major or patch number and
         // their path is predictable based on the version number.  (This was
         // historically a problem because two pull requests both adding a new
         // schema version might merge cleanly but produce an invalid result.)
-        KnownVersion::legacy(1, 0),
-        KnownVersion::legacy(2, 0),
-        KnownVersion::legacy(3, 0),
-        KnownVersion::legacy(3, 1),
-        KnownVersion::legacy(3, 2),
-        KnownVersion::legacy(3, 3),
-        KnownVersion::legacy(4, 0),
-        KnownVersion::legacy(5, 0),
-        KnownVersion::legacy(6, 0),
-        KnownVersion::legacy(7, 0),
-        KnownVersion::legacy(8, 0),
-        KnownVersion::legacy(9, 0),
-        KnownVersion::legacy(10, 0),
-        KnownVersion::legacy(11, 0),
-        KnownVersion::legacy(12, 0),
-        KnownVersion::legacy(13, 0),
-        KnownVersion::legacy(14, 0),
-        KnownVersion::legacy(15, 0),
-        KnownVersion::legacy(16, 0),
-        KnownVersion::legacy(17, 0),
-        KnownVersion::legacy(18, 0),
-        KnownVersion::legacy(19, 0),
-        KnownVersion::legacy(20, 0),
-        KnownVersion::legacy(21, 0),
-        KnownVersion::legacy(22, 0),
-        KnownVersion::legacy(23, 0),
-        KnownVersion::legacy(23, 1),
-        KnownVersion::legacy(24, 0),
-        KnownVersion::legacy(25, 0),
-        KnownVersion::legacy(26, 0),
-        KnownVersion::legacy(27, 0),
-        KnownVersion::legacy(28, 0),
-        KnownVersion::legacy(29, 0),
-        KnownVersion::legacy(30, 0),
-        KnownVersion::legacy(31, 0),
-        KnownVersion::legacy(32, 0),
-        KnownVersion::legacy(33, 0),
-        KnownVersion::legacy(33, 1),
-        KnownVersion::legacy(34, 0),
-        KnownVersion::legacy(35, 0),
-        KnownVersion::legacy(36, 0),
-        KnownVersion::legacy(37, 0),
-        KnownVersion::legacy(37, 1),
-        KnownVersion::legacy(38, 0),
-        KnownVersion::legacy(39, 0),
-        KnownVersion::legacy(40, 0),
-        KnownVersion::legacy(41, 0),
-        KnownVersion::legacy(42, 0),
         KnownVersion::legacy(43, 0),
-        KnownVersion::new(44, "my-thing"),
+        KnownVersion::legacy(42, 0),
+        KnownVersion::legacy(41, 0),
+        KnownVersion::legacy(40, 0),
+        KnownVersion::legacy(39, 0),
+        KnownVersion::legacy(38, 0),
+        KnownVersion::legacy(37, 1),
+        KnownVersion::legacy(37, 0),
+        KnownVersion::legacy(36, 0),
+        KnownVersion::legacy(35, 0),
+        KnownVersion::legacy(34, 0),
+        KnownVersion::legacy(33, 1),
+        KnownVersion::legacy(33, 0),
+        KnownVersion::legacy(32, 0),
+        KnownVersion::legacy(31, 0),
+        KnownVersion::legacy(30, 0),
+        KnownVersion::legacy(29, 0),
+        KnownVersion::legacy(28, 0),
+        KnownVersion::legacy(27, 0),
+        KnownVersion::legacy(26, 0),
+        KnownVersion::legacy(25, 0),
+        KnownVersion::legacy(24, 0),
+        KnownVersion::legacy(23, 1),
+        KnownVersion::legacy(23, 0),
+        KnownVersion::legacy(22, 0),
+        KnownVersion::legacy(21, 0),
+        KnownVersion::legacy(20, 0),
+        KnownVersion::legacy(19, 0),
+        KnownVersion::legacy(18, 0),
+        KnownVersion::legacy(17, 0),
+        KnownVersion::legacy(16, 0),
+        KnownVersion::legacy(15, 0),
+        KnownVersion::legacy(14, 0),
+        KnownVersion::legacy(13, 0),
+        KnownVersion::legacy(12, 0),
+        KnownVersion::legacy(11, 0),
+        KnownVersion::legacy(10, 0),
+        KnownVersion::legacy(9, 0),
+        KnownVersion::legacy(8, 0),
+        KnownVersion::legacy(7, 0),
+        KnownVersion::legacy(6, 0),
+        KnownVersion::legacy(5, 0),
+        KnownVersion::legacy(4, 0),
+        KnownVersion::legacy(3, 3),
+        KnownVersion::legacy(3, 2),
+        KnownVersion::legacy(3, 1),
+        KnownVersion::legacy(3, 0),
+        KnownVersion::legacy(2, 0),
+        KnownVersion::legacy(1, 0),
     ]
 });
 
+/// The earliest supported schema version.
+pub const EARLIEST_SUPPORTED_VERSION: SemverVersion =
+    SemverVersion::new(1, 0, 0);
+
+/// Describes one version of the database schema
 #[derive(Debug, Clone)]
 struct KnownVersion {
+    /// All versions have an associated SemVer.  We only use the major number.
     semver: SemverVersion,
+
+    /// Path relative to the root of the schema ("schema/crdb" in the root of
+    /// this repo) where this version's update SQL files are stored
     relative_path: String,
 }
 
 impl KnownVersion {
-    fn legacy(major: u64, micro: u64) -> KnownVersion {
-        let semver = SemverVersion::new(major, 0, micro);
-        let relative_path = semver.to_string();
-        KnownVersion { semver, relative_path }
-    }
-
+    /// Generate a `KnownVersion` for a new schema version
+    ///
+    /// `major` should be the next available integer (one more than the previous
+    /// version's major number).
+    ///
+    /// `relative_path` is the path relative to "schema/crdb" (from the root of
+    /// this repository) where the SQL files live that will update the schema
+    /// from the previous version to this version.
     fn new(major: u64, relative_path: &str) -> KnownVersion {
         let semver = SemverVersion::new(major, 0, 0);
         KnownVersion { semver, relative_path: relative_path.to_owned() }
+    }
+
+    /// Generate a `KnownVersion` for a version that predates the current
+    /// directory naming scheme
+    ///
+    /// These versions varied in both major and patch numbers and the path to
+    /// their SQL files was predictable based solely on the version.
+    ///
+    /// **This should not be used for new schema versions.**
+    fn legacy(major: u64, patch: u64) -> KnownVersion {
+        let semver = SemverVersion::new(major, 0, patch);
+        let relative_path = semver.to_string();
+        KnownVersion { semver, relative_path }
     }
 }
 
@@ -105,17 +135,50 @@ impl std::fmt::Display for KnownVersion {
     }
 }
 
+/// Load and inspect the set of all known schema versions
 #[derive(Debug, Clone)]
 pub struct AllSchemaVersions {
     versions: BTreeMap<SemverVersion, SchemaVersion>,
 }
 
 impl AllSchemaVersions {
+    /// Load the set of all known schema versions from the given directory tree
+    ///
+    /// The directory should contain exactly one directory for each version.
+    /// Each version's directory should contain the SQL files that carry out
+    /// schema migration from the previous version.  See schema/crdb/README.adoc
+    /// for details.
     pub fn load(
         schema_directory: &Utf8Path,
     ) -> Result<AllSchemaVersions, anyhow::Error> {
+        Self::load_known_versions(schema_directory, KNOWN_VERSIONS.iter())
+    }
+
+    /// Load a specific set of known schema versions using the legacy
+    /// conventions from the given directory tree
+    ///
+    /// This is only provided for certain integration tests.
+    #[doc(hidden)]
+    pub fn load_specific_legacy_versions<'a>(
+        schema_directory: &Utf8Path,
+        versions: impl Iterator<Item = &'a SemverVersion>,
+    ) -> Result<AllSchemaVersions, anyhow::Error> {
+        let known_versions: Vec<_> = versions
+            .map(|v| {
+                assert_eq!(v.0.minor, 0);
+                KnownVersion::legacy(v.0.major, v.0.patch)
+            })
+            .collect();
+
+        Self::load_known_versions(schema_directory, known_versions.iter())
+    }
+
+    fn load_known_versions<'a>(
+        schema_directory: &Utf8Path,
+        known_versions: impl Iterator<Item = &'a KnownVersion>,
+    ) -> Result<AllSchemaVersions, anyhow::Error> {
         let mut versions = BTreeMap::new();
-        for known_version in &*KNOWN_VERSIONS {
+        for known_version in known_versions {
             let version_path =
                 schema_directory.join(&known_version.relative_path);
             let schema_version = SchemaVersion::load_from_directory(
@@ -135,14 +198,21 @@ impl AllSchemaVersions {
         Ok(AllSchemaVersions { versions })
     }
 
+    /// Iterate over the set of all known schema versions in order starting with
+    /// the earliest supported version
     pub fn iter_versions(&self) -> impl Iterator<Item = &SchemaVersion> {
         self.versions.values()
     }
 
+    /// Return whether `version` is a known schema version
     pub fn contains_version(&self, version: &SemverVersion) -> bool {
         self.versions.contains_key(version)
     }
 
+    /// Iterate over the known schema versions within `bounds`
+    ///
+    /// This is generally used to iterate over all the schema versions between
+    /// two specific versions.
     pub fn versions_range<R>(
         &self,
         bounds: R,
@@ -154,27 +224,12 @@ impl AllSchemaVersions {
     }
 }
 
+/// Describes a single version of the schema, including the SQL steps to get
+/// from the previous version to the current one
 #[derive(Debug, Clone)]
 pub struct SchemaVersion {
     semver: SemverVersion,
     upgrade_from_previous: Vec<SchemaUpgradeStep>,
-}
-
-/// Describes a single file containing a schema change, as SQL.
-#[derive(Debug, Clone)]
-pub struct SchemaUpgradeStep {
-    label: String,
-    sql: String,
-}
-
-impl SchemaUpgradeStep {
-    pub fn label(&self) -> &str {
-        self.label.as_ref()
-    }
-
-    pub fn sql(&self) -> &str {
-        self.sql.as_ref()
-    }
 }
 
 impl SchemaVersion {
@@ -250,7 +305,7 @@ impl SchemaVersion {
                 // For a single file, we allow either `up.sql` (keyed as
                 // up_number=0) or `up1.sql`; reject any higher number.
                 ensure!(
-                    *up_number == 1,
+                    *up_number <= 1,
                     "`up*.sql` numbering must start at 1: found first file \
                      {path}"
                 );
@@ -295,14 +350,19 @@ impl SchemaVersion {
         Ok(SchemaVersion { semver, upgrade_from_previous: steps })
     }
 
+    /// Returns the semver for this schema version
     pub fn semver(&self) -> &SemverVersion {
         &self.semver
     }
 
+    /// Returns true if this schema version is the one that the current program
+    /// thinks is the latest (current) one
     pub fn is_current_software_version(&self) -> bool {
         self.semver == SCHEMA_VERSION
     }
 
+    /// Iterate over the SQL steps required to update the database schema from
+    /// the previous version to this one
     pub fn upgrade_steps(&self) -> impl Iterator<Item = &SchemaUpgradeStep> {
         self.upgrade_from_previous.iter()
     }
@@ -317,6 +377,26 @@ impl std::fmt::Display for SchemaVersion {
     }
 }
 
+/// Describes a single file containing a schema change, as SQL.
+#[derive(Debug, Clone)]
+pub struct SchemaUpgradeStep {
+    label: String,
+    sql: String,
+}
+
+impl SchemaUpgradeStep {
+    /// Returns a human-readable name for this step (the name of the file it
+    /// came from)
+    pub fn label(&self) -> &str {
+        self.label.as_ref()
+    }
+
+    /// Returns the actual SQL to execute for this step
+    pub fn sql(&self) -> &str {
+        self.sql.as_ref()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -324,19 +404,178 @@ mod test {
 
     #[test]
     fn test_known_versions() {
+        if let Err(error) = verify_known_versions(
+            // The real list is defined in reverse order for developer
+            // convenience so we reverse it before processing.
+            KNOWN_VERSIONS.iter().rev(),
+            &EARLIEST_SUPPORTED_VERSION,
+            &SCHEMA_VERSION,
+            // Versions after 43 obey our modern, stricter rules.
+            43,
+        ) {
+            panic!("problem with static configuration: {:#}", error);
+        }
+    }
+
+    // (Test the test function)
+    #[test]
+    fn test_verify() {
+        // EARLIEST_SUPPORTED_VERSION is somehow wrong
+        let error = verify_known_versions(
+            [&KnownVersion::legacy(2, 0), &KnownVersion::legacy(3, 0)],
+            &SemverVersion::new(1, 0, 0),
+            &SemverVersion::new(3, 0, 0),
+            100,
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "EARLIEST_SUPPORTED_VERSION is not the earliest in KNOWN_VERSIONS"
+        );
+
+        // SCHEMA_VERSION was not updated
+        let error = verify_known_versions(
+            [&KnownVersion::legacy(1, 0), &KnownVersion::legacy(2, 0)],
+            &SemverVersion::new(1, 0, 0),
+            &SemverVersion::new(1, 0, 0),
+            100,
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "latest KNOWN_VERSION is 2.0.0, but SCHEMA_VERSION is 1.0.0"
+        );
+
+        // Latest version was duplicated instead of bumped (legacy)
+        let error = verify_known_versions(
+            [
+                &KnownVersion::legacy(1, 0),
+                &KnownVersion::legacy(2, 0),
+                &KnownVersion::legacy(2, 0),
+            ],
+            &EARLIEST_SUPPORTED_VERSION,
+            &SemverVersion::new(2, 0, 0),
+            100,
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "KNOWN_VERSION 2.0.0 appears directly after 2.0.0, but is not later"
+        );
+
+        // Latest version was duplicated instead of bumped (modern case)
+        let error = verify_known_versions(
+            [
+                &KnownVersion::legacy(1, 0),
+                &KnownVersion::new(2, "dir1"),
+                &KnownVersion::new(2, "dir2"),
+            ],
+            &EARLIEST_SUPPORTED_VERSION,
+            &SemverVersion::new(2, 0, 0),
+            100,
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "KNOWN_VERSION 2.0.0 appears directly after 2.0.0, but is not later"
+        );
+
+        // Version added out of order
+        let error = verify_known_versions(
+            [
+                &KnownVersion::legacy(1, 0),
+                &KnownVersion::legacy(2, 0),
+                &KnownVersion::legacy(1, 3),
+            ],
+            &EARLIEST_SUPPORTED_VERSION,
+            &SemverVersion::new(3, 0, 0),
+            100,
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "KNOWN_VERSION 1.0.3 appears directly after 2.0.0, but is not later"
+        );
+
+        // Gaps are not allowed.
+        let error = verify_known_versions(
+            [
+                &KnownVersion::legacy(1, 0),
+                &KnownVersion::legacy(2, 0),
+                &KnownVersion::legacy(4, 0),
+            ],
+            &EARLIEST_SUPPORTED_VERSION,
+            &SemverVersion::new(4, 0, 0),
+            100,
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "KNOWN_VERSION 4.0.0 appears directly after 2.0.0, but its major \
+            number is neither the same nor one greater"
+        );
+
+        // For the strict case, the patch level can't be non-zero.  You can only
+        // make this mistake by using `KnownVersion::legacy()` for a new
+        // version.
+        let error = verify_known_versions(
+            [
+                &KnownVersion::legacy(1, 0),
+                &KnownVersion::legacy(2, 0),
+                &KnownVersion::legacy(3, 2),
+            ],
+            &EARLIEST_SUPPORTED_VERSION,
+            &SemverVersion::new(3, 0, 2),
+            2,
+        )
+        .unwrap_err();
+        assert_eq!(format!("{error:#}"), "new patch versions must be zero");
+
+        // For the strict case, the directory name cannot contain the version at
+        // all.  You can only make this mistake by using
+        // `KnownVersion::legacy()` for a new version.
+        let error = verify_known_versions(
+            [
+                &KnownVersion::legacy(1, 0),
+                &KnownVersion::legacy(2, 0),
+                &KnownVersion::legacy(3, 0),
+            ],
+            &EARLIEST_SUPPORTED_VERSION,
+            &SemverVersion::new(3, 0, 0),
+            2,
+        )
+        .unwrap_err();
+        assert_eq!(
+            format!("{error:#}"),
+            "the relative path for a version should not contain the \
+            version itself"
+        );
+    }
+
+    fn verify_known_versions<'a, I>(
+        // list of known versions in order from earliest to latest
+        known_versions: I,
+        earliest: &SemverVersion,
+        latest: &SemverVersion,
+        min_strict_major: u64,
+    ) -> Result<(), anyhow::Error>
+    where
+        I: IntoIterator<Item = &'a KnownVersion>,
+    {
+        let mut known_versions = known_versions.into_iter();
+
         // All known versions should be unique and increasing.
-        let mut known_versions = KNOWN_VERSIONS.iter();
         let first =
             known_versions.next().expect("expected at least one KNOWN_VERSION");
-        assert_eq!(
-            first.semver, EARLIEST_SUPPORTED_VERSION,
-            "EARLIEST_SUPPORTED_VERSION should be the first in KNOWN_VERSIONS"
+        ensure!(
+            first.semver == *earliest,
+            "EARLIEST_SUPPORTED_VERSION is not the earliest in KNOWN_VERSIONS"
         );
 
         let mut prev = first;
         for v in known_versions {
             println!("checking known version: {} -> {}", prev, v);
-            assert!(
+            ensure!(
                 v.semver > prev.semver,
                 "KNOWN_VERSION {} appears directly after {}, but is not later",
                 v,
@@ -344,13 +583,13 @@ mod test {
             );
 
             // We currently make sure there are no gaps in the major number.
-            // This is not strictly necessary but it probably reflects a
-            // mistake.
+            // This is not strictly necessary but if this isn't true then it was
+            // probably a mistake.
             //
             // It's allowed for the major numbers to be the same because a few
-            // past schema versions only bumped the micro number for whatever
+            // past schema versions only bumped the patch number for whatever
             // reason.
-            assert!(
+            ensure!(
                 v.semver.0.major == prev.semver.0.major
                     || v.semver.0.major == prev.semver.0.major + 1,
                 "KNOWN_VERSION {} appears directly after {}, but its major \
@@ -358,18 +597,44 @@ mod test {
                 v,
                 prev
             );
+
+            // We never allowed minor versions to be zero and it is not
+            // currently possible to even construct one that had a non-zero
+            // minor number.
+            ensure!(v.semver.0.minor == 0, "new minor versions must be zero");
+
+            // We changed things after version 43 to require that:
+            //
+            // (1) the major always be bumped (the minor and patch must be zero)
+            // (2) users choose a unique directory name for the SQL files.  It
+            //     would defeat the point if people used the semver for
+            //
+            // After version 43, we do not allow non-zero minor or patch
+            // numbers.
+            if v.semver.0.major > min_strict_major {
+                ensure!(
+                    v.semver.0.patch == 0,
+                    "new patch versions must be zero"
+                );
+                ensure!(
+                    !v.relative_path.contains(&v.semver.to_string()),
+                    "the relative path for a version should not contain the \
+                    version itself"
+                );
+            }
+
             prev = v;
         }
 
-        assert_eq!(
-            prev.semver, SCHEMA_VERSION,
-            "last KNOWN_VERSION is {}, but SCHEMA_VERSION is {}",
-            prev, SCHEMA_VERSION
+        ensure!(
+            prev.semver == *latest,
+            "latest KNOWN_VERSION is {}, but SCHEMA_VERSION is {}",
+            prev,
+            latest
         );
-    }
 
-    // XXX-dap add a test that there's nothing extra in the schema migrations
-    // directory
+        Ok(())
+    }
 
     // Confirm that `SchemaVersion::load_from_directory()` rejects `up*.sql`
     // files where the `*` doesn't contain a positive integer.
@@ -487,7 +752,7 @@ mod test {
                 Err(error) => {
                     let message = format!("{error:#}");
                     assert!(
-                        message.starts_with("invalid `up*.sql` combination: "),
+                        message.starts_with("invalid `up*.sql` sequence: "),
                         "message did not start with expected prefix: \
                          {message:?}"
                     );

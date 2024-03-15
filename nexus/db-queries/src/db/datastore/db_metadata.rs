@@ -423,8 +423,11 @@ mod test {
             .await;
 
         // Show that the datastores can be created concurrently.
-        let all_versions = AllSchemaVersions::load(config_dir.path())
-            .expect("failed to load schema");
+        let all_versions = AllSchemaVersions::load_specific_legacy_versions(
+            config_dir.path(),
+            [&v0, &v1, &v2].into_iter(),
+        )
+        .expect("failed to load schema");
         let _ = futures::future::join_all((0..10).map(|_| {
             let all_versions = all_versions.clone();
             let log = log.clone();
