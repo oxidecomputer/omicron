@@ -35,7 +35,6 @@ impl DataStore {
         use db::schema::{
             bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
         };
-        use diesel::serialize::ToSql;
         use diesel::sql_types;
         use diesel::IntoSql;
 
@@ -72,6 +71,7 @@ impl DataStore {
                     config.bgp_announce_set_id.into_sql::<sql_types::Uuid>(),
                     config
                         .vrf
+                        .clone()
                         .into_sql::<sql_types::Nullable<sql_types::Text>>(),
                 ))
                 .filter(diesel::dsl::not(diesel::dsl::exists(
