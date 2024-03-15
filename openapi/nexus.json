@@ -6488,6 +6488,46 @@
         }
       }
     },
+    "/v1/system/networking/bgp-message-history": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP router message history",
+        "operationId": "networking_bgp_message_history",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asn",
+            "description": "The ASN to filter on. Required.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregateBgpMessageHistory"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/bgp-routes-ipv4": {
       "get": {
         "tags": [
@@ -8892,6 +8932,22 @@
           "items"
         ]
       },
+      "AggregateBgpMessageHistory": {
+        "description": "BGP message history for rack switches.",
+        "type": "object",
+        "properties": {
+          "switch_histories": {
+            "description": "BGP history organized by switch.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchBgpHistory"
+            }
+          }
+        },
+        "required": [
+          "switch_histories"
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -9335,6 +9391,7 @@
           "switch"
         ]
       },
+      "BgpMessageHistory": {},
       "BgpPeer": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
@@ -15914,6 +15971,31 @@
           "rack_id",
           "time_created",
           "time_modified"
+        ]
+      },
+      "SwitchBgpHistory": {
+        "description": "BGP message history for a particular switch.",
+        "type": "object",
+        "properties": {
+          "history": {
+            "description": "Message history indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BgpMessageHistory"
+            }
+          },
+          "switch": {
+            "description": "Switch this message history is associated with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "history",
+          "switch"
         ]
       },
       "SwitchInterfaceConfig": {

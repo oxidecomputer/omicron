@@ -42,7 +42,6 @@ use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_db_queries::{authz, db::datastore::ProbeInfo};
 use nexus_types::external_api::shared::BfdStatus;
-use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -80,6 +79,9 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::api::external::{
+    http_pagination::data_page_params_for, AggregateBgpMessageHistory,
+};
 use omicron_common::bail_unless;
 use parse_display::Display;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
@@ -277,6 +279,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_bgp_announce_set_create)?;
         api.register(networking_bgp_announce_set_list)?;
         api.register(networking_bgp_announce_set_delete)?;
+        api.register(networking_bgp_message_history)?;
 
         api.register(networking_bfd_enable)?;
         api.register(networking_bfd_disable)?;
@@ -3506,6 +3509,27 @@ async fn networking_bgp_status(
         let nexus = &apictx.nexus;
         let result = nexus.bgp_peer_status(&opctx).await?;
         Ok(HttpResponseOk(result))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get BGP router message history
+#[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-message-history",
+    tags = ["system/networking"],
+}]
+async fn networking_bgp_message_history(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    query_params: Query<params::BgpRouteSelector>,
+) -> Result<HttpResponseOk<AggregateBgpMessageHistory>, HttpError> {
+    let apictx = rqctx.context();
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let sel = query_params.into_inner();
+        let result = nexus.bgp_message_history(&opctx, &sel).await?;
+        Ok(HttpResponseOk(AggregateBgpMessageHistory::new(result)))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

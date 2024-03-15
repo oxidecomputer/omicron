@@ -10,7 +10,6 @@ members = [
     "clients/dpd-client",
     "clients/gateway-client",
     "clients/installinator-artifact-client",
-    "clients/mg-admin-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -96,7 +95,6 @@ default-members = [
     "clients/oximeter-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
-    "clients/mg-admin-client",
     "common",
     "dev-tools/crdb-seed",
     "dev-tools/omdb",
@@ -201,7 +199,7 @@ csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
 display-error-chain = "0.2.0"
-ddm-admin-client = { path = "clients/ddm-admin-client" }
+omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
@@ -267,7 +265,8 @@ maplit = "1.0.2"
 mime_guess = "2.0.4"
 mockall = "0.12"
 newtype_derive = "0.1.6"
-mg-admin-client = { path = "clients/mg-admin-client" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9a8380583716a0b1ceba75db679b4822803070cf" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9a8380583716a0b1ceba75db679b4822803070cf" }
 multimap = "0.10.0"
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
@@ -669,6 +668,7 @@ branch = "oxide/omicron"
 # See also: uuid-kinds/README.adoc.
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
+omicron-common = { path = "common" }
 
 [patch.crates-io.zone]
 git = 'https://github.com/oxidecomputer/zone'
