@@ -1170,13 +1170,10 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         zones_in_service,
         parent_blueprint_id: None,
         internal_dns_version,
-        // We don't actually configure external DNS during RSS. During handoff,
-        // Nexus creates an initial empty external DNS configuration, then
-        // creates the recovery silo, which bumps the generation.
-        //
-        // TODO-john How should we do this? Baking this knowledge of how Nexus
-        // sets up external DNS here seems bad.
-        external_dns_version: Generation::new().next(),
+        // We don't configure external DNS during RSS, so set it to an initial
+        // generation of 1. Nexus will bump this up when it updates external DNS
+        // (including creating the recovery silo).
+        external_dns_version: Generation::new(),
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),
