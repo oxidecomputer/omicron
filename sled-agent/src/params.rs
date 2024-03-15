@@ -293,9 +293,6 @@ pub type OmicronPhysicalDiskConfig =
 pub type OmicronPhysicalDisksConfig =
     sled_storage::disk::OmicronPhysicalDisksConfig;
 
-/// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
-pub const OMICRON_ZONES_CONFIG_INITIAL_GENERATION: u32 = 1;
-
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -313,6 +310,11 @@ pub struct OmicronZonesConfig {
 
     /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
+}
+
+impl OmicronZonesConfig {
+    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
+    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
 }
 
 impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {

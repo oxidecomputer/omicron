@@ -33,6 +33,7 @@
 
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
+use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::params::{
     PhysicalDiskPutRequest, ZpoolPutRequest,
 };
@@ -55,6 +56,7 @@ pub trait NexusServer: Send + Sync + 'static {
     async fn start(
         internal_server: Self::InternalServer,
         config: &NexusConfig,
+        blueprint: Blueprint,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         physical_disks: Vec<PhysicalDiskPutRequest>,
         zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,

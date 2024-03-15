@@ -12,6 +12,7 @@ use dropshot::HttpError;
 use omicron_uuid_kinds::GenericUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::SlogInlineError;
 use std::fmt::Display;
 use uuid::Uuid;
 
@@ -26,7 +27,15 @@ use uuid::Uuid;
 /// General best practices for error design apply here.  Where possible, we want
 /// to reuse existing variants rather than inventing new ones to distinguish
 /// cases that no programmatic consumer needs to distinguish.
-#[derive(Clone, Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    thiserror::Error,
+    PartialEq,
+    Serialize,
+    SlogInlineError,
+)]
 pub enum Error {
     /// An object needed as part of this operation was not found.
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
