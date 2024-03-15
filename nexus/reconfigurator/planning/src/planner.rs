@@ -338,6 +338,9 @@ mod test {
     use crate::example::example;
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
+    use chrono::NaiveDateTime;
+    use chrono::TimeZone;
+    use chrono::Utc;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
     use nexus_types::external_api::views::SledPolicy;
@@ -439,7 +442,7 @@ mod test {
         assert_eq!(sled_id, new_sled_id);
         assert_eq!(sled_zones.zones.len(), 1);
         assert!(matches!(
-            sled_zones.zones[0].zone_type,
+            sled_zones.zones[0].config.zone_type,
             OmicronZoneType::InternalNtp { .. }
         ));
         assert_eq!(diff.sleds_removed().count(), 0);
@@ -480,10 +483,10 @@ mod test {
                     source: String::from("test suite"),
                     sled_id: new_sled_id,
                     zones: blueprint4
-                        .omicron_zones
+                        .blueprint_zones
                         .get(&new_sled_id)
-                        .cloned()
-                        .expect("blueprint should contain zones for new sled"),
+                        .expect("blueprint should contain zones for new sled")
+                        .to_omicron_zones_config()
                 }
             )
             .is_none());
@@ -524,7 +527,7 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), 10);
         for zone in &zones {
-            let OmicronZoneType::Crucible { .. } = zone.zone_type else {
+            let OmicronZoneType::Crucible { .. } = zone.config.zone_type else {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
             };
         }
@@ -599,15 +602,15 @@ mod test {
 
         // This blueprint should only have 1 Nexus instance on the one sled we
         // kept.
-        assert_eq!(blueprint1.omicron_zones.len(), 1);
+        assert_eq!(blueprint1.blueprint_zones.len(), 1);
         assert_eq!(
             blueprint1
-                .omicron_zones
+                .blueprint_zones
                 .get(&sled_id)
                 .expect("missing kept sled")
                 .zones
                 .iter()
-                .filter(|z| z.zone_type.is_nexus())
+                .filter(|z| z.config.zone_type.is_nexus())
                 .count(),
             1
         );
@@ -642,7 +645,7 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), policy.target_nexus_zone_count - 1);
         for zone in &zones {
-            let OmicronZoneType::Nexus { .. } = zone.zone_type else {
+            let OmicronZoneType::Nexus { .. } = zone.config.zone_type else {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             };
         }
@@ -675,13 +678,13 @@ mod test {
             .expect("failed to create initial blueprint");
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
-        assert_eq!(blueprint1.omicron_zones.len(), 3);
-        for sled_config in blueprint1.omicron_zones.values() {
+        assert_eq!(blueprint1.blueprint_zones.len(), 3);
+        for sled_config in blueprint1.blueprint_zones.values() {
             assert_eq!(
                 sled_config
                     .zones
                     .iter()
-                    .filter(|z| z.zone_type.is_nexus())
+                    .filter(|z| z.config.zone_type.is_nexus())
                     .count(),
                 1
             );
@@ -727,7 +730,8 @@ mod test {
                 }
             }
             for zone in &zones {
-                let OmicronZoneType::Nexus { .. } = zone.zone_type else {
+                let OmicronZoneType::Nexus { .. } = zone.config.zone_type
+                else {
                     panic!("unexpectedly added a non-Crucible zone: {zone:?}");
                 };
             }
@@ -766,13 +770,13 @@ mod test {
             .expect("failed to create initial blueprint");
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
-        assert_eq!(blueprint1.omicron_zones.len(), 5);
-        for sled_config in blueprint1.omicron_zones.values() {
+        assert_eq!(blueprint1.blueprint_zones.len(), 5);
+        for sled_config in blueprint1.blueprint_zones.values() {
             assert_eq!(
                 sled_config
                     .zones
                     .iter()
-                    .filter(|z| z.zone_type.is_nexus())
+                    .filter(|z| z.config.zone_type.is_nexus())
                     .count(),
                 1
             );
@@ -811,7 +815,7 @@ mod test {
         // When the planner gets smarter about removing zones from expunged
         // and/or removed sleds, we'll have to adjust this number.
         policy.target_nexus_zone_count = 16;
-        let blueprint2 = Planner::new_based_on(
+        let mut blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
             Generation::new(),
@@ -824,6 +828,15 @@ mod test {
         .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to plan");
+
+        // Define a time_created for consistent output across runs.
+        blueprint2.time_created =
+            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+
+        assert_contents(
+            "tests/output/planner_nonprovisionable_bp2.txt",
+            &blueprint2.display().to_string(),
+        );
 
         let diff = blueprint1.diff_sleds(&blueprint2);
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
@@ -857,7 +870,8 @@ mod test {
                 }
             }
             for zone in &zones {
-                let OmicronZoneType::Nexus { .. } = zone.zone_type else {
+                let OmicronZoneType::Nexus { .. } = zone.config.zone_type
+                else {
                     panic!("unexpectedly added a non-Crucible zone: {zone:?}");
                 };
             }
