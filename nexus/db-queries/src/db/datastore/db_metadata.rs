@@ -8,143 +8,20 @@ use super::DataStore;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use anyhow::{bail, ensure, Context};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
-use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_config::SchemaConfig;
 use nexus_db_model::AllSchemaVersions;
+use nexus_db_model::SchemaVersion;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::SemverVersion;
-use slog::Logger;
+use slog::{error, info, o, Logger};
 use std::ops::Bound;
 use std::str::FromStr;
 
 pub const EARLIEST_SUPPORTED_VERSION: &'static str = "1.0.0";
-
-/// Describes a single file containing a schema change, as SQL.
-#[derive(Debug)]
-pub struct SchemaUpgradeStep {
-    pub path: Utf8PathBuf,
-    pub sql: String,
-}
-
-/// Describes a sequence of files containing schema changes.
-#[derive(Debug)]
-pub struct SchemaUpgrade {
-    pub steps: Vec<SchemaUpgradeStep>,
-}
-
-/// Reads a "version directory" and reads all SQL changes into
-/// a result Vec.
-///
-/// Files that do not begin with "up" and end with ".sql" are ignored. The
-/// collection of `up*.sql` files must fall into one of these two conventions:
-///
-/// * "up.sql" with no other files
-/// * "up1.sql", "up2.sql", ..., beginning from 1, optionally with leading
-///   zeroes (e.g., "up01.sql", "up02.sql", ...). There is no maximum value, but
-///   there may not be any gaps (e.g., if "up2.sql" and "up4.sql" exist, so must
-///   "up3.sql") and there must not be any repeats (e.g., if "up1.sql" exists,
-///   "up01.sql" must not exist).
-///
-/// Any violation of these two rules will result in an error. Collections of the
-/// second form (`up1.sql`, ...) will be sorted numerically.
-pub async fn all_sql_for_version_migration<P: AsRef<Utf8Path>>(
-    path: P,
-) -> Result<SchemaUpgrade, String> {
-    let target_dir = path.as_ref();
-    let mut up_sqls = vec![];
-    let entries = target_dir
-        .read_dir_utf8()
-        .map_err(|e| format!("Failed to readdir {target_dir}: {e}"))?;
-    for entry in entries {
-        let entry = entry.map_err(|err| format!("Invalid entry: {err}"))?;
-        let pathbuf = entry.into_path();
-
-        // Ensure filename ends with ".sql"
-        if pathbuf.extension() != Some("sql") {
-            continue;
-        }
-
-        // Ensure filename begins with "up", and extract anything in between
-        // "up" and ".sql".
-        let Some(remaining_filename) = pathbuf
-            .file_stem()
-            .and_then(|file_stem| file_stem.strip_prefix("up"))
-        else {
-            continue;
-        };
-
-        // Ensure the remaining filename is either empty (i.e., the filename is
-        // exactly "up.sql") or parseable as an unsigned integer. We give
-        // "up.sql" the "up_number" 0 (checked in the loop below), and require
-        // any other number to be nonzero.
-        if remaining_filename.is_empty() {
-            up_sqls.push((0, pathbuf));
-        } else {
-            let Ok(up_number) = remaining_filename.parse::<u64>() else {
-                return Err(format!(
-                    "invalid filename (non-numeric `up*.sql`): {pathbuf}",
-                ));
-            };
-            if up_number == 0 {
-                return Err(format!(
-                    "invalid filename (`up*.sql` numbering must start at 1): \
-                     {pathbuf}",
-                ));
-            }
-            up_sqls.push((up_number, pathbuf));
-        }
-    }
-    up_sqls.sort();
-
-    // Validate that we have a reasonable sequence of `up*.sql` numbers.
-    match up_sqls.as_slice() {
-        [] => return Err("no `up*.sql` files found".to_string()),
-        [(up_number, path)] => {
-            // For a single file, we allow either `up.sql` (keyed as
-            // up_number=0) or `up1.sql`; reject any higher number.
-            if *up_number > 1 {
-                return Err(format!(
-                    "`up*.sql` numbering must start at 1: found first file \
-                     {path}"
-                ));
-            }
-        }
-        _ => {
-            for (i, (up_number, path)) in up_sqls.iter().enumerate() {
-                // We have 2 or more `up*.sql`; they should be numbered exactly
-                // 1..=up_sqls.len().
-                if i as u64 + 1 != *up_number {
-                    // We know we have at least two elements, so report an error
-                    // referencing either the next item (if we're first) or the
-                    // previous item (if we're not first).
-                    let (path_a, path_b) = if i == 0 {
-                        let (_, next_path) = &up_sqls[1];
-                        (path, next_path)
-                    } else {
-                        let (_, prev_path) = &up_sqls[i - 1];
-                        (prev_path, path)
-                    };
-                    return Err(format!(
-                        "invalid `up*.sql` combination: {path_a}, {path_b}"
-                    ));
-                }
-            }
-        }
-    }
-
-    // This collection of `up*.sql` files is valid; read them all, in order.
-    let mut result = SchemaUpgrade { steps: vec![] };
-    for (_, path) in up_sqls.into_iter() {
-        let sql = tokio::fs::read_to_string(&path)
-            .await
-            .map_err(|e| format!("Cannot read {path}: {e}"))?;
-        result.steps.push(SchemaUpgradeStep { path: path.to_owned(), sql });
-    }
-    Ok(result)
-}
 
 impl DataStore {
     // Ensures that the database schema matches "desired_version".
@@ -160,127 +37,127 @@ impl DataStore {
     // instances on the rack are operating on the same version of software.
     // If that assumption is broken, nothing would stop a "new deployment"
     // from making a change that invalidates the queries used by an "old
-    // deployment". This is fixable, but it requires slightly more knowledge
-    // about the deployment and liveness of Nexus services within the rack.
+    // deployment".
     pub async fn ensure_schema(
         &self,
         log: &Logger,
         desired_version: SemverVersion,
         config: Option<&SchemaConfig>,
-    ) -> Result<(), String> {
-        let mut current_version = match self.database_schema_version().await {
-            Ok(current_version) => {
-                // NOTE: We could run with a less tight restriction.
-                //
-                // If we respect the meaning of the semver version, it should be possible
-                // to use subsequent versions, as long as they do not introduce breaking changes.
-                //
-                // However, at the moment, we opt for conservatism: if the database does not
-                // exactly match the schema version, we refuse to continue without modification.
-                if current_version == desired_version {
-                    info!(log, "Compatible database schema: {current_version}");
-                    return Ok(());
-                }
-                let observed = &current_version.0;
-                warn!(log, "Database schema {observed} does not match expected {desired_version}");
-                current_version
-            }
-            Err(e) => {
-                return Err(format!("Cannot read schema version: {e}"));
-            }
-        };
+    ) -> Result<(), anyhow::Error> {
+        let found_version = self
+            .database_schema_version()
+            .await
+            .context("Cannot read database schema version")?;
+        let log = log.new(o!(
+            "found_version" => found_version.to_string(),
+            "desired_version" => desired_version.to_string(),
+        ));
+
+        // NOTE: We could run with a less tight restriction.
+        //
+        // If we respect the meaning of the semver version, it should be
+        // possible to use subsequent versions, as long as they do not introduce
+        // breaking changes.
+        //
+        // However, at the moment, we opt for conservatism: if the database does
+        // not exactly match the schema version, we refuse to continue without
+        // modification.
+        if found_version == desired_version {
+            info!(log, "Database schema version is up to date");
+            return Ok(());
+        }
+
+        if found_version > desired_version {
+            error!(
+                log,
+                "Found schema version is newer than desired schema version";
+            );
+            bail!(
+                "Found schema version ({}) is newer than desired schema \
+                version ({})",
+                found_version,
+                desired_version,
+            )
+        }
 
         let Some(config) = config else {
-            return Err(
-                "Not configured to automatically update schema".to_string()
+            error!(
+                log,
+                "Database schema version is out of date, but automatic update \
+                is disabled",
             );
+            bail!("Schema is out of date but automatic update is disabled");
         };
-
-        if current_version > desired_version {
-            return Err("Nexus older than DB version: automatic downgrades are unsupported".to_string());
-        }
 
         // If we're here, we know the following:
         //
         // - The schema does not match our expected version (or at least, it
-        // didn't when we read it moments ago).
+        //   didn't when we read it moments ago).
         // - We should attempt to automatically upgrade the schema.
         //
-        // We do the following:
-        // - Look in the schema directory for all the changes, in-order, to
-        // migrate from our current version to the desired version.
-
+        // XXX-dap have the caller load all versions so we only do it once and
+        // not in this async context?
+        info!(log, "Database schema is out of date.  Attempting upgrade.");
         info!(log, "Reading schemas from {}", config.schema_dir);
         let all_versions = AllSchemaVersions::load(&config.schema_dir)
-            .await
-            .map_err(|e| format!("{e:#}"))?;
-        if !all_versions.contains_version(&current_version) {
-            return Err(format!(
-                "Current DB version {current_version} was not found in {}",
-                config.schema_dir
-            ));
-        }
-        // TODO: Test this?
-        if !all_versions.contains_version(&desired_version) {
-            return Err(format!(
-                "Target DB version {desired_version} was not found in {}",
-                config.schema_dir
-            ));
-        }
+            .context("loading schema versions")?;
+        ensure!(
+            all_versions.contains_version(&found_version),
+            "Found schema version {found_version} was not found",
+        );
 
-        let target_versions: Vec<_> = all_versions
+        // TODO: Test this?
+        ensure!(
+            all_versions.contains_version(&desired_version),
+            "Desired version {desired_version} was not found",
+        );
+
+        let target_versions: Vec<&SchemaVersion> = all_versions
             .versions_range((
-                Bound::Excluded(&current_version),
+                Bound::Excluded(&found_version),
                 Bound::Included(&desired_version),
             ))
             .collect();
 
+        let mut current_version = found_version;
         for target_version in target_versions.into_iter() {
-            info!(
-                log,
-                "Attempting to upgrade schema";
+            let log = log.new(o!(
                 "current_version" => current_version.to_string(),
-                "target_version" => target_version.to_string(),
-            );
-
-            let target_dir = config.schema_dir.join(target_version.to_string());
-
-            let schema_change =
-                all_sql_for_version_migration(&target_dir).await?;
+                "target_version" => target_version.semver().to_string(),
+            ));
+            info!(log, "Attempting to upgrade schema");
 
             // Confirm the current version, set the "target_version"
             // column to indicate that a schema update is in-progress.
             //
             // Sets the following:
             // - db_metadata.target_version = new version
-            self.prepare_schema_update(&current_version, &target_version)
-                .await
-                .map_err(|e| e.to_string())?;
+            self.prepare_schema_update(
+                &current_version,
+                &target_version.semver(),
+            )
+            .await
+            .context("preparing schema update")?;
+            info!(log, "Marked schema upgrade as prepared");
 
-            info!(
-                log,
-                "Marked schema upgrade as prepared";
-                "current_version" => current_version.to_string(),
-                "target_version" => target_version.to_string(),
-            );
-
-            for SchemaUpgradeStep { path: _, sql } in &schema_change.steps {
-                // Perform the schema change.
+            for step in target_version.upgrade_steps() {
+                // Perform the schema change step.
                 self.apply_schema_update(
                     &current_version,
-                    &target_version,
-                    &sql,
+                    &target_version.semver(),
+                    step.sql(),
                 )
                 .await
-                .map_err(|e| e.to_string())?;
+                .with_context(|| {
+                    format!(
+                        "update to {}, applying step {:?}",
+                        target_version.semver(),
+                        step.label()
+                    )
+                })?;
             }
 
-            info!(
-                log,
-                "Applied schema upgrade";
-                "current_version" => current_version.to_string(),
-                "target_version" => target_version.to_string(),
-            );
+            info!(log, "Applied schema upgrade");
 
             // NOTE: We could execute the schema change in a background task,
             // and let it propagate, while observing it with the following
@@ -304,19 +181,22 @@ impl DataStore {
             // Now that the schema change has completed, set the following:
             // - db_metadata.version = new version
             // - db_metadata.target_version = NULL
-            self.finalize_schema_update(&current_version, &target_version)
-                .await
-                .map_err(|e| e.to_string())?;
+            self.finalize_schema_update(
+                &current_version,
+                target_version.semver(),
+            )
+            .await
+            .context("finalizing schema update")?;
 
             info!(
                 log,
                 "Finalized schema upgrade";
-                "current_version" => current_version.to_string(),
-                "target_version" => target_version.to_string(),
             );
 
-            current_version = target_version.clone();
+            current_version = target_version.semver().clone();
         }
+
+        info!(log, "Schema update complete");
 
         Ok(())
     }
@@ -387,7 +267,7 @@ impl DataStore {
         &self,
         current: &SemverVersion,
         target: &SemverVersion,
-        sql: &String,
+        sql: &str,
     ) -> Result<(), Error> {
         let conn = self.pool_connection_unauthorized().await?;
 
@@ -440,9 +320,10 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         if rows_updated != 1 {
-            return Err(Error::internal_error(
-                &format!("Failed to finalize schema update from version {from_version} to {to_version}"),
-            ));
+            return Err(Error::internal_error(&format!(
+                "Failed to finalize schema update from version \
+                {from_version} to {to_version}"
+            )));
         }
         Ok(())
     }

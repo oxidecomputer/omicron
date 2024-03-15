@@ -101,8 +101,7 @@ mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
 pub use db_metadata::{
-    all_sql_for_version_migration, SchemaUpgrade, SchemaUpgradeStep,
-    EARLIEST_SUPPORTED_VERSION,
+        EARLIEST_SUPPORTED_VERSION,
 };
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;

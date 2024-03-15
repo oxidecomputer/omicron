@@ -6,7 +6,7 @@
 // XXX consider moving all of this to its own crate?
 
 use crate::schema::SCHEMA_VERSION;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{bail, ensure, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use omicron_common::api::external::SemverVersion;
 use once_cell::sync::Lazy;
@@ -102,48 +102,25 @@ pub struct AllSchemaVersions {
 }
 
 impl AllSchemaVersions {
-    pub async fn load(
-        directory: &Utf8Path,
+    pub fn load(
+        schema_directory: &Utf8Path,
     ) -> Result<AllSchemaVersions, anyhow::Error> {
-        let mut dir =
-            tokio::fs::read_dir(directory).await.with_context(|| {
-                format!("Failed to read from schema directory {directory:?}")
+        let mut versions = BTreeMap::new();
+        for known_version in &*KNOWN_VERSIONS {
+            let version_path =
+                schema_directory.join(&known_version.relative_path);
+            let schema_version = SchemaVersion::load_from_directory(
+                known_version.semver.clone(),
+                version_path,
+            )
+            .with_context(|| {
+                format!(
+                    "loading schema version {} from {:?}",
+                    known_version.semver, schema_directory,
+                )
             })?;
 
-        let mut versions = BTreeMap::new();
-        while let Some(entry) = dir.next_entry().await.with_context(|| {
-            format!("Failed to read schema dir {directory:?}")
-        })? {
-            let file_name =
-                entry.file_name().into_string().map_err(|os_str| {
-                    anyhow!(
-                    "Found non-UTF8 entry in schema dir {directory:?}: {:?}",
-                    os_str
-                )
-                })?;
-            let file_type = entry.file_type().await.with_context(|| {
-                format!(
-                    "Failed to determine type of file \
-                    {file_name:?} in {directory:?}",
-                )
-            })?;
-            if file_type.is_dir() {
-                let name = entry
-                    .file_name()
-                    .into_string()
-                    .map_err(|_| anyhow!("Non-unicode schema dir"))?;
-                if let Ok(observed_version) = name.parse::<SemverVersion>() {
-                    versions.insert(
-                        observed_version.clone(),
-                        SchemaVersion {
-                            semver: observed_version,
-                            path: directory.join(file_name),
-                        },
-                    );
-                } else {
-                    bail!("Failed to parse {name} as a semver version");
-                }
-            }
+            versions.insert(known_version.semver.clone(), schema_version);
         }
 
         Ok(AllSchemaVersions { versions })
@@ -160,32 +137,165 @@ impl AllSchemaVersions {
     pub fn versions_range<'a, R>(
         &self,
         bounds: R,
-    ) -> impl Iterator<Item = &'_ SemverVersion>
+    ) -> impl Iterator<Item = &'_ SchemaVersion>
     where
         R: std::ops::RangeBounds<SemverVersion>,
     {
-        self.versions.range(bounds).map(|(k, _)| k)
+        self.versions.range(bounds).map(|(_, v)| v)
     }
 }
 
-// XXX-dap load the list of SQL files too
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct SchemaVersion {
     semver: SemverVersion,
-    path: Utf8PathBuf,
+    upgrade_from_previous: Vec<SchemaUpgradeStep>,
+}
+
+/// Describes a single file containing a schema change, as SQL.
+#[derive(Debug, Clone)]
+pub struct SchemaUpgradeStep {
+    label: String,
+    sql: String,
+}
+
+impl SchemaUpgradeStep {
+    pub fn label(&self) -> &str {
+        self.label.as_ref()
+    }
+
+    pub fn sql(&self) -> &str {
+        self.sql.as_ref()
+    }
 }
 
 impl SchemaVersion {
+    /// Reads a "version directory" and reads all SQL changes into a result Vec.
+    ///
+    /// Files that do not begin with "up" and end with ".sql" are ignored. The
+    /// collection of `up*.sql` files must fall into one of these two
+    /// conventions:
+    ///
+    /// * "up.sql" with no other files
+    /// * "up1.sql", "up2.sql", ..., beginning from 1, optionally with leading
+    ///   zeroes (e.g., "up01.sql", "up02.sql", ...). There is no maximum value,
+    ///   but there may not be any gaps (e.g., if "up2.sql" and "up4.sql" exist,
+    ///   so must "up3.sql") and there must not be any repeats (e.g., if
+    ///   "up1.sql" exists, "up01.sql" must not exist).
+    ///
+    /// Any violation of these two rules will result in an error. Collections of
+    /// the second form (`up1.sql`, ...) will be sorted numerically.
+    fn load_from_directory(
+        semver: SemverVersion,
+        directory: Utf8PathBuf,
+    ) -> Result<SchemaVersion, anyhow::Error> {
+        let mut up_sqls = vec![];
+        let entries = directory
+            .read_dir_utf8()
+            .with_context(|| format!("Failed to readdir {directory}"))?;
+        for entry in entries {
+            let entry = entry.with_context(|| {
+                format!("Reading {directory:?}: invalid entry")
+            })?;
+            let pathbuf = entry.into_path();
+
+            // Ensure filename ends with ".sql"
+            if pathbuf.extension() != Some("sql") {
+                continue;
+            }
+
+            // Ensure filename begins with "up", and extract anything in between
+            // "up" and ".sql".
+            let Some(remaining_filename) = pathbuf
+                .file_stem()
+                .and_then(|file_stem| file_stem.strip_prefix("up"))
+            else {
+                continue;
+            };
+
+            // Ensure the remaining filename is either empty (i.e., the filename
+            // is exactly "up.sql") or parseable as an unsigned integer. We give
+            // "up.sql" the "up_number" 0 (checked in the loop below), and
+            // require any other number to be nonzero.
+            if remaining_filename.is_empty() {
+                up_sqls.push((0, pathbuf));
+            } else {
+                let Ok(up_number) = remaining_filename.parse::<u64>() else {
+                    bail!(
+                        "invalid filename (non-numeric `up*.sql`): {pathbuf}",
+                    );
+                };
+                ensure!(
+                    up_number != 0,
+                    "invalid filename (`up*.sql` numbering must start at 1): \
+                     {pathbuf}",
+                );
+                up_sqls.push((up_number, pathbuf));
+            }
+        }
+        up_sqls.sort();
+
+        // Validate that we have a reasonable sequence of `up*.sql` numbers.
+        match up_sqls.as_slice() {
+            [] => bail!("no `up*.sql` files found"),
+            [(up_number, path)] => {
+                // For a single file, we allow either `up.sql` (keyed as
+                // up_number=0) or `up1.sql`; reject any higher number.
+                ensure!(
+                    *up_number == 1,
+                    "`up*.sql` numbering must start at 1: found first file \
+                     {path}"
+                );
+            }
+            _ => {
+                for (i, (up_number, path)) in up_sqls.iter().enumerate() {
+                    // We have 2 or more `up*.sql`; they should be numbered
+                    // exactly 1..=up_sqls.len().
+                    if i as u64 + 1 != *up_number {
+                        // We know we have at least two elements, so report an
+                        // error referencing either the next item (if we're
+                        // first) or the previous item (if we're not first).
+                        let (path_a, path_b) = if i == 0 {
+                            let (_, next_path) = &up_sqls[1];
+                            (path, next_path)
+                        } else {
+                            let (_, prev_path) = &up_sqls[i - 1];
+                            (prev_path, path)
+                        };
+                        bail!("invalid `up*.sql` sequence: {path_a}, {path_b}");
+                    }
+                }
+            }
+        }
+
+        // This collection of `up*.sql` files is valid.  Read them all, in
+        // order.
+        let mut steps = vec![];
+        for (_, path) in up_sqls.into_iter() {
+            let sql = std::fs::read_to_string(&path)
+                .with_context(|| format!("Cannot read {path}"))?;
+            // unwrap: `file_name()` is documented to return `None` only when
+            // the path is `..`.  But we got this path from reading the
+            // directory, and that process explicitly documents that it skips
+            // `..`.
+            steps.push(SchemaUpgradeStep {
+                label: path.file_name().unwrap().to_string(),
+                sql,
+            });
+        }
+
+        Ok(SchemaVersion { semver, upgrade_from_previous: steps })
+    }
+
     pub fn semver(&self) -> &SemverVersion {
         &self.semver
     }
 
-    pub fn path(&self) -> &Utf8Path {
-        &self.path
-    }
-
     pub fn is_current_software_version(&self) -> bool {
         self.semver == SCHEMA_VERSION
+    }
+
+    pub fn upgrade_steps(&self) -> impl Iterator<Item = &SchemaUpgradeStep> {
+        self.upgrade_from_previous.iter()
     }
 }
 
@@ -241,4 +351,7 @@ mod test {
             prev, SCHEMA_VERSION
         );
     }
+
+    // XXX-dap add a test that there's nothing extra in the schema migrations
+    // directory
 }

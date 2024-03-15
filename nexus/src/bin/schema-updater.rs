@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
             println!("Current Version in database: {current_version}");
 
             let all_versions =
-                AllSchemaVersions::load(&schema_config.schema_dir).await?;
+                AllSchemaVersions::load(&schema_config.schema_dir)?;
 
             println!("Known Versions:");
             for version in all_versions.iter_versions() {
