@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use sled_hardware::{
     DiskVariant, Partition, PooledDisk, PooledDiskError, UnparsedDisk,
 };
-use slog::Logger;
+use slog::{info, Logger};
 use uuid::Uuid;
 
 use crate::config::MountConfig;
@@ -101,6 +101,7 @@ impl SyntheticDisk {
         raw: RawSyntheticDisk,
         zpool_id: Option<Uuid>,
     ) -> Self {
+        info!(log, "Invoking SyntheticDisk::new"; "identity" => ?raw.identity);
         let zpool_name = sled_hardware::disk::ensure_zpool_exists(
             log,
             raw.variant,

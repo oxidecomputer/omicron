@@ -28,6 +28,7 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+expectorate.workspace = true
 illumos-utils = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
 

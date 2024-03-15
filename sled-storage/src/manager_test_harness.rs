@@ -8,6 +8,7 @@ use crate::config::MountConfig;
 use crate::disk::{OmicronPhysicalDisksConfig, RawDisk};
 use crate::manager::{StorageHandle, StorageManager};
 use camino::Utf8PathBuf;
+use key_manager::StorageKeyRequester;
 use slog::{info, Logger};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -68,6 +69,7 @@ pub struct StorageManagerTestHarness {
     vdev_dir: Option<camino_tempfile::Utf8TempDir>,
     vdevs: std::collections::BTreeSet<RawDisk>,
     next_slot: i64,
+    key_requester: StorageKeyRequester,
     key_manager_error_injector: Arc<AtomicBool>,
     key_manager_task: tokio::task::JoinHandle<()>,
     storage_manager_task: tokio::task::JoinHandle<()>,
@@ -126,6 +128,14 @@ impl StorageManagerTestHarness {
         Self::new_with_tmp_dir(log, tmp).await
     }
 
+    pub(crate) fn mount_config(&self) -> MountConfig {
+        MountConfig { root: self.vdev_dir.as_ref().expect("Harness destroyed?").path().into() }
+    }
+
+    pub(crate) fn key_requester(&self) -> &StorageKeyRequester {
+        &self.key_requester
+    }
+
     async fn new_with_tmp_dir(
         log: &Logger,
         tmp: camino_tempfile::Utf8TempDir,
@@ -140,7 +150,7 @@ impl StorageManagerTestHarness {
             },
         );
         let (manager, handle) =
-            StorageManager::new(&log, mount_config, key_requester);
+            StorageManager::new(&log, mount_config, key_requester.clone());
 
         // Spawn the key_manager so that it will respond to requests for encryption keys
         let key_manager_task =
@@ -156,6 +166,7 @@ impl StorageManagerTestHarness {
             vdev_dir: Some(tmp),
             vdevs: std::collections::BTreeSet::new(),
             next_slot: 0,
+            key_requester,
             key_manager_error_injector,
             key_manager_task,
             storage_manager_task,

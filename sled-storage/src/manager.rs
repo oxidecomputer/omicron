@@ -504,6 +504,10 @@ impl StorageManager {
     }
 
     async fn key_manager_ready(&mut self) -> Result<(), Error> {
+        // Unconditionally set the state to "synchronization needed",
+        // to force us to try to asynchronously ensure that disks are ready.
+        self.state = StorageManagerState::SynchronizationNeeded;
+
         // Now that we're actually able to unpack U.2s, attempt to load the
         // set of disks which we previously stored in the ledger, if one
         // existed.
@@ -515,28 +519,30 @@ impl StorageManager {
             // plane, and adopt all requested disks into the control plane
             // in a background task (see: [Self::manage_disks]).
             self.resources.set_config(&ledger.data().disks);
-            self.state = StorageManagerState::SynchronizationNeeded;
         } else {
             info!(self.log, "KeyManager ready, but no ledger detected");
-            if self.resources.get_config().await.is_empty() {
+            if !self.resources.get_config().await.is_empty() {
                 // This case seems unlikely -- we'd need to somehow have no
                 // ledger, but have been told to store the configuration
                 // regardless -- but it seems safe to bail out if we have
                 // ANY configuration stored, for any reason.
-                info!(self.log, "Some configuration already exists");
+                warn!(self.log, "Some configuration already exists, without ledger");
                 return Ok(());
-            } else {
-                info!(self.log, "No configuration exists");
             }
+
+            info!(self.log, "No configuration exists");
 
             // NOTE: What follows is an exceptional case: one where we have
             // no record of "Control Plane Physical Disks", but we have zpools
             // on our U.2s, and we want to use them regardless.
             //
-            // THIS WOULD NORMALLY BE INCORRECT BEHAVIOR. However, because we
-            // are transitioning from "the set of disks / zpools is implicit" to
-            // a world where that set is explicit, this is a necessary
-            // transitional tool.
+            // THIS WOULD NORMALLY BE INCORRECT BEHAVIOR. In the future, these
+            // zpools will not be "automatically imported", and instead, we'll
+            // let Nexus decide whether or not to reformat the disks.
+            //
+            // However, because we are transitioning from "the set of disks /
+            // zpools is implicit" to a world where that set is explicit, this
+            // is a necessary transitional tool.
             //
             // TODO: Once we are confident that we have migrated to a world
             // where this ledger is universally used, we should remove the
@@ -590,10 +596,8 @@ impl StorageManager {
             if !synthetic_config.is_empty() {
                 info!(self.log, "Automatically managing disks"; "count" => synthetic_config.len());
                 self.resources.set_config(&synthetic_config);
-                self.state = StorageManagerState::SynchronizationNeeded;
             } else {
                 info!(self.log, "No disks to be automatically managed");
-                self.state = StorageManagerState::Synchronized;
             }
         }
 
@@ -668,7 +672,7 @@ impl StorageManager {
         Ok(result)
     }
 
-    // Updates [StorageResources] to manage the disks requsted by `config`, if
+    // Updates [StorageResources] to manage the disks requested by `config`, if
     // those disks exist.
     //
     // Makes no attempts to manipulate the ledger storage.
@@ -699,6 +703,8 @@ impl StorageManager {
         &mut self,
     ) -> Result<OmicronPhysicalDisksConfig, Error> {
         let log = self.log.new(o!("request" => "omicron_physical_disks_list"));
+
+        // TODO: Should this be "resources.get_config"
 
         let ledger_paths = self.all_omicron_disk_ledgers().await;
         let maybe_ledger = Ledger::<OmicronPhysicalDisksConfig>::new(
@@ -899,7 +905,7 @@ mod tests {
         assert!(matches!(
             result,
             Err(Error::Ledger(ledger::Error::FailedToWrite { .. }))
-        ));
+        ), "Saw unexpected result: {:?}", result);
 
         // Add an M.2 which can store the ledger.
         let _raw_disks =
@@ -1228,5 +1234,80 @@ mod tests {
 
         harness.cleanup().await;
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ledgerless_to_ledgered_migration() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("upsert_filesystem");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+
+        // First, we format the U.2 to have a zpool. This should work, even
+        // without looping in the StorageManager.
+        let u2_raw = &raw_disks[0];
+        let pool_id = Uuid::new_v4();
+        let disk = crate::disk::Disk::new(
+            &logctx.log,
+            &harness.mount_config(),
+            u2_raw.clone(),
+            Some(pool_id),
+            Some(harness.key_requester())
+        ).await.expect("Failed to format U.2");
+
+        // Because we did that formatting "behind the back" of the
+        // StorageManager, we should see no evidence of the U.2 being managed.
+
+        // We should still see no ledger.
+        let result = harness.handle().omicron_physical_disks_list().await;
+        assert!(
+            matches!(
+                result,
+                Err(Error::LedgerNotFound),
+            ),
+            "{:?}", result
+        );
+
+        // We should also not see any managed U.2s.
+        let disks = harness.handle().get_latest_disks().await;
+        assert!(disks.all_u2_zpools().is_empty());
+
+        // However, when the system activates, we should see a Zpool,
+        // and "auto-manage" it.
+
+        harness.handle().key_manager_ready().await;
+
+        // TODO: Check that a config exists? Where would we see this via
+        // inventory?
+        //
+        // TODO: - Modify get_config to store "more ledgery info"
+        // - Put the synthetic one in there, maybe w/generation "zero"
+
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn test_omicron_physical_disks_schema() {
+        let schema = schemars::schema_for!(OmicronPhysicalDisksConfig);
+        expectorate::assert_contents(
+            "../schema/omicron-physical-disks.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
     }
 }
