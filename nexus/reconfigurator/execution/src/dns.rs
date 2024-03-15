@@ -490,13 +490,9 @@ mod test {
     use omicron_common::address::NEXUS_REDUNDANCY;
     use omicron_common::address::RACK_PREFIX;
     use omicron_common::address::SLED_PREFIX;
-    use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
     use omicron_common::api::external::IdentityMetadataCreateParams;
-    use omicron_test_utils::dev::poll::wait_for_condition;
-    use omicron_test_utils::dev::poll::CondCheckError;
     use omicron_test_utils::dev::test_setup_log;
-    use slog::{debug, info};
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -506,7 +502,6 @@ mod test {
     use std::net::SocketAddrV6;
     use std::str::FromStr;
     use std::sync::Arc;
-    use std::time::Duration;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -1171,38 +1166,6 @@ mod test {
             datastore.clone(),
         );
 
-        // First, wait until Nexus has successfully completed an inventory
-        // collection.
-        let collection = wait_for_condition(
-            || async {
-                let result =
-                    datastore.inventory_get_latest_collection(&opctx).await;
-                let log_result = match &result {
-                    Ok(Some(_)) => Ok("found"),
-                    Ok(None) => Ok("not found"),
-                    Err(error) => Err(error),
-                };
-                debug!(
-                    log,
-                    "attempt to fetch latest inventory collection";
-                    "result" => ?log_result,
-                );
-
-                match result {
-                    Ok(None) => Err(CondCheckError::NotYet),
-                    Ok(Some(c)) => Ok(c),
-                    Err(Error::ServiceUnavailable { .. }) => {
-                        Err(CondCheckError::NotYet)
-                    }
-                    Err(error) => Err(CondCheckError::Failed(error)),
-                }
-            },
-            &Duration::from_millis(50),
-            &Duration::from_secs(30),
-        )
-        .await
-        .expect("expected to find inventory collection");
-
         // Fetch the initial contents of internal and external DNS.
         let dns_initial_internal = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
@@ -1213,29 +1176,15 @@ mod test {
             .await
             .expect("fetching initial external DNS");
 
-        // Now, use the collection to construct an initial blueprint.
-        // This stores it into the database, too.
-        info!(log, "using collection"; "collection_id" => %collection.id);
-        let blueprint = nexus
-            .blueprint_generate_from_collection(&opctx, collection.id)
+        // Fetch the initial blueprint installed during rack initialization.
+        let (_blueprint_target, blueprint) = datastore
+            .blueprint_target_get_current_full(&opctx)
             .await
-            .expect("failed to generate initial blueprint");
+            .expect("failed to read current target blueprint")
+            .expect("no target blueprint set");
         eprintln!("blueprint: {:?}", blueprint);
 
-        // Set it as the current target.  We'll need this later.
-        datastore
-            .blueprint_target_set_current(
-                &opctx,
-                BlueprintTarget {
-                    target_id: blueprint.id,
-                    enabled: false,
-                    time_made_target: chrono::Utc::now(),
-                },
-            )
-            .await
-            .expect("failed to set blueprint as target");
-
-        // Now, execute the blueprint.
+        // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
         crate::realize_blueprint_with_overrides(
             &opctx,

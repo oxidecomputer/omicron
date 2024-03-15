@@ -27,6 +27,7 @@ use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
+use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::ServiceKind;
 use omicron_common::address::IpRange;
@@ -232,6 +233,7 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start(
         internal_server: InternalServer,
         config: &NexusConfig,
+        blueprint: Blueprint,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
@@ -276,6 +278,7 @@ impl nexus_test_interface::NexusServer for Server {
                 &opctx,
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
+                    blueprint,
                     services,
                     datasets,
                     internal_services_ip_pool_ranges,
