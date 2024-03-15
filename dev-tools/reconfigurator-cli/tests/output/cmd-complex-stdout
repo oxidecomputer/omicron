@@ -80,51 +80,51 @@ comment: from collection 5e1d6ae0-c5b4-4884-ac41-680cd4f5762d
 zones:
 
   sled 1f34b5cc-6dac-40cc-9ea1-95f32c33e59b: Omicron zones at generation 5
-    0db88baf-911d-47bb-af71-3aebd7c96934 in service     nexus
-    213d7dd3-95a4-45a7-99ca-e4899991dab4 in service     crucible
-    218f36a5-9e51-4b88-ad1a-da4d85c246c4 in service     internal_dns
-    40c47ead-3be8-4724-a8ef-b66233fc5c65 in service     crucible
-    425d9d2f-72ea-4f53-80b6-04e002771cdb in service     crucible
-    46a050b6-37b8-47b9-b4ae-ccb736ecd6d5 in service     crucible
-    4ea8104f-2cfc-4599-9d2c-bcfd8f0b71fd in service     clickhouse
-    7611a549-effc-41b6-b6cb-c03e0c70a31f in service     internal_ntp
-    af7ccead-2bd8-4a8a-9fbf-3b788d180139 in service     cockroach_db
-    d4428e41-ad7b-41f0-bde6-7c7c955f20c1 in service     crucible
+    0db88baf-911d-47bb-af71-3aebd7c96934 in service     nexus [underlay IP fd00:1122:3344:103::4]
+    213d7dd3-95a4-45a7-99ca-e4899991dab4 in service     crucible [underlay IP fd00:1122:3344:103::6]
+    218f36a5-9e51-4b88-ad1a-da4d85c246c4 in service     internal_dns [underlay IP fd00:1122:3344:3::1]
+    40c47ead-3be8-4724-a8ef-b66233fc5c65 in service     crucible [underlay IP fd00:1122:3344:103::7]
+    425d9d2f-72ea-4f53-80b6-04e002771cdb in service     crucible [underlay IP fd00:1122:3344:103::9]
+    46a050b6-37b8-47b9-b4ae-ccb736ecd6d5 in service     crucible [underlay IP fd00:1122:3344:103::8]
+    4ea8104f-2cfc-4599-9d2c-bcfd8f0b71fd in service     clickhouse [underlay IP fd00:1122:3344:103::5]
+    7611a549-effc-41b6-b6cb-c03e0c70a31f in service     internal_ntp [underlay IP fd00:1122:3344:103::b]
+    af7ccead-2bd8-4a8a-9fbf-3b788d180139 in service     cockroach_db [underlay IP fd00:1122:3344:103::3]
+    d4428e41-ad7b-41f0-bde6-7c7c955f20c1 in service     crucible [underlay IP fd00:1122:3344:103::a]
   sled 67a1268b-52d3-4159-b3ed-7a0777f1f340: Omicron zones at generation 5
-    1ebea0c3-1bfd-472c-9f84-ac9e23b32707 in service     crucible
-    2e9dfa8f-5371-48e5-b7f7-62a6af8283c1 in service     cockroach_db
-    57c712a6-6429-44b7-a9b2-9957cb9054d4 in service     crucible
-    59c4c9f0-bea9-46b7-ae9d-fb6dc1d658b9 in service     crucible
-    73916098-788f-48d8-b745-e13fdcfb771b in service     internal_ntp
-    9bb513e3-7505-416c-aa70-b26f1152bbdc in service     crucible
-    9c14c879-137b-4f5b-8068-1292bffc83ed in service     cockroach_db
-    9cf90589-5da1-4b42-b09b-d784e4134637 in service     nexus
-    d48b2dfa-c749-47dd-98b6-3f478cd63934 in service     crucible_pantry
-    fd003bee-818a-4c95-aae5-e378ac601522 in service     crucible
+    1ebea0c3-1bfd-472c-9f84-ac9e23b32707 in service     crucible [underlay IP fd00:1122:3344:104::b]
+    2e9dfa8f-5371-48e5-b7f7-62a6af8283c1 in service     cockroach_db [underlay IP fd00:1122:3344:104::4]
+    57c712a6-6429-44b7-a9b2-9957cb9054d4 in service     crucible [underlay IP fd00:1122:3344:104::a]
+    59c4c9f0-bea9-46b7-ae9d-fb6dc1d658b9 in service     crucible [underlay IP fd00:1122:3344:104::7]
+    73916098-788f-48d8-b745-e13fdcfb771b in service     internal_ntp [underlay IP fd00:1122:3344:104::c]
+    9bb513e3-7505-416c-aa70-b26f1152bbdc in service     crucible [underlay IP fd00:1122:3344:104::9]
+    9c14c879-137b-4f5b-8068-1292bffc83ed in service     cockroach_db [underlay IP fd00:1122:3344:104::3]
+    9cf90589-5da1-4b42-b09b-d784e4134637 in service     nexus [underlay IP fd00:1122:3344:104::5]
+    d48b2dfa-c749-47dd-98b6-3f478cd63934 in service     crucible_pantry [underlay IP fd00:1122:3344:104::6]
+    fd003bee-818a-4c95-aae5-e378ac601522 in service     crucible [underlay IP fd00:1122:3344:104::8]
   sled 77851655-10a5-4e80-88b0-a001473cab7e: Omicron zones at generation 5
-    084cac6e-44b5-4333-a2ff-b0993b534898 in service     crucible
-    11c527c5-0598-428e-9270-be5b74d3461b in service     cockroach_db
-    20be9299-495d-428d-b315-694c2c4b64af in service     crucible_pantry
-    2b29cb95-f8c6-4aff-acc0-1c0a627be392 in service     crucible
-    8d452bdd-e8b8-4108-a690-46fc59197db0 in service     crucible
-    953019c0-8e85-4417-b231-d42820470125 in service     oximeter
-    99c635b9-8e97-414a-8316-8261d2d767d0 in service     crucible
-    cbe1abfa-0063-44b2-9ce7-7ad76b403a94 in service     internal_dns
-    d52e797a-8fff-4e1e-a5ff-0ab8c8293ded in service     boundary_ntp
-    dc7f703a-27d1-4802-b85d-5629ddb2d67c in service     crucible
-    f0ed9838-6f1b-4646-a478-9f74f2e6e802 in service     external_dns
+    084cac6e-44b5-4333-a2ff-b0993b534898 in service     crucible [underlay IP fd00:1122:3344:102::8]
+    11c527c5-0598-428e-9270-be5b74d3461b in service     cockroach_db [underlay IP fd00:1122:3344:102::3]
+    20be9299-495d-428d-b315-694c2c4b64af in service     crucible_pantry [underlay IP fd00:1122:3344:102::6]
+    2b29cb95-f8c6-4aff-acc0-1c0a627be392 in service     crucible [underlay IP fd00:1122:3344:102::b]
+    8d452bdd-e8b8-4108-a690-46fc59197db0 in service     crucible [underlay IP fd00:1122:3344:102::a]
+    953019c0-8e85-4417-b231-d42820470125 in service     oximeter [underlay IP fd00:1122:3344:102::5]
+    99c635b9-8e97-414a-8316-8261d2d767d0 in service     crucible [underlay IP fd00:1122:3344:102::7]
+    cbe1abfa-0063-44b2-9ce7-7ad76b403a94 in service     internal_dns [underlay IP fd00:1122:3344:2::1]
+    d52e797a-8fff-4e1e-a5ff-0ab8c8293ded in service     boundary_ntp [underlay IP fd00:1122:3344:102::c]
+    dc7f703a-27d1-4802-b85d-5629ddb2d67c in service     crucible [underlay IP fd00:1122:3344:102::9]
+    f0ed9838-6f1b-4646-a478-9f74f2e6e802 in service     external_dns [underlay IP fd00:1122:3344:102::4]
   sled f122b3a2-e383-4e42-b2a5-74a69a9d110a: Omicron zones at generation 5
-    0d459323-e414-4f32-9944-76c7331da622 in service     nexus
-    2902972b-3ae4-489d-b937-6480352e214a in service     crucible
-    2ee832de-af75-47ac-abac-f91304857ca4 in service     external_dns
-    30050a7e-7fc3-4965-b07b-1635212393eb in service     crucible_pantry
-    8494befe-6df6-42d1-9baa-599ba4228430 in service     boundary_ntp
-    92cba955-3a5a-4d82-b0f2-30e89d4556d1 in service     crucible
-    9ba4cda7-d2e4-4c44-b1a6-8ddfe676098b in service     cockroach_db
-    e668e3f5-5457-4689-97da-b2af537787ac in service     crucible
-    f32fd972-7f40-4c58-9e00-7fc5c44273f4 in service     crucible
-    f8c79ba4-194a-4cfe-8090-5315e297b780 in service     internal_dns
-    fa5e0176-b4a8-4598-aa31-40fd562d246c in service     crucible
+    0d459323-e414-4f32-9944-76c7331da622 in service     nexus [underlay IP fd00:1122:3344:101::5]
+    2902972b-3ae4-489d-b937-6480352e214a in service     crucible [underlay IP fd00:1122:3344:101::8]
+    2ee832de-af75-47ac-abac-f91304857ca4 in service     external_dns [underlay IP fd00:1122:3344:101::4]
+    30050a7e-7fc3-4965-b07b-1635212393eb in service     crucible_pantry [underlay IP fd00:1122:3344:101::6]
+    8494befe-6df6-42d1-9baa-599ba4228430 in service     boundary_ntp [underlay IP fd00:1122:3344:101::c]
+    92cba955-3a5a-4d82-b0f2-30e89d4556d1 in service     crucible [underlay IP fd00:1122:3344:101::7]
+    9ba4cda7-d2e4-4c44-b1a6-8ddfe676098b in service     cockroach_db [underlay IP fd00:1122:3344:101::3]
+    e668e3f5-5457-4689-97da-b2af537787ac in service     crucible [underlay IP fd00:1122:3344:101::b]
+    f32fd972-7f40-4c58-9e00-7fc5c44273f4 in service     crucible [underlay IP fd00:1122:3344:101::9]
+    f8c79ba4-194a-4cfe-8090-5315e297b780 in service     internal_dns [underlay IP fd00:1122:3344:1::1]
+    fa5e0176-b4a8-4598-aa31-40fd562d246c in service     crucible [underlay IP fd00:1122:3344:101::a]
 
 
 > 
@@ -135,54 +135,54 @@ diff collection 3f61b723-cfe7-40ec-b22c-e3e1f35325f9 blueprint cd34e87b-d821-476
 +++ blueprint cd34e87b-d821-4768-b32f-f41c28db835e
   sled 1f34b5cc-6dac-40cc-9ea1-95f32c33e59b
       zone config generation 5
-         zone 0db88baf-911d-47bb-af71-3aebd7c96934 type nexus underlay IP fd00:1122:3344:103::4 (unchanged)
-         zone 213d7dd3-95a4-45a7-99ca-e4899991dab4 type crucible underlay IP fd00:1122:3344:103::6 (unchanged)
-         zone 218f36a5-9e51-4b88-ad1a-da4d85c246c4 type internal_dns underlay IP fd00:1122:3344:3::1 (unchanged)
-         zone 40c47ead-3be8-4724-a8ef-b66233fc5c65 type crucible underlay IP fd00:1122:3344:103::7 (unchanged)
-         zone 425d9d2f-72ea-4f53-80b6-04e002771cdb type crucible underlay IP fd00:1122:3344:103::9 (unchanged)
-         zone 46a050b6-37b8-47b9-b4ae-ccb736ecd6d5 type crucible underlay IP fd00:1122:3344:103::8 (unchanged)
-         zone 4ea8104f-2cfc-4599-9d2c-bcfd8f0b71fd type clickhouse underlay IP fd00:1122:3344:103::5 (unchanged)
-         zone 7611a549-effc-41b6-b6cb-c03e0c70a31f type internal_ntp underlay IP fd00:1122:3344:103::b (unchanged)
-         zone af7ccead-2bd8-4a8a-9fbf-3b788d180139 type cockroach_db underlay IP fd00:1122:3344:103::3 (unchanged)
-         zone d4428e41-ad7b-41f0-bde6-7c7c955f20c1 type crucible underlay IP fd00:1122:3344:103::a (unchanged)
+          0db88baf-911d-47bb-af71-3aebd7c96934 in service     nexus [underlay IP fd00:1122:3344:103::4] (unchanged)
+          213d7dd3-95a4-45a7-99ca-e4899991dab4 in service     crucible [underlay IP fd00:1122:3344:103::6] (unchanged)
+          218f36a5-9e51-4b88-ad1a-da4d85c246c4 in service     internal_dns [underlay IP fd00:1122:3344:3::1] (unchanged)
+          40c47ead-3be8-4724-a8ef-b66233fc5c65 in service     crucible [underlay IP fd00:1122:3344:103::7] (unchanged)
+          425d9d2f-72ea-4f53-80b6-04e002771cdb in service     crucible [underlay IP fd00:1122:3344:103::9] (unchanged)
+          46a050b6-37b8-47b9-b4ae-ccb736ecd6d5 in service     crucible [underlay IP fd00:1122:3344:103::8] (unchanged)
+          4ea8104f-2cfc-4599-9d2c-bcfd8f0b71fd in service     clickhouse [underlay IP fd00:1122:3344:103::5] (unchanged)
+          7611a549-effc-41b6-b6cb-c03e0c70a31f in service     internal_ntp [underlay IP fd00:1122:3344:103::b] (unchanged)
+          af7ccead-2bd8-4a8a-9fbf-3b788d180139 in service     cockroach_db [underlay IP fd00:1122:3344:103::3] (unchanged)
+          d4428e41-ad7b-41f0-bde6-7c7c955f20c1 in service     crucible [underlay IP fd00:1122:3344:103::a] (unchanged)
   sled 67a1268b-52d3-4159-b3ed-7a0777f1f340
       zone config generation 5
-         zone 1ebea0c3-1bfd-472c-9f84-ac9e23b32707 type crucible underlay IP fd00:1122:3344:104::b (unchanged)
-         zone 2e9dfa8f-5371-48e5-b7f7-62a6af8283c1 type cockroach_db underlay IP fd00:1122:3344:104::4 (unchanged)
-         zone 57c712a6-6429-44b7-a9b2-9957cb9054d4 type crucible underlay IP fd00:1122:3344:104::a (unchanged)
-         zone 59c4c9f0-bea9-46b7-ae9d-fb6dc1d658b9 type crucible underlay IP fd00:1122:3344:104::7 (unchanged)
-         zone 73916098-788f-48d8-b745-e13fdcfb771b type internal_ntp underlay IP fd00:1122:3344:104::c (unchanged)
-         zone 9bb513e3-7505-416c-aa70-b26f1152bbdc type crucible underlay IP fd00:1122:3344:104::9 (unchanged)
-         zone 9c14c879-137b-4f5b-8068-1292bffc83ed type cockroach_db underlay IP fd00:1122:3344:104::3 (unchanged)
-         zone 9cf90589-5da1-4b42-b09b-d784e4134637 type nexus underlay IP fd00:1122:3344:104::5 (unchanged)
-         zone d48b2dfa-c749-47dd-98b6-3f478cd63934 type crucible_pantry underlay IP fd00:1122:3344:104::6 (unchanged)
-         zone fd003bee-818a-4c95-aae5-e378ac601522 type crucible underlay IP fd00:1122:3344:104::8 (unchanged)
+          1ebea0c3-1bfd-472c-9f84-ac9e23b32707 in service     crucible [underlay IP fd00:1122:3344:104::b] (unchanged)
+          2e9dfa8f-5371-48e5-b7f7-62a6af8283c1 in service     cockroach_db [underlay IP fd00:1122:3344:104::4] (unchanged)
+          57c712a6-6429-44b7-a9b2-9957cb9054d4 in service     crucible [underlay IP fd00:1122:3344:104::a] (unchanged)
+          59c4c9f0-bea9-46b7-ae9d-fb6dc1d658b9 in service     crucible [underlay IP fd00:1122:3344:104::7] (unchanged)
+          73916098-788f-48d8-b745-e13fdcfb771b in service     internal_ntp [underlay IP fd00:1122:3344:104::c] (unchanged)
+          9bb513e3-7505-416c-aa70-b26f1152bbdc in service     crucible [underlay IP fd00:1122:3344:104::9] (unchanged)
+          9c14c879-137b-4f5b-8068-1292bffc83ed in service     cockroach_db [underlay IP fd00:1122:3344:104::3] (unchanged)
+          9cf90589-5da1-4b42-b09b-d784e4134637 in service     nexus [underlay IP fd00:1122:3344:104::5] (unchanged)
+          d48b2dfa-c749-47dd-98b6-3f478cd63934 in service     crucible_pantry [underlay IP fd00:1122:3344:104::6] (unchanged)
+          fd003bee-818a-4c95-aae5-e378ac601522 in service     crucible [underlay IP fd00:1122:3344:104::8] (unchanged)
   sled 77851655-10a5-4e80-88b0-a001473cab7e
       zone config generation 5
-         zone 084cac6e-44b5-4333-a2ff-b0993b534898 type crucible underlay IP fd00:1122:3344:102::8 (unchanged)
-         zone 11c527c5-0598-428e-9270-be5b74d3461b type cockroach_db underlay IP fd00:1122:3344:102::3 (unchanged)
-         zone 20be9299-495d-428d-b315-694c2c4b64af type crucible_pantry underlay IP fd00:1122:3344:102::6 (unchanged)
-         zone 2b29cb95-f8c6-4aff-acc0-1c0a627be392 type crucible underlay IP fd00:1122:3344:102::b (unchanged)
-         zone 8d452bdd-e8b8-4108-a690-46fc59197db0 type crucible underlay IP fd00:1122:3344:102::a (unchanged)
-         zone 953019c0-8e85-4417-b231-d42820470125 type oximeter underlay IP fd00:1122:3344:102::5 (unchanged)
-         zone 99c635b9-8e97-414a-8316-8261d2d767d0 type crucible underlay IP fd00:1122:3344:102::7 (unchanged)
-         zone cbe1abfa-0063-44b2-9ce7-7ad76b403a94 type internal_dns underlay IP fd00:1122:3344:2::1 (unchanged)
-         zone d52e797a-8fff-4e1e-a5ff-0ab8c8293ded type boundary_ntp underlay IP fd00:1122:3344:102::c (unchanged)
-         zone dc7f703a-27d1-4802-b85d-5629ddb2d67c type crucible underlay IP fd00:1122:3344:102::9 (unchanged)
-         zone f0ed9838-6f1b-4646-a478-9f74f2e6e802 type external_dns underlay IP fd00:1122:3344:102::4 (unchanged)
+          084cac6e-44b5-4333-a2ff-b0993b534898 in service     crucible [underlay IP fd00:1122:3344:102::8] (unchanged)
+          11c527c5-0598-428e-9270-be5b74d3461b in service     cockroach_db [underlay IP fd00:1122:3344:102::3] (unchanged)
+          20be9299-495d-428d-b315-694c2c4b64af in service     crucible_pantry [underlay IP fd00:1122:3344:102::6] (unchanged)
+          2b29cb95-f8c6-4aff-acc0-1c0a627be392 in service     crucible [underlay IP fd00:1122:3344:102::b] (unchanged)
+          8d452bdd-e8b8-4108-a690-46fc59197db0 in service     crucible [underlay IP fd00:1122:3344:102::a] (unchanged)
+          953019c0-8e85-4417-b231-d42820470125 in service     oximeter [underlay IP fd00:1122:3344:102::5] (unchanged)
+          99c635b9-8e97-414a-8316-8261d2d767d0 in service     crucible [underlay IP fd00:1122:3344:102::7] (unchanged)
+          cbe1abfa-0063-44b2-9ce7-7ad76b403a94 in service     internal_dns [underlay IP fd00:1122:3344:2::1] (unchanged)
+          d52e797a-8fff-4e1e-a5ff-0ab8c8293ded in service     boundary_ntp [underlay IP fd00:1122:3344:102::c] (unchanged)
+          dc7f703a-27d1-4802-b85d-5629ddb2d67c in service     crucible [underlay IP fd00:1122:3344:102::9] (unchanged)
+          f0ed9838-6f1b-4646-a478-9f74f2e6e802 in service     external_dns [underlay IP fd00:1122:3344:102::4] (unchanged)
   sled f122b3a2-e383-4e42-b2a5-74a69a9d110a
       zone config generation 5
-         zone 0d459323-e414-4f32-9944-76c7331da622 type nexus underlay IP fd00:1122:3344:101::5 (unchanged)
-         zone 2902972b-3ae4-489d-b937-6480352e214a type crucible underlay IP fd00:1122:3344:101::8 (unchanged)
-         zone 2ee832de-af75-47ac-abac-f91304857ca4 type external_dns underlay IP fd00:1122:3344:101::4 (unchanged)
-         zone 30050a7e-7fc3-4965-b07b-1635212393eb type crucible_pantry underlay IP fd00:1122:3344:101::6 (unchanged)
-         zone 8494befe-6df6-42d1-9baa-599ba4228430 type boundary_ntp underlay IP fd00:1122:3344:101::c (unchanged)
-         zone 92cba955-3a5a-4d82-b0f2-30e89d4556d1 type crucible underlay IP fd00:1122:3344:101::7 (unchanged)
-         zone 9ba4cda7-d2e4-4c44-b1a6-8ddfe676098b type cockroach_db underlay IP fd00:1122:3344:101::3 (unchanged)
-         zone e668e3f5-5457-4689-97da-b2af537787ac type crucible underlay IP fd00:1122:3344:101::b (unchanged)
-         zone f32fd972-7f40-4c58-9e00-7fc5c44273f4 type crucible underlay IP fd00:1122:3344:101::9 (unchanged)
-         zone f8c79ba4-194a-4cfe-8090-5315e297b780 type internal_dns underlay IP fd00:1122:3344:1::1 (unchanged)
-         zone fa5e0176-b4a8-4598-aa31-40fd562d246c type crucible underlay IP fd00:1122:3344:101::a (unchanged)
+          0d459323-e414-4f32-9944-76c7331da622 in service     nexus [underlay IP fd00:1122:3344:101::5] (unchanged)
+          2902972b-3ae4-489d-b937-6480352e214a in service     crucible [underlay IP fd00:1122:3344:101::8] (unchanged)
+          2ee832de-af75-47ac-abac-f91304857ca4 in service     external_dns [underlay IP fd00:1122:3344:101::4] (unchanged)
+          30050a7e-7fc3-4965-b07b-1635212393eb in service     crucible_pantry [underlay IP fd00:1122:3344:101::6] (unchanged)
+          8494befe-6df6-42d1-9baa-599ba4228430 in service     boundary_ntp [underlay IP fd00:1122:3344:101::c] (unchanged)
+          92cba955-3a5a-4d82-b0f2-30e89d4556d1 in service     crucible [underlay IP fd00:1122:3344:101::7] (unchanged)
+          9ba4cda7-d2e4-4c44-b1a6-8ddfe676098b in service     cockroach_db [underlay IP fd00:1122:3344:101::3] (unchanged)
+          e668e3f5-5457-4689-97da-b2af537787ac in service     crucible [underlay IP fd00:1122:3344:101::b] (unchanged)
+          f32fd972-7f40-4c58-9e00-7fc5c44273f4 in service     crucible [underlay IP fd00:1122:3344:101::9] (unchanged)
+          f8c79ba4-194a-4cfe-8090-5315e297b780 in service     internal_dns [underlay IP fd00:1122:3344:1::1] (unchanged)
+          fa5e0176-b4a8-4598-aa31-40fd562d246c in service     crucible [underlay IP fd00:1122:3344:101::a] (unchanged)
 
 
 > 
@@ -193,54 +193,54 @@ diff blueprint 649e444d-d00f-4067-a915-12e15647bf37 blueprint cd34e87b-d821-4768
 +++ blueprint cd34e87b-d821-4768-b32f-f41c28db835e
   sled 1f34b5cc-6dac-40cc-9ea1-95f32c33e59b
       zone config generation 5
-         zone 0db88baf-911d-47bb-af71-3aebd7c96934 type nexus underlay IP fd00:1122:3344:103::4 (unchanged)
-         zone 213d7dd3-95a4-45a7-99ca-e4899991dab4 type crucible underlay IP fd00:1122:3344:103::6 (unchanged)
-         zone 218f36a5-9e51-4b88-ad1a-da4d85c246c4 type internal_dns underlay IP fd00:1122:3344:3::1 (unchanged)
-         zone 40c47ead-3be8-4724-a8ef-b66233fc5c65 type crucible underlay IP fd00:1122:3344:103::7 (unchanged)
-         zone 425d9d2f-72ea-4f53-80b6-04e002771cdb type crucible underlay IP fd00:1122:3344:103::9 (unchanged)
-         zone 46a050b6-37b8-47b9-b4ae-ccb736ecd6d5 type crucible underlay IP fd00:1122:3344:103::8 (unchanged)
-         zone 4ea8104f-2cfc-4599-9d2c-bcfd8f0b71fd type clickhouse underlay IP fd00:1122:3344:103::5 (unchanged)
-         zone 7611a549-effc-41b6-b6cb-c03e0c70a31f type internal_ntp underlay IP fd00:1122:3344:103::b (unchanged)
-         zone af7ccead-2bd8-4a8a-9fbf-3b788d180139 type cockroach_db underlay IP fd00:1122:3344:103::3 (unchanged)
-         zone d4428e41-ad7b-41f0-bde6-7c7c955f20c1 type crucible underlay IP fd00:1122:3344:103::a (unchanged)
+          0db88baf-911d-47bb-af71-3aebd7c96934 in service     nexus [underlay IP fd00:1122:3344:103::4] (unchanged)
+          213d7dd3-95a4-45a7-99ca-e4899991dab4 in service     crucible [underlay IP fd00:1122:3344:103::6] (unchanged)
+          218f36a5-9e51-4b88-ad1a-da4d85c246c4 in service     internal_dns [underlay IP fd00:1122:3344:3::1] (unchanged)
+          40c47ead-3be8-4724-a8ef-b66233fc5c65 in service     crucible [underlay IP fd00:1122:3344:103::7] (unchanged)
+          425d9d2f-72ea-4f53-80b6-04e002771cdb in service     crucible [underlay IP fd00:1122:3344:103::9] (unchanged)
+          46a050b6-37b8-47b9-b4ae-ccb736ecd6d5 in service     crucible [underlay IP fd00:1122:3344:103::8] (unchanged)
+          4ea8104f-2cfc-4599-9d2c-bcfd8f0b71fd in service     clickhouse [underlay IP fd00:1122:3344:103::5] (unchanged)
+          7611a549-effc-41b6-b6cb-c03e0c70a31f in service     internal_ntp [underlay IP fd00:1122:3344:103::b] (unchanged)
+          af7ccead-2bd8-4a8a-9fbf-3b788d180139 in service     cockroach_db [underlay IP fd00:1122:3344:103::3] (unchanged)
+          d4428e41-ad7b-41f0-bde6-7c7c955f20c1 in service     crucible [underlay IP fd00:1122:3344:103::a] (unchanged)
   sled 67a1268b-52d3-4159-b3ed-7a0777f1f340
       zone config generation 5
-         zone 1ebea0c3-1bfd-472c-9f84-ac9e23b32707 type crucible underlay IP fd00:1122:3344:104::b (unchanged)
-         zone 2e9dfa8f-5371-48e5-b7f7-62a6af8283c1 type cockroach_db underlay IP fd00:1122:3344:104::4 (unchanged)
-         zone 57c712a6-6429-44b7-a9b2-9957cb9054d4 type crucible underlay IP fd00:1122:3344:104::a (unchanged)
-         zone 59c4c9f0-bea9-46b7-ae9d-fb6dc1d658b9 type crucible underlay IP fd00:1122:3344:104::7 (unchanged)
-         zone 73916098-788f-48d8-b745-e13fdcfb771b type internal_ntp underlay IP fd00:1122:3344:104::c (unchanged)
-         zone 9bb513e3-7505-416c-aa70-b26f1152bbdc type crucible underlay IP fd00:1122:3344:104::9 (unchanged)
-         zone 9c14c879-137b-4f5b-8068-1292bffc83ed type cockroach_db underlay IP fd00:1122:3344:104::3 (unchanged)
-         zone 9cf90589-5da1-4b42-b09b-d784e4134637 type nexus underlay IP fd00:1122:3344:104::5 (unchanged)
-         zone d48b2dfa-c749-47dd-98b6-3f478cd63934 type crucible_pantry underlay IP fd00:1122:3344:104::6 (unchanged)
-         zone fd003bee-818a-4c95-aae5-e378ac601522 type crucible underlay IP fd00:1122:3344:104::8 (unchanged)
+          1ebea0c3-1bfd-472c-9f84-ac9e23b32707 in service     crucible [underlay IP fd00:1122:3344:104::b] (unchanged)
+          2e9dfa8f-5371-48e5-b7f7-62a6af8283c1 in service     cockroach_db [underlay IP fd00:1122:3344:104::4] (unchanged)
+          57c712a6-6429-44b7-a9b2-9957cb9054d4 in service     crucible [underlay IP fd00:1122:3344:104::a] (unchanged)
+          59c4c9f0-bea9-46b7-ae9d-fb6dc1d658b9 in service     crucible [underlay IP fd00:1122:3344:104::7] (unchanged)
+          73916098-788f-48d8-b745-e13fdcfb771b in service     internal_ntp [underlay IP fd00:1122:3344:104::c] (unchanged)
+          9bb513e3-7505-416c-aa70-b26f1152bbdc in service     crucible [underlay IP fd00:1122:3344:104::9] (unchanged)
+          9c14c879-137b-4f5b-8068-1292bffc83ed in service     cockroach_db [underlay IP fd00:1122:3344:104::3] (unchanged)
+          9cf90589-5da1-4b42-b09b-d784e4134637 in service     nexus [underlay IP fd00:1122:3344:104::5] (unchanged)
+          d48b2dfa-c749-47dd-98b6-3f478cd63934 in service     crucible_pantry [underlay IP fd00:1122:3344:104::6] (unchanged)
+          fd003bee-818a-4c95-aae5-e378ac601522 in service     crucible [underlay IP fd00:1122:3344:104::8] (unchanged)
   sled 77851655-10a5-4e80-88b0-a001473cab7e
       zone config generation 5
-         zone 084cac6e-44b5-4333-a2ff-b0993b534898 type crucible underlay IP fd00:1122:3344:102::8 (unchanged)
-         zone 11c527c5-0598-428e-9270-be5b74d3461b type cockroach_db underlay IP fd00:1122:3344:102::3 (unchanged)
-         zone 20be9299-495d-428d-b315-694c2c4b64af type crucible_pantry underlay IP fd00:1122:3344:102::6 (unchanged)
-         zone 2b29cb95-f8c6-4aff-acc0-1c0a627be392 type crucible underlay IP fd00:1122:3344:102::b (unchanged)
-         zone 8d452bdd-e8b8-4108-a690-46fc59197db0 type crucible underlay IP fd00:1122:3344:102::a (unchanged)
-         zone 953019c0-8e85-4417-b231-d42820470125 type oximeter underlay IP fd00:1122:3344:102::5 (unchanged)
-         zone 99c635b9-8e97-414a-8316-8261d2d767d0 type crucible underlay IP fd00:1122:3344:102::7 (unchanged)
-         zone cbe1abfa-0063-44b2-9ce7-7ad76b403a94 type internal_dns underlay IP fd00:1122:3344:2::1 (unchanged)
-         zone d52e797a-8fff-4e1e-a5ff-0ab8c8293ded type boundary_ntp underlay IP fd00:1122:3344:102::c (unchanged)
-         zone dc7f703a-27d1-4802-b85d-5629ddb2d67c type crucible underlay IP fd00:1122:3344:102::9 (unchanged)
-         zone f0ed9838-6f1b-4646-a478-9f74f2e6e802 type external_dns underlay IP fd00:1122:3344:102::4 (unchanged)
+          084cac6e-44b5-4333-a2ff-b0993b534898 in service     crucible [underlay IP fd00:1122:3344:102::8] (unchanged)
+          11c527c5-0598-428e-9270-be5b74d3461b in service     cockroach_db [underlay IP fd00:1122:3344:102::3] (unchanged)
+          20be9299-495d-428d-b315-694c2c4b64af in service     crucible_pantry [underlay IP fd00:1122:3344:102::6] (unchanged)
+          2b29cb95-f8c6-4aff-acc0-1c0a627be392 in service     crucible [underlay IP fd00:1122:3344:102::b] (unchanged)
+          8d452bdd-e8b8-4108-a690-46fc59197db0 in service     crucible [underlay IP fd00:1122:3344:102::a] (unchanged)
+          953019c0-8e85-4417-b231-d42820470125 in service     oximeter [underlay IP fd00:1122:3344:102::5] (unchanged)
+          99c635b9-8e97-414a-8316-8261d2d767d0 in service     crucible [underlay IP fd00:1122:3344:102::7] (unchanged)
+          cbe1abfa-0063-44b2-9ce7-7ad76b403a94 in service     internal_dns [underlay IP fd00:1122:3344:2::1] (unchanged)
+          d52e797a-8fff-4e1e-a5ff-0ab8c8293ded in service     boundary_ntp [underlay IP fd00:1122:3344:102::c] (unchanged)
+          dc7f703a-27d1-4802-b85d-5629ddb2d67c in service     crucible [underlay IP fd00:1122:3344:102::9] (unchanged)
+          f0ed9838-6f1b-4646-a478-9f74f2e6e802 in service     external_dns [underlay IP fd00:1122:3344:102::4] (unchanged)
   sled f122b3a2-e383-4e42-b2a5-74a69a9d110a
       zone config generation 5
-         zone 0d459323-e414-4f32-9944-76c7331da622 type nexus underlay IP fd00:1122:3344:101::5 (unchanged)
-         zone 2902972b-3ae4-489d-b937-6480352e214a type crucible underlay IP fd00:1122:3344:101::8 (unchanged)
-         zone 2ee832de-af75-47ac-abac-f91304857ca4 type external_dns underlay IP fd00:1122:3344:101::4 (unchanged)
-         zone 30050a7e-7fc3-4965-b07b-1635212393eb type crucible_pantry underlay IP fd00:1122:3344:101::6 (unchanged)
-         zone 8494befe-6df6-42d1-9baa-599ba4228430 type boundary_ntp underlay IP fd00:1122:3344:101::c (unchanged)
-         zone 92cba955-3a5a-4d82-b0f2-30e89d4556d1 type crucible underlay IP fd00:1122:3344:101::7 (unchanged)
-         zone 9ba4cda7-d2e4-4c44-b1a6-8ddfe676098b type cockroach_db underlay IP fd00:1122:3344:101::3 (unchanged)
-         zone e668e3f5-5457-4689-97da-b2af537787ac type crucible underlay IP fd00:1122:3344:101::b (unchanged)
-         zone f32fd972-7f40-4c58-9e00-7fc5c44273f4 type crucible underlay IP fd00:1122:3344:101::9 (unchanged)
-         zone f8c79ba4-194a-4cfe-8090-5315e297b780 type internal_dns underlay IP fd00:1122:3344:1::1 (unchanged)
-         zone fa5e0176-b4a8-4598-aa31-40fd562d246c type crucible underlay IP fd00:1122:3344:101::a (unchanged)
+          0d459323-e414-4f32-9944-76c7331da622 in service     nexus [underlay IP fd00:1122:3344:101::5] (unchanged)
+          2902972b-3ae4-489d-b937-6480352e214a in service     crucible [underlay IP fd00:1122:3344:101::8] (unchanged)
+          2ee832de-af75-47ac-abac-f91304857ca4 in service     external_dns [underlay IP fd00:1122:3344:101::4] (unchanged)
+          30050a7e-7fc3-4965-b07b-1635212393eb in service     crucible_pantry [underlay IP fd00:1122:3344:101::6] (unchanged)
+          8494befe-6df6-42d1-9baa-599ba4228430 in service     boundary_ntp [underlay IP fd00:1122:3344:101::c] (unchanged)
+          92cba955-3a5a-4d82-b0f2-30e89d4556d1 in service     crucible [underlay IP fd00:1122:3344:101::7] (unchanged)
+          9ba4cda7-d2e4-4c44-b1a6-8ddfe676098b in service     cockroach_db [underlay IP fd00:1122:3344:101::3] (unchanged)
+          e668e3f5-5457-4689-97da-b2af537787ac in service     crucible [underlay IP fd00:1122:3344:101::b] (unchanged)
+          f32fd972-7f40-4c58-9e00-7fc5c44273f4 in service     crucible [underlay IP fd00:1122:3344:101::9] (unchanged)
+          f8c79ba4-194a-4cfe-8090-5315e297b780 in service     internal_dns [underlay IP fd00:1122:3344:1::1] (unchanged)
+          fa5e0176-b4a8-4598-aa31-40fd562d246c in service     crucible [underlay IP fd00:1122:3344:101::a] (unchanged)
 
 
 > 
@@ -251,54 +251,54 @@ diff blueprint cd34e87b-d821-4768-b32f-f41c28db835e blueprint 649e444d-d00f-4067
 +++ blueprint 649e444d-d00f-4067-a915-12e15647bf37
   sled 1f34b5cc-6dac-40cc-9ea1-95f32c33e59b
       zone config generation 5
-         zone 0db88baf-911d-47bb-af71-3aebd7c96934 type nexus underlay IP fd00:1122:3344:103::4 (unchanged)
-         zone 213d7dd3-95a4-45a7-99ca-e4899991dab4 type crucible underlay IP fd00:1122:3344:103::6 (unchanged)
-         zone 218f36a5-9e51-4b88-ad1a-da4d85c246c4 type internal_dns underlay IP fd00:1122:3344:3::1 (unchanged)
-         zone 40c47ead-3be8-4724-a8ef-b66233fc5c65 type crucible underlay IP fd00:1122:3344:103::7 (unchanged)
-         zone 425d9d2f-72ea-4f53-80b6-04e002771cdb type crucible underlay IP fd00:1122:3344:103::9 (unchanged)
-         zone 46a050b6-37b8-47b9-b4ae-ccb736ecd6d5 type crucible underlay IP fd00:1122:3344:103::8 (unchanged)
-         zone 4ea8104f-2cfc-4599-9d2c-bcfd8f0b71fd type clickhouse underlay IP fd00:1122:3344:103::5 (unchanged)
-         zone 7611a549-effc-41b6-b6cb-c03e0c70a31f type internal_ntp underlay IP fd00:1122:3344:103::b (unchanged)
-         zone af7ccead-2bd8-4a8a-9fbf-3b788d180139 type cockroach_db underlay IP fd00:1122:3344:103::3 (unchanged)
-         zone d4428e41-ad7b-41f0-bde6-7c7c955f20c1 type crucible underlay IP fd00:1122:3344:103::a (unchanged)
+          0db88baf-911d-47bb-af71-3aebd7c96934 in service     nexus [underlay IP fd00:1122:3344:103::4] (unchanged)
+          213d7dd3-95a4-45a7-99ca-e4899991dab4 in service     crucible [underlay IP fd00:1122:3344:103::6] (unchanged)
+          218f36a5-9e51-4b88-ad1a-da4d85c246c4 in service     internal_dns [underlay IP fd00:1122:3344:3::1] (unchanged)
+          40c47ead-3be8-4724-a8ef-b66233fc5c65 in service     crucible [underlay IP fd00:1122:3344:103::7] (unchanged)
+          425d9d2f-72ea-4f53-80b6-04e002771cdb in service     crucible [underlay IP fd00:1122:3344:103::9] (unchanged)
+          46a050b6-37b8-47b9-b4ae-ccb736ecd6d5 in service     crucible [underlay IP fd00:1122:3344:103::8] (unchanged)
+          4ea8104f-2cfc-4599-9d2c-bcfd8f0b71fd in service     clickhouse [underlay IP fd00:1122:3344:103::5] (unchanged)
+          7611a549-effc-41b6-b6cb-c03e0c70a31f in service     internal_ntp [underlay IP fd00:1122:3344:103::b] (unchanged)
+          af7ccead-2bd8-4a8a-9fbf-3b788d180139 in service     cockroach_db [underlay IP fd00:1122:3344:103::3] (unchanged)
+          d4428e41-ad7b-41f0-bde6-7c7c955f20c1 in service     crucible [underlay IP fd00:1122:3344:103::a] (unchanged)
   sled 67a1268b-52d3-4159-b3ed-7a0777f1f340
       zone config generation 5
-         zone 1ebea0c3-1bfd-472c-9f84-ac9e23b32707 type crucible underlay IP fd00:1122:3344:104::b (unchanged)
-         zone 2e9dfa8f-5371-48e5-b7f7-62a6af8283c1 type cockroach_db underlay IP fd00:1122:3344:104::4 (unchanged)
-         zone 57c712a6-6429-44b7-a9b2-9957cb9054d4 type crucible underlay IP fd00:1122:3344:104::a (unchanged)
-         zone 59c4c9f0-bea9-46b7-ae9d-fb6dc1d658b9 type crucible underlay IP fd00:1122:3344:104::7 (unchanged)
-         zone 73916098-788f-48d8-b745-e13fdcfb771b type internal_ntp underlay IP fd00:1122:3344:104::c (unchanged)
-         zone 9bb513e3-7505-416c-aa70-b26f1152bbdc type crucible underlay IP fd00:1122:3344:104::9 (unchanged)
-         zone 9c14c879-137b-4f5b-8068-1292bffc83ed type cockroach_db underlay IP fd00:1122:3344:104::3 (unchanged)
-         zone 9cf90589-5da1-4b42-b09b-d784e4134637 type nexus underlay IP fd00:1122:3344:104::5 (unchanged)
-         zone d48b2dfa-c749-47dd-98b6-3f478cd63934 type crucible_pantry underlay IP fd00:1122:3344:104::6 (unchanged)
-         zone fd003bee-818a-4c95-aae5-e378ac601522 type crucible underlay IP fd00:1122:3344:104::8 (unchanged)
+          1ebea0c3-1bfd-472c-9f84-ac9e23b32707 in service     crucible [underlay IP fd00:1122:3344:104::b] (unchanged)
+          2e9dfa8f-5371-48e5-b7f7-62a6af8283c1 in service     cockroach_db [underlay IP fd00:1122:3344:104::4] (unchanged)
+          57c712a6-6429-44b7-a9b2-9957cb9054d4 in service     crucible [underlay IP fd00:1122:3344:104::a] (unchanged)
+          59c4c9f0-bea9-46b7-ae9d-fb6dc1d658b9 in service     crucible [underlay IP fd00:1122:3344:104::7] (unchanged)
+          73916098-788f-48d8-b745-e13fdcfb771b in service     internal_ntp [underlay IP fd00:1122:3344:104::c] (unchanged)
+          9bb513e3-7505-416c-aa70-b26f1152bbdc in service     crucible [underlay IP fd00:1122:3344:104::9] (unchanged)
+          9c14c879-137b-4f5b-8068-1292bffc83ed in service     cockroach_db [underlay IP fd00:1122:3344:104::3] (unchanged)
+          9cf90589-5da1-4b42-b09b-d784e4134637 in service     nexus [underlay IP fd00:1122:3344:104::5] (unchanged)
+          d48b2dfa-c749-47dd-98b6-3f478cd63934 in service     crucible_pantry [underlay IP fd00:1122:3344:104::6] (unchanged)
+          fd003bee-818a-4c95-aae5-e378ac601522 in service     crucible [underlay IP fd00:1122:3344:104::8] (unchanged)
   sled 77851655-10a5-4e80-88b0-a001473cab7e
       zone config generation 5
-         zone 084cac6e-44b5-4333-a2ff-b0993b534898 type crucible underlay IP fd00:1122:3344:102::8 (unchanged)
-         zone 11c527c5-0598-428e-9270-be5b74d3461b type cockroach_db underlay IP fd00:1122:3344:102::3 (unchanged)
-         zone 20be9299-495d-428d-b315-694c2c4b64af type crucible_pantry underlay IP fd00:1122:3344:102::6 (unchanged)
-         zone 2b29cb95-f8c6-4aff-acc0-1c0a627be392 type crucible underlay IP fd00:1122:3344:102::b (unchanged)
-         zone 8d452bdd-e8b8-4108-a690-46fc59197db0 type crucible underlay IP fd00:1122:3344:102::a (unchanged)
-         zone 953019c0-8e85-4417-b231-d42820470125 type oximeter underlay IP fd00:1122:3344:102::5 (unchanged)
-         zone 99c635b9-8e97-414a-8316-8261d2d767d0 type crucible underlay IP fd00:1122:3344:102::7 (unchanged)
-         zone cbe1abfa-0063-44b2-9ce7-7ad76b403a94 type internal_dns underlay IP fd00:1122:3344:2::1 (unchanged)
-         zone d52e797a-8fff-4e1e-a5ff-0ab8c8293ded type boundary_ntp underlay IP fd00:1122:3344:102::c (unchanged)
-         zone dc7f703a-27d1-4802-b85d-5629ddb2d67c type crucible underlay IP fd00:1122:3344:102::9 (unchanged)
-         zone f0ed9838-6f1b-4646-a478-9f74f2e6e802 type external_dns underlay IP fd00:1122:3344:102::4 (unchanged)
+          084cac6e-44b5-4333-a2ff-b0993b534898 in service     crucible [underlay IP fd00:1122:3344:102::8] (unchanged)
+          11c527c5-0598-428e-9270-be5b74d3461b in service     cockroach_db [underlay IP fd00:1122:3344:102::3] (unchanged)
+          20be9299-495d-428d-b315-694c2c4b64af in service     crucible_pantry [underlay IP fd00:1122:3344:102::6] (unchanged)
+          2b29cb95-f8c6-4aff-acc0-1c0a627be392 in service     crucible [underlay IP fd00:1122:3344:102::b] (unchanged)
+          8d452bdd-e8b8-4108-a690-46fc59197db0 in service     crucible [underlay IP fd00:1122:3344:102::a] (unchanged)
+          953019c0-8e85-4417-b231-d42820470125 in service     oximeter [underlay IP fd00:1122:3344:102::5] (unchanged)
+          99c635b9-8e97-414a-8316-8261d2d767d0 in service     crucible [underlay IP fd00:1122:3344:102::7] (unchanged)
+          cbe1abfa-0063-44b2-9ce7-7ad76b403a94 in service     internal_dns [underlay IP fd00:1122:3344:2::1] (unchanged)
+          d52e797a-8fff-4e1e-a5ff-0ab8c8293ded in service     boundary_ntp [underlay IP fd00:1122:3344:102::c] (unchanged)
+          dc7f703a-27d1-4802-b85d-5629ddb2d67c in service     crucible [underlay IP fd00:1122:3344:102::9] (unchanged)
+          f0ed9838-6f1b-4646-a478-9f74f2e6e802 in service     external_dns [underlay IP fd00:1122:3344:102::4] (unchanged)
   sled f122b3a2-e383-4e42-b2a5-74a69a9d110a
       zone config generation 5
-         zone 0d459323-e414-4f32-9944-76c7331da622 type nexus underlay IP fd00:1122:3344:101::5 (unchanged)
-         zone 2902972b-3ae4-489d-b937-6480352e214a type crucible underlay IP fd00:1122:3344:101::8 (unchanged)
-         zone 2ee832de-af75-47ac-abac-f91304857ca4 type external_dns underlay IP fd00:1122:3344:101::4 (unchanged)
-         zone 30050a7e-7fc3-4965-b07b-1635212393eb type crucible_pantry underlay IP fd00:1122:3344:101::6 (unchanged)
-         zone 8494befe-6df6-42d1-9baa-599ba4228430 type boundary_ntp underlay IP fd00:1122:3344:101::c (unchanged)
-         zone 92cba955-3a5a-4d82-b0f2-30e89d4556d1 type crucible underlay IP fd00:1122:3344:101::7 (unchanged)
-         zone 9ba4cda7-d2e4-4c44-b1a6-8ddfe676098b type cockroach_db underlay IP fd00:1122:3344:101::3 (unchanged)
-         zone e668e3f5-5457-4689-97da-b2af537787ac type crucible underlay IP fd00:1122:3344:101::b (unchanged)
-         zone f32fd972-7f40-4c58-9e00-7fc5c44273f4 type crucible underlay IP fd00:1122:3344:101::9 (unchanged)
-         zone f8c79ba4-194a-4cfe-8090-5315e297b780 type internal_dns underlay IP fd00:1122:3344:1::1 (unchanged)
-         zone fa5e0176-b4a8-4598-aa31-40fd562d246c type crucible underlay IP fd00:1122:3344:101::a (unchanged)
+          0d459323-e414-4f32-9944-76c7331da622 in service     nexus [underlay IP fd00:1122:3344:101::5] (unchanged)
+          2902972b-3ae4-489d-b937-6480352e214a in service     crucible [underlay IP fd00:1122:3344:101::8] (unchanged)
+          2ee832de-af75-47ac-abac-f91304857ca4 in service     external_dns [underlay IP fd00:1122:3344:101::4] (unchanged)
+          30050a7e-7fc3-4965-b07b-1635212393eb in service     crucible_pantry [underlay IP fd00:1122:3344:101::6] (unchanged)
+          8494befe-6df6-42d1-9baa-599ba4228430 in service     boundary_ntp [underlay IP fd00:1122:3344:101::c] (unchanged)
+          92cba955-3a5a-4d82-b0f2-30e89d4556d1 in service     crucible [underlay IP fd00:1122:3344:101::7] (unchanged)
+          9ba4cda7-d2e4-4c44-b1a6-8ddfe676098b in service     cockroach_db [underlay IP fd00:1122:3344:101::3] (unchanged)
+          e668e3f5-5457-4689-97da-b2af537787ac in service     crucible [underlay IP fd00:1122:3344:101::b] (unchanged)
+          f32fd972-7f40-4c58-9e00-7fc5c44273f4 in service     crucible [underlay IP fd00:1122:3344:101::9] (unchanged)
+          f8c79ba4-194a-4cfe-8090-5315e297b780 in service     internal_dns [underlay IP fd00:1122:3344:1::1] (unchanged)
+          fa5e0176-b4a8-4598-aa31-40fd562d246c in service     crucible [underlay IP fd00:1122:3344:101::a] (unchanged)
 
 
 > 

@@ -210,7 +210,7 @@ mod test {
     use nexus_types::deployment::{Blueprint, BlueprintTarget};
     use omicron_common::api::external::Generation;
     use serde::Deserialize;
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -228,8 +228,7 @@ mod test {
             },
             Blueprint {
                 id,
-                omicron_zones: BTreeMap::new(),
-                zones_in_service: BTreeSet::new(),
+                blueprint_zones: BTreeMap::new(),
                 parent_blueprint_id,
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),

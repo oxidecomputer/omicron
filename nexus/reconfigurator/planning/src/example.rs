@@ -108,14 +108,14 @@ impl ExampleSystem {
             system.to_collection_builder().expect("failed to build collection");
 
         for sled_id in blueprint.sleds() {
-            let Some(zones) = blueprint.omicron_zones.get(&sled_id) else {
+            let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
             builder
                 .found_sled_omicron_zones(
                     "fake sled agent",
                     sled_id,
-                    zones.clone(),
+                    zones.to_omicron_zones_config(),
                 )
                 .unwrap();
         }
