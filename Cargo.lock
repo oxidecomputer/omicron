@@ -4406,6 +4406,7 @@ name = "nexus-db-model"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
  "chrono",
  "db-macros",
  "derive-where",
@@ -4436,6 +4437,7 @@ dependencies = [
  "steno",
  "strum 0.26.1",
  "thiserror",
+ "tokio",
  "uuid",
 ]
 

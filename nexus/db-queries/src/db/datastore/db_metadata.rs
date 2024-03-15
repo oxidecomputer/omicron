@@ -13,10 +13,10 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_config::SchemaConfig;
+use nexus_db_model::AllSchemaVersions;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::SemverVersion;
 use slog::Logger;
-use std::collections::BTreeSet;
 use std::ops::Bound;
 use std::str::FromStr;
 
@@ -211,49 +211,29 @@ impl DataStore {
         // migrate from our current version to the desired version.
 
         info!(log, "Reading schemas from {}", config.schema_dir);
-        let mut dir = tokio::fs::read_dir(&config.schema_dir)
+        let all_versions = AllSchemaVersions::load(&config.schema_dir)
             .await
-            .map_err(|e| format!("Failed to read schema config dir: {e}"))?;
-        let mut all_versions = BTreeSet::new();
-        while let Some(entry) = dir
-            .next_entry()
-            .await
-            .map_err(|e| format!("Failed to read schema dir: {e}"))?
-        {
-            if entry.file_type().await.map_err(|e| e.to_string())?.is_dir() {
-                let name = entry
-                    .file_name()
-                    .into_string()
-                    .map_err(|_| "Non-unicode schema dir".to_string())?;
-                if let Ok(observed_version) = name.parse::<SemverVersion>() {
-                    all_versions.insert(observed_version);
-                } else {
-                    let err_msg =
-                        format!("Failed to parse {name} as a semver version");
-                    warn!(log, "{err_msg}");
-                    return Err(err_msg);
-                }
-            }
-        }
-
-        if !all_versions.contains(&current_version) {
+            .map_err(|e| format!("{e:#}"))?;
+        if !all_versions.contains_version(&current_version) {
             return Err(format!(
                 "Current DB version {current_version} was not found in {}",
                 config.schema_dir
             ));
         }
         // TODO: Test this?
-        if !all_versions.contains(&desired_version) {
+        if !all_versions.contains_version(&desired_version) {
             return Err(format!(
                 "Target DB version {desired_version} was not found in {}",
                 config.schema_dir
             ));
         }
 
-        let target_versions = all_versions.range((
-            Bound::Excluded(&current_version),
-            Bound::Included(&desired_version),
-        ));
+        let target_versions: Vec<_> = all_versions
+            .versions_range((
+                Bound::Excluded(&current_version),
+                Bound::Included(&desired_version),
+            ))
+            .collect();
 
         for target_version in target_versions.into_iter() {
             info!(

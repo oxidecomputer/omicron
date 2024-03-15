@@ -4,13 +4,14 @@
 
 //! Upgrades CRDB schema
 
-use anyhow::{anyhow, bail};
+use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use clap::Subcommand;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_config::SchemaConfig;
 use nexus_db_model::schema::SCHEMA_VERSION;
+use nexus_db_model::AllSchemaVersions;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::SemverVersion;
@@ -20,7 +21,6 @@ use slog::LevelFilter;
 use slog::Logger;
 use slog_term::FullFormat;
 use slog_term::TermDecorator;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 fn parse_log_level(s: &str) -> anyhow::Result<Level> {
@@ -87,44 +87,22 @@ async fn main() -> anyhow::Result<()> {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|_| "Unknown".to_string());
 
-            println!("Current Version: {current_version}");
+            println!("Current Version in database: {current_version}");
 
-            let mut dir =
-                tokio::fs::read_dir(&schema_config.schema_dir).await.map_err(
-                    |e| anyhow!("Failed to read from schema directory: {e}"),
-                )?;
-
-            let mut all_versions = BTreeSet::new();
-            while let Some(entry) = dir
-                .next_entry()
-                .await
-                .map_err(|e| anyhow!("Failed to read schema dir: {e}"))?
-            {
-                if entry.file_type().await.map_err(|e| anyhow!(e))?.is_dir() {
-                    let name = entry
-                        .file_name()
-                        .into_string()
-                        .map_err(|_| anyhow!("Non-unicode schema dir"))?;
-                    if let Ok(observed_version) = name.parse::<SemverVersion>()
-                    {
-                        all_versions.insert(observed_version);
-                    } else {
-                        bail!("Failed to parse {name} as a semver version");
-                    }
-                }
-            }
+            let all_versions =
+                AllSchemaVersions::load(&schema_config.schema_dir).await?;
 
             println!("Known Versions:");
-            for version in &all_versions {
+            for version in all_versions.iter_versions() {
                 let mut extra = String::new();
-                if version.to_string() == current_version {
+                if version.semver().to_string() == current_version {
                     extra.push_str(" (reported by database)");
                 };
-                if version == &SCHEMA_VERSION {
+                if version.is_current_software_version() {
                     extra.push_str(" (expected by Nexus)");
                 };
 
-                println!("  {version}{extra}")
+                println!("  {}{extra}", version.semver())
             }
         }
         Cmd::Upgrade { version } => {
