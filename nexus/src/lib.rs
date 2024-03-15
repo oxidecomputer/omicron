@@ -30,7 +30,9 @@ use nexus_config::NexusConfig;
 use nexus_types::deployment::Blueprint;
 use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
+use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::{
     ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
@@ -352,6 +354,17 @@ impl nexus_test_interface::NexusServer for Server {
             )
             .await
             .unwrap();
+    }
+
+    async fn inventory_collect_and_get_latest_collection(
+        &self,
+    ) -> Result<Option<Collection>, Error> {
+        let nexus = &self.apictx.nexus;
+
+        nexus.activate_inventory_collection();
+
+        let opctx = nexus.opctx_for_internal_api();
+        nexus.datastore().inventory_get_latest_collection(&opctx).await
     }
 
     async fn close(mut self) {
