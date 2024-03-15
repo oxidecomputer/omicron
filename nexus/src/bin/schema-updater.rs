@@ -10,8 +10,8 @@ use clap::Parser;
 use clap::Subcommand;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_config::SchemaConfig;
-use nexus_db_model::schema::SCHEMA_VERSION;
 use nexus_db_model::AllSchemaVersions;
+use nexus_db_model::SCHEMA_VERSION;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::SemverVersion;
@@ -73,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
     let crdb_cfg = db::Config { url: args.url };
     let pool = Arc::new(db::Pool::new(&log, &crdb_cfg));
     let schema_config = SchemaConfig { schema_dir: args.schema_directory };
+    let all_versions = AllSchemaVersions::load(&schema_config.schema_dir)?;
 
     // We use the unchecked constructor of the datastore because we
     // don't want to block on someone else applying an upgrade.
@@ -88,10 +89,6 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "Unknown".to_string());
 
             println!("Current Version in database: {current_version}");
-
-            let all_versions =
-                AllSchemaVersions::load(&schema_config.schema_dir)?;
-
             println!("Known Versions:");
             for version in all_versions.iter_versions() {
                 let mut extra = String::new();
@@ -108,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
         Cmd::Upgrade { version } => {
             println!("Upgrading to {version}");
             datastore
-                .ensure_schema(&log, version.clone(), Some(&schema_config))
+                .ensure_schema(&log, version.clone(), Some(&all_versions))
                 .await
                 .map_err(|e| anyhow!(e))?;
             println!("Upgrade to {version} complete");

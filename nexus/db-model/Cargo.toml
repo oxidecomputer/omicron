@@ -45,4 +45,5 @@ sled-agent-client.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+camino-tempfile.workspace = true
 expectorate.workspace = true

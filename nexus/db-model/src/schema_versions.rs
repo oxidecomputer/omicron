@@ -2,15 +2,24 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// XXX-dap TODO-doc
-// XXX consider moving all of this to its own crate?
+// XXX-dap TODO-doc this whole file
+// XXX-dap TODO-doc update README too
 
-use crate::schema::SCHEMA_VERSION;
 use anyhow::{bail, ensure, Context};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use omicron_common::api::external::SemverVersion;
 use once_cell::sync::Lazy;
 use std::collections::BTreeMap;
+
+/// The version of the database schema this particular version of Nexus was
+/// built against.
+///
+/// This should be updated whenever the schema is changed. For more details,
+/// refer to: schema/crdb/README.adoc
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(43, 0, 0);
+
+pub const EARLIEST_SUPPORTED_VERSION: SemverVersion =
+    SemverVersion::new(1, 0, 0);
 
 static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
     vec![
@@ -111,7 +120,7 @@ impl AllSchemaVersions {
                 schema_directory.join(&known_version.relative_path);
             let schema_version = SchemaVersion::load_from_directory(
                 known_version.semver.clone(),
-                version_path,
+                &version_path,
             )
             .with_context(|| {
                 format!(
@@ -134,7 +143,7 @@ impl AllSchemaVersions {
         self.versions.contains_key(version)
     }
 
-    pub fn versions_range<'a, R>(
+    pub fn versions_range<R>(
         &self,
         bounds: R,
     ) -> impl Iterator<Item = &'_ SchemaVersion>
@@ -186,7 +195,7 @@ impl SchemaVersion {
     /// the second form (`up1.sql`, ...) will be sorted numerically.
     fn load_from_directory(
         semver: SemverVersion,
-        directory: Utf8PathBuf,
+        directory: &Utf8Path,
     ) -> Result<SchemaVersion, anyhow::Error> {
         let mut up_sqls = vec![];
         let entries = directory
@@ -311,13 +320,20 @@ impl std::fmt::Display for SchemaVersion {
 #[cfg(test)]
 mod test {
     use super::*;
+    use camino_tempfile::Utf8TempDir;
 
     #[test]
     fn test_known_versions() {
         // All known versions should be unique and increasing.
         let mut known_versions = KNOWN_VERSIONS.iter();
-        let mut prev =
+        let first =
             known_versions.next().expect("expected at least one KNOWN_VERSION");
+        assert_eq!(
+            first.semver, EARLIEST_SUPPORTED_VERSION,
+            "EARLIEST_SUPPORTED_VERSION should be the first in KNOWN_VERSIONS"
+        );
+
+        let mut prev = first;
         for v in known_versions {
             println!("checking known version: {} -> {}", prev, v);
             assert!(
@@ -354,4 +370,163 @@ mod test {
 
     // XXX-dap add a test that there's nothing extra in the schema migrations
     // directory
+
+    // Confirm that `SchemaVersion::load_from_directory()` rejects `up*.sql`
+    // files where the `*` doesn't contain a positive integer.
+    #[tokio::test]
+    async fn test_reject_invalid_up_sql_names() {
+        for (invalid_filename, error_prefix) in [
+            ("upA.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("up1a.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("upaaa1.sql", "invalid filename (non-numeric `up*.sql`)"),
+            ("up-3.sql", "invalid filename (non-numeric `up*.sql`)"),
+            (
+                "up0.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+            (
+                "up00.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+            (
+                "up000.sql",
+                "invalid filename (`up*.sql` numbering must start at 1)",
+            ),
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            let filename = tempdir.path().join(invalid_filename);
+            _ = tokio::fs::File::create(&filename).await.unwrap();
+            let maybe_schema = SchemaVersion::load_from_directory(
+                SemverVersion::new(12, 0, 0),
+                tempdir.path(),
+            );
+            match maybe_schema {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {invalid_filename} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(error) => {
+                    assert_eq!(
+                        format!("{error:#}"),
+                        format!("{error_prefix}: {filename}")
+                    );
+                }
+            }
+        }
+    }
+
+    // Confirm that `SchemaVersion::load_from_directory()` rejects a directory
+    // with no appropriately-named files.
+    #[tokio::test]
+    async fn test_reject_no_up_sql_files() {
+        for filenames in [
+            &[] as &[&str],
+            &["README.md"],
+            &["foo.sql", "bar.sql"],
+            &["up1sql", "up2sql"],
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            let maybe_schema = SchemaVersion::load_from_directory(
+                SemverVersion::new(12, 0, 0),
+                tempdir.path(),
+            );
+            match maybe_schema {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {filenames:?} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(error) => {
+                    assert_eq!(
+                        format!("{error:#}"),
+                        "no `up*.sql` files found"
+                    );
+                }
+            }
+        }
+    }
+
+    // Confirm that `SchemaVersion::load_from_directory()` rejects collections
+    // of `up*.sql` files with individually-valid names but that do not pass the
+    // rules of the entire collection.
+    #[tokio::test]
+    async fn test_reject_invalid_up_sql_collections() {
+        for invalid_filenames in [
+            &["up.sql", "up1.sql"] as &[&str],
+            &["up1.sql", "up01.sql"],
+            &["up1.sql", "up3.sql"],
+            &["up1.sql", "up2.sql", "up3.sql", "up02.sql"],
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in invalid_filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            let maybe_schema = SchemaVersion::load_from_directory(
+                SemverVersion::new(12, 0, 0),
+                tempdir.path(),
+            );
+            match maybe_schema {
+                Ok(upgrade) => {
+                    panic!(
+                        "unexpected success on {invalid_filenames:?} \
+                         (produced {upgrade:?})"
+                    );
+                }
+                Err(error) => {
+                    let message = format!("{error:#}");
+                    assert!(
+                        message.starts_with("invalid `up*.sql` combination: "),
+                        "message did not start with expected prefix: \
+                         {message:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    // Confirm that `SchemaVersion::load_from_directory()` accepts legal
+    // collections of `up*.sql` filenames.
+    #[tokio::test]
+    async fn test_allows_valid_up_sql_collections() {
+        for filenames in [
+            &["up.sql"] as &[&str],
+            &["up1.sql", "up2.sql"],
+            &[
+                "up01.sql", "up02.sql", "up03.sql", "up04.sql", "up05.sql",
+                "up06.sql", "up07.sql", "up08.sql", "up09.sql", "up10.sql",
+                "up11.sql",
+            ],
+            &["up00001.sql", "up00002.sql", "up00003.sql"],
+        ] {
+            let tempdir = Utf8TempDir::new().unwrap();
+            for filename in filenames {
+                _ = tokio::fs::File::create(tempdir.path().join(filename))
+                    .await
+                    .unwrap();
+            }
+
+            let maybe_schema = SchemaVersion::load_from_directory(
+                SemverVersion::new(12, 0, 0),
+                tempdir.path(),
+            );
+            match maybe_schema {
+                Ok(_) => (),
+                Err(message) => {
+                    panic!("unexpected failure on {filenames:?}: {message:?}");
+                }
+            }
+        }
+    }
 }

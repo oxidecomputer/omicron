@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
-use nexus_config::SchemaConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -100,12 +99,10 @@ mod vpc;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
-pub use db_metadata::{
-        EARLIEST_SUPPORTED_VERSION,
-};
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
+use nexus_db_model::AllSchemaVersions;
 pub use probe::ProbeInfo;
 pub use rack::RackInit;
 pub use silo::Discoverability;
@@ -196,14 +193,13 @@ impl DataStore {
     pub async fn new(
         log: &Logger,
         pool: Arc<Pool>,
-        config: Option<&SchemaConfig>,
+        config: Option<&AllSchemaVersions>,
     ) -> Result<Self, String> {
         let datastore =
             Self::new_unchecked(log.new(o!("component" => "datastore")), pool)?;
 
         // Keep looping until we find that the schema matches our expectation.
-        const EXPECTED_VERSION: SemverVersion =
-            nexus_db_model::schema::SCHEMA_VERSION;
+        const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
         retry_notify(
             retry_policy_internal_service(),
             || async {
