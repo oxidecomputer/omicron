@@ -343,6 +343,7 @@ mod test {
     use chrono::Utc;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
+    use nexus_types::deployment::BlueprintZonePolicy;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -877,6 +878,65 @@ mod test {
             }
         }
         assert_eq!(total_new_nexus_zones, 11);
+
+        // ---
+
+        // Also poke at some of the config by hand; we'll use this to test out
+        // diff output. This isn't a real blueprint, just one that we're
+        // creating to test diff output.
+        let mut blueprint2a = blueprint2.clone();
+
+        let mut changed_crucible_zone = false;
+
+        for zone in &mut blueprint2a
+            .blueprint_zones
+            .get_mut(&nonprovisionable_sled_id)
+            .unwrap()
+            .zones
+        {
+            if let OmicronZoneType::Nexus { internal_address, .. } =
+                &mut zone.config.zone_type
+            {
+                // Change one of these params to ensure that the diff output
+                // makes sense.
+                *internal_address = format!("{internal_address}foo");
+            } else if let OmicronZoneType::Crucible { .. } =
+                zone.config.zone_type
+            {
+                // Only change one crucible zone to see how other zones render.
+                if changed_crucible_zone {
+                    continue;
+                } else {
+                    zone.zone_policy = BlueprintZonePolicy::NotInService;
+                    changed_crucible_zone = true;
+                }
+            } else if let OmicronZoneType::InternalNtp { .. } =
+                &mut zone.config.zone_type
+            {
+                // Change the underlay IP.
+                let mut segments = zone.config.underlay_address.segments();
+                segments[0] += 1;
+                zone.config.underlay_address = segments.into();
+            }
+        }
+
+        blueprint2a
+            .blueprint_zones
+            .get_mut(&expunged_sled_id)
+            .unwrap()
+            .zones
+            .clear();
+
+        blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
+
+        let diff = blueprint2.diff_sleds(&blueprint2a);
+        println!("2 -> 2a (manually modified zones):\n{}", diff.display());
+        assert_contents(
+            "tests/output/planner_nonprovisionable_2_2a.txt",
+            &diff.display().to_string(),
+        );
+
+        // ---
 
         logctx.cleanup_successful();
     }

@@ -260,7 +260,7 @@ pub fn blueprint_internal_dns_config(
         let context = || {
             format!(
                 "parsing {} zone with id {}",
-                zone.config.zone_type.label(),
+                zone.config.zone_type.tag(),
                 zone.config.id
             )
         };
