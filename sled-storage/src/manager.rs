@@ -526,7 +526,10 @@ impl StorageManager {
                 // ledger, but have been told to store the configuration
                 // regardless -- but it seems safe to bail out if we have
                 // ANY configuration stored, for any reason.
-                warn!(self.log, "Some configuration already exists, without ledger");
+                warn!(
+                    self.log,
+                    "Some configuration already exists, without ledger"
+                );
                 return Ok(());
             }
 
@@ -617,7 +620,9 @@ impl StorageManager {
             .disks
             .sort_by(|a, b| a.identity.partial_cmp(&b.identity).unwrap());
 
-        // TODO: Need schema change test for this ledger.
+        // We rely on the schema being stable across reboots -- observe
+        // "test_omicron_physical_disks_schema" below for that property
+        // guarantee.
         let ledger_paths = self.all_omicron_disk_ledgers().await;
         let maybe_ledger = Ledger::<OmicronPhysicalDisksConfig>::new(
             &log,
@@ -837,6 +842,7 @@ mod tests {
 
     use super::*;
     use camino_tempfile::tempdir;
+    use omicron_common::api::external::Generation;
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
     use std::sync::atomic::Ordering;
@@ -902,10 +908,14 @@ mod tests {
             .handle()
             .omicron_physical_disks_ensure(config.clone())
             .await;
-        assert!(matches!(
-            result,
-            Err(Error::Ledger(ledger::Error::FailedToWrite { .. }))
-        ), "Saw unexpected result: {:?}", result);
+        assert!(
+            matches!(
+                result,
+                Err(Error::Ledger(ledger::Error::FailedToWrite { .. }))
+            ),
+            "Saw unexpected result: {:?}",
+            result
+        );
 
         // Add an M.2 which can store the ledger.
         let _raw_disks =
@@ -1242,6 +1252,7 @@ mod tests {
         let logctx = test_setup_log("ledgerless_to_ledgered_migration");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
+        // Test setup: Create a U.2 and M.2
         let raw_disks =
             harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
 
@@ -1249,26 +1260,25 @@ mod tests {
         // without looping in the StorageManager.
         let u2_raw = &raw_disks[0];
         let pool_id = Uuid::new_v4();
-        let disk = crate::disk::Disk::new(
+        let _disk = crate::disk::Disk::new(
             &logctx.log,
             &harness.mount_config(),
             u2_raw.clone(),
             Some(pool_id),
-            Some(harness.key_requester())
-        ).await.expect("Failed to format U.2");
+            Some(harness.key_requester()),
+        )
+        .await
+        .expect("Failed to format U.2");
 
         // Because we did that formatting "behind the back" of the
         // StorageManager, we should see no evidence of the U.2 being managed.
+        //
+        // This currently matches the format of "existing systems, which were
+        // initialized before the storage ledger was created".
 
         // We should still see no ledger.
         let result = harness.handle().omicron_physical_disks_list().await;
-        assert!(
-            matches!(
-                result,
-                Err(Error::LedgerNotFound),
-            ),
-            "{:?}", result
-        );
+        assert!(matches!(result, Err(Error::LedgerNotFound),), "{:?}", result);
 
         // We should also not see any managed U.2s.
         let disks = harness.handle().get_latest_disks().await;
@@ -1279,25 +1289,52 @@ mod tests {
 
         harness.handle().key_manager_ready().await;
 
+        // It might take a moment for synchronization to be handled by the
+        // background task, but we'll eventually see the U.2 zpool.
+        //
+        // This is the equivalent of us "loading a zpool, even though
+        // it was not backed by a ledger".
         let handle = harness.handle_mut();
         while handle.wait_for_changes().await.all_u2_zpools().is_empty() {
             info!(&logctx.log, "Waiting for U.2 to automatically show up");
         }
 
-        // TODO: Check that a config exists? Where would we see this via
-        // inventory?
+        // This is the equivalent of the "/omicron-physical-disks GET" API,
+        // which Nexus might use to contact this sled.
         //
-        // TODO: - Modify get_config to store "more ledgery info"
-        // - Put the synthetic one in there, maybe w/generation "zero"
+        // This means that we'll bootstrap the sled successfully, but report a
+        // 404 if nexus asks us for the latest configuration.
+        let result = harness.handle().omicron_physical_disks_list().await;
+        assert!(matches!(result, Err(Error::LedgerNotFound),), "{:?}", result);
 
-//        let config = harness.make_config(1, &raw_disks);
-//        let result = harness
-//            .handle()
-//            .omicron_physical_disks_ensure(config.clone())
-//            .await
-//            .expect("Ensuring disks should work after key manager is ready");
-//        assert!(!result.has_error(), "{:?}", result);
+        // At this point, Nexus may want to explicitly tell sled agent which
+        // disks it should use. This is the equivalent of invoking
+        // "/omicron-physical-disks PUT".
+        let physical_disk_id = Uuid::new_v4();
+        let config = OmicronPhysicalDisksConfig {
+            generation: Generation::new(),
+            disks: vec![OmicronPhysicalDiskConfig {
+                identity: u2_raw.identity().clone(),
+                id: physical_disk_id,
+                pool_id,
+            }],
+        };
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Failed to ensure disks with 'new' Config");
+        assert!(!result.has_error(), "{:?}", result);
 
+        let observed_config = harness
+            .handle()
+            .omicron_physical_disks_list()
+            .await
+            .expect("Failed to retreive config after ensuring it");
+        assert_eq!(observed_config, config);
+
+        let u2s = harness.handle().get_latest_disks().await.all_u2_zpools();
+        assert_eq!(u2s.len(), 1, "{:?}", u2s);
 
         harness.cleanup().await;
         logctx.cleanup_successful();

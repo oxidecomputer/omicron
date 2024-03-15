@@ -129,7 +129,14 @@ impl StorageManagerTestHarness {
     }
 
     pub(crate) fn mount_config(&self) -> MountConfig {
-        MountConfig { root: self.vdev_dir.as_ref().expect("Harness destroyed?").path().into() }
+        MountConfig {
+            root: self
+                .vdev_dir
+                .as_ref()
+                .expect("Harness destroyed?")
+                .path()
+                .into(),
+        }
     }
 
     pub(crate) fn key_requester(&self) -> &StorageKeyRequester {

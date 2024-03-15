@@ -725,29 +725,24 @@ impl DataStore {
                     info!(log, "Inserted services");
 
                     for physical_disk in physical_disks {
-                        self.physical_disk_upsert(
-                            &opctx,
-                            physical_disk,
-                        )
-                        .await
-                        .map_err(|e| {
-                            err.set(RackInitError::PhysicalDiskInsert(e)).unwrap();
-                            DieselError::RollbackTransaction
-                        })?;
+                        self.physical_disk_upsert(&opctx, physical_disk)
+                            .await
+                            .map_err(|e| {
+                                err.set(RackInitError::PhysicalDiskInsert(e))
+                                    .unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
                     }
 
                     info!(log, "Inserted physical disks");
 
                     for zpool in zpools {
-                        self.zpool_upsert(
-                            &opctx,
-                            zpool,
-                        )
-                        .await
-                        .map_err(|e| {
-                            err.set(RackInitError::ZpoolInsert(e)).unwrap();
-                            DieselError::RollbackTransaction
-                        })?;
+                        self.zpool_upsert(&opctx, zpool).await.map_err(
+                            |e| {
+                                err.set(RackInitError::ZpoolInsert(e)).unwrap();
+                                DieselError::RollbackTransaction
+                            },
+                        )?;
                     }
 
                     info!(log, "Inserted zpools");
