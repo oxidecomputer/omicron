@@ -67,6 +67,10 @@ impl DataStore {
                 let new_entry_subquery = diesel::dsl::select((
                     config.id().into_sql::<sql_types::Uuid>(),
                     config.name().to_string().into_sql::<sql_types::Text>(),
+                    config
+                        .description()
+                        .to_string()
+                        .into_sql::<sql_types::Text>(),
                     config.asn.into_sql::<sql_types::BigInt>(),
                     config.bgp_announce_set_id.into_sql::<sql_types::Uuid>(),
                     config
@@ -83,6 +87,7 @@ impl DataStore {
                     .into_columns((
                         dsl::id,
                         dsl::name,
+                        dsl::description,
                         dsl::asn,
                         dsl::bgp_announce_set_id,
                         dsl::vrf,
