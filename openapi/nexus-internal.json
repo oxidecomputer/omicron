@@ -6252,6 +6252,14 @@
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
+          "blueprint": {
+            "description": "Blueprint describing services initialized by RSS.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Blueprint"
+              }
+            ]
+          },
           "certs": {
             "description": "x.509 Certificates used to encrypt communication with the external API.",
             "type": "array",
@@ -6318,6 +6326,7 @@
           }
         },
         "required": [
+          "blueprint",
           "certs",
           "datasets",
           "external_dns_zone_name",

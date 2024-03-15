@@ -33,6 +33,7 @@
 
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
+use nexus_types::deployment::Blueprint;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use slog::Logger;
@@ -52,6 +53,7 @@ pub trait NexusServer: Send + Sync + 'static {
     async fn start(
         internal_server: Self::InternalServer,
         config: &NexusConfig,
+        blueprint: Blueprint,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
