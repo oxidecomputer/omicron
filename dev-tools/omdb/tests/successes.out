@@ -72,43 +72,28 @@ loading blueprints ... done.
 wrote <REDACTED>
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
-termination: Exited(0)
+termination: Exited(2)
 ---------------------------------------------
 stdout:
-SERVICE        INSTANCE_ID                          ADDR                     SLED_SERIAL  
-CruciblePantry REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
-Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT sim-b6d65341 
-Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-039be560 
-Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              sim-b6d65341 
 ---------------------------------------------
 stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
+error: unrecognized subcommand 'services'
+
+Usage: omdb db [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
-termination: Exited(0)
+termination: Exited(2)
 ---------------------------------------------
 stdout:
-sled: sim-039be560 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
-
-  SERVICE INSTANCE_ID                          ADDR        
-  Mgd     REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT 
-
-sled: sim-b6d65341 (id REDACTED_UUID_REDACTED_UUID_REDACTED)
-
-  SERVICE        INSTANCE_ID                          ADDR                     
-  CruciblePantry REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  ExternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  InternalDns    REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-  Nexus          REDACTED_UUID_REDACTED_UUID_REDACTED [::ffff:127.0.0.1]:REDACTED_PORT 
-  Mgd            REDACTED_UUID_REDACTED_UUID_REDACTED [::1]:REDACTED_PORT              
-
 ---------------------------------------------
 stderr:
-note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
-note: database schema version matches expected (<redacted database version>)
+error: unrecognized subcommand 'services'
+
+Usage: omdb db [OPTIONS] <COMMAND>
+
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)

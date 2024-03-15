@@ -99,7 +99,6 @@ Commands:
   dns                  Print information about internal and external DNS
   inventory            Print information about collected hardware/software inventory
   reconfigurator-save  Save the current Reconfigurator inputs to a file
-  services             Print information about control plane services
   sleds                Print information about sleds
   instances            Print information about customer instances
   network              Print information about the network
@@ -129,7 +128,6 @@ Commands:
   dns                  Print information about internal and external DNS
   inventory            Print information about collected hardware/software inventory
   reconfigurator-save  Save the current Reconfigurator inputs to a file
-  services             Print information about control plane services
   sleds                Print information about sleds
   instances            Print information about customer instances
   network              Print information about the network
@@ -219,17 +217,11 @@ termination: Exited(2)
 stdout:
 ---------------------------------------------
 stderr:
-Print information about control plane services
+error: unrecognized subcommand 'services'
 
-Usage: omdb db services <COMMAND>
+Usage: omdb db [OPTIONS] <COMMAND>
 
-Commands:
-  list-instances  List service instances
-  list-by-sled    List service instances, grouped by sled
-  help            Print this message or the help of the given subcommand(s)
-
-Options:
-  -h, --help  Print help
+For more information, try '--help'.
 =============================================
 EXECUTING COMMAND: omdb ["db", "snapshots"]
 termination: Exited(2)
