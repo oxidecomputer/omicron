@@ -4425,6 +4425,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "once_cell",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
