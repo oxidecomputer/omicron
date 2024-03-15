@@ -463,6 +463,7 @@ impl StorageResources {
         )
         .await
         .map_err(|err| {
+            warn!(log, "Disk::new failed"; "err" => ?err);
             match err {
                 // We pick this error out and identify it separately because
                 // it may be transient, and should sometimes be handled with

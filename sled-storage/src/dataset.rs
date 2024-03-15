@@ -285,6 +285,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
     disk_identity: &DiskIdentity,
     key_requester: Option<&StorageKeyRequester>,
 ) -> Result<(), DatasetError> {
+    info!(log, "Ensuring zpool has datasets"; "zpool" => ?zpool_name, "disk_identity" => ?disk_identity);
     let (root, datasets) = match zpool_name.kind().into() {
         DiskVariant::M2 => (None, M2_EXPECTED_DATASETS.iter()),
         DiskVariant::U2 => (Some(CRYPT_DATASET), U2_EXPECTED_DATASETS.iter()),

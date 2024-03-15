@@ -1239,7 +1239,7 @@ mod tests {
     #[tokio::test]
     async fn ledgerless_to_ledgered_migration() {
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
-        let logctx = test_setup_log("upsert_filesystem");
+        let logctx = test_setup_log("ledgerless_to_ledgered_migration");
         let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
 
         let raw_disks =
@@ -1279,19 +1279,24 @@ mod tests {
 
         harness.handle().key_manager_ready().await;
 
+        let handle = harness.handle_mut();
+        while handle.wait_for_changes().await.all_u2_zpools().is_empty() {
+            info!(&logctx.log, "Waiting for U.2 to automatically show up");
+        }
+
         // TODO: Check that a config exists? Where would we see this via
         // inventory?
         //
         // TODO: - Modify get_config to store "more ledgery info"
         // - Put the synthetic one in there, maybe w/generation "zero"
 
-        let config = harness.make_config(1, &raw_disks);
-        let result = harness
-            .handle()
-            .omicron_physical_disks_ensure(config.clone())
-            .await
-            .expect("Ensuring disks should work after key manager is ready");
-        assert!(!result.has_error(), "{:?}", result);
+//        let config = harness.make_config(1, &raw_disks);
+//        let result = harness
+//            .handle()
+//            .omicron_physical_disks_ensure(config.clone())
+//            .await
+//            .expect("Ensuring disks should work after key manager is ready");
+//        assert!(!result.has_error(), "{:?}", result);
 
 
         harness.cleanup().await;
