@@ -53,12 +53,33 @@ impl DataStore {
             .transaction(&conn, |conn| async move {
                 let lot = AddressLot::new(&params.identity, params.kind.into());
 
-                let db_lot: AddressLot =
-                    diesel::insert_into(lot_dsl::address_lot)
-                        .values(lot)
-                        .returning(AddressLot::as_returning())
-                        .get_result_async(&conn)
-                        .await?;
+                // @internet-diglett says:
+                // I hate this. I know how to replace this transaction with
+                // CTEs but for the life of me I can't get it to work in
+                // diesel. I gave up and just extended the logic inside
+                // of the transaction instead chasing diesel trait bound errors.
+                let found_lot: Option<AddressLot> = lot_dsl::address_lot
+                    .filter(
+                        lot_dsl::name
+                            .eq(Name::from(params.identity.name.clone())),
+                    )
+                    .filter(lot_dsl::time_deleted.is_null())
+                    .select(AddressLot::as_select())
+                    .limit(1)
+                    .first_async(&conn)
+                    .await
+                    .ok();
+
+                let db_lot = match found_lot {
+                    Some(v) => v,
+                    None => {
+                        diesel::insert_into(lot_dsl::address_lot)
+                            .values(lot)
+                            .returning(AddressLot::as_returning())
+                            .get_result_async(&conn)
+                            .await?
+                    }
+                };
 
                 let blocks: Vec<AddressLotBlock> = params
                     .blocks
@@ -71,6 +92,38 @@ impl DataStore {
                         )
                     })
                     .collect();
+
+                let db_blocks: Vec<AddressLotBlock> =
+                    block_dsl::address_lot_block
+                        .filter(block_dsl::address_lot_id.eq(db_lot.id()))
+                        .filter(
+                            block_dsl::first_address.eq_any(
+                                blocks
+                                    .iter()
+                                    .map(|b| b.first_address)
+                                    .collect::<Vec<_>>(),
+                            ),
+                        )
+                        .filter(
+                            block_dsl::last_address.eq_any(
+                                blocks
+                                    .iter()
+                                    .map(|b| b.last_address)
+                                    .collect::<Vec<_>>(),
+                            ),
+                        )
+                        .get_results_async(&conn)
+                        .await?;
+
+                let blocks = blocks
+                    .into_iter()
+                    .filter(|b| {
+                        !db_blocks.iter().any(|db_b| {
+                            db_b.first_address == b.first_address
+                                || db_b.last_address == b.last_address
+                        })
+                    })
+                    .collect::<Vec<_>>();
 
                 let db_blocks =
                     diesel::insert_into(block_dsl::address_lot_block)

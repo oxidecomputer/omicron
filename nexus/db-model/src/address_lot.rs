@@ -14,7 +14,7 @@ use uuid::Uuid;
 pub const INFRA_LOT: &str = "initial-infra";
 
 impl_enum_type!(
-    #[derive(SqlType, Debug, Clone, Copy)]
+    #[derive(SqlType, Debug, Clone, Copy, QueryId)]
     #[diesel(postgres_type(name = "address_lot_kind", schema = "public"))]
     pub struct AddressLotKindEnum;
 
@@ -26,7 +26,7 @@ impl_enum_type!(
         FromSqlRow,
         PartialEq,
         Serialize,
-        Deserialize
+        Deserialize,
     )]
     #[diesel(sql_type = AddressLotKindEnum)]
     pub enum AddressLotKind;
