@@ -44,6 +44,7 @@ use nexus_db_model::SiloUser;
 use nexus_db_model::SiloUserPasswordHash;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
@@ -61,6 +62,7 @@ use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
+use slog_error_chain::InlineErrorChain;
 use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
@@ -70,6 +72,7 @@ use uuid::Uuid;
 pub struct RackInit {
     pub rack_id: Uuid,
     pub rack_subnet: IpNetwork,
+    pub blueprint: Blueprint,
     pub services: Vec<internal_params::ServicePutRequest>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
@@ -87,6 +90,8 @@ pub struct RackInit {
 enum RackInitError {
     AddingIp(Error),
     AddingNic(Error),
+    BlueprintInsert(Error),
+    BlueprintTargetSet(Error),
     ServiceInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     RackUpdate { err: DieselError, rack_id: Uuid },
@@ -127,6 +132,12 @@ impl From<RackInitError> for Error {
             },
             RackInitError::ServiceInsert(err) => Error::internal_error(
                 &format!("failed to insert Service record: {:#}", err),
+            ),
+            RackInitError::BlueprintInsert(err) => Error::internal_error(
+                &format!("failed to insert Blueprint: {:#}", err),
+            ),
+            RackInitError::BlueprintTargetSet(err) => Error::internal_error(
+                &format!("failed to insert set target Blueprint: {:#}", err),
             ),
             RackInitError::RackUpdate { err, rack_id } => {
                 public_error_from_diesel(
@@ -520,11 +531,12 @@ impl DataStore {
             Self::allocate_external_ip_on_connection(conn, db_ip)
                 .await
                 .map_err(|err| {
-                    warn!(
+                    error!(
                         log,
                         "Initializing Rack: Failed to allocate \
-                        IP address for {}",
-                        service.kind,
+                         IP address for {}",
+                        service.kind;
+                        "err" => %err,
                     );
                     match err.retryable() {
                         Retryable(e) => RackInitError::Retryable(e),
@@ -585,9 +597,11 @@ impl DataStore {
                 let service_pool = service_pool.clone();
                 async move {
                     let rack_id = rack_init.rack_id;
+                    let blueprint = rack_init.blueprint;
                     let services = rack_init.services;
                     let datasets = rack_init.datasets;
-                    let service_ip_pool_ranges = rack_init.service_ip_pool_ranges;
+                    let service_ip_pool_ranges =
+                        rack_init.service_ip_pool_ranges;
                     let internal_dns = rack_init.internal_dns;
                     let external_dns = rack_init.external_dns;
 
@@ -598,11 +612,16 @@ impl DataStore {
                         .get_result_async(&conn)
                         .await
                         .map_err(|e| {
-                            warn!(log, "Initializing Rack: Rack UUID not found");
+                            error!(
+                                log,
+                                "Initializing Rack: Rack UUID not found";
+                                InlineErrorChain::new(&e),
+                            );
                             err.set(RackInitError::RackUpdate {
                                 err: e,
                                 rack_id,
-                            }).unwrap();
+                            })
+                            .unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     if rack.initialized {
@@ -610,7 +629,7 @@ impl DataStore {
                         return Ok::<_, DieselError>(rack);
                     }
 
-                    // Otherwise, insert services and datasets.
+                    // Otherwise, insert blueprint and datasets.
 
                     // Set up the IP pool for internal services.
                     for range in service_ip_pool_ranges {
@@ -622,14 +641,56 @@ impl DataStore {
                         )
                         .await
                         .map_err(|e| {
-                            warn!(
+                            error!(
                                 log,
-                                "Initializing Rack: Failed to add IP pool range"
+                                "Initializing Rack: Failed to add \
+                                 IP pool range";
+                                &e,
                             );
                             err.set(RackInitError::AddingIp(e)).unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     }
+
+                    // Insert the RSS-generated blueprint.
+                    Self::blueprint_insert_on_connection(
+                        &conn, opctx, &blueprint,
+                    )
+                    .await
+                    .map_err(|e| {
+                        error!(
+                            log,
+                            "Initializing Rack: Failed to insert blueprint";
+                            &e,
+                        );
+                        err.set(RackInitError::BlueprintInsert(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
+
+                    // Mark the RSS-generated blueprint as the current target,
+                    // DISABLED. We may change this to enabled in the future
+                    // when more of Reconfigurator is automated, but for now we
+                    // require a support operation to enable it.
+                    Self::blueprint_target_set_current_on_connection(
+                        &conn,
+                        opctx,
+                        BlueprintTarget {
+                            target_id: blueprint.id,
+                            enabled: false,
+                            time_made_target: Utc::now(),
+                        },
+                    )
+                    .await
+                    .map_err(|e| {
+                        error!(
+                            log,
+                            "Initializing Rack: Failed to set blueprint \
+                             as target";
+                            &e,
+                        );
+                        err.set(RackInitError::BlueprintTargetSet(e)).unwrap();
+                        DieselError::RollbackTransaction
+                    })?;
 
                     // Allocate records for all services.
                     for service in services {
@@ -650,7 +711,7 @@ impl DataStore {
                     for dataset in datasets {
                         use db::schema::dataset::dsl;
                         let zpool_id = dataset.pool_id;
-                        <Zpool as DatastoreCollection<Dataset>>::insert_resource(
+                        Zpool::insert_resource(
                             zpool_id,
                             diesel::insert_into(dsl::dataset)
                                 .values(dataset.clone())
@@ -670,7 +731,8 @@ impl DataStore {
                             err.set(RackInitError::DatasetInsert {
                                 err: e,
                                 zpool_id,
-                            }).unwrap();
+                            })
+                            .unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     }
@@ -678,20 +740,22 @@ impl DataStore {
 
                     // Insert the initial contents of the internal and external DNS
                     // zones.
-                    Self::load_dns_data(&conn, internal_dns)
-                        .await
-                        .map_err(|e| {
-                            err.set(RackInitError::DnsSerialization(e)).unwrap();
+                    Self::load_dns_data(&conn, internal_dns).await.map_err(
+                        |e| {
+                            err.set(RackInitError::DnsSerialization(e))
+                                .unwrap();
                             DieselError::RollbackTransaction
-                        })?;
+                        },
+                    )?;
                     info!(log, "Populated DNS tables for internal DNS");
 
-                    Self::load_dns_data(&conn, external_dns)
-                        .await
-                        .map_err(|e| {
-                           err.set(RackInitError::DnsSerialization(e)).unwrap();
-                           DieselError::RollbackTransaction
-                        })?;
+                    Self::load_dns_data(&conn, external_dns).await.map_err(
+                        |e| {
+                            err.set(RackInitError::DnsSerialization(e))
+                                .unwrap();
+                            DieselError::RollbackTransaction
+                        },
+                    )?;
                     info!(log, "Populated DNS tables for external DNS");
 
                     // Create the initial Recovery Silo
@@ -711,7 +775,7 @@ impl DataStore {
                         _ => {
                             err.set(e).unwrap();
                             DieselError::RollbackTransaction
-                        },
+                        }
                     })?;
 
                     let rack = diesel::update(rack_dsl::rack)
@@ -730,13 +794,13 @@ impl DataStore {
                             err.set(RackInitError::RackUpdate {
                                 err: e,
                                 rack_id,
-                            }).unwrap();
+                            })
+                            .unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     Ok(rack)
                 }
-            },
-            )
+            })
             .await
             .map_err(|e| {
                 if let Some(err) = Arc::try_unwrap(err).unwrap().take() {
@@ -873,7 +937,7 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -884,6 +948,17 @@ mod test {
             RackInit {
                 rack_id: Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap(),
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
+                blueprint: Blueprint {
+                    id: Uuid::new_v4(),
+                    omicron_zones: BTreeMap::new(),
+                    zones_in_service: BTreeSet::new(),
+                    parent_blueprint_id: None,
+                    internal_dns_version: *Generation::new(),
+                    external_dns_version: *Generation::new(),
+                    time_created: Utc::now(),
+                    creator: "test suite".to_string(),
+                    comment: "test suite".to_string(),
+                },
                 services: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],

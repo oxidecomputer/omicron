@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(43, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(44, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -34,6 +34,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // their path is predictable based on the version number.  (This was
         // historically a problem because two pull requests both adding a new
         // schema version might merge cleanly but produce an invalid result.)
+        KnownVersion::legacy(44, 0),
         KnownVersion::legacy(43, 0),
         KnownVersion::legacy(42, 0),
         KnownVersion::legacy(41, 0),
@@ -410,8 +411,8 @@ mod test {
             KNOWN_VERSIONS.iter().rev(),
             &EARLIEST_SUPPORTED_VERSION,
             &SCHEMA_VERSION,
-            // Versions after 43 obey our modern, stricter rules.
-            43,
+            // Versions after 44 obey our modern, stricter rules.
+            44,
         ) {
             panic!("problem with static configuration: {:#}", error);
         }
@@ -603,13 +604,13 @@ mod test {
             // minor number.
             ensure!(v.semver.0.minor == 0, "new minor versions must be zero");
 
-            // We changed things after version 43 to require that:
+            // We changed things after version 44 to require that:
             //
             // (1) the major always be bumped (the minor and patch must be zero)
             // (2) users choose a unique directory name for the SQL files.  It
             //     would defeat the point if people used the semver for
             //
-            // After version 43, we do not allow non-zero minor or patch
+            // After version 44, we do not allow non-zero minor or patch
             // numbers.
             if v.semver.0.major > min_strict_major {
                 ensure!(

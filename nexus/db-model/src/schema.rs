@@ -951,8 +951,6 @@ table! {
 
         sled_id -> Uuid,
         physical_disk_id -> Uuid,
-
-        total_size -> Int8,
     }
 }
 
@@ -1363,6 +1361,16 @@ table! {
         serial -> Text,
 
         variant -> crate::PhysicalDiskKindEnum,
+    }
+}
+
+table! {
+    inv_zpool (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        id -> Uuid,
+        sled_id -> Uuid,
+        total_size -> Int8,
     }
 }
 
