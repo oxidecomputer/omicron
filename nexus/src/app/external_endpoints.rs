@@ -35,7 +35,7 @@ use nexus_db_model::Certificate;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::model::ServiceKind;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::silo_dns_name;
@@ -225,7 +225,7 @@ impl ExternalEndpoints {
             .filter(|s| {
                 // Ignore the built-in Silo, which people are not supposed to
                 // log into.
-                s.id() != *SILO_ID
+                s.id() != *DEFAULT_SILO_ID
             })
             .find(|s| s.authentication_mode == AuthenticationMode::Local)
             .and_then(|s| {
