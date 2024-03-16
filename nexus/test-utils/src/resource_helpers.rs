@@ -32,13 +32,18 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::NameOrId;
 use omicron_sled_agent::sim::SledAgent;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_test_utils::dev::poll::CondCheckError;
+use slog::debug;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub async fn objects_list_page_authz<ItemType>(
@@ -792,6 +797,56 @@ impl DiskTest {
                 .upsert_crucible_dataset(dataset.id, zpool.id, address)
                 .await;
         }
+
+        let log = &cptestctx.logctx.log;
+
+        // Wait until Nexus has successfully completed an inventory collection
+        // which includes this zpool
+        wait_for_condition(
+            || async {
+                let result = cptestctx
+                    .server
+                    .inventory_collect_and_get_latest_collection()
+                    .await;
+                let log_result = match &result {
+                    Ok(Some(_)) => Ok("found"),
+                    Ok(None) => Ok("not found"),
+                    Err(error) => Err(error),
+                };
+                debug!(
+                    log,
+                    "attempt to fetch latest inventory collection";
+                    "result" => ?log_result,
+                );
+
+                match result {
+                    Ok(None) => Err(CondCheckError::NotYet),
+                    Ok(Some(c)) => {
+                        let all_zpools = c
+                            .sled_agents
+                            .values()
+                            .flat_map(|sled_agent| {
+                                sled_agent.zpools.iter().map(|z| z.id)
+                            })
+                            .collect::<std::collections::HashSet<Uuid>>();
+
+                        if all_zpools.contains(&zpool.id) {
+                            Ok(())
+                        } else {
+                            Err(CondCheckError::NotYet)
+                        }
+                    }
+                    Err(Error::ServiceUnavailable { .. }) => {
+                        Err(CondCheckError::NotYet)
+                    }
+                    Err(error) => Err(CondCheckError::Failed(error)),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(30),
+        )
+        .await
+        .expect("expected to find inventory collection");
 
         self.zpools.push(zpool);
     }

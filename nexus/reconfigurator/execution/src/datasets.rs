@@ -200,7 +200,6 @@ mod tests {
                     zpool_name.id(),
                     sled_id,
                     Uuid::new_v4(), // physical_disk_id
-                    (1 << 30).try_into().unwrap(), // total_size
                 );
                 datastore
                     .zpool_upsert(zpool)
@@ -269,8 +268,7 @@ mod tests {
             let zpool = Zpool::new(
                 new_zpool_id,
                 sled_id,
-                Uuid::new_v4(),                // physical_disk_id
-                (1 << 30).try_into().unwrap(), // total_size
+                Uuid::new_v4(), // physical_disk_id
             );
             datastore
                 .zpool_upsert(zpool)

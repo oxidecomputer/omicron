@@ -1107,18 +1107,22 @@ impl SledAgent {
         } else {
             crate::params::SledRole::Gimlet
         };
-        let disks = self
-            .storage()
-            .get_latest_resources()
-            .await
-            .disks()
-            .iter()
-            .map(|(identity, (disk, _pool))| crate::params::InventoryDisk {
+
+        let mut disks = vec![];
+        let mut zpools = vec![];
+        for (identity, (disk, pool)) in
+            self.storage().get_latest_resources().await.disks().iter()
+        {
+            disks.push(crate::params::InventoryDisk {
                 identity: identity.clone(),
                 variant: disk.variant(),
                 slot: disk.slot(),
-            })
-            .collect();
+            });
+            zpools.push(crate::params::InventoryZpool {
+                id: pool.name.id(),
+                total_size: ByteCount::try_from(pool.info.size())?,
+            });
+        }
 
         Ok(Inventory {
             sled_id,
@@ -1129,6 +1133,7 @@ impl SledAgent {
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
             disks,
+            zpools,
         })
     }
 }
