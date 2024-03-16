@@ -77,6 +77,8 @@ impl DataStore {
                         .vrf
                         .clone()
                         .into_sql::<sql_types::Nullable<sql_types::Text>>(),
+                    Utc::now().into_sql::<sql_types::Timestamptz>(),
+                    Utc::now().into_sql::<sql_types::Timestamptz>(),
                 ))
                 .filter(diesel::dsl::not(diesel::dsl::exists(
                     matching_entry_subquery,
@@ -91,6 +93,8 @@ impl DataStore {
                         dsl::asn,
                         dsl::bgp_announce_set_id,
                         dsl::vrf,
+                        dsl::time_created,
+                        dsl::time_modified,
                     ))
                     .execute_async(&conn)
                     .await?;
