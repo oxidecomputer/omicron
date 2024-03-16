@@ -342,42 +342,21 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
 
         use db::schema::external_ip;
-        use diesel::dsl::{count_star, sql};
+        use diesel::dsl::sql;
         use diesel::sql_types::BigInt;
 
-        let counts = external_ip::table
+        let (ipv4, ipv6) = external_ip::table
             .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             .filter(external_ip::time_deleted.is_null())
-            // Naturally, what I wanted was something like this:
-            //
-            //   .group_by(family(external_ip::ip))
-            //   .select((family(external_ip::ip), count_star()))
-            //
-            // but diesel does not like the type, plus diesel doesn't let you do the
-            // column alias bit.
-            //
-            // Also worth noting: while the dsl family() function returns an
-            // Integer, when I do it with plain sql, if I use Integer and i32,
-            // I get errors about trying to unpack more than 32 bits. So we use
-            // BigInt and i64.
-            .group_by(sql::<BigInt>("ip_family"))
-            .select((sql::<BigInt>("family(ip) AS ip_family"), count_star()))
-            .get_results_async::<(i64, i64)>(
+            .select((
+                sql::<BigInt>("count(*) FILTER (WHERE family(ip) = 4)"),
+                sql::<BigInt>("count(*) FILTER (WHERE family(ip) = 6)"),
+            ))
+            .first_async::<(i64, i64)>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        let mut ipv4 = 0;
-        let mut ipv6 = 0;
-
-        for &(family, count) in &counts {
-            match family {
-                4 => ipv4 = count,
-                6 => ipv6 = count,
-                _ => (),
-            }
-        }
 
         Ok(IpsAllocated { ipv4, ipv6 })
     }
