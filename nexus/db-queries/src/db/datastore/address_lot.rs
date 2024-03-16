@@ -145,7 +145,7 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::AddressLot,
-                        &params.identity.name.as_str(),
+                        params.identity.name.as_str(),
                     ),
                 )
             })

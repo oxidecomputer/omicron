@@ -17,7 +17,7 @@ use super::nat_cleanup;
 use super::phantom_disks;
 use super::region_replacement;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
-use super::sync_switch_port_settings::SwitchPortSettingsManager;
+use super::sync_switch_configuration::SwitchPortSettingsManager;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;

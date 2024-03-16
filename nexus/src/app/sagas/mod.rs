@@ -34,7 +34,6 @@ pub mod instance_start;
 pub mod project_create;
 pub mod snapshot_create;
 pub mod snapshot_delete;
-pub mod switch_port_settings_common;
 pub mod test_saga;
 pub mod volume_delete;
 pub mod volume_remove_rop;

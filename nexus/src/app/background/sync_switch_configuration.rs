@@ -2,13 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Background task for propagating per-port switch settings to management daemons
-//! (dendrite, mgd, etc.)
+//! Background task for propagating user provided switch configurations
+//! to relevant management daemons (dendrite, mgd, sled-agent, etc.)
 
 use crate::app::{
-    background::networking::{build_dpd_clients, build_mgd_clients},
+    background::networking::{
+        api_to_dpd_port_settings, build_dpd_clients, build_mgd_clients,
+    },
     map_switch_zone_addrs,
-    sagas::switch_port_settings_common::api_to_dpd_port_settings,
 };
 
 use internal_dns::resolver::Resolver;

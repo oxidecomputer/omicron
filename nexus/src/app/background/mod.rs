@@ -20,6 +20,6 @@ mod phantom_disks;
 mod region_replacement;
 mod status;
 mod sync_service_zone_nat;
-mod sync_switch_port_settings;
+mod sync_switch_configuration;
 
 pub use init::BackgroundTasks;
