@@ -81,7 +81,7 @@ impl DataStore {
                     }
                 };
 
-                let blocks: Vec<AddressLotBlock> = params
+                let desired_blocks: Vec<AddressLotBlock> = params
                     .blocks
                     .iter()
                     .map(|b| {
@@ -93,12 +93,12 @@ impl DataStore {
                     })
                     .collect();
 
-                let db_blocks: Vec<AddressLotBlock> =
+                let found_blocks: Vec<AddressLotBlock> =
                     block_dsl::address_lot_block
                         .filter(block_dsl::address_lot_id.eq(db_lot.id()))
                         .filter(
                             block_dsl::first_address.eq_any(
-                                blocks
+                                desired_blocks
                                     .iter()
                                     .map(|b| b.first_address)
                                     .collect::<Vec<_>>(),
@@ -106,7 +106,7 @@ impl DataStore {
                         )
                         .filter(
                             block_dsl::last_address.eq_any(
-                                blocks
+                                desired_blocks
                                     .iter()
                                     .map(|b| b.last_address)
                                     .collect::<Vec<_>>(),
@@ -115,24 +115,29 @@ impl DataStore {
                         .get_results_async(&conn)
                         .await?;
 
-                let blocks = blocks
-                    .into_iter()
-                    .filter(|b| {
-                        !db_blocks.iter().any(|db_b| {
-                            db_b.first_address == b.first_address
-                                || db_b.last_address == b.last_address
-                        })
-                    })
-                    .collect::<Vec<_>>();
+                let mut blocks = vec![];
 
-                let db_blocks =
-                    diesel::insert_into(block_dsl::address_lot_block)
-                        .values(blocks)
-                        .returning(AddressLotBlock::as_returning())
-                        .get_results_async(&conn)
-                        .await?;
+                // If the block is found in the database, use the found block.
+                // If the block is not found in the database, insert it.
+                for desired_block in desired_blocks {
+                    let block = match found_blocks.iter().find(|db_b| {
+                        db_b.first_address == desired_block.first_address
+                            && db_b.last_address == desired_block.last_address
+                    }) {
+                        Some(block) => block.clone(),
+                        None => {
+                            diesel::insert_into(block_dsl::address_lot_block)
+                                .values(desired_block)
+                                .returning(AddressLotBlock::as_returning())
+                                .get_results_async(&conn)
+                                .await?[0]
+                                .clone()
+                        }
+                    };
+                    blocks.push(block);
+                }
 
-                Ok(AddressLotCreateResult { lot: db_lot, blocks: db_blocks })
+                Ok(AddressLotCreateResult { lot: db_lot, blocks })
             })
             .await
             .map_err(|e| {
