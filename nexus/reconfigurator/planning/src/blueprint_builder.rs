@@ -831,10 +831,9 @@ impl<'a> BlueprintZonesBuilder<'a> {
                     zones: old_sled_zones.zones.clone(),
                 }
             } else {
-                // The first generation is reserved to mean the one
-                // containing no zones.  See
-                // OMICRON_ZONES_CONFIG_INITIAL_GENERATION.  So we start
-                // with the next one.
+                // The first generation is reserved to mean the one containing
+                // no zones.  See OmicronZonesConfig::INITIAL_GENERATION.  So
+                // we start with the next one.
                 BlueprintZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![],

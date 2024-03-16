@@ -7,6 +7,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;
+use chrono::Utc;
 use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
@@ -24,6 +25,10 @@ use nexus_config::MgdConfig;
 use nexus_config::NexusConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_interface::NexusServer;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
@@ -54,6 +59,7 @@ use oximeter_collector::Oximeter;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::{debug, error, o, Logger};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -785,12 +791,54 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             user_password_hash,
         };
 
+        let blueprint = {
+            let mut blueprint_zones = BTreeMap::new();
+            for (maybe_sled_agent, zones) in [
+                (self.sled_agent.as_ref(), &self.omicron_zones),
+                (self.sled_agent2.as_ref(), &self.omicron_zones2),
+            ] {
+                if let Some(sa) = maybe_sled_agent {
+                    blueprint_zones.insert(
+                        sa.sled_agent.id,
+                        BlueprintZonesConfig {
+                            generation: Generation::new().next(),
+                            zones: zones
+                                .iter()
+                                .map(|z| {
+                                    BlueprintZoneConfig {
+                                        config: z.clone(),
+                                        // All initial zones are in-service
+                                        zone_policy:
+                                            BlueprintZonePolicy::InService,
+                                    }
+                                })
+                                .collect(),
+                        },
+                    );
+                }
+            }
+            Blueprint {
+                id: Uuid::new_v4(),
+                blueprint_zones,
+                parent_blueprint_id: None,
+                internal_dns_version: dns_config
+                    .generation
+                    .try_into()
+                    .expect("bad internal DNS generation"),
+                external_dns_version: Generation::new(),
+                time_created: Utc::now(),
+                creator: "nexus-test-utils".to_string(),
+                comment: "initial test blueprint".to_string(),
+            }
+        };
+
         // Handoff all known service information to Nexus
         let server = N::start(
             self.nexus_internal
                 .take()
                 .expect("Must launch internal nexus first"),
-            &self.config,
+            self.config,
+            blueprint,
             self.rack_init_builder.services.clone(),
             // NOTE: We should probably hand off
             // "self.rack_init_builder.datasets" here, but Nexus won't be happy
