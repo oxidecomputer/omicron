@@ -109,3 +109,42 @@ impl types::DnsConfigParams {
         Ok(&self.zones[0])
     }
 }
+
+impl Ord for types::DnsRecord {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use types::DnsRecord;
+        match (self, other) {
+            // Same kinds: compare the items in them
+            (DnsRecord::A(addr1), DnsRecord::A(addr2)) => addr1.cmp(addr2),
+            (DnsRecord::Aaaa(addr1), DnsRecord::Aaaa(addr2)) => {
+                addr1.cmp(addr2)
+            }
+            (DnsRecord::Srv(srv1), DnsRecord::Srv(srv2)) => srv1
+                .target
+                .cmp(&srv2.target)
+                .then_with(|| srv1.port.cmp(&srv2.port)),
+
+            // Different kinds: define an arbitrary order among the kinds.
+            // We could use std::mem::discriminant() here but it'd be nice if
+            // this were stable over time.
+            // We define (arbitrarily): A < Aaaa < Srv
+            (DnsRecord::A(_), DnsRecord::Aaaa(_) | DnsRecord::Srv(_)) => {
+                std::cmp::Ordering::Less
+            }
+            (DnsRecord::Aaaa(_), DnsRecord::Srv(_)) => std::cmp::Ordering::Less,
+
+            // Anything else will result in "Greater".  But let's be explicit.
+            (DnsRecord::Aaaa(_), DnsRecord::A(_))
+            | (DnsRecord::Srv(_), DnsRecord::A(_))
+            | (DnsRecord::Srv(_), DnsRecord::Aaaa(_)) => {
+                std::cmp::Ordering::Greater
+            }
+        }
+    }
+}
+
+impl PartialOrd for types::DnsRecord {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}

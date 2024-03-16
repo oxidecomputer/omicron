@@ -91,9 +91,9 @@ use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;
 use sled_hardware::underlay;
-use sled_hardware::underlay::BOOTSTRAP_PREFIX;
-use sled_hardware::Baseboard;
 use sled_hardware::SledMode;
+use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware_types::Baseboard;
 use sled_storage::dataset::{
     DatasetKind, DatasetName, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
 };
@@ -4374,11 +4374,11 @@ mod test {
 
         let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
         let internal_disk: RawDisk =
-            SyntheticDisk::new(internal_zpool_name).into();
+            SyntheticDisk::new(internal_zpool_name, 0).into();
         handle.upsert_disk(internal_disk).await;
         let external_zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let external_disk: RawDisk =
-            SyntheticDisk::new(external_zpool_name).into();
+            SyntheticDisk::new(external_zpool_name, 1).into();
         handle.upsert_disk(external_disk).await;
 
         handle

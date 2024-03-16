@@ -9,3 +9,5 @@ pub mod config;
 mod plan;
 /// The main implementation of the RSS service.
 pub mod service;
+
+pub use plan::service::SledConfig;

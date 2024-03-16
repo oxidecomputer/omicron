@@ -14,7 +14,7 @@ thiserror.workspace = true
 tokio.workspace = true
 
 omicron-common.workspace = true
-sled-hardware.workspace = true
+sled-hardware-types.workspace = true
 omicron-workspace-hack.workspace = true
 
 [build-dependencies]
