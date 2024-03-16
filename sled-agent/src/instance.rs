@@ -1560,7 +1560,7 @@ mod tests {
     use tokio::time::timeout;
 
     const TIMEOUT_DURATION: tokio::time::Duration =
-        tokio::time::Duration::from_secs(3);
+        tokio::time::Duration::from_secs(30);
 
     #[derive(Default, Clone)]
     enum ReceivedInstanceState {
@@ -1748,7 +1748,7 @@ mod tests {
         tokio::spawn(storage_manager.run());
         let external_zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let external_disk: RawDisk =
-            SyntheticDisk::new(external_zpool_name).into();
+            SyntheticDisk::new(external_zpool_name, 0).into();
         storage_handle.upsert_disk(external_disk).await;
         storage_handle
     }
@@ -1913,10 +1913,15 @@ mod tests {
 
         let (put_tx, put_rx) = oneshot::channel();
 
+        // pretending we're InstanceManager::ensure_state, start our "instance"
+        // (backed by fakes and propolis_mock_server)
         inst.put_state(put_tx, InstanceStateRequested::Running)
             .await
             .expect("failed to send Instance::put_state");
 
+        // even though we ignore this result at instance creation time in
+        // practice (to avoid request timeouts), in this test let's make sure
+        // it actually completes.
         timeout(TIMEOUT_DURATION, put_rx)
             .await
             .expect("timed out waiting for Instance::put_state result")
@@ -1982,11 +1987,21 @@ mod tests {
 
         let (put_tx, put_rx) = oneshot::channel();
 
+        tokio::time::pause();
+
+        // pretending we're InstanceManager::ensure_state, try in vain to start
+        // our "instance", but no propolis server is running
         inst.put_state(put_tx, InstanceStateRequested::Running)
             .await
             .expect("failed to send Instance::put_state");
 
-        timeout(TIMEOUT_DURATION, put_rx)
+        let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
+
+        tokio::time::advance(TIMEOUT_DURATION).await;
+
+        tokio::time::resume();
+
+        timeout_fut
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
 
@@ -2010,16 +2025,18 @@ mod tests {
         // automock'd things used during this test
         let _mock_vnic_contexts = mock_vnic_contexts();
 
+        let rt_handle = tokio::runtime::Handle::current();
+
         // time out while booting zone, on purpose!
         let boot_ctx = MockZones::boot_context();
-        boot_ctx.expect().return_once(|_| {
-            std::thread::sleep(TIMEOUT_DURATION * 2);
+        boot_ctx.expect().return_once(move |_| {
+            rt_handle.block_on(tokio::time::sleep(TIMEOUT_DURATION * 2));
             Ok(())
         });
         let wait_ctx = illumos_utils::svc::wait_for_service_context();
-        wait_ctx.expect().times(1..).returning(|_, _, _| Ok(()));
+        wait_ctx.expect().times(..).returning(|_, _, _| Ok(()));
         let zone_id_ctx = MockZones::id_context();
-        zone_id_ctx.expect().times(1..).returning(|_| Ok(Some(1)));
+        zone_id_ctx.expect().times(..).returning(|_| Ok(Some(1)));
 
         let FakeNexusParts { nexus_client, nexus_server, state_rx } =
             FakeNexusParts::new(&logctx);
@@ -2051,13 +2068,23 @@ mod tests {
         .await
         .expect("timed out creating Instance struct");
 
+        tokio::time::pause();
+
         let (put_tx, put_rx) = oneshot::channel();
 
+        // pretending we're InstanceManager::ensure_state, try in vain to start
+        // our "instance", but the zone never finishes installing
         inst.put_state(put_tx, InstanceStateRequested::Running)
             .await
             .expect("failed to send Instance::put_state");
 
-        timeout(TIMEOUT_DURATION, put_rx)
+        let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
+
+        tokio::time::advance(TIMEOUT_DURATION * 2).await;
+
+        tokio::time::resume();
+
+        timeout_fut
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
 

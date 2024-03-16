@@ -185,7 +185,6 @@ impl InstanceManager {
         target: InstanceStateRequested,
     ) -> Result<InstancePutStateResponse, Error> {
         let (tx, rx) = oneshot::channel();
-
         self.inner
             .tx
             .send(InstanceManagerRequest::EnsureState {
@@ -202,7 +201,10 @@ impl InstanceManager {
             // (see InstanceRunner::put_state)
             InstanceStateRequested::MigrationTarget(_)
             | InstanceStateRequested::Running => {
-                // don't error on channel being closed
+                // We don't want the sending side of the channel to see an
+                // error if we drop rx without awaiting it.
+                // Since we don't care about the response here, we spawn rx
+                // into a task which will await it for us in the background.
                 tokio::spawn(rx);
                 Ok(InstancePutStateResponse { updated_runtime: None })
             }
