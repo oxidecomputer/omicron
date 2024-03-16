@@ -240,7 +240,9 @@ impl StorageManagerTestHarness {
                     self.next_slot,
                 )
                 .unwrap_or_else(|err| {
-                    panic!("Failed to create synthetic disk for {vdev}: {err:?}")
+                    panic!(
+                        "Failed to create synthetic disk for {vdev}: {err:?}"
+                    )
                 })
                 .into();
             self.next_slot += 1;
