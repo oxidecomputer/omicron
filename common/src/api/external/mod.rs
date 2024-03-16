@@ -650,16 +650,28 @@ impl From<ByteCount> for i64 {
 pub struct Generation(u64);
 
 impl Generation {
-    pub fn new() -> Generation {
+    pub const fn new() -> Generation {
         Generation(1)
     }
 
-    pub fn next(&self) -> Generation {
+    pub const fn from_u32(value: u32) -> Generation {
+        // `as` is a little distasteful because it allows lossy conversion, but
+        // (a) we know converting `u32` to `u64` will always succeed
+        // losslessly, and (b) it allows to make this function `const`, unlike
+        // if we were to use `u64::from(value)`.
+        Generation(value as u64)
+    }
+
+    pub const fn next(&self) -> Generation {
         // It should technically be an operational error if this wraps or even
         // exceeds the value allowed by an i64.  But it seems unlikely enough to
         // happen in practice that we can probably feel safe with this.
         let next_gen = self.0 + 1;
-        assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
+        // `as` is a little distasteful because it allows lossy conversion, but
+        // (a) we know converting `i64::MAX` to `u64` will always succeed
+        // losslessly, and (b) it allows to make this function `const`, unlike
+        // if we were to use `u64::try_from(i64::MAX).unwrap()`.
+        assert!(next_gen <= i64::MAX as u64);
         Generation(next_gen)
     }
 }
@@ -697,8 +709,18 @@ impl TryFrom<i64> for Generation {
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         Ok(Generation(
             u64::try_from(value)
-                .map_err(|_| anyhow!("generation number too large"))?,
+                .map_err(|_| anyhow!("negative generation number"))?,
         ))
+    }
+}
+
+impl TryFrom<u64> for Generation {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        i64::try_from(value)
+            .map_err(|_| anyhow!("generation number too large"))?;
+        Ok(Generation(value))
     }
 }
 

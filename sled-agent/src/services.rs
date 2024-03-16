@@ -4374,11 +4374,11 @@ mod test {
 
         let internal_zpool_name = ZpoolName::new_internal(Uuid::new_v4());
         let internal_disk: RawDisk =
-            SyntheticDisk::new(internal_zpool_name).into();
+            SyntheticDisk::new(internal_zpool_name, 0).into();
         handle.upsert_disk(internal_disk).await;
         let external_zpool_name = ZpoolName::new_external(Uuid::new_v4());
         let external_disk: RawDisk =
-            SyntheticDisk::new(external_zpool_name).into();
+            SyntheticDisk::new(external_zpool_name, 1).into();
         handle.upsert_disk(external_disk).await;
 
         handle

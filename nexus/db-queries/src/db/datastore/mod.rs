@@ -380,7 +380,7 @@ mod test {
     };
     use crate::db::explain::ExplainableAsync;
     use crate::db::fixed_data::silo::DEFAULT_SILO;
-    use crate::db::fixed_data::silo::SILO_ID;
+    use crate::db::fixed_data::silo::DEFAULT_SILO_ID;
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
@@ -499,8 +499,8 @@ mod test {
         // Associate silo with user
         let authz_silo = authz::Silo::new(
             authz::FLEET,
-            *SILO_ID,
-            LookupType::ById(*SILO_ID),
+            *DEFAULT_SILO_ID,
+            LookupType::ById(*DEFAULT_SILO_ID),
         );
         datastore
             .silo_user_create(
@@ -519,7 +519,7 @@ mod test {
             .fetch()
             .await
             .unwrap();
-        assert_eq!(*SILO_ID, db_silo_user.silo_id);
+        assert_eq!(*DEFAULT_SILO_ID, db_silo_user.silo_id);
 
         // fetch the one we just created
         let (.., fetched) = LookupPath::new(&opctx, &datastore)
@@ -577,7 +577,7 @@ mod test {
             Arc::new(authz::Authz::new(&logctx.log)),
             authn::Context::for_test_user(
                 silo_user_id,
-                *SILO_ID,
+                *DEFAULT_SILO_ID,
                 SiloAuthnPolicy::try_from(&*DEFAULT_SILO).unwrap(),
             ),
             Arc::clone(&datastore),
@@ -661,15 +661,57 @@ mod test {
         sled_id: Uuid,
         physical_disk_id: Uuid,
     ) -> Uuid {
-        let zpool_id = Uuid::new_v4();
-        let zpool = Zpool::new(
-            zpool_id,
+        let zpool_id = create_test_zpool_not_in_inventory(
+            datastore,
             sled_id,
             physical_disk_id,
-            test_zpool_size().into(),
-        );
+        )
+        .await;
+
+        add_test_zpool_to_inventory(datastore, zpool_id, sled_id).await;
+
+        zpool_id
+    }
+
+    // Creates a test zpool, returns its UUID.
+    //
+    // However, this helper doesn't add the zpool to the inventory just yet.
+    async fn create_test_zpool_not_in_inventory(
+        datastore: &DataStore,
+        sled_id: Uuid,
+        physical_disk_id: Uuid,
+    ) -> Uuid {
+        let zpool_id = Uuid::new_v4();
+        let zpool = Zpool::new(zpool_id, sled_id, physical_disk_id);
         datastore.zpool_upsert(zpool).await.unwrap();
         zpool_id
+    }
+
+    // Adds a test zpool into the inventory, with a randomly generated
+    // collection UUID.
+    async fn add_test_zpool_to_inventory(
+        datastore: &DataStore,
+        zpool_id: Uuid,
+        sled_id: Uuid,
+    ) {
+        use db::schema::inv_zpool::dsl;
+
+        let inv_collection_id = Uuid::new_v4();
+        let time_collected = Utc::now();
+        let inv_pool = nexus_db_model::InvZpool {
+            inv_collection_id,
+            time_collected,
+            id: zpool_id,
+            sled_id,
+            total_size: test_zpool_size().into(),
+        };
+        diesel::insert_into(dsl::inv_zpool)
+            .values(inv_pool)
+            .execute_async(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
     }
 
     fn create_test_disk_create_params(
@@ -1157,6 +1199,103 @@ mod test {
     }
 
     #[tokio::test]
+    async fn test_region_allocation_only_operates_on_zpools_in_inventory() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_only_operates_on_zpools_in_inventory",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and a disk on that sled...
+        let physical_disk_id = create_test_physical_disk(
+            &datastore,
+            &opctx,
+            sled_id,
+            PhysicalDiskKind::U2,
+        )
+        .await;
+
+        // Create enough zpools for region allocation to succeed
+        let zpool_ids: Vec<Uuid> = stream::iter(0..REGION_REDUNDANCY_THRESHOLD)
+            .then(|_| {
+                create_test_zpool_not_in_inventory(
+                    &datastore,
+                    sled_id,
+                    physical_disk_id,
+                )
+            })
+            .collect()
+            .await;
+
+        let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+
+        // 1 dataset per zpool
+        stream::iter(zpool_ids.clone())
+            .then(|zpool_id| {
+                let id = Uuid::new_v4();
+                let dataset = Dataset::new(
+                    id,
+                    zpool_id,
+                    bogus_addr,
+                    DatasetKind::Crucible,
+                );
+                let datastore = datastore.clone();
+                async move {
+                    datastore.dataset_upsert(dataset).await.unwrap();
+                    id
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        // Allocate regions from the datasets for this volume.
+        let params = create_test_disk_create_params(
+            "disk1",
+            ByteCount::from_mebibytes_u32(500),
+        );
+        let volume1_id = Uuid::new_v4();
+        let err = datastore
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
+            )
+            .await
+            .unwrap_err();
+
+        let expected = "Not enough zpool space to allocate disks";
+        assert!(
+            err.to_string().contains(expected),
+            "Saw error: \'{err}\', but expected \'{expected}\'"
+        );
+        assert!(matches!(err, Error::InsufficientCapacity { .. }));
+
+        // If we add the zpools to the inventory and try again, the allocation
+        // will succeed.
+        for zpool_id in zpool_ids {
+            add_test_zpool_to_inventory(&datastore, zpool_id, sled_id).await;
+        }
+        datastore
+            .region_allocate(
+                &opctx,
+                volume1_id,
+                &params.disk_source,
+                params.size,
+                &RegionAllocationStrategy::Random { seed: Some(0) },
+            )
+            .await
+            .expect("Allocation should have worked after adding zpools to inventory");
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_region_allocation_not_enough_zpools() {
         let logctx =
             dev::test_setup_log("test_region_allocation_not_enough_zpools");
@@ -1381,8 +1520,8 @@ mod test {
         // Create a new Silo user so that we can lookup their keys.
         let authz_silo = authz::Silo::new(
             authz::FLEET,
-            *SILO_ID,
-            LookupType::ById(*SILO_ID),
+            *DEFAULT_SILO_ID,
+            LookupType::ById(*DEFAULT_SILO_ID),
         );
         let silo_user_id = Uuid::new_v4();
         datastore
@@ -1432,7 +1571,7 @@ mod test {
                 .fetch()
                 .await
                 .unwrap();
-        assert_eq!(authz_silo.id(), *SILO_ID);
+        assert_eq!(authz_silo.id(), *DEFAULT_SILO_ID);
         assert_eq!(authz_silo_user.id(), silo_user_id);
         assert_eq!(found.silo_user_id, ssh_key.silo_user_id);
         assert_eq!(found.public_key, ssh_key.public_key);

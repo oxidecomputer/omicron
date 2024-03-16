@@ -288,9 +288,6 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
-/// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
-pub const OMICRON_ZONES_CONFIG_INITIAL_GENERATION: u32 = 1;
-
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -308,6 +305,11 @@ pub struct OmicronZonesConfig {
 
     /// list of running zones
     pub zones: Vec<OmicronZoneConfig>,
+}
+
+impl OmicronZonesConfig {
+    /// Generation 1 of `OmicronZonesConfig` is always the set of no zones.
+    pub const INITIAL_GENERATION: Generation = Generation::from_u32(1);
 }
 
 impl From<OmicronZonesConfig> for sled_agent_client::types::OmicronZonesConfig {
@@ -872,6 +874,21 @@ pub enum InstanceExternalIpBody {
 // becomes easier to maintain a separate copy, we should do that.
 pub type SledRole = nexus_client::types::SledRole;
 
+/// Identifies information about disks which may be attached to Sleds.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InventoryDisk {
+    pub identity: omicron_common::disk::DiskIdentity,
+    pub variant: sled_hardware::DiskVariant,
+    pub slot: i64,
+}
+
+/// Identifies information about zpools managed by the control plane
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InventoryZpool {
+    pub id: Uuid,
+    pub total_size: ByteCount,
+}
+
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Inventory {
@@ -882,6 +899,8 @@ pub struct Inventory {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    pub disks: Vec<InventoryDisk>,
+    pub zpools: Vec<InventoryZpool>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

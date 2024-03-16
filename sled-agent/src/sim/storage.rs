@@ -22,7 +22,9 @@ use futures::lock::Mutex;
 use nexus_client::types::{
     ByteCount, PhysicalDiskKind, PhysicalDiskPutRequest, ZpoolPutRequest,
 };
+use omicron_common::disk::DiskIdentity;
 use propolis_client::types::VolumeConstructionRequest;
+use sled_hardware::DiskVariant;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -471,17 +473,19 @@ impl CrucibleServer {
     }
 }
 
-struct PhysicalDisk {
-    _variant: PhysicalDiskKind,
+pub(crate) struct PhysicalDisk {
+    pub(crate) variant: DiskVariant,
+    pub(crate) slot: i64,
 }
 
-struct Zpool {
+pub(crate) struct Zpool {
     datasets: HashMap<Uuid, CrucibleServer>,
+    total_size: u64,
 }
 
 impl Zpool {
-    fn new() -> Self {
-        Zpool { datasets: HashMap::new() }
+    fn new(total_size: u64) -> Self {
+        Zpool { datasets: HashMap::new(), total_size }
     }
 
     fn insert_dataset(
@@ -496,6 +500,10 @@ impl Zpool {
         self.datasets
             .get(&id)
             .expect("Failed to get the dataset we just inserted")
+    }
+
+    pub fn total_size(&self) -> u64 {
+        self.total_size
     }
 
     pub async fn get_dataset_for_region(
@@ -530,19 +538,13 @@ impl Zpool {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct DiskName {
-    vendor: String,
-    serial: String,
-    model: String,
-}
-
 /// Simulated representation of all storage on a sled.
 pub struct Storage {
     sled_id: Uuid,
     nexus_client: Arc<NexusClient>,
     log: Logger,
-    physical_disks: HashMap<DiskName, PhysicalDisk>,
+    physical_disks: HashMap<DiskIdentity, PhysicalDisk>,
+    next_disk_slot: i64,
     zpools: HashMap<Uuid, Zpool>,
     crucible_ip: IpAddr,
     next_crucible_port: u16,
@@ -560,10 +562,16 @@ impl Storage {
             nexus_client,
             log,
             physical_disks: HashMap::new(),
+            next_disk_slot: 0,
             zpools: HashMap::new(),
             crucible_ip,
             next_crucible_port: 100,
         }
+    }
+
+    /// Returns an immutable reference to all (currently known) physical disks
+    pub fn physical_disks(&self) -> &HashMap<DiskIdentity, PhysicalDisk> {
+        &self.physical_disks
     }
 
     pub async fn insert_physical_disk(
@@ -571,15 +579,21 @@ impl Storage {
         vendor: String,
         serial: String,
         model: String,
-        variant: PhysicalDiskKind,
+        variant: DiskVariant,
     ) {
-        let identifier = DiskName {
+        let identifier = DiskIdentity {
             vendor: vendor.clone(),
             serial: serial.clone(),
             model: model.clone(),
         };
-        self.physical_disks
-            .insert(identifier, PhysicalDisk { _variant: variant });
+        let slot = self.next_disk_slot;
+        self.next_disk_slot += 1;
+        self.physical_disks.insert(identifier, PhysicalDisk { variant, slot });
+
+        let variant = match variant {
+            DiskVariant::U2 => PhysicalDiskKind::U2,
+            DiskVariant::M2 => PhysicalDiskKind::M2,
+        };
 
         // Notify Nexus
         let request = PhysicalDiskPutRequest {
@@ -605,7 +619,7 @@ impl Storage {
         size: u64,
     ) {
         // Update our local data
-        self.zpools.insert(zpool_id, Zpool::new());
+        self.zpools.insert(zpool_id, Zpool::new(size));
 
         // Notify Nexus
         let request = ZpoolPutRequest {
@@ -620,6 +634,10 @@ impl Storage {
             .expect("Failed to notify Nexus about new Zpool");
     }
 
+    /// Returns an immutable reference to all zpools
+    pub fn zpools(&self) -> &HashMap<Uuid, Zpool> {
+        &self.zpools
+    }
     /// Adds a Dataset to the sled's simulated storage.
     pub async fn insert_dataset(
         &mut self,

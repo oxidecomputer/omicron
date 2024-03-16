@@ -562,6 +562,12 @@ impl Nexus {
         Some(rustls_cfg)
     }
 
+    // Called to trigger inventory collection.
+    pub(crate) fn activate_inventory_collection(&self) {
+        self.background_tasks
+            .activate(&self.background_tasks.task_inventory_collection);
+    }
+
     // Called to hand off management of external servers to Nexus.
     pub(crate) async fn set_servers(
         &self,

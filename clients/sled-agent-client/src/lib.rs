@@ -167,6 +167,16 @@ impl omicron_common::api::external::ClientError for types::Error {
     }
 }
 
+impl From<types::DiskIdentity> for omicron_common::disk::DiskIdentity {
+    fn from(identity: types::DiskIdentity) -> Self {
+        Self {
+            vendor: identity.vendor,
+            serial: identity.serial,
+            model: identity.model,
+        }
+    }
+}
+
 impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
     for types::InstanceRuntimeState
 {
