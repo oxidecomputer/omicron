@@ -45,6 +45,7 @@ use nexus_db_model::InvRotPage;
 use nexus_db_model::InvServiceProcessor;
 use nexus_db_model::InvSledAgent;
 use nexus_db_model::InvSledOmicronZones;
+use nexus_db_model::InvZpool;
 use nexus_db_model::RotPageWhichEnum;
 use nexus_db_model::SledRole;
 use nexus_db_model::SledRoleEnum;
@@ -134,6 +135,18 @@ impl DataStore {
                 sled_agent.disks.iter().map(|disk| {
                     InvPhysicalDisk::new(collection_id, *sled_id, disk.clone())
                 })
+            })
+            .collect();
+
+        // Pull zpools out of all sled agents
+        let zpools: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent
+                    .zpools
+                    .iter()
+                    .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
             })
             .collect();
 
@@ -665,6 +678,25 @@ impl DataStore {
                     }
                     let _ = diesel::insert_into(dsl::inv_physical_disk)
                         .values(some_disks)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
+            // Insert rows for all the zpools we found.
+            {
+                use db::schema::inv_zpool::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut zpools = zpools.into_iter();
+                loop {
+                    let some_zpools =
+                        zpools.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_zpools.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_zpool)
+                        .values(some_zpools)
                         .execute_async(&conn)
                         .await?;
                 }
@@ -1470,6 +1502,34 @@ impl DataStore {
             disks
         };
 
+        // Mapping of "Sled ID" -> "All zpools reported by that sled"
+        let zpools: BTreeMap<Uuid, Vec<nexus_types::inventory::Zpool>> = {
+            use db::schema::inv_zpool::dsl;
+
+            let mut zpools =
+                BTreeMap::<Uuid, Vec<nexus_types::inventory::Zpool>>::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_zpool,
+                    (dsl::sled_id, dsl::id),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(id))
+                .select(InvZpool::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| (row.sled_id, row.id));
+                for zpool in batch {
+                    zpools.entry(zpool.sled_id).or_default().push(zpool.into());
+                }
+            }
+            zpools
+        };
+
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
         // Agents.
         let baseboard_id_ids: BTreeSet<_> = sps
@@ -1576,6 +1636,10 @@ impl DataStore {
                         disks: physical_disks
                             .get(&sled_id)
                             .map(|disks| disks.to_vec())
+                            .unwrap_or_default(),
+                        zpools: zpools
+                            .get(&sled_id)
+                            .map(|zpools| zpools.to_vec())
                             .unwrap_or_default(),
                     };
                     Ok((sled_id, sled_agent))

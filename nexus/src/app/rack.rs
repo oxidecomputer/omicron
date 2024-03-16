@@ -190,6 +190,12 @@ impl super::Nexus {
             format!("{silo_dns_name}.{}", request.external_dns_zone_name);
         dns_update.add_name(silo_dns_name, dns_records)?;
 
+        // We're providing an update to the initial `external_dns` group we
+        // defined above; also bump RSS's blueprint's `external_dns_version` to
+        // match this update.
+        let mut blueprint = request.blueprint;
+        blueprint.external_dns_version = blueprint.external_dns_version.next();
+
         // Administrators of the Recovery Silo are automatically made
         // administrators of the Fleet.
         let mapped_fleet_roles = BTreeMap::from([(
@@ -202,9 +208,10 @@ impl super::Nexus {
                 name: request.recovery_silo.silo_name,
                 description: "built-in recovery Silo".to_string(),
             },
-            // The recovery silo is initialized with no allocated capacity given it's
-            // not intended to be used to deploy workloads. Operators can add capacity
-            // after the fact if they want to use it for that purpose.
+            // The recovery silo is initialized with no allocated capacity given
+            // it's not intended to be used to deploy workloads. Operators can
+            // add capacity after the fact if they want to use it for that
+            // purpose.
             quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode: SiloIdentityMode::LocalOnly,
@@ -221,6 +228,7 @@ impl super::Nexus {
                 RackInit {
                     rack_subnet: rack_network_config.rack_subnet.into(),
                     rack_id,
+                    blueprint,
                     services: request.services,
                     datasets,
                     service_ip_pool_ranges,
@@ -915,8 +923,7 @@ impl super::Nexus {
 
         // Trigger an inventory collection so that the newly added sled is known
         // about.
-        self.background_tasks
-            .activate(&self.background_tasks.task_inventory_collection);
+        self.activate_inventory_collection();
 
         Ok(())
     }

@@ -4,6 +4,7 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::deployment::Blueprint;
 use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UserId;
 use crate::external_api::shared::Baseboard;
@@ -248,6 +249,8 @@ impl std::fmt::Debug for Certificate {
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
+    /// Blueprint describing services initialized by RSS.
+    pub blueprint: Blueprint,
     /// Services on the rack which have been created by RSS.
     pub services: Vec<ServicePutRequest>,
     /// Datasets on the rack which have been provisioned by RSS.
