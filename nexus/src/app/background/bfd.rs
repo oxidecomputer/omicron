@@ -5,16 +5,21 @@
 //! Background task for managing switch bidirectional forwarding detection
 //! (BFD) sessions.
 
+use crate::app::{
+    background::networking::build_mgd_clients, map_switch_zone_addrs,
+};
+
 use super::common::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns::{resolver::Resolver, ServiceName};
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};
 use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use omicron_common::api::external::{DataPageParams, SwitchLocation};
 use serde_json::json;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     hash::Hash,
     net::{IpAddr, Ipv4Addr},
     sync::Arc,
@@ -22,15 +27,12 @@ use std::{
 
 pub struct BfdManager {
     datastore: Arc<DataStore>,
-    mgd_clients: HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
+    resolver: Resolver,
 }
 
 impl BfdManager {
-    pub fn new(
-        datastore: Arc<DataStore>,
-        mgd_clients: HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
-    ) -> Self {
-        Self { datastore, mgd_clients }
+    pub fn new(datastore: Arc<DataStore>, resolver: Resolver) -> Self {
+        Self { datastore, resolver }
     }
 }
 
@@ -114,7 +116,30 @@ impl BackgroundTask for BfdManager {
 
             let mut current: HashSet<BfdSessionKey> = HashSet::new();
 
-            for (location, c) in &self.mgd_clients {
+            let switch_zone_addresses = match self
+                .resolver
+                .lookup_all_ipv6(ServiceName::Dendrite)
+                .await
+            {
+                Ok(addrs) => addrs,
+                Err(e) => {
+                    error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                    return json!({
+                        "error":
+                            format!(
+                                "failed to resolve addresses for Dendrite services: {:#}",
+                                e
+                            )
+                        });
+                },
+            };
+
+            let mappings =
+                map_switch_zone_addrs(log, switch_zone_addresses).await;
+
+            let mgd_clients = build_mgd_clients(mappings, log);
+
+            for (location, c) in &mgd_clients {
                 let client_current = match c.inner.get_bfd_peers().await {
                     Ok(x) => x.into_inner(),
                     Err(e) => {
@@ -159,7 +184,7 @@ impl BackgroundTask for BfdManager {
             }
 
             for x in &to_add {
-                let mg = match self.mgd_clients.get(&x.switch) {
+                let mg = match mgd_clients.get(&x.switch) {
                     Some(mg) => mg,
                     None => {
                         error!(&log, "failed to get mg client";
@@ -190,7 +215,7 @@ impl BackgroundTask for BfdManager {
             }
 
             for x in &to_del {
-                let mg = match self.mgd_clients.get(&x.switch) {
+                let mg = match mgd_clients.get(&x.switch) {
                     Some(mg) => mg,
                     None => {
                         error!(&log, "failed to get mg client";
