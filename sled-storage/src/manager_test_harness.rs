@@ -69,6 +69,7 @@ pub struct StorageManagerTestHarness {
     vdev_dir: Option<camino_tempfile::Utf8TempDir>,
     vdevs: std::collections::BTreeSet<RawDisk>,
     next_slot: i64,
+    #[allow(unused)]
     key_requester: StorageKeyRequester,
     key_manager_error_injector: Arc<AtomicBool>,
     key_manager_task: tokio::task::JoinHandle<()>,
@@ -128,6 +129,7 @@ impl StorageManagerTestHarness {
         Self::new_with_tmp_dir(log, tmp).await
     }
 
+    #[allow(unused)]
     pub(crate) fn mount_config(&self) -> MountConfig {
         MountConfig {
             root: self
@@ -139,6 +141,7 @@ impl StorageManagerTestHarness {
         }
     }
 
+    #[allow(unused)]
     pub(crate) fn key_requester(&self) -> &StorageKeyRequester {
         &self.key_requester
     }

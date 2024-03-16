@@ -2180,7 +2180,6 @@ mod illumos_tests {
     use chrono::Timelike;
     use chrono::Utc;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
-    use rand::RngCore;
     use slog::Drain;
     use slog::Logger;
 
@@ -2340,10 +2339,7 @@ mod illumos_tests {
     // i.e., the "ashift" value.  An empty dataset is unlikely to contain more
     // than one megabyte of overhead, so use that as a conservative test size to
     // avoid issues.
-    const TEST_QUOTA: u64 = 1024 * 1024;
-
-    // XXX not this?
-//    const TEST_QUOTA: usize = sled_storage::dataset::DEBUG_DATASET_QUOTA;
+    const TEST_QUOTA: usize = sled_storage::dataset::DEBUG_DATASET_QUOTA;
 
     async fn run_test_with_zfs_dataset<T, Fut>(test: T)
     where
@@ -2654,12 +2650,6 @@ mod illumos_tests {
             super::ZONE_BUNDLE_METADATA_FILENAME,
             contents.as_bytes(),
         )?;
-
-        // Inject some ~incompressible ballast to ensure the bundles are, though
-        // fake, not also microscopic:
-        let mut ballast = vec![0; 64 * 1024];
-        rand::thread_rng().fill_bytes(&mut ballast);
-        super::insert_data(&mut builder, "ballast.bin", &ballast)?;
 
         let _ = builder.into_inner().context("failed to finish tarball")?;
         let bytes = tokio::fs::metadata(&path).await?.len();
