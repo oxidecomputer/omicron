@@ -446,10 +446,11 @@ impl NexusNotifierTask {
             (Some(tx), rx)
         };
 
+        const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
+        let mut interval = interval(RETRY_TIMEOUT);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         loop {
-            const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
-            let mut interval = interval(RETRY_TIMEOUT);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             tokio::select! {
                 req = self.rx.recv() => {
                     let Some(req) = req else {
