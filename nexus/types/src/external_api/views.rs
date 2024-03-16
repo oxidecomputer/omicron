@@ -305,28 +305,37 @@ pub struct IpPool {
     pub identity: IdentityMetadata,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct IpPoolUtilization {
-    // TODO: make sure these names are satisfactory
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Ipv4Utilization {
+    /// The number of IPv4 addresses allocated from this pool
+    pub allocated: u32,
+    /// The total number of IPv4 addresses in the pool, i.e., the sum of the
+    /// lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit
+    /// integer because there are only 2^32 IPv4 addresses.
+    pub capacity: u32,
+}
 
-    // Unlike total, the reason this is bigger than u32 is simply that the
-    // DB count comes back as an i64, and in theory the count could really
-    // be bigger than 2^32 = ~4.29B, though in practice that is virtually
-    // impossible.
-    /// The number of IPs allocated from the pool
-    ///
-    /// Like total, this is a numeric string with a custom "uint128" format
-    /// representing a 128-bit integer, though in practice it is extremely
-    /// unlikely to be bigger than 32 bits (2^32 = ~4.29 billion).
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Ipv6Utilization {
+    /// The number of IPv6 addresses allocated from this pool. A 128-bit integer
+    /// string to match the capacity field.
     #[serde(with = "U128String")]
     pub allocated: u128,
 
-    /// The total number of IP addresses in the pool, i.e., the sum of the
-    /// lengths of the ranges. An IPv6 range can contain up to 2^128 addresses,
-    /// so we represent this value in JSON as a numeric string with a custom
-    /// "uint128" format.
+    /// The total number of IPv6 addresses in the pool, i.e., the sum of the
+    /// lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128
+    /// addresses, so we represent this value in JSON as a numeric string with a
+    /// custom "uint128" format.
     #[serde(with = "U128String")]
     pub capacity: u128,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct IpPoolUtilization {
+    /// Number of allocated and total available IPv4 addresses in pool
+    pub ipv4: Ipv4Utilization,
+    /// Number of allocated and total available IPv6 addresses in pool
+    pub ipv6: Ipv6Utilization,
 }
 
 // Custom struct for serializing/deserializing u128 as a string. The serde

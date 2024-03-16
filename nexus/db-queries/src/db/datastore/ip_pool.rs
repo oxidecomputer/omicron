@@ -51,6 +51,16 @@ use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
 use uuid::Uuid;
 
+pub struct IpsAllocated {
+    pub ipv4: i64,
+    pub ipv6: i64,
+}
+
+pub struct IpsCapacity {
+    pub ipv4: u32,
+    pub ipv6: u128,
+}
+
 impl DataStore {
     /// List IP Pools
     pub async fn ip_pools_list(
@@ -328,32 +338,48 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
-    ) -> Result<u128, Error> {
+    ) -> Result<IpsAllocated, Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
 
         use db::schema::external_ip;
+        use diesel::dsl::{count_star, sql};
+        use diesel::sql_types::BigInt;
 
-        let count = external_ip::table
+        let counts = external_ip::table
             .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             .filter(external_ip::time_deleted.is_null())
-            .select(external_ip::id)
-            .count()
-            .first_async::<i64>(&*self.pool_connection_authorized(opctx).await?)
+            // Naturally, what I wanted was something like this:
+            //
+            //   .group_by(family(external_ip::ip))
+            //   .select((family(external_ip::ip), count_star()))
+            //
+            // but diesel does not like the type, plus diesel doesn't let you do the
+            // column alias bit.
+            //
+            // Also worth noting: while the dsl family() function returns an
+            // Integer, when I do it with plain sql, if I use Integer and i32,
+            // I get errors about trying to unpack more than 32 bits. So we use
+            // BigInt and i64.
+            .group_by(sql::<BigInt>("ip_family"))
+            .select((sql::<BigInt>("family(ip) AS ip_family"), count_star()))
+            .get_results_async::<(i64, i64)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // This is a bit strange but it should be ok.
-        //   a) SQL tends to represent counts as signed integers even though
-        //      they can't really be negative, and Diesel follows that. We
-        //      assume here that it will be a positive i64.
-        //   b) It could clearly be a u64, but the calling code immediate
-        //      converts it to a u128 anyway, so it would be pointless.
-        u128::try_from(count).map_err(|_e| {
-            Error::internal_error(&format!(
-                "Failed to convert i64 {} SQL count to u64",
-                count
-            ))
-        })
+        let mut ipv4 = 0;
+        let mut ipv6 = 0;
+
+        for &(family, count) in &counts {
+            match family {
+                4 => ipv4 = count,
+                6 => ipv6 = count,
+                _ => (),
+            }
+        }
+
+        Ok(IpsAllocated { ipv4, ipv6 })
     }
 
     // TODO: should this just return the vec of ranges?
@@ -362,17 +388,19 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_pool: &authz::IpPool,
-    ) -> Result<u128, Error> {
+    ) -> Result<IpsCapacity, Error> {
         opctx.authorize(authz::Action::Read, authz_pool).await?;
         opctx.authorize(authz::Action::ListChildren, authz_pool).await?;
 
         use db::schema::ip_pool_range;
 
-        let ranges: Vec<IpPoolRange> = ip_pool_range::table
+        let ranges = ip_pool_range::table
             .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::time_deleted.is_null())
             .select(IpPoolRange::as_select())
-            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_results_async::<IpPoolRange>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -381,7 +409,17 @@ impl DataStore {
                 )
             })?;
 
-        Ok(ranges.iter().fold(0, |acc, r| acc + IpRange::from(r).len()))
+        let mut ipv4: u32 = 0;
+        let mut ipv6: u128 = 0;
+
+        for range in &ranges {
+            let r = IpRange::from(range);
+            match r {
+                IpRange::V4(r) => ipv4 += r.len(),
+                IpRange::V6(r) => ipv6 += r.len(),
+            }
+        }
+        Ok(IpsCapacity { ipv4, ipv6 })
     }
 
     pub async fn ip_pool_silo_list(
@@ -1179,7 +1217,8 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips, 0);
+        assert_eq!(max_ips.ipv4, 0);
+        assert_eq!(max_ips.ipv6, 0);
 
         let range = IpRange::V4(
             Ipv4Range::new(
@@ -1198,7 +1237,8 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips, 5);
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 0);
 
         let link = IpPoolResource {
             ip_pool_id: pool.id(),
@@ -1215,7 +1255,8 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count, 0);
+        assert_eq!(ip_count.ipv4, 0);
+        assert_eq!(ip_count.ipv6, 0);
 
         let identity = IdentityMetadataCreateParams {
             name: "my-ip".parse().unwrap(),
@@ -1231,14 +1272,16 @@ mod test {
             .ip_pool_allocated_count(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(ip_count, 1);
+        assert_eq!(ip_count.ipv4, 1);
+        assert_eq!(ip_count.ipv6, 0);
 
         // allocating one has nothing to do with total capacity
         let max_ips = datastore
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips, 5);
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 0);
 
         let ipv6_range = IpRange::V6(
             Ipv6Range::new(
@@ -1257,7 +1300,8 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips, 5 + 11 + 65536);
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 11 + 65536);
 
         // add a giant range for fun
         let ipv6_range = IpRange::V6(
@@ -1278,7 +1322,8 @@ mod test {
             .ip_pool_total_capacity(&opctx, &authz_pool)
             .await
             .unwrap();
-        assert_eq!(max_ips, 1208925819614629174706171);
+        assert_eq!(max_ips.ipv4, 5);
+        assert_eq!(max_ips.ipv6, 1208925819614629174706166);
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

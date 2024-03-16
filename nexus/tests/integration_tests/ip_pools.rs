@@ -767,7 +767,7 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
 
     create_pool(client, "p0").await;
 
-    assert_ip_pool_utilization(client, "p0", 0, 0).await;
+    assert_ip_pool_utilization(client, "p0", 0, 0, 0, 0).await;
 
     let add_url = "/v1/system/ip-pools/p0/ranges/add";
 
@@ -781,7 +781,7 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
     );
     object_create::<IpRange, IpPoolRange>(client, &add_url, &range).await;
 
-    assert_ip_pool_utilization(client, "p0", 0, 5).await;
+    assert_ip_pool_utilization(client, "p0", 0, 5, 0, 0).await;
 
     // now let's add a gigantic range just for fun
     let big_range = IpRange::V6(
@@ -795,7 +795,8 @@ async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
     );
     object_create::<IpRange, IpPoolRange>(client, &add_url, &big_range).await;
 
-    assert_ip_pool_utilization(client, "p0", 0, 18446480190918885380).await;
+    assert_ip_pool_utilization(client, "p0", 0, 5, 0, 18446480190918885375)
+        .await;
 }
 
 // Data for testing overlapping IP ranges
