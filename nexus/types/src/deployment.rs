@@ -1195,14 +1195,14 @@ mod table_display {
             )
             .with(
                 Modify::new(Columns::single(1))
-                    // Column 1 (sled ID) gets some extra padding and a border
-                    // on the right to separate it from the other columns.
-                    .with(Padding::new(0, 2, 0, 0))
-                    .with(Border::new().set_right('|')),
+                    // Column 1 (sled ID) gets some extra padding to separate
+                    // it from the other columns (particularly relevant with
+                    // changed zones, where we use ':' as a border.
+                    .with(Padding::new(0, 2, 0, 0)),
             )
             .with(
-                // Column 2 gets extra padding on the left to be
-                // symmetrical to column 1.
+                // Column 2 gets extra padding on the left to be symmetrical to
+                // column 1.
                 Modify::new(Columns::single(2)).with(Padding::new(2, 0, 0, 0)),
             );
     }
