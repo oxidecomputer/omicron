@@ -72,24 +72,25 @@ export CARGO_INCREMENTAL=0
 # If we remove "--timings=json" below, this would no longer be needed.
 export RUSTC_BOOTSTRAP=1
 
+verify_libraries() {
+    # If we are running on illumos we want to verify that we are not requiring system
+    # libraries outside of specific binaries. If we encounter this situation we bail
+    # NB: This runs `cargo build --bins` to ensure it can check the final executable.
+    if [[ $target_os == "illumos" ]]; then
+        cargo xtask verify-libraries
+    fi
+}
+
 # Build all the packages and tests, and keep track of how long each took to build.
 # We report build progress to stderr, and the "--timings=json" output goes to stdout.
 ptime -m cargo build -Z unstable-options --timings=json --workspace --tests --locked --verbose 1> "$OUTPUT_DIR/crate-build-timings.json"
-
-# If we are running on illumos we want to verify that we are not requiring system
-# libraries outside of specific binaries. If we encounter this situation we bail
-# before running any tests.
-# NB: This must be ran after we have built the binaries with cargo build.
-if [[ $target_os == "illumos" ]]; then
-    ptime -m timeout 5m cargo xtask verify-libraries
-fi
 
 #
 # We apply our own timeout to ensure that we get a normal failure on timeout
 # rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
 #
 banner test
-ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
+ptime -m timeout 2h verify_libraries && cargo nextest run --profile ci --locked --verbose
 
 #
 # https://github.com/nextest-rs/nextest/issues/16
