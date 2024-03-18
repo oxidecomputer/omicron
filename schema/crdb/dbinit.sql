@@ -1222,7 +1222,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
 CREATE TYPE IF NOT EXISTS omicron.public.producer_kind AS ENUM (
     -- A sled agent for an entry in the sled table.
     'sled_agent',
-    -- A service in the omicron.public.service table
+    -- A service in a blueprint (typically the current target blueprint, but it
+    -- may reference a prior blueprint if the service is in the process of being
+    -- removed).
     'service',
     -- A Propolis VMM for an instance in the omicron.public.instance table
     'instance'
