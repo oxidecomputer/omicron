@@ -164,22 +164,16 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
 ) WHERE time_deleted IS NULL;
 
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
-    -- omicron.public.dataset
-    'dataset',
-    -- omicron.public.service
-    'service',
     -- omicron.public.instance
     'instance',
-    -- omicron.public.sled
-    --
-    -- reserved as an approximation of sled internal usage, such as "by the OS
-    -- and all unaccounted services".
-    'reserved'
+    -- We expect to other resource kinds here in the future; e.g., to track
+    -- resources used by control plane services. For now, we only track
+    -- instances.
 );
 
 -- Accounting for programs using resources on a sled
 CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
-    -- Should match the UUID of the corresponding service
+    -- Should match the UUID of the corresponding resource
     id UUID PRIMARY KEY,
 
     -- The sled where resources are being consumed
