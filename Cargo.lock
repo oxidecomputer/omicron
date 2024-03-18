@@ -469,7 +469,7 @@ dependencies = [
 [[package]]
 name = "bgp"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=9a8380583716a0b1ceba75db679b4822803070cf#9a8380583716a0b1ceba75db679b4822803070cf"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1608,7 +1608,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=9a8380583716a0b1ceba75db679b4822803070cf#9a8380583716a0b1ceba75db679b4822803070cf"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
 dependencies = [
  "mg-common",
  "percent-encoding",
@@ -4186,7 +4186,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=9a8380583716a0b1ceba75db679b4822803070cf#9a8380583716a0b1ceba75db679b4822803070cf"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
 dependencies = [
  "anyhow",
  "bgp",
@@ -4204,7 +4204,7 @@ dependencies = [
 [[package]]
 name = "mg-common"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=9a8380583716a0b1ceba75db679b4822803070cf#9a8380583716a0b1ceba75db679b4822803070cf"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
 dependencies = [
  "anstyle",
  "clap 4.5.1",
@@ -7178,7 +7178,7 @@ dependencies = [
 [[package]]
 name = "rdb"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=9a8380583716a0b1ceba75db679b4822803070cf#9a8380583716a0b1ceba75db679b4822803070cf"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
 dependencies = [
  "anyhow",
  "ciborium",
