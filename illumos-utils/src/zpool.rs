@@ -194,7 +194,7 @@ impl Zpool {
         let mut cmd = std::process::Command::new(PFEXEC);
         cmd.env_clear();
         cmd.env("LC_ALL", "C.UTF-8");
-        cmd.arg(ZPOOL).arg("create");
+        cmd.arg(ZPOOL).args(["create", "-o", "ashift=12"]);
         cmd.arg(&name.to_string());
         cmd.arg(vdev);
         execute(&mut cmd).map_err(Error::from)?;

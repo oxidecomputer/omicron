@@ -565,11 +565,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         port_config: &PortConfigV1,
     ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
         info!(self.log, "Building Port Configuration");
-        let mut dpd_port_settings = PortSettings {
-            links: HashMap::new(),
-            v4_routes: HashMap::new(),
-            v6_routes: HashMap::new(),
-        };
+        let mut dpd_port_settings = PortSettings { links: HashMap::new() };
         let link_id = LinkId(0);
 
         let mut addrs = Vec::new();
