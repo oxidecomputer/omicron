@@ -361,8 +361,6 @@ impl DataStore {
         Ok(IpsAllocated { ipv4, ipv6 })
     }
 
-    // TODO: should this just return the vec of ranges?
-    // TODO: generally we never retrieve all of anything, how bad is that
     pub async fn ip_pool_total_capacity(
         &self,
         opctx: &OpContext,
@@ -377,6 +375,15 @@ impl DataStore {
             .filter(ip_pool_range::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_range::time_deleted.is_null())
             .select(IpPoolRange::as_select())
+            // This is a rare unpaginated DB query, which means we are
+            // vulnerable to a resource exhaustion attack in which someone
+            // creates a very large number of ranges in order to make this
+            // query slow. In order to mitigate that, we limit the query to the
+            // (current) max allowed page size, effectively making this query
+            // exactly as vulnerable as if it were paginated. If there are more
+            // than 10,000 ranges in a pool, we will undercount, but I have a
+            // hard time seeing that as a practical problem.
+            .limit(10000)
             .get_results_async::<IpPoolRange>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
