@@ -295,6 +295,12 @@ fn verify_executable(
     Ok(())
 }
 
+#[cfg(not(target_os = "illumos"))]
+fn cmd_verify_libraries() -> Result<()> {
+    unimplemented!("Library verification is only available on illumos!")
+}
+
+#[cfg(target_os = "illumos")]
 fn cmd_verify_libraries() -> Result<()> {
     let metadata = load_workspace()?;
     let mut config_path = metadata.workspace_root;
