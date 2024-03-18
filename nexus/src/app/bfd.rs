@@ -7,15 +7,18 @@ use mg_admin_client::types::BfdPeerState;
 use nexus_db_queries::context::OpContext;
 use nexus_types::external_api::shared::{BfdState, BfdStatus};
 use omicron_common::api::{external::Error, internal::shared::SwitchLocation};
-use std::sync::Arc;
 
 impl super::Nexus {
-    fn mg_client_for_switch_location(
+    async fn mg_client_for_switch_location(
         &self,
         switch: SwitchLocation,
-    ) -> Result<Arc<mg_admin_client::Client>, Error> {
-        let mg_client: Arc<mg_admin_client::Client> = self
-            .mg_clients
+    ) -> Result<mg_admin_client::Client, Error> {
+        let mg_client: mg_admin_client::Client = self
+            .mg_clients()
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!("failed to get mg clients: {e}"))
+            })?
             .get(&switch)
             .ok_or_else(|| {
                 Error::not_found_by_name(
@@ -64,7 +67,7 @@ impl super::Nexus {
         // be updated for multirack.
         let mut result = Vec::new();
         for s in &[SwitchLocation::Switch0, SwitchLocation::Switch1] {
-            let mg_client = self.mg_client_for_switch_location(*s)?;
+            let mg_client = self.mg_client_for_switch_location(*s).await?;
             let status = mg_client
                 .inner
                 .get_bfd_peers()

@@ -367,6 +367,8 @@ pub struct BackgroundTaskConfig {
     pub sync_service_zone_nat: SyncServiceZoneNatConfig,
     /// configuration for the bfd manager task
     pub bfd_manager: BfdManagerConfig,
+    /// configuration for the switch port settings manager task
+    pub switch_port_settings_manager: SwitchPortSettingsManagerConfig,
     /// configuration for region replacement task
     pub region_replacement: RegionReplacementConfig,
 }
@@ -427,6 +429,15 @@ pub struct SyncServiceZoneNatConfig {
     pub period_secs: Duration,
 }
 
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SwitchPortSettingsManagerConfig {
+    /// Interval (in seconds) for periodic activations of this background task.
+    /// This task is also activated on-demand when any of the switch port settings
+    /// api endpoints are called.
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct InventoryConfig {
@@ -713,6 +724,7 @@ mod test {
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
+            switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
@@ -828,6 +840,10 @@ mod test {
                         sync_service_zone_nat: SyncServiceZoneNatConfig {
                             period_secs: Duration::from_secs(30)
                         },
+                        switch_port_settings_manager:
+                            SwitchPortSettingsManagerConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                         region_replacement: RegionReplacementConfig {
                             period_secs: Duration::from_secs(30),
                         },
@@ -893,6 +909,7 @@ mod test {
             blueprints.period_secs_load = 10
             blueprints.period_secs_execute = 60
             sync_service_zone_nat.period_secs = 30
+            switch_port_settings_manager.period_secs = 30
             region_replacement.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"

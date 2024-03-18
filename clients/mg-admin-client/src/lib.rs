@@ -17,11 +17,13 @@ mod inner {
 }
 
 pub use inner::types;
+use inner::types::Prefix4;
 pub use inner::Error;
 
 use inner::Client as InnerClient;
 use omicron_common::api::external::BgpPeerState;
 use slog::Logger;
+use std::hash::Hash;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use thiserror::Error;
@@ -79,5 +81,20 @@ impl Client {
             log.clone(),
         );
         Ok(Self { inner, log })
+    }
+}
+
+impl Eq for Prefix4 {}
+
+impl PartialEq for Prefix4 {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.length == other.length
+    }
+}
+
+impl Hash for Prefix4 {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.value.hash(state);
+        self.length.hash(state);
     }
 }

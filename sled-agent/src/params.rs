@@ -736,6 +736,13 @@ pub struct InventoryDisk {
     pub slot: i64,
 }
 
+/// Identifies information about zpools managed by the control plane
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InventoryZpool {
+    pub id: Uuid,
+    pub total_size: ByteCount,
+}
+
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Inventory {
@@ -747,6 +754,7 @@ pub struct Inventory {
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
     pub disks: Vec<InventoryDisk>,
+    pub zpools: Vec<InventoryZpool>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

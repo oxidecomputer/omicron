@@ -46,7 +46,6 @@ impl DataStore {
                 .set((
                     dsl::time_modified.eq(Utc::now()),
                     dsl::sled_id.eq(excluded(dsl::sled_id)),
-                    dsl::total_size.eq(excluded(dsl::total_size)),
                 )),
         )
         .insert_and_get_result_async(
