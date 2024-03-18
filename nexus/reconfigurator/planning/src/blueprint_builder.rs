@@ -35,11 +35,15 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use rand::rngs::StdRng;
+use rand::RngCore;
+use rand::SeedableRng;
 use slog::o;
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::collections::HashSet;
+use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -106,6 +110,7 @@ pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
     internal_dns_version: Generation,
+    external_dns_version: Generation,
 
     // These fields are used to allocate resources from sleds.
     policy: &'a Policy,
@@ -127,6 +132,9 @@ pub struct BlueprintBuilder<'a> {
 
     // Iterator of available MAC addresses in the system address range
     available_system_macs: Box<dyn Iterator<Item = MacAddr>>,
+
+    // Random number generator for new UUIDs
+    rng: BlueprintBuilderRng,
 }
 
 impl<'a> BlueprintBuilder<'a> {
@@ -135,8 +143,49 @@ impl<'a> BlueprintBuilder<'a> {
     pub fn build_initial_from_collection(
         collection: &'a Collection,
         internal_dns_version: Generation,
+        external_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
+    ) -> Result<Blueprint, Error> {
+        Self::build_initial_impl(
+            collection,
+            internal_dns_version,
+            external_dns_version,
+            policy,
+            creator,
+            BlueprintBuilderRng::new(),
+        )
+    }
+
+    /// A version of [`Self::build_initial_from_collection`] that allows the
+    /// blueprint ID to be generated from a random seed.
+    pub fn build_initial_from_collection_seeded<H: Hash>(
+        collection: &'a Collection,
+        internal_dns_version: Generation,
+        external_dns_version: Generation,
+        policy: &'a Policy,
+        creator: &str,
+        seed: H,
+    ) -> Result<Blueprint, Error> {
+        let mut rng = BlueprintBuilderRng::new();
+        rng.set_seed(seed);
+        Self::build_initial_impl(
+            collection,
+            internal_dns_version,
+            external_dns_version,
+            policy,
+            creator,
+            rng,
+        )
+    }
+
+    fn build_initial_impl(
+        collection: &'a Collection,
+        internal_dns_version: Generation,
+        external_dns_version: Generation,
+        policy: &'a Policy,
+        creator: &str,
+        mut rng: BlueprintBuilderRng,
     ) -> Result<Blueprint, Error> {
         let omicron_zones = policy
             .sleds
@@ -177,11 +226,12 @@ impl<'a> BlueprintBuilder<'a> {
         let zones_in_service =
             collection.all_omicron_zones().map(|z| z.id).collect();
         Ok(Blueprint {
-            id: Uuid::new_v4(),
+            id: rng.blueprint_rng.next_uuid(),
             omicron_zones,
             zones_in_service,
             parent_blueprint_id: None,
             internal_dns_version,
+            external_dns_version,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("from collection {}", collection.id),
@@ -194,6 +244,7 @@ impl<'a> BlueprintBuilder<'a> {
         log: &Logger,
         parent_blueprint: &'a Blueprint,
         internal_dns_version: Generation,
+        external_dns_version: Generation,
         policy: &'a Policy,
         creator: &str,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
@@ -255,7 +306,12 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             }
             if let Some(external_ip) = z.zone_type.external_ip()? {
-                if !used_external_ips.insert(external_ip) {
+                // For the test suite, ignore localhost.  It gets reused many
+                // times and that's okay.  We don't expect to see localhost
+                // outside the test suite.
+                if !external_ip.is_loopback()
+                    && !used_external_ips.insert(external_ip)
+                {
                     bail!("duplicate external IP: {external_ip}");
                 }
             }
@@ -301,6 +357,7 @@ impl<'a> BlueprintBuilder<'a> {
             log,
             parent_blueprint,
             internal_dns_version,
+            external_dns_version,
             policy,
             sled_ip_allocators: BTreeMap::new(),
             zones: BlueprintZones::new(parent_blueprint),
@@ -311,24 +368,35 @@ impl<'a> BlueprintBuilder<'a> {
             nexus_v6_ips,
             available_external_ips,
             available_system_macs,
+            rng: BlueprintBuilderRng::new(),
         })
     }
 
     /// Assemble a final [`Blueprint`] based on the contents of the builder
-    pub fn build(self) -> Blueprint {
+    pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for each in-service sled.
         let omicron_zones =
             self.zones.into_omicron_zones(self.policy.sleds.keys().copied());
         Blueprint {
-            id: Uuid::new_v4(),
+            id: self.rng.blueprint_rng.next_uuid(),
             omicron_zones,
             zones_in_service: self.zones_in_service,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self.comments.join(", "),
         }
+    }
+
+    /// Within tests, set a seeded RNG for deterministic results.
+    ///
+    /// This will ensure that tests that use this builder will produce the same
+    /// results each time they are run.
+    pub fn set_rng_seed<H: Hash>(&mut self, seed: H) -> &mut Self {
+        self.rng.set_seed(seed);
+        self
     }
 
     /// Sets the blueprints "comment"
@@ -388,7 +456,7 @@ impl<'a> BlueprintBuilder<'a> {
             .collect();
 
         let zone = OmicronZoneConfig {
-            id: Uuid::new_v4(),
+            id: self.rng.zone_rng.next_uuid(),
             underlay_address: ip,
             zone_type: OmicronZoneType::InternalNtp {
                 address: ntp_address.to_string(),
@@ -434,7 +502,7 @@ impl<'a> BlueprintBuilder<'a> {
         let port = omicron_common::address::CRUCIBLE_PORT;
         let address = SocketAddrV6::new(ip, port, 0, 0).to_string();
         let zone = OmicronZoneConfig {
-            id: Uuid::new_v4(),
+            id: self.rng.zone_rng.next_uuid(),
             underlay_address: ip,
             zone_type: OmicronZoneType::Crucible {
                 address,
@@ -519,7 +587,7 @@ impl<'a> BlueprintBuilder<'a> {
         };
 
         for _ in 0..num_nexus_to_add {
-            let nexus_id = Uuid::new_v4();
+            let nexus_id = self.rng.zone_rng.next_uuid();
             let external_ip = self
                 .available_external_ips
                 .next()
@@ -547,7 +615,7 @@ impl<'a> BlueprintBuilder<'a> {
                     .next()
                     .ok_or(Error::NoSystemMacAddressAvailable)?;
                 NetworkInterface {
-                    id: Uuid::new_v4(),
+                    id: self.rng.network_interface_rng.next_uuid(),
                     kind: NetworkInterfaceKind::Service { id: nexus_id },
                     name: format!("nexus-{nexus_id}").parse().unwrap(),
                     ip,
@@ -649,6 +717,74 @@ impl<'a> BlueprintBuilder<'a> {
     }
 }
 
+#[derive(Debug)]
+struct BlueprintBuilderRng {
+    // Have separate RNGs for the different kinds of UUIDs we might add,
+    // generated from the main RNG. This is so that e.g. adding a new network
+    // interface doesn't alter the blueprint or sled UUID.
+    //
+    // In the future, when we switch to typed UUIDs, each of these will be
+    // associated with a specific `TypedUuidKind`.
+    blueprint_rng: UuidRng,
+    zone_rng: UuidRng,
+    network_interface_rng: UuidRng,
+}
+
+impl BlueprintBuilderRng {
+    fn new() -> Self {
+        Self::new_from_rng(StdRng::from_entropy())
+    }
+
+    fn new_from_rng(mut root_rng: StdRng) -> Self {
+        let blueprint_rng = UuidRng::from_root_rng(&mut root_rng, "blueprint");
+        let zone_rng = UuidRng::from_root_rng(&mut root_rng, "zone");
+        let network_interface_rng =
+            UuidRng::from_root_rng(&mut root_rng, "network_interface");
+
+        BlueprintBuilderRng { blueprint_rng, zone_rng, network_interface_rng }
+    }
+
+    fn set_seed<H: Hash>(&mut self, seed: H) {
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "blueprint-builder";
+        let mut seeder = rand_seeder::Seeder::from((seed, SEED_EXTRA));
+        *self = Self::new_from_rng(seeder.make_rng::<StdRng>());
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct UuidRng {
+    rng: StdRng,
+}
+
+impl UuidRng {
+    /// Returns a new `UuidRng` generated from the root RNG.
+    ///
+    /// `extra` is a string that should be unique to the purpose of the UUIDs.
+    fn from_root_rng(root_rng: &mut StdRng, extra: &'static str) -> Self {
+        let seed = root_rng.next_u64();
+        let mut seeder = rand_seeder::Seeder::from((seed, extra));
+        Self { rng: seeder.make_rng::<StdRng>() }
+    }
+
+    /// `extra` is a string that should be unique to the purpose of the UUIDs.
+    pub(crate) fn from_seed<H: Hash>(seed: H, extra: &'static str) -> Self {
+        let mut seeder = rand_seeder::Seeder::from((seed, extra));
+        Self { rng: seeder.make_rng::<StdRng>() }
+    }
+
+    /// Returns a new UUIDv4 generated from the RNG.
+    pub(crate) fn next_uuid(&mut self) -> Uuid {
+        let mut bytes = [0; 16];
+        self.rng.fill_bytes(&mut bytes);
+        // Builder::from_random_bytes will turn the random bytes into a valid
+        // UUIDv4. (Parts of the system depend on the UUID actually being valid
+        // v4, so it's important that we don't just use `uuid::from_bytes`.)
+        uuid::Builder::from_random_bytes(bytes).into_uuid()
+    }
+}
+
 /// Helper for working with sets of zones on each sled
 ///
 /// Tracking the set of zones is slightly non-trivial because we need to bump
@@ -687,8 +823,8 @@ impl<'a> BlueprintZones<'a> {
             } else {
                 // The first generation is reserved to mean the one
                 // containing no zones.  See
-                // OMICRON_ZONES_CONFIG_INITIAL_GENERATION.  So we start
-                // with the next one.
+                // OmicronZonesConfig::INITIAL_GENERATION.  So we start with the
+                // next one.
                 OmicronZonesConfig {
                     generation: Generation::new().next(),
                     zones: vec![],
@@ -750,125 +886,14 @@ impl<'a> BlueprintZones<'a> {
 #[cfg(test)]
 pub mod test {
     use super::*;
+    use crate::example::example;
+    use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
-    use crate::system::SystemDescription;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
-    use sled_agent_client::types::{
-        OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-    };
+    use sled_agent_client::types::{OmicronZoneConfig, OmicronZoneType};
 
     pub const DEFAULT_N_SLEDS: usize = 3;
-
-    pub struct ExampleSystem {
-        pub system: SystemDescription,
-        pub policy: Policy,
-        pub collection: Collection,
-        pub blueprint: Blueprint,
-    }
-
-    impl ExampleSystem {
-        pub fn new(log: &slog::Logger, nsleds: usize) -> ExampleSystem {
-            let mut system = SystemDescription::new();
-            let sled_ids: Vec<_> =
-                (0..nsleds).map(|_| Uuid::new_v4()).collect();
-            for sled_id in &sled_ids {
-                let _ = system.sled(SledBuilder::new().id(*sled_id)).unwrap();
-            }
-
-            let policy = system.to_policy().expect("failed to make policy");
-            let mut inventory_builder = system
-                .to_collection_builder()
-                .expect("failed to build collection");
-
-            // For each sled, have it report 0 zones in the initial inventory.
-            // This will enable us to build a blueprint from the initial
-            // inventory, which we can then use to build new blueprints.
-            for sled_id in &sled_ids {
-                inventory_builder
-                    .found_sled_omicron_zones(
-                        "fake sled agent",
-                        *sled_id,
-                        OmicronZonesConfig {
-                            generation: Generation::new(),
-                            zones: vec![],
-                        },
-                    )
-                    .expect("recording Omicron zones");
-            }
-
-            let empty_zone_inventory = inventory_builder.build();
-            let initial_blueprint =
-                BlueprintBuilder::build_initial_from_collection(
-                    &empty_zone_inventory,
-                    Generation::new(),
-                    &policy,
-                    "test suite",
-                )
-                .unwrap();
-
-            // Now make a blueprint and collection with some zones on each sled.
-            let mut builder = BlueprintBuilder::new_based_on(
-                &log,
-                &initial_blueprint,
-                Generation::new(),
-                &policy,
-                "test suite",
-            )
-            .unwrap();
-            for (sled_id, sled_resources) in &policy.sleds {
-                let _ = builder.sled_ensure_zone_ntp(*sled_id).unwrap();
-                let _ = builder
-                    .sled_ensure_zone_multiple_nexus_with_config(
-                        *sled_id,
-                        1,
-                        false,
-                        vec![],
-                    )
-                    .unwrap();
-                for pool_name in &sled_resources.zpools {
-                    let _ = builder
-                        .sled_ensure_zone_crucible(*sled_id, pool_name.clone())
-                        .unwrap();
-                }
-            }
-
-            let blueprint = builder.build();
-            let mut builder = system
-                .to_collection_builder()
-                .expect("failed to build collection");
-
-            for sled_id in blueprint.sleds() {
-                let Some(zones) = blueprint.omicron_zones.get(&sled_id) else {
-                    continue;
-                };
-                builder
-                    .found_sled_omicron_zones(
-                        "fake sled agent",
-                        sled_id,
-                        zones.clone(),
-                    )
-                    .unwrap();
-            }
-
-            ExampleSystem {
-                system,
-                policy,
-                collection: builder.build(),
-                blueprint,
-            }
-        }
-    }
-
-    /// Returns a collection and policy describing a pretty simple system.
-    ///
-    /// `n_sleds` is the number of sleds supported. Currently, this value can
-    /// be anywhere between 0 and 5. (More can be added in the future if
-    /// necessary.)
-    pub fn example(log: &slog::Logger, nsleds: usize) -> (Collection, Policy) {
-        let example = ExampleSystem::new(log, nsleds);
-        (example.collection, example.policy)
-    }
 
     /// Checks various conditions that should be true for all blueprints
     pub fn verify_blueprint(blueprint: &Blueprint) {
@@ -893,14 +918,18 @@ pub mod test {
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
         // describes no changes.
-        let logctx = test_setup_log("blueprint_builder_test_initial");
-        let (collection, policy) = example(&logctx.log, DEFAULT_N_SLEDS);
+        static TEST_NAME: &str = "blueprint_builder_test_initial";
+        let logctx = test_setup_log(TEST_NAME);
+        let (collection, policy) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let blueprint_initial =
-            BlueprintBuilder::build_initial_from_collection(
+            BlueprintBuilder::build_initial_from_collection_seeded(
                 &collection,
+                Generation::new(),
                 Generation::new(),
                 &policy,
                 "the_test",
+                TEST_NAME,
             )
             .expect("failed to create initial blueprint");
         verify_blueprint(&blueprint_initial);
@@ -912,7 +941,7 @@ pub mod test {
             .diff_sleds_from_collection(&collection, &zones_in_service);
         println!(
             "collection -> initial blueprint (expected no changes):\n{}",
-            diff
+            diff.display()
         );
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
@@ -923,6 +952,7 @@ pub mod test {
             &logctx.log,
             &blueprint_initial,
             Generation::new(),
+            Generation::new(),
             &policy,
             "test_basic",
         )
@@ -932,7 +962,7 @@ pub mod test {
         let diff = blueprint_initial.diff_sleds(&blueprint);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
-            diff
+            diff.display()
         );
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
@@ -943,14 +973,17 @@ pub mod test {
 
     #[test]
     fn test_basic() {
-        let logctx = test_setup_log("blueprint_builder_test_basic");
-        let mut example = ExampleSystem::new(&logctx.log, DEFAULT_N_SLEDS);
+        static TEST_NAME: &str = "blueprint_builder_test_basic";
+        let logctx = test_setup_log(TEST_NAME);
+        let mut example =
+            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let blueprint1 = &example.blueprint;
         verify_blueprint(blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             blueprint1,
+            Generation::new(),
             Generation::new(),
             &example.policy,
             "test_basic",
@@ -974,20 +1007,21 @@ pub mod test {
         let diff = blueprint1.diff_sleds(&blueprint2);
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
-            diff
+            diff.display()
         );
         assert_eq!(diff.sleds_added().count(), 0);
         assert_eq!(diff.sleds_removed().count(), 0);
         assert_eq!(diff.sleds_changed().count(), 0);
 
         // The next step is adding these zones to a new sled.
-        let new_sled_id = Uuid::new_v4();
+        let new_sled_id = example.sled_rng.next_uuid();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let policy = example.system.to_policy().unwrap();
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test_basic",
@@ -1004,7 +1038,7 @@ pub mod test {
         let blueprint3 = builder.build();
         verify_blueprint(&blueprint3);
         let diff = blueprint2.diff_sleds(&blueprint3);
-        println!("expecting new NTP and Crucible zones:\n{}", diff);
+        println!("expecting new NTP and Crucible zones:\n{}", diff.display());
 
         // No sleds were changed or removed.
         assert_eq!(diff.sleds_changed().count(), 0);
@@ -1063,13 +1097,15 @@ pub mod test {
 
     #[test]
     fn test_add_nexus_with_no_existing_nexus_zones() {
-        let logctx = test_setup_log(
-            "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones",
-        );
-        let (mut collection, policy) = example(&logctx.log, DEFAULT_N_SLEDS);
+        static TEST_NAME: &str =
+            "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones";
+        let logctx = test_setup_log(TEST_NAME);
+        let (mut collection, policy) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
-        // We don't care about the internal DNS version here.
+        // We don't care about the DNS versions here.
         let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
 
         // Adding a new Nexus zone currently requires copying settings from an
         // existing Nexus zone. If we remove all Nexus zones from the
@@ -1081,11 +1117,13 @@ pub mod test {
             });
         }
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test",
+            TEST_NAME,
         )
         .expect("failed to create initial blueprint");
 
@@ -1093,6 +1131,7 @@ pub mod test {
             &logctx.log,
             &parent,
             internal_dns_version,
+            external_dns_version,
             &policy,
             "test",
         )
@@ -1120,12 +1159,14 @@ pub mod test {
 
     #[test]
     fn test_add_nexus_error_cases() {
-        let logctx =
-            test_setup_log("blueprint_builder_test_add_nexus_error_cases");
-        let (mut collection, policy) = example(&logctx.log, DEFAULT_N_SLEDS);
+        static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
+        let logctx = test_setup_log(TEST_NAME);
+        let (mut collection, policy) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
-        // We don't care about the internal DNS version here.
+        // We don't care about the DNS versions here.
         let internal_dns_version = Generation::new();
+        let external_dns_version = Generation::new();
 
         // Remove the Nexus zone from one of the sleds so that
         // `sled_ensure_zone_nexus` can attempt to add a Nexus zone to
@@ -1145,11 +1186,13 @@ pub mod test {
             selected_sled_id.expect("found no sleds with Nexus zone")
         };
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",
+            TEST_NAME,
         )
         .expect("failed to create initial blueprint");
 
@@ -1160,6 +1203,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 internal_dns_version,
+                external_dns_version,
                 &policy,
                 "test",
             )
@@ -1179,6 +1223,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 internal_dns_version,
+                external_dns_version,
                 &policy,
                 "test",
             )
@@ -1212,6 +1257,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 internal_dns_version,
+                external_dns_version,
                 &policy,
                 "test",
             )
@@ -1239,11 +1285,12 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_zones_with_same_external_ip() {
-        let logctx = test_setup_log(
+        static TEST_NAME: &str =
             "blueprint_builder_test_invalid_parent_blueprint_\
-             two_zones_with_same_external_ip",
-        );
-        let (mut collection, policy) = example(&logctx.log, DEFAULT_N_SLEDS);
+             two_zones_with_same_external_ip";
+        let logctx = test_setup_log(TEST_NAME);
+        let (mut collection, policy) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same external IP. Skim through the zones, copy the
@@ -1270,17 +1317,20 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",
+            TEST_NAME,
         )
         .unwrap();
 
         match BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",
@@ -1297,11 +1347,12 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_nexus_zones_with_same_nic_ip() {
-        let logctx = test_setup_log(
+        static TEST_NAME: &str =
             "blueprint_builder_test_invalid_parent_blueprint_\
-             two_nexus_zones_with_same_nic_ip",
-        );
-        let (mut collection, policy) = example(&logctx.log, DEFAULT_N_SLEDS);
+             two_nexus_zones_with_same_nic_ip";
+        let logctx = test_setup_log(TEST_NAME);
+        let (mut collection, policy) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // Nexus zones with the same NIC IP. Skim through the zones, copy
@@ -1326,17 +1377,20 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",
+            TEST_NAME,
         )
         .unwrap();
 
         match BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",
@@ -1353,11 +1407,12 @@ pub mod test {
 
     #[test]
     fn test_invalid_parent_blueprint_two_zones_with_same_vnic_mac() {
-        let logctx = test_setup_log(
+        static TEST_NAME: &str =
             "blueprint_builder_test_invalid_parent_blueprint_\
-             two_zones_with_same_vnic_mac",
-        );
-        let (mut collection, policy) = example(&logctx.log, DEFAULT_N_SLEDS);
+             two_zones_with_same_vnic_mac";
+        let logctx = test_setup_log(TEST_NAME);
+        let (mut collection, policy) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same service vNIC MAC address. Skim through the
@@ -1382,17 +1437,20 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        let parent = BlueprintBuilder::build_initial_from_collection(
+        let parent = BlueprintBuilder::build_initial_from_collection_seeded(
             &collection,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",
+            TEST_NAME,
         )
         .unwrap();
 
         match BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
+            Generation::new(),
             Generation::new(),
             &policy,
             "test",

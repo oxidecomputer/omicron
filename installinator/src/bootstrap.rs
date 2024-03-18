@@ -16,7 +16,7 @@ use illumos_utils::dladm::Dladm;
 use illumos_utils::zone::Zones;
 use omicron_common::address::Ipv6Subnet;
 use sled_hardware::underlay;
-use sled_hardware::underlay::BootstrapInterface;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::info;
 use slog::Logger;
 

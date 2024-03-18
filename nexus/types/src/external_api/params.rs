@@ -92,6 +92,7 @@ id_path_param!(SwitchPath, switch_id, "switch");
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
     pub sled: Uuid,
@@ -1324,6 +1325,16 @@ impl JsonSchema for BlockSize {
 pub enum PhysicalDiskKind {
     M2,
     U2,
+}
+
+impl From<sled_agent_client::types::DiskVariant> for PhysicalDiskKind {
+    fn from(variant: sled_agent_client::types::DiskVariant) -> Self {
+        use sled_agent_client::types::DiskVariant;
+        match variant {
+            DiskVariant::U2 => Self::U2,
+            DiskVariant::M2 => Self::M2,
+        }
+    }
 }
 
 /// Different sources for a disk

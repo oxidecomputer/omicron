@@ -109,6 +109,7 @@ mod test {
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate,
     };
+    use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::OmicronZonesConfig;
@@ -131,7 +132,7 @@ mod test {
 
     fn create_blueprint(
         omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-        internal_dns_version: Generation,
+        dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -145,7 +146,8 @@ mod test {
                 omicron_zones,
                 zones_in_service: BTreeSet::new(),
                 parent_blueprint_id: None,
-                internal_dns_version,
+                internal_dns_version: dns_version,
+                external_dns_version: dns_version,
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -158,8 +160,10 @@ mod test {
         // Set up the test.
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
+        let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),
+            nexus.authz.clone(),
+            authn::Context::internal_api(),
             datastore.clone(),
         );
 

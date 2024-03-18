@@ -4,8 +4,8 @@
 
 use ddm_admin_client::Client as DdmAdminClient;
 use futures::stream::FuturesUnordered;
-use sled_hardware::underlay::BootstrapInterface;
-use sled_hardware::Baseboard;
+use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware_types::Baseboard;
 use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;

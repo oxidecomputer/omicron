@@ -20,7 +20,7 @@ use omicron_sled_agent::sim::{
     run_standalone_server, Config, ConfigHardware, ConfigStorage, ConfigZpool,
     SimMode,
 };
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;

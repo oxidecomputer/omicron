@@ -8,7 +8,8 @@
 
 use crate::services::ServiceManager;
 use crate::sled_agent::SledAgent;
-use sled_hardware::{Baseboard, HardwareManager, HardwareUpdate};
+use sled_hardware::{HardwareManager, HardwareUpdate};
+use sled_hardware_types::Baseboard;
 use sled_storage::disk::RawDisk;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;

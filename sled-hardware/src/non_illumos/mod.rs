@@ -5,8 +5,9 @@
 use crate::disk::{
     DiskPaths, DiskVariant, Partition, PooledDiskError, UnparsedDisk,
 };
-use crate::{Baseboard, SledMode};
+use crate::SledMode;
 use omicron_common::disk::DiskIdentity;
+use sled_hardware_types::Baseboard;
 use slog::Logger;
 use std::collections::HashSet;
 use tokio::sync::broadcast;

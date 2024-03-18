@@ -14,7 +14,7 @@ use http::StatusCode;
 use itertools::Itertools;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -1032,7 +1032,7 @@ async fn assert_metrics(
             ram
         );
     }
-    for id in &[None, Some(*SILO_ID)] {
+    for id in &[None, Some(*DEFAULT_SILO_ID)] {
         assert_eq!(
             get_latest_system_metric(
                 cptestctx,

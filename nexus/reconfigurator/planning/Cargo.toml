@@ -15,6 +15,8 @@ nexus-config.workspace = true
 nexus-inventory.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+rand.workspace = true
+rand_seeder.workspace = true
 sled-agent-client.workspace = true
 slog.workspace = true
 thiserror.workspace = true
@@ -23,5 +25,5 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+expectorate.workspace = true
 omicron-test-utils.workspace = true
-sled-agent-client.workspace = true

@@ -100,6 +100,10 @@ impl Sled {
         &self.serial_number
     }
 
+    pub fn part_number(&self) -> &str {
+        &self.part_number
+    }
+
     /// The policy here is the `views::SledPolicy` because we expect external
     /// users to always use that.
     pub fn policy(&self) -> views::SledPolicy {
