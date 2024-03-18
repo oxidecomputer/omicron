@@ -34,7 +34,7 @@ pub const M2_BACKING_DATASET: &'static str = "backing";
 cfg_if! {
     if #[cfg(any(test, feature = "testing"))] {
         // Tuned for zone_bundle tests
-        pub const DEBUG_DATASET_QUOTA: usize = 100 * (1 << 10);
+        pub const DEBUG_DATASET_QUOTA: usize = 1 << 20;
     } else {
         // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
         // tuned as needed.

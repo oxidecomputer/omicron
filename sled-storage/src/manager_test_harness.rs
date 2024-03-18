@@ -129,23 +129,6 @@ impl StorageManagerTestHarness {
         Self::new_with_tmp_dir(log, tmp).await
     }
 
-    #[allow(unused)]
-    pub(crate) fn mount_config(&self) -> MountConfig {
-        MountConfig {
-            root: self
-                .vdev_dir
-                .as_ref()
-                .expect("Harness destroyed?")
-                .path()
-                .into(),
-        }
-    }
-
-    #[allow(unused)]
-    pub(crate) fn key_requester(&self) -> &StorageKeyRequester {
-        &self.key_requester
-    }
-
     async fn new_with_tmp_dir(
         log: &Logger,
         tmp: camino_tempfile::Utf8TempDir,
@@ -219,24 +202,63 @@ impl StorageManagerTestHarness {
         slef
     }
 
+    #[allow(unused)]
+    pub(crate) fn mount_config(&self) -> MountConfig {
+        MountConfig {
+            root: self
+                .vdev_dir
+                .as_ref()
+                .expect("Harness destroyed?")
+                .path()
+                .into(),
+        }
+    }
+
+    #[allow(unused)]
+    pub(crate) fn key_requester(&self) -> &StorageKeyRequester {
+        &self.key_requester
+    }
+
+    pub const DEFAULT_VDEV_SIZE: u64 = 64 * (1 << 20);
+
     /// Adds raw devices to the [crate::manager::StorageManager], as if they were detected via
     /// hardware. Can be called several times.
+    ///
+    /// Each device is [Self::DEFAULT_VDEV_SIZE] in size.
+    /// Use [Self::add_vdevs_with_size] if you need more control
+    /// over device sizes.
     pub async fn add_vdevs<P: AsRef<str> + ?Sized>(
         &mut self,
         vdevs: &[&P],
+    ) -> Vec<RawDisk> {
+        self.add_vdevs_with_size(
+            &vdevs
+                .iter()
+                .map(|vdev| (vdev, Self::DEFAULT_VDEV_SIZE))
+                .collect::<Vec<_>>(),
+        )
+        .await
+    }
+
+    pub async fn add_vdevs_with_size<P: AsRef<str> + ?Sized>(
+        &mut self,
+        vdevs: &[(&P, u64)],
     ) -> Vec<RawDisk> {
         let vdev_dir = self
             .vdev_dir
             .as_ref()
             .expect("Cannot add vdevs, test harness terminated");
         let mut added = vec![];
-        for vdev in vdevs.iter().map(|vdev| Utf8PathBuf::from(vdev.as_ref())) {
+        for (vdev, size) in vdevs
+            .iter()
+            .map(|(vdev, size)| (Utf8PathBuf::from(vdev.as_ref()), size))
+        {
             assert!(vdev.is_relative());
             let vdev_path = vdev_dir.path().join(&vdev);
             let raw_disk: RawDisk =
                 crate::disk::RawSyntheticDisk::new_with_length(
                     &vdev_path,
-                    1 << 30,
+                    *size,
                     self.next_slot,
                 )
                 .unwrap_or_else(|err| {

@@ -2179,9 +2179,11 @@ mod illumos_tests {
     use chrono::TimeZone;
     use chrono::Timelike;
     use chrono::Utc;
+    use rand::RngCore;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use slog::Drain;
     use slog::Logger;
+    use std::sync::{Arc, Mutex};
 
     /// An iterator that returns the date of consecutive days beginning with 1st
     /// January 2020. The time portion of each returned date will be fixed at
@@ -2233,10 +2235,22 @@ mod illumos_tests {
         assert!(zfs_quota(&path).await.is_err());
     }
 
-    struct CleanupTestContext {
+    struct CleanupTestContextInner {
         resource_wrapper: ResourceWrapper,
         context: CleanupContext,
         bundler: ZoneBundler,
+    }
+
+    // Practically, we only expect one thread to "own" this context at a time.
+    // However, with the "run_test_with_zfs_dataset", it's hard to pass an
+    // async function as a parameter ("test") that acts on a mutable reference
+    // without some fancy HRTB shenanigans.
+    //
+    // Reader: If you think you can pass a "&mut CleanupTestContextInner"
+    // there instead of an "Arc<Mutex<...>>", I welcome you to try!
+    #[derive(Clone)]
+    struct CleanupTestContext {
+        ctx: Arc<Mutex<CleanupTestContextInner>>,
     }
 
     // A wrapper around `StorageResources`, that automatically creates dummy
@@ -2294,12 +2308,19 @@ mod illumos_tests {
             resource_wrapper.storage_test_harness.handle().clone(),
             context,
         );
-        Ok(CleanupTestContext { resource_wrapper, context, bundler })
+        Ok(CleanupTestContext {
+            ctx: Arc::new(Mutex::new(CleanupTestContextInner {
+                resource_wrapper,
+                context,
+                bundler,
+            })),
+        })
     }
 
     #[tokio::test]
     async fn test_context() {
-        let mut ctx = setup_fake_cleanup_task().await.unwrap();
+        let context = setup_fake_cleanup_task().await.unwrap();
+        let mut ctx = context.ctx.lock().unwrap();
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, ctx.context, "received incorrect context");
         ctx.resource_wrapper.storage_test_harness.cleanup().await;
@@ -2307,7 +2328,8 @@ mod illumos_tests {
 
     #[tokio::test]
     async fn test_update_context() {
-        let mut ctx = setup_fake_cleanup_task().await.unwrap();
+        let context = setup_fake_cleanup_task().await.unwrap();
+        let mut ctx = context.ctx.lock().unwrap();
         let new_context = CleanupContext {
             period: CleanupPeriod::new(ctx.context.period.as_duration() / 2)
                 .unwrap(),
@@ -2349,7 +2371,14 @@ mod illumos_tests {
         let context = setup_fake_cleanup_task()
             .await
             .expect("failed to create cleanup task");
-        let result = test(context).await;
+        let result = test(context.clone()).await;
+
+        let mut ctx = context.ctx.lock().unwrap();
+        info!(
+            &ctx.bundler.log,
+            "Test completed, performing cleanup before emitting result"
+        );
+        ctx.resource_wrapper.storage_test_harness.cleanup().await;
         result.expect("test failed!");
     }
 
@@ -2359,8 +2388,9 @@ mod illumos_tests {
     }
 
     async fn test_utilization_body(
-        mut ctx: CleanupTestContext,
+        ctx: CleanupTestContext,
     ) -> anyhow::Result<()> {
+        let ctx = ctx.ctx.lock().unwrap();
         let utilization = ctx.bundler.utilization().await?;
         let paths = utilization.keys().cloned().collect::<Vec<_>>();
 
@@ -2375,6 +2405,19 @@ mod illumos_tests {
             .values()
             .next()
             .context("no utilization information?")?;
+
+        // If this needs to change, go modify the "add_vdevs" call in
+        // "setup_storage".
+        assert!(
+            TEST_QUOTA
+                < StorageManagerTestHarness::DEFAULT_VDEV_SIZE
+                    .try_into()
+                    .unwrap(),
+            "Quota larger than underlying device (quota: {}, device size: {})",
+            TEST_QUOTA,
+            StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
+        );
+
         anyhow::ensure!(
             bundle_utilization.dataset_quota
                 == u64::try_from(TEST_QUOTA).unwrap(),
@@ -2403,9 +2446,13 @@ mod illumos_tests {
             DaysOfOurBundles::new().next().unwrap(),
             ZoneBundleCause::ExplicitRequest,
         )
-        .await?;
+        .await
+        .context("Failed to insert_fake_bundle")?;
 
-        let new_utilization = ctx.bundler.utilization().await?;
+        let new_utilization =
+            ctx.bundler.utilization().await.context(
+                "Failed to get utilization after inserting fake bundle",
+            )?;
         anyhow::ensure!(
             paths == new_utilization.keys().cloned().collect::<Vec<_>>(),
             "paths should not change"
@@ -2450,7 +2497,6 @@ mod illumos_tests {
             used,
             size,
         );
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
         Ok(())
     }
 
@@ -2459,9 +2505,8 @@ mod illumos_tests {
         run_test_with_zfs_dataset(test_cleanup_body).await;
     }
 
-    async fn test_cleanup_body(
-        mut ctx: CleanupTestContext,
-    ) -> anyhow::Result<()> {
+    async fn test_cleanup_body(ctx: CleanupTestContext) -> anyhow::Result<()> {
+        let ctx = ctx.ctx.lock().unwrap();
         // Let's add a bunch of fake bundles, until we should be over the
         // storage limit. These will all be explicit requests, so the priority
         // should be decided based on time, i.e., the ones first added should be
@@ -2522,7 +2567,6 @@ mod illumos_tests {
             anyhow::ensure!(exists, "cleaned up an unexpected bundle");
         }
 
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
         Ok(())
     }
 
@@ -2532,8 +2576,9 @@ mod illumos_tests {
     }
 
     async fn test_list_with_filter_body(
-        mut ctx: CleanupTestContext,
+        ctx: CleanupTestContext,
     ) -> anyhow::Result<()> {
+        let ctx = ctx.ctx.lock().unwrap();
         let mut days = DaysOfOurBundles::new();
         let mut info = Vec::new();
         const N_BUNDLES: usize = 3;
@@ -2586,7 +2631,6 @@ mod illumos_tests {
                 "Matched incorrect zone bundle with a filter",
             );
         }
-        ctx.resource_wrapper.storage_test_harness.cleanup().await;
         Ok(())
     }
 
@@ -2650,6 +2694,12 @@ mod illumos_tests {
             super::ZONE_BUNDLE_METADATA_FILENAME,
             contents.as_bytes(),
         )?;
+
+        // Inject some ~incompressible ballast to ensure the bundles are, though
+        // fake, not also microscopic:
+        let mut ballast = vec![0; 64 * 1024];
+        rand::thread_rng().fill_bytes(&mut ballast);
+        super::insert_data(&mut builder, "ballast.bin", &ballast)?;
 
         let _ = builder.into_inner().context("failed to finish tarball")?;
         let bytes = tokio::fs::metadata(&path).await?.len();
