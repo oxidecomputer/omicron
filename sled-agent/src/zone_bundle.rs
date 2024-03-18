@@ -2183,7 +2183,8 @@ mod illumos_tests {
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use slog::Drain;
     use slog::Logger;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
     /// An iterator that returns the date of consecutive days beginning with 1st
     /// January 2020. The time portion of each returned date will be fixed at
@@ -2320,7 +2321,7 @@ mod illumos_tests {
     #[tokio::test]
     async fn test_context() {
         let context = setup_fake_cleanup_task().await.unwrap();
-        let mut ctx = context.ctx.lock().unwrap();
+        let mut ctx = context.ctx.lock().await;
         let context = ctx.bundler.cleanup_context().await;
         assert_eq!(context, ctx.context, "received incorrect context");
         ctx.resource_wrapper.storage_test_harness.cleanup().await;
@@ -2329,7 +2330,7 @@ mod illumos_tests {
     #[tokio::test]
     async fn test_update_context() {
         let context = setup_fake_cleanup_task().await.unwrap();
-        let mut ctx = context.ctx.lock().unwrap();
+        let mut ctx = context.ctx.lock().await;
         let new_context = CleanupContext {
             period: CleanupPeriod::new(ctx.context.period.as_duration() / 2)
                 .unwrap(),
@@ -2373,7 +2374,7 @@ mod illumos_tests {
             .expect("failed to create cleanup task");
         let result = test(context.clone()).await;
 
-        let mut ctx = context.ctx.lock().unwrap();
+        let mut ctx = context.ctx.lock().await;
         info!(
             &ctx.bundler.log,
             "Test completed, performing cleanup before emitting result"
@@ -2390,7 +2391,7 @@ mod illumos_tests {
     async fn test_utilization_body(
         ctx: CleanupTestContext,
     ) -> anyhow::Result<()> {
-        let ctx = ctx.ctx.lock().unwrap();
+        let ctx = ctx.ctx.lock().await;
         let utilization = ctx.bundler.utilization().await?;
         let paths = utilization.keys().cloned().collect::<Vec<_>>();
 
@@ -2506,7 +2507,7 @@ mod illumos_tests {
     }
 
     async fn test_cleanup_body(ctx: CleanupTestContext) -> anyhow::Result<()> {
-        let ctx = ctx.ctx.lock().unwrap();
+        let ctx = ctx.ctx.lock().await;
         // Let's add a bunch of fake bundles, until we should be over the
         // storage limit. These will all be explicit requests, so the priority
         // should be decided based on time, i.e., the ones first added should be
@@ -2578,7 +2579,7 @@ mod illumos_tests {
     async fn test_list_with_filter_body(
         ctx: CleanupTestContext,
     ) -> anyhow::Result<()> {
-        let ctx = ctx.ctx.lock().unwrap();
+        let ctx = ctx.ctx.lock().await;
         let mut days = DaysOfOurBundles::new();
         let mut info = Vec::new();
         const N_BUNDLES: usize = 3;
