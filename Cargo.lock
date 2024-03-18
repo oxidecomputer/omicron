@@ -481,9 +481,9 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
- "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?branch=master)",
+ "bhyve_api_sys 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af)",
  "libc",
  "strum 0.26.1",
 ]
@@ -501,7 +501,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "libc",
  "strum 0.26.1",
@@ -1237,7 +1237,7 @@ dependencies = [
 [[package]]
 name = "cpuid_profile_config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "propolis",
  "serde",
@@ -1957,7 +1957,7 @@ checksum = "f77af9e75578c1ab34f5f04545a8b05be0c36fbd7a9bb3cf2d2a971e435fdbb9"
 [[package]]
 name = "dladm"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "libc",
  "strum 0.26.1",
@@ -4013,6 +4013,7 @@ checksum = "b024e211b1b371da58cd69e4fb8fa4ed16915edcc0e2e1fb04ac4bad61959f25"
 [[package]]
 name = "libfalcon"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/falcon?rev=1b228b556f53516f0a78ab9d63be5adf977deb97#1b228b556f53516f0a78ab9d63be5adf977deb97"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -4023,7 +4024,7 @@ dependencies = [
  "libc",
  "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys?branch=main)",
  "portpicker",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?branch=master)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af)",
  "propolis-server-config",
  "rand 0.8.5",
  "regex",
@@ -6953,10 +6954,10 @@ dependencies = [
 [[package]]
 name = "propolis"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "anyhow",
- "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?branch=master)",
+ "bhyve_api 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af)",
  "bitflags 2.4.2",
  "bitstruct",
  "byteorder",
@@ -6966,7 +6967,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "pin-project-lite",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?branch=master)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af)",
  "rfb",
  "serde",
  "serde_arrays",
@@ -6983,7 +6984,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -7055,7 +7056,7 @@ dependencies = [
 [[package]]
 name = "propolis-server-config"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "cpuid_profile_config",
  "serde",
@@ -7067,7 +7068,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "schemars",
  "serde",
@@ -10625,7 +10626,7 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 [[package]]
 name = "viona_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "libc",
  "viona_api_sys",
@@ -10634,7 +10635,7 @@ dependencies = [
 [[package]]
 name = "viona_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=master#4ccbb04add49a3a3ba8822d93ffa91afc0067b8d"
+source = "git+https://github.com/oxidecomputer/propolis?rev=6dceb9ef69c217cb78a2018bbedafbc19f6ec1af#6dceb9ef69c217cb78a2018bbedafbc19f6ec1af"
 dependencies = [
  "libc",
 ]

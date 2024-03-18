@@ -52,8 +52,6 @@ rustdocflags = "--document-private-items"
 rustflags = [
     "-C", "link-arg=-Wl,-znocompstrtab,-R/usr/platform/oxide/lib/amd64"
 ]
-# TODO: This should be in a separate config used for VMM based testing
-runner = "test-utils/src/bin/falcon_runner.sh"
 
 # Set up `cargo xtask`.
 [alias]
