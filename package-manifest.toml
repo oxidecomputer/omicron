@@ -504,10 +504,10 @@ service_name = "crucible_pantry_prebuilt"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "crucible"
-source.commit = "1c1574fb721f98f2df1b23e3fd27d83be018882e"
+source.commit = "952c7d60d22be5198b892bec8d92f4291b9160c2"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/crucible/image/<commit>/crucible-pantry.sha256.txt
-source.sha256 = "8839a3748cd2926f61244c99344d0802e59ea4673a5f31a2aaad5d759176aa80"
+source.sha256 = "1a40e24b176e8179cc7f74ef6922cd2ee51d5eca9bfa7057fc37994cf5c4678e"
 output.type = "zone"
 output.intermediate_only = true
 
