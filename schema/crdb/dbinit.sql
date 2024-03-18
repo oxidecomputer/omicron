@@ -296,36 +296,6 @@ CREATE TYPE IF NOT EXISTS omicron.public.service_kind AS ENUM (
   'mgd'
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.service (
-    /* Identity metadata (asset) */
-    id UUID PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-
-    /* FK into the Sled table */
-    sled_id UUID NOT NULL,
-    /* For services in illumos zones, the zone's unique id (for debugging) */
-    zone_id UUID,
-    /* The IP address of the service. */
-    ip INET NOT NULL,
-    /* The UDP or TCP port on which the service listens. */
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
-    /* Indicates the type of service. */
-    kind omicron.public.service_kind NOT NULL
-);
-
-/* Add an index which lets us look up the services on a sled */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_sled ON omicron.public.service (
-    sled_id,
-    id
-);
-
-/* Look up (and paginate) services of a given kind. */
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_service_by_kind ON omicron.public.service (
-    kind,
-    id
-);
-
 CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
   'm2',
   'u2'
