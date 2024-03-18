@@ -338,7 +338,7 @@ impl Plan {
                 .unwrap();
         }
 
-        // Set up stoarge early, as it'll be necessary for placement of
+        // Set up storage early, as it'll be necessary for placement of
         // many subsequent services.
         //
         // Our policy at RSS time is currently "adopt all the U.2 disks we can see".

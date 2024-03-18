@@ -208,7 +208,7 @@ PXA_END="$EXTRA_IP_END"
 export GATEWAY_IP GATEWAY_MAC PXA_START PXA_END
 
 pfexec zpool create -f scratch c1t1d0 c2t1d0
-ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
+VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for
