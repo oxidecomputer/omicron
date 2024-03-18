@@ -13,7 +13,7 @@ use omicron_common::api::external::SemverVersion;
 ///
 /// This should be updated whenever the schema is changed. For more details,
 /// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(43, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(45, 0, 0);
 
 table! {
     disk (id) {
@@ -960,8 +960,6 @@ table! {
 
         sled_id -> Uuid,
         physical_disk_id -> Uuid,
-
-        total_size -> Int8,
     }
 }
 
@@ -1376,6 +1374,16 @@ table! {
 }
 
 table! {
+    inv_zpool (inv_collection_id, sled_id, id) {
+        inv_collection_id -> Uuid,
+        time_collected -> Timestamptz,
+        id -> Uuid,
+        sled_id -> Uuid,
+        total_size -> Int8,
+    }
+}
+
+table! {
     inv_sled_omicron_zones (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -1518,6 +1526,16 @@ table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
+    }
+}
+
+table! {
+    bootstore_config (key, generation) {
+        key -> Text,
+        generation -> Int8,
+        data -> Jsonb,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 

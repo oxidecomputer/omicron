@@ -476,6 +476,7 @@ impl Sled {
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
                 disks: vec![],
+                zpools: vec![],
             }
         };
 
@@ -558,6 +559,7 @@ impl Sled {
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             disks: vec![],
+            zpools: vec![],
         };
 
         Sled {

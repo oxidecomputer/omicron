@@ -8,8 +8,8 @@ use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    BgpImportedRouteIpv4, BgpPeerStatus, CreateResult, DeleteResult, Ipv4Net,
-    ListResultVec, LookupResult, NameOrId,
+    self, BgpImportedRouteIpv4, BgpPeerStatus, CreateResult, DeleteResult,
+    Ipv4Net, ListResultVec, LookupResult, NameOrId,
 };
 
 impl super::Nexus {
@@ -88,7 +88,11 @@ impl super::Nexus {
     ) -> ListResultVec<BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients {
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
             let router_info = match client.inner.get_routers().await {
                 Ok(result) => result.into_inner(),
                 Err(e) => {
@@ -126,7 +130,11 @@ impl super::Nexus {
     ) -> ListResultVec<BgpImportedRouteIpv4> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients {
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
             let imported: Vec<BgpImportedRouteIpv4> = match client
                 .inner
                 .get_imported4(&mg_admin_client::types::GetImported4Request {
