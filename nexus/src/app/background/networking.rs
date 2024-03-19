@@ -21,20 +21,10 @@ pub(crate) fn build_mgd_clients(
         let port = MGD_PORT;
         let socketaddr =
             std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-        let client =
-            match mg_admin_client::Client::new(&log.clone(), socketaddr) {
-                Ok(client) => client,
-                Err(e) => {
-                    error!(
-                        log,
-                        "error building mgd client";
-                        "location" => %location,
-                        "addr" => %addr,
-                        "error" => %e,
-                    );
-                    continue;
-                }
-            };
+        let client = mg_admin_client::Client::new(
+            format!("http://{}", socketaddr).as_str(),
+            log.clone(),
+        );
         clients.push((*location, client));
     }
     clients.into_iter().collect::<HashMap<_, _>>()

@@ -164,6 +164,7 @@ ip_pool_silo_list                        GET      /v1/system/ip-pools/{pool}/sil
 ip_pool_silo_unlink                      DELETE   /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/silos/{silo}
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
+ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
 networking_address_lot_create            POST     /v1/system/networking/address-lot
@@ -179,6 +180,7 @@ networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp
 networking_bgp_imported_routes_ipv4      GET      /v1/system/networking/bgp-routes-ipv4
+networking_bgp_message_history           GET      /v1/system/networking/bgp-message-history
 networking_bgp_status                    GET      /v1/system/networking/bgp-status
 networking_loopback_address_create       POST     /v1/system/networking/loopback-address
 networking_loopback_address_delete       DELETE   /v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}
