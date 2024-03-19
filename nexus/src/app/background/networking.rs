@@ -80,11 +80,7 @@ pub(crate) fn api_to_dpd_port_settings(
             LinkSettings {
                 params: LinkCreate {
                     autoneg: l.autoneg,
-                    // TODO: dendrite currently does nothing with this field.
-                    // Setting it to a value causes RPW reconciler passes to do
-                    // unnecessarily work, trying to set a field that dendrite
-                    // will not apply.
-                    lane: None,
+                    lane: Some(LinkId(0)),
                     kr: false,
                     fec: match l.fec {
                         SwitchLinkFec::Firecode => PortFec::Firecode,
