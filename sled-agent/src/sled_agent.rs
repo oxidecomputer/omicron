@@ -34,7 +34,6 @@ use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use ddm_admin_client::Client as DdmAdminClient;
 use derive_more::From;
 use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
@@ -65,6 +64,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service,
     retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use oximeter::types::ProducerRegistry;
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
@@ -1174,7 +1174,7 @@ pub enum AddSledError {
         err: bootstrap_agent_client::Error,
     },
     #[error("Failed to connect to DDM")]
-    DdmAdminClient(#[source] ddm_admin_client::DdmError),
+    DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
     #[error("Failed to learn bootstrap ip for {0:?}")]
     NotFound(BaseboardId),
     #[error("Failed to initialize {sled_id}: {err}")]
