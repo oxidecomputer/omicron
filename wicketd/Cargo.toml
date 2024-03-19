@@ -46,7 +46,7 @@ toml.workspace = true
 uuid.workspace = true
 
 bootstrap-agent-client.workspace = true
-ddm-admin-client.workspace = true
+omicron-ddm-admin-client.workspace = true
 gateway-client.workspace = true
 installinator-artifactd.workspace = true
 installinator-common.workspace = true
