@@ -18,6 +18,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let node_name = format!("{}_test_vm", name);
     let mut d = Runner::new(&runner_name);
     let vm = d.node(&node_name, "helios-2.0", 2, gb(8));
+    //    d.persistent = true;
 
     let cargo_bay = tempdir()?;
     eprintln!("Set cargo-bay to {} on host machine", cargo_bay.path());
