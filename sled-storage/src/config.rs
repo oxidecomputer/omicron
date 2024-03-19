@@ -21,6 +21,10 @@ use camino::Utf8PathBuf;
 pub struct MountConfig {
     /// The root path under which datasets are located.
     pub root: Utf8PathBuf,
+
+    /// The path where synthetic disks are stored,
+    /// if their paths are not absolute.
+    pub synthetic_disk_root: Utf8PathBuf,
 }
 
 impl Default for MountConfig {
@@ -29,6 +33,7 @@ impl Default for MountConfig {
             root: Utf8PathBuf::from(
                 illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT,
             ),
+            synthetic_disk_root: Utf8PathBuf::from("/tmp"),
         }
     }
 }

@@ -133,7 +133,8 @@ impl StorageManagerTestHarness {
         log: &Logger,
         tmp: camino_tempfile::Utf8TempDir,
     ) -> Self {
-        let mount_config = MountConfig { root: tmp.path().into() };
+        let mount_config =
+            MountConfig { root: tmp.path().into(), ..Default::default() };
 
         let key_manager_error_injector = Arc::new(AtomicBool::new(false));
         let (mut key_manager, key_requester) = key_manager::KeyManager::new(
@@ -211,6 +212,7 @@ impl StorageManagerTestHarness {
                 .expect("Harness destroyed?")
                 .path()
                 .into(),
+            ..Default::default()
         }
     }
 

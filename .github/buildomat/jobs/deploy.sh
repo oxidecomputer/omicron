@@ -217,7 +217,11 @@ VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 # real system, the certificate would come from the customer during initial rack
 # setup on the technician port.
 #
-tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
+
+# Update the vdevs to point to where we've created them
+sed -i "s/\(m2\|u2\)\(.*\.vdev\)/\/scratch\/\1\2/g"
+
 SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 
@@ -244,8 +248,8 @@ addresses = \\[\"$UPLINK_IP/24\"\\]
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true
 
-tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml
-rm -f pkg/config-rss.toml*
+tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
+rm -f pkg/config-rss.toml* pkg/config.toml
 
 #
 # By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS

@@ -35,7 +35,7 @@ function ensure_vdevs {
             )
         for VDEV in "${VDEVS[@]}"; do
             echo "Device: [$VDEV]"
-            VDEV_PATH="${VDEV_DIR:-$OMICRON_TOP}/$VDEV"
+            VDEV_PATH="${VDEV_DIR:-/tmp}/$VDEV"
             if ! [[ -f "$VDEV_PATH" ]]; then
                 dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=20G
             fi
@@ -49,7 +49,7 @@ function try_destroy_zpools {
     for ZPOOL_TYPE in "${ZPOOL_TYPES[@]}"; do
         readarray -t ZPOOLS < <(zfs list -d 0 -o name | grep "^$ZPOOL_TYPE")
         for ZPOOL in "${ZPOOLS[@]}"; do
-            VDEV_FILE="${VDEV_DIR:-$OMICRON_TOP}/$VDEV.vdev"
+            VDEV_FILE="${VDEV_DIR:-/tmp}/$VDEV"
             zfs destroy -r "$ZPOOL" && \
                     (zfs unmount "$ZPOOL" || true) && \
                     zpool destroy "$ZPOOL" && \

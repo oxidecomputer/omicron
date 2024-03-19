@@ -98,14 +98,27 @@ impl SyntheticDisk {
     // it. If the zpool already exists, it is imported, but not re-created.
     pub fn new(
         log: &Logger,
+        mount_config: &MountConfig,
         raw: RawSyntheticDisk,
         zpool_id: Option<Uuid>,
     ) -> Self {
-        info!(log, "Invoking SyntheticDisk::new"; "identity" => ?raw.identity);
+        let path = if raw.path.is_absolute() {
+            raw.path.clone()
+        } else {
+            mount_config.synthetic_disk_root.join(&raw.path)
+        };
+
+        info!(
+            log,
+            "Invoking SyntheticDisk::new";
+            "identity" => ?raw.identity,
+            "path" => %path,
+        );
+
         let zpool_name = sled_hardware::disk::ensure_zpool_exists(
             log,
             raw.variant,
-            &raw.path,
+            &path,
             zpool_id,
         )
         .unwrap();
@@ -274,9 +287,12 @@ impl Disk {
     ) -> Result<Self, DiskError> {
         let disk: Disk = match raw_disk {
             RawDisk::Real(disk) => PooledDisk::new(log, disk, pool_id)?.into(),
-            RawDisk::Synthetic(disk) => {
-                Disk::Synthetic(SyntheticDisk::new(log, disk, pool_id))
-            }
+            RawDisk::Synthetic(disk) => Disk::Synthetic(SyntheticDisk::new(
+                log,
+                mount_config,
+                disk,
+                pool_id,
+            )),
         };
         dataset::ensure_zpool_has_datasets(
             log,
