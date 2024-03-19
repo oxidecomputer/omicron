@@ -4,8 +4,8 @@ use end_to_end_tests::helpers::{generate_name, get_system_ip_pool};
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
-    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, Ipv4Range, NameOrId,
-    SiloQuotasUpdate,
+    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpRange, Ipv4Range,
+    NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
     ClientDisksExt, ClientHiddenExt, ClientProjectsExt,
@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
     client
         .ip_pool_range_add()
         .pool(pool_name)
-        .body(Ipv4Range { first, last })
+        .body(IpRange::V4(Ipv4Range { first, last }))
         .send()
         .await?;
 
