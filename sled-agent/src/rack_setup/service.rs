@@ -86,7 +86,6 @@ use anyhow::{bail, Context};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
-use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
@@ -100,6 +99,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,

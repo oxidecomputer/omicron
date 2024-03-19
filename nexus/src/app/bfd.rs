@@ -69,7 +69,6 @@ impl super::Nexus {
         for s in &[SwitchLocation::Switch0, SwitchLocation::Switch1] {
             let mg_client = self.mg_client_for_switch_location(*s).await?;
             let status = mg_client
-                .inner
                 .get_bfd_peers()
                 .await
                 .map_err(|e| {
