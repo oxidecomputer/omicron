@@ -194,7 +194,23 @@ impl InstanceManager {
             })
             .await
             .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
-        rx.await?
+
+        match target {
+            // these may involve a long-running zone creation, so avoid HTTP
+            // request timeouts by decoupling the response
+            // (see InstanceRunner::put_state)
+            InstanceStateRequested::MigrationTarget(_)
+            | InstanceStateRequested::Running => {
+                // We don't want the sending side of the channel to see an
+                // error if we drop rx without awaiting it.
+                // Since we don't care about the response here, we spawn rx
+                // into a task which will await it for us in the background.
+                tokio::spawn(rx);
+                Ok(InstancePutStateResponse { updated_runtime: None })
+            }
+            InstanceStateRequested::Stopped
+            | InstanceStateRequested::Reboot => rx.await?,
+        }
     }
 
     pub async fn put_migration_ids(

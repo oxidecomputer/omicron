@@ -30,7 +30,6 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::{DhcpCfg, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
-use illumos_utils::zone::Zones;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use omicron_common::api::internal::nexus::{
@@ -51,6 +50,11 @@ use std::net::{SocketAddr, SocketAddrV6};
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
+
+#[cfg(test)]
+use illumos_utils::zone::MockZones as Zones;
+#[cfg(not(test))]
+use illumos_utils::zone::Zones;
 
 // The depth of the request queue for the instance.
 const QUEUE_SIZE: usize = 32;
@@ -310,11 +314,6 @@ struct InstanceRunner {
 
     // Properties visible to Propolis
     properties: propolis_client::types::InstanceProperties,
-
-    // This is currently unused, but will be sent to Propolis as part of the
-    // work tracked in https://github.com/oxidecomputer/omicron/issues/4851. It
-    // will be included in the InstanceProperties above, most likely.
-    _metadata: InstanceMetadata,
 
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: Uuid,
@@ -926,6 +925,7 @@ impl Instance {
     ///   instance manager's tracking table.
     /// * `state`: The initial state of this instance.
     /// * `services`: A set of instance manager-provided services.
+    /// * `metadata`: Instance-related metadata used to track statistics.
     pub(crate) fn new(
         log: Logger,
         id: Uuid,
@@ -1010,10 +1010,8 @@ impl Instance {
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: hardware.properties.ncpus.0 as u8,
+                metadata: metadata.into(),
             },
-            // This will be used in a follow up, tracked under
-            // https://github.com/oxidecomputer/omicron/issues/4851.
-            _metadata: metadata,
             propolis_id,
             propolis_addr,
             vnic_allocator,

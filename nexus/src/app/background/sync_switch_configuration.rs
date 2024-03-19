@@ -28,8 +28,9 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig,
-    DeleteStaticRoute4Request, Prefix4, StaticRoute4, StaticRoute4List,
+    DeleteStaticRoute4Request, StaticRoute4, StaticRoute4List,
 };
+use mg_admin_client::Prefix4;
 use nexus_db_queries::{
     context::OpContext,
     db::{datastore::SwitchPortSettingsCombinedResult, DataStore},
@@ -605,7 +606,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             "switch_location" => ?location,
                             "config" => ?config,
                         );
-                        if let Err(e) = client.inner.bgp_apply(config).await {
+                        if let Err(e) = client.bgp_apply(config).await {
                             error!(log, "error while applying bgp configuration"; "error" => ?e);
                         }
                     }
@@ -1083,7 +1084,7 @@ fn static_routes_to_del(
                 .difference(routes_wanted)
                 .map(|(nexthop, prefix)| StaticRoute4 {
                     nexthop: *nexthop,
-                    prefix: prefix.clone(),
+                    prefix: *prefix,
                 })
                 .collect::<Vec<StaticRoute4>>();
 
@@ -1099,7 +1100,7 @@ fn static_routes_to_del(
                 .iter()
                 .map(|(nexthop, prefix)| StaticRoute4 {
                     nexthop: *nexthop,
-                    prefix: prefix.clone(),
+                    prefix: *prefix,
                 })
                 .collect::<Vec<StaticRoute4>>();
 
@@ -1146,7 +1147,7 @@ fn static_routes_to_add(
             .difference(routes_on_switch)
             .map(|(nexthop, prefix)| StaticRoute4 {
                 nexthop: *nexthop,
-                prefix: prefix.clone(),
+                prefix: *prefix,
             })
             .collect::<Vec<StaticRoute4>>();
 
@@ -1325,12 +1326,10 @@ async fn static_routes_on_switch<'a>(
 
     for (location, client) in mgd_clients {
         let static_routes: HashSet<(Ipv4Addr, Prefix4)> =
-            match client.inner.static_list_v4_routes().await {
-                Ok(routes) => routes
-                    .list
-                    .iter()
-                    .map(|r| (r.nexthop, r.prefix.clone()))
-                    .collect(),
+            match client.static_list_v4_routes().await {
+                Ok(routes) => {
+                    routes.list.iter().map(|r| (r.nexthop, r.prefix)).collect()
+                }
                 Err(_) => {
                     error!(
                         &log,
@@ -1369,7 +1368,7 @@ async fn delete_static_routes(
             "switch_location" => ?switch_location,
             "request" => ?request,
         );
-        if let Err(e) = client.inner.static_remove_v4_route(&request).await {
+        if let Err(e) = client.static_remove_v4_route(&request).await {
             error!(
                 &log,
                 "failed to delete routes from mgd";
@@ -1405,7 +1404,7 @@ async fn add_static_routes<'a>(
             "switch_location" => ?switch_location,
             "request" => ?request,
         );
-        if let Err(e) = client.inner.static_add_v4_route(&request).await {
+        if let Err(e) = client.static_add_v4_route(&request).await {
             error!(
                 &log,
                 "failed to add routes to mgd";
