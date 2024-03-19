@@ -71,30 +71,6 @@ loading inventory collections ... done.
 loading blueprints ... done.
 wrote <REDACTED>
 =============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-instances"]
-termination: Exited(2)
----------------------------------------------
-stdout:
----------------------------------------------
-stderr:
-error: unrecognized subcommand 'services'
-
-Usage: omdb db [OPTIONS] <COMMAND>
-
-For more information, try '--help'.
-=============================================
-EXECUTING COMMAND: omdb ["db", "services", "list-by-sled"]
-termination: Exited(2)
----------------------------------------------
-stdout:
----------------------------------------------
-stderr:
-error: unrecognized subcommand 'services'
-
-Usage: omdb db [OPTIONS] <COMMAND>
-
-For more information, try '--help'.
-=============================================
 EXECUTING COMMAND: omdb ["db", "sleds"]
 termination: Exited(0)
 ---------------------------------------------
