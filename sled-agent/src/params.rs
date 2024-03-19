@@ -135,7 +135,7 @@ pub struct InstancePutStateBody {
 
 /// The response sent from a request to move an instance into a specific runtime
 /// state.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstancePutStateResponse {
     /// The current runtime state of the instance after handling the request to
     /// change its state. If the instance's state did not change, this field is
