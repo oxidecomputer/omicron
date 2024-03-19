@@ -165,7 +165,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_sled_by_rack ON omicron.public.sled (
 
 CREATE TYPE IF NOT EXISTS omicron.public.sled_resource_kind AS ENUM (
     -- omicron.public.instance
-    'instance',
+    'instance'
     -- We expect to other resource kinds here in the future; e.g., to track
     -- resources used by control plane services. For now, we only track
     -- instances.
@@ -179,9 +179,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     -- The sled where resources are being consumed
     sled_id UUID NOT NULL,
 
-    -- Identifies the type of the resource
-    kind omicron.public.sled_resource_kind NOT NULL,
-
     -- The maximum number of hardware threads usable by this resource
     hardware_threads INT8 NOT NULL,
 
@@ -189,7 +186,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_resource (
     rss_ram INT8 NOT NULL,
 
     -- The maximum amount of Reservoir RAM provisioned to this resource
-    reservoir_ram INT8 NOT NULL
+    reservoir_ram INT8 NOT NULL,
+
+    -- Identifies the type of the resource
+    kind omicron.public.sled_resource_kind NOT NULL
 );
 
 -- Allow looking up all resources which reside on a sled
@@ -3673,7 +3673,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '45.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '46.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
