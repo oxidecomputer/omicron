@@ -6,6 +6,8 @@ use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
 use futures::future::BoxFuture;
+use nexus_config::NexusConfig;
+use nexus_config::SchemaConfig;
 use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_queries::db::datastore::{
     all_sql_for_version_migration, EARLIEST_SUPPORTED_VERSION,
@@ -14,8 +16,6 @@ use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::Config;
-use omicron_common::nexus_config::SchemaConfig;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
@@ -45,7 +45,7 @@ async fn test_setup_just_crdb<'a>(
 // Helper to ensure we perform the same setup for the positive and negative test
 // cases.
 async fn test_setup<'a>(
-    config: &'a mut Config,
+    config: &'a mut NexusConfig,
     name: &'static str,
 ) -> ControlPlaneTestContextBuilder<'a, omicron_nexus::Server> {
     let mut builder =
@@ -1048,7 +1048,8 @@ fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
 fn before_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
     // IP addresses were pulled off dogfood sled 16
     Box::pin(async move {
-        // Create two sleds
+        // Create two sleds. (SLED2 is marked non_provisionable for
+        // after_37_0_1.)
         client
             .batch_execute(&format!(
                 "INSERT INTO sled
@@ -1062,7 +1063,7 @@ fn before_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
             'fd00:1122:3344:104::1ac', 'provisionable'),
           ('{SLED2}', now(), now(), NULL, 1, '{RACK1}', false, 'zzzz', 'xxxx',
              '2', 64, 12345678, 77,'fd00:1122:3344:107::1', 12345,
-            'fd00:1122:3344:107::d4', 'provisionable');
+            'fd00:1122:3344:107::d4', 'non_provisionable');
         "
             ))
             .await
@@ -1095,6 +1096,45 @@ fn after_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
+// This reuses the sleds created in before_24_0_0.
+fn after_37_0_1(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
+        let rows = client
+            .query("SELECT sled_policy, sled_state FROM sled ORDER BY id", &[])
+            .await
+            .expect("Failed to select sled policy and state");
+        let policy_and_state = process_rows(&rows);
+
+        assert_eq!(
+            policy_and_state[0].values,
+            vec![
+                ColumnValue::new(
+                    "sled_policy",
+                    SqlEnum::from(("sled_policy", "in_service"))
+                ),
+                ColumnValue::new(
+                    "sled_state",
+                    SqlEnum::from(("sled_state", "active"))
+                ),
+            ]
+        );
+        assert_eq!(
+            policy_and_state[1].values,
+            vec![
+                ColumnValue::new(
+                    "sled_policy",
+                    SqlEnum::from(("sled_policy", "no_provision"))
+                ),
+                ColumnValue::new(
+                    "sled_state",
+                    SqlEnum::from(("sled_state", "active"))
+                ),
+            ]
+        );
+    })
+}
+
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1111,6 +1151,10 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion(semver::Version::parse("24.0.0").unwrap()),
         DataMigrationFns { before: Some(before_24_0_0), after: after_24_0_0 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("37.0.1").unwrap()),
+        DataMigrationFns { before: None, after: after_37_0_1 },
     );
 
     map

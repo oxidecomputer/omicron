@@ -8,13 +8,19 @@
 //! to operate correctly.
 
 use dropshot::{
-    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk, Path,
-    RequestContext,
+    endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk,
+    HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
 use hyper::Body;
 use internal_dns::ServiceName;
+use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::UpdateArtifactId;
+use omicron_common::api::internal::nexus::{
+    SledInstanceState, UpdateArtifactId,
+};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use uuid::Uuid;
 
 /// Implements a fake Nexus.
 ///
@@ -26,6 +32,26 @@ pub trait FakeNexusServer: Send + Sync {
         &self,
         _artifact_id: UpdateArtifactId,
     ) -> Result<Vec<u8>, Error> {
+        Err(Error::internal_error("Not implemented"))
+    }
+
+    fn sled_agent_get(&self, _sled_id: Uuid) -> Result<SledAgentInfo, Error> {
+        Err(Error::internal_error("Not implemented"))
+    }
+
+    fn sled_agent_put(
+        &self,
+        _sled_id: Uuid,
+        _info: SledAgentInfo,
+    ) -> Result<(), Error> {
+        Err(Error::internal_error("Not implemented"))
+    }
+
+    fn cpapi_instances_put(
+        &self,
+        _instance_id: Uuid,
+        _new_runtime_state: SledInstanceState,
+    ) -> Result<(), Error> {
         Err(Error::internal_error("Not implemented"))
     }
 }
@@ -52,9 +78,72 @@ async fn cpapi_artifact_download(
     ))
 }
 
+/// Path parameters for Sled Agent requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct SledAgentPathParam {
+    sled_id: Uuid,
+}
+
+/// Return information about the given sled agent
+#[endpoint {
+     method = GET,
+     path = "/sled-agents/{sled_id}",
+ }]
+async fn sled_agent_get(
+    request_context: RequestContext<ServerContext>,
+    path_params: Path<SledAgentPathParam>,
+) -> Result<HttpResponseOk<SledAgentInfo>, HttpError> {
+    let context = request_context.context();
+
+    Ok(HttpResponseOk(
+        context.sled_agent_get(path_params.into_inner().sled_id)?,
+    ))
+}
+
+#[endpoint {
+     method = POST,
+     path = "/sled-agents/{sled_id}",
+ }]
+async fn sled_agent_put(
+    request_context: RequestContext<ServerContext>,
+    path_params: Path<SledAgentPathParam>,
+    sled_info: TypedBody<SledAgentInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let context = request_context.context();
+    context.sled_agent_put(
+        path_params.into_inner().sled_id,
+        sled_info.into_inner(),
+    )?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct InstancePathParam {
+    instance_id: Uuid,
+}
+#[endpoint {
+    method = PUT,
+    path = "/instances/{instance_id}",
+}]
+async fn cpapi_instances_put(
+    request_context: RequestContext<ServerContext>,
+    path_params: Path<InstancePathParam>,
+    new_runtime_state: TypedBody<SledInstanceState>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let context = request_context.context();
+    context.cpapi_instances_put(
+        path_params.into_inner().instance_id,
+        new_runtime_state.into_inner(),
+    )?;
+    Ok(HttpResponseUpdatedNoContent())
+}
+
 fn api() -> ApiDescription<ServerContext> {
     let mut api = ApiDescription::new();
     api.register(cpapi_artifact_download).unwrap();
+    api.register(sled_agent_get).unwrap();
+    api.register(sled_agent_put).unwrap();
+    api.register(cpapi_instances_put).unwrap();
     api
 }
 

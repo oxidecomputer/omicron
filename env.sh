@@ -5,7 +5,7 @@
 # See also: ./.envrc
 
 set -o xtrace
-OMICRON_WS="$(cd $(dirname "${BASH_SOURCE[0]}") && echo $PWD)"
+OMICRON_WS="$(readlink -f $(dirname "${BASH_SOURCE[0]}"))"
 export PATH="$OMICRON_WS/out/cockroachdb/bin:$PATH"
 export PATH="$OMICRON_WS/out/clickhouse:$PATH"
 export PATH="$OMICRON_WS/out/dendrite-stub/bin:$PATH"

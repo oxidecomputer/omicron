@@ -4,17 +4,17 @@
 
 //! Types representing deployed software and configuration
 //!
-//! For more on this, see the crate-level documentation for `nexus/deployment`.
+//! For more on this, see the crate-level documentation for
+//! `nexus/reconfigurator/planning`.
 //!
 //! This lives in nexus/types because it's used by both nexus/db-model and
-//! nexus/deployment.  (It could as well just live in nexus/db-model, but
-//! nexus/deployment does not currently know about nexus/db-model and it's
-//! convenient to separate these concerns.)
+//! nexus/reconfigurator/planning.  (It could as well just live in
+//! nexus/db-model, but nexus/reconfigurator/planning does not currently know
+//! about nexus/db-model and it's convenient to separate these concerns.)
 
-use crate::external_api::views::SledProvisionState;
+use crate::external_api::views::SledPolicy;
+use crate::external_api::views::SledState;
 use crate::inventory::Collection;
-pub use crate::inventory::NetworkInterface;
-pub use crate::inventory::NetworkInterfaceKind;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
 pub use crate::inventory::OmicronZoneType;
@@ -30,6 +30,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use uuid::Uuid;
 
 /// Fleet-wide deployment policy
@@ -47,7 +48,7 @@ use uuid::Uuid;
 ///
 /// The current policy is pretty limited.  It's aimed primarily at supporting
 /// the add/remove sled use case.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Policy {
     /// set of sleds that are supposed to be part of the control plane, along
     /// with information about resources available to the planner
@@ -62,10 +63,13 @@ pub struct Policy {
 }
 
 /// Describes the resources available on each sled for the planner
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SledResources {
-    /// provision state of this sled
-    pub provision_state: SledProvisionState,
+    /// current sled policy
+    pub policy: SledPolicy,
+
+    /// current sled state
+    pub state: SledState,
 
     /// zpools on this sled
     ///
@@ -80,11 +84,22 @@ pub struct SledResources {
     pub subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
+impl SledResources {
+    /// Returns true if the sled can have services provisioned on it that
+    /// aren't required to be on every sled.
+    ///
+    /// For example, NTP must exist on every sled, but Nexus does not have to.
+    pub fn is_eligible_for_discretionary_services(&self) -> bool {
+        self.policy.is_provisionable()
+            && self.state.is_eligible_for_discretionary_services()
+    }
+}
+
 /// Describes a complete set of software and configuration for the system
 // Blueprints are a fundamental part of how the system modifies itself.  Each
 // blueprint completely describes all of the software and configuration
-// that the control plane manages.  See the nexus/deployment crate-level
-// documentation for details.
+// that the control plane manages.  See the nexus/reconfigurator/planning
+// crate-level documentation for details.
 //
 // Blueprints are different from policy.  Policy describes the things that an
 // operator would generally want to control.  The blueprint describes the
@@ -118,7 +133,7 @@ pub struct SledResources {
 // zones deployed on each host and some supporting configuration (e.g., DNS).
 // This is aimed at supporting add/remove sleds.  The plan is to grow this to
 // include more of the system as we support more use cases.
-#[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
 pub struct Blueprint {
     /// unique identifier for this blueprint
     pub id: Uuid,
@@ -134,6 +149,14 @@ pub struct Blueprint {
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
+
+    /// internal DNS version when this blueprint was created
+    // See blueprint execution for more on this.
+    pub internal_dns_version: Generation,
+
+    /// external DNS version when thi blueprint was created
+    // See blueprint execution for more on this.
+    pub external_dns_version: Generation,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -161,8 +184,11 @@ impl Blueprint {
         self.omicron_zones.keys().copied()
     }
 
-    /// Summarize the difference between two blueprints
-    pub fn diff<'a>(&'a self, other: &'a Blueprint) -> OmicronZonesDiff<'a> {
+    /// Summarize the difference between sleds and zones between two blueprints
+    pub fn diff_sleds<'a>(
+        &'a self,
+        other: &'a Blueprint,
+    ) -> OmicronZonesDiff<'a> {
         OmicronZonesDiff {
             before_label: format!("blueprint {}", self.id),
             before_zones: self.omicron_zones.clone(),
@@ -173,14 +199,15 @@ impl Blueprint {
         }
     }
 
-    /// Summarize the difference between a collection and a blueprint
+    /// Summarize the differences in sleds and zones between a collection and a
+    /// blueprint
     ///
     /// This gives an idea about what would change about a running system if one
     /// were to execute the blueprint.
     ///
     /// Note that collections do not currently include information about what
     /// zones are in-service, so the caller must provide that information.
-    pub fn diff_from_collection<'a>(
+    pub fn diff_sleds_from_collection<'a>(
         &'a self,
         collection: &'a Collection,
         before_zones_in_service: &'a BTreeSet<Uuid>,
@@ -199,6 +226,74 @@ impl Blueprint {
             after_zones_in_service: &self.zones_in_service,
         }
     }
+
+    /// Return a struct that can be displayed.
+    pub fn display(&self) -> BlueprintDisplay<'_> {
+        BlueprintDisplay { blueprint: self }
+    }
+}
+
+/// Wrapper to allow a [`Blueprint`] to be displayed with information.
+///
+/// Returned by [`Blueprint::display()`].
+#[derive(Clone, Debug)]
+pub struct BlueprintDisplay<'a> {
+    blueprint: &'a Blueprint,
+    // TODO: add colorization with a stylesheet
+}
+
+impl<'a> fmt::Display for BlueprintDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let b = self.blueprint;
+        writeln!(f, "blueprint  {}", b.id)?;
+        writeln!(
+            f,
+            "parent:    {}",
+            b.parent_blueprint_id
+                .map(|u| u.to_string())
+                .unwrap_or_else(|| String::from("<none>"))
+        )?;
+        writeln!(
+            f,
+            "created by {}{}",
+            b.creator,
+            if b.creator.parse::<Uuid>().is_ok() {
+                " (likely a Nexus instance)"
+            } else {
+                ""
+            }
+        )?;
+        writeln!(
+            f,
+            "created at {}",
+            humantime::format_rfc3339_millis(b.time_created.into(),)
+        )?;
+        writeln!(f, "internal DNS version: {}", b.internal_dns_version)?;
+        writeln!(f, "comment: {}", b.comment)?;
+        writeln!(f, "zones:\n")?;
+        for (sled_id, sled_zones) in &b.omicron_zones {
+            writeln!(
+                f,
+                "  sled {}: Omicron zones at generation {}",
+                sled_id, sled_zones.generation
+            )?;
+            for z in &sled_zones.zones {
+                writeln!(
+                    f,
+                    "    {} {} {}",
+                    z.id,
+                    if b.zones_in_service.contains(&z.id) {
+                        "in service    "
+                    } else {
+                        "not in service"
+                    },
+                    z.zone_type.label(),
+                )?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 /// Describe high-level metadata about a blueprint
@@ -212,6 +307,10 @@ pub struct BlueprintMetadata {
 
     /// which blueprint this blueprint is based on
     pub parent_blueprint_id: Option<Uuid>,
+    /// internal DNS version when this blueprint was created
+    pub internal_dns_version: Generation,
+    /// external DNS version when this blueprint was created
+    pub external_dns_version: Generation,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -244,6 +343,7 @@ pub struct BlueprintTargetSet {
 }
 
 /// Summarizes the differences between two blueprints
+#[derive(Debug)]
 pub struct OmicronZonesDiff<'a> {
     before_label: String,
     // We store an owned copy of "before_zones" to make it easier to support
@@ -256,6 +356,7 @@ pub struct OmicronZonesDiff<'a> {
 }
 
 /// Describes a sled that appeared on both sides of a diff (possibly changed)
+#[derive(Debug)]
 pub struct DiffSledCommon<'a> {
     /// id of the sled
     pub sled_id: Uuid,
@@ -465,14 +566,33 @@ impl<'a> OmicronZonesDiff<'a> {
         })
     }
 
+    /// Return a struct that can be used to display the diff in a
+    /// unified `diff(1)`-like format.
+    pub fn display(&self) -> OmicronZonesDiffDisplay<'_, 'a> {
+        OmicronZonesDiffDisplay::new(self)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct OmicronZonesDiffDisplay<'diff, 'a> {
+    diff: &'diff OmicronZonesDiff<'a>,
+    // TODO: add colorization with a stylesheet
+}
+
+impl<'diff, 'a> OmicronZonesDiffDisplay<'diff, 'a> {
+    #[inline]
+    fn new(diff: &'diff OmicronZonesDiff<'a>) -> Self {
+        Self { diff }
+    }
+
     fn print_whole_sled(
         &self,
-        f: &mut std::fmt::Formatter<'_>,
+        f: &mut fmt::Formatter<'_>,
         prefix: char,
         label: &str,
         bbsledzones: &OmicronZonesConfig,
         sled_id: Uuid,
-    ) -> std::fmt::Result {
+    ) -> fmt::Result {
         writeln!(f, "{} sled {} ({})", prefix, sled_id, label)?;
         writeln!(
             f,
@@ -495,18 +615,18 @@ impl<'a> OmicronZonesDiff<'a> {
     }
 }
 
-/// Implements diff(1)-like output for diff'ing two blueprints
-impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "diff {} {}", self.before_label, self.after_label)?;
-        writeln!(f, "--- {}", self.before_label)?;
-        writeln!(f, "+++ {}", self.after_label)?;
+impl<'diff, 'a> fmt::Display for OmicronZonesDiffDisplay<'diff, 'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let diff = self.diff;
+        writeln!(f, "diff {} {}", diff.before_label, diff.after_label)?;
+        writeln!(f, "--- {}", diff.before_label)?;
+        writeln!(f, "+++ {}", diff.after_label)?;
 
-        for (sled_id, sled_zones) in self.sleds_removed() {
+        for (sled_id, sled_zones) in diff.sleds_removed() {
             self.print_whole_sled(f, '-', "removed", sled_zones, sled_id)?;
         }
 
-        for (sled_id, sled_changes) in self.sleds_in_common() {
+        for (sled_id, sled_changes) in diff.sleds_in_common() {
             // Print a line about the sled itself and zone config generation,
             // regardless of whether anything has changed.
             writeln!(f, "  sled {}", sled_id)?;
@@ -621,10 +741,24 @@ impl<'a> std::fmt::Display for OmicronZonesDiff<'a> {
             }
         }
 
-        for (sled_id, sled_zones) in self.sleds_added() {
+        for (sled_id, sled_zones) in diff.sleds_added() {
             self.print_whole_sled(f, '+', "added", sled_zones, sled_id)?;
         }
 
         Ok(())
     }
+}
+
+/// Encapsulates Reconfigurator state
+///
+/// This serialized from is intended for saving state from hand-constructed or
+/// real, deployed systems and loading it back into a simulator or test suite
+///
+/// **This format is not stable.  It may change at any time without
+/// backwards-compatibility guarantees.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnstableReconfiguratorState {
+    pub policy: Policy,
+    pub collections: Vec<Collection>,
+    pub blueprints: Vec<Blueprint>,
 }

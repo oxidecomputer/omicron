@@ -4,6 +4,9 @@
 
 //! Insights into capacity and utilization
 
+use nexus_db_model::IpPoolUtilization;
+use nexus_db_model::Ipv4Utilization;
+use nexus_db_model::Ipv6Utilization;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -29,5 +32,56 @@ impl super::Nexus {
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::SiloUtilization> {
         self.db_datastore.silo_utilization_list(opctx, pagparams).await
+    }
+
+    pub async fn ip_pool_utilization_view(
+        &self,
+        opctx: &OpContext,
+        pool_lookup: &lookup::IpPool<'_>,
+    ) -> Result<IpPoolUtilization, Error> {
+        let (.., authz_pool) =
+            pool_lookup.lookup_for(authz::Action::Read).await?;
+
+        let allocated = self
+            .db_datastore
+            .ip_pool_allocated_count(opctx, &authz_pool)
+            .await?;
+        let capacity = self
+            .db_datastore
+            .ip_pool_total_capacity(opctx, &authz_pool)
+            .await?;
+
+        // we have one query for v4 and v6 allocated and one for both v4 and
+        // v6 capacity so we can do two queries instead 4, but in the response
+        // we want them paired by IP version
+        Ok(IpPoolUtilization {
+            ipv4: Ipv4Utilization {
+                // This one less trivial to justify than the u128 conversion
+                // below because an i64 could obviously be too big for u32.
+                // In addition to the fact that it is unlikely for anyone to
+                // allocate 4 billion IPs, we rely on the fact that there can
+                // only be 2^32 IPv4 addresses, period.
+                allocated: u32::try_from(allocated.ipv4).map_err(|_e| {
+                    Error::internal_error(&format!(
+                        "Failed to convert i64 {} IPv4 address count to u32",
+                        allocated.ipv4
+                    ))
+                })?,
+                capacity: capacity.ipv4,
+            },
+            ipv6: Ipv6Utilization {
+                // SQL represents counts as signed integers for historical
+                // or compatibility reasons even though they can't really be
+                // negative, and Diesel follows that. We assume here that it
+                // will be a positive i64.
+                allocated: u128::try_from(allocated.ipv6).map_err(|_e| {
+                    Error::internal_error(&format!(
+                        "Failed to convert i64 {} IPv6 address count to u128",
+                        allocated.ipv6
+                    ))
+                })?,
+                capacity: capacity.ipv6,
+            },
+        })
     }
 }

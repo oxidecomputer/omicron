@@ -12,8 +12,8 @@ case "$HOSTNAME" in
     oxz_crucible*)
 	PATH+=:/opt/oxide/crucible/bin
 	;;
-    oxz_clockhouse*)
-	PATH+=:/opt/oxide/clickhouse
+    oxz_clickhouse*)
+	PATH+=:/opt/oxide/clickhouse:/opt/oxide/clickhouse_keeper
 	;;
     oxz_external_dns*|oxz_internal_dns*)
 	PATH+=:/opt/oxide/dns-server/bin

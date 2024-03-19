@@ -10,6 +10,7 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-bb8-diesel.workspace = true
+camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 crossterm.workspace = true
@@ -25,14 +26,17 @@ gateway-test-utils.workspace = true
 humantime.workspace = true
 internal-dns.workspace = true
 nexus-client.workspace = true
+nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-reconfigurator-preparation.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 oximeter-client.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 ratatui.workspace = true
+reedline.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled-agent-client.workspace = true
@@ -46,16 +50,16 @@ unicode-width.workspace = true
 uuid.workspace = true
 ipnetwork.workspace = true
 omicron-workspace-hack.workspace = true
-nexus-test-utils.workspace = true
 multimap.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+nexus-test-utils.workspace = true
 nexus-test-utils-macros.workspace = true
 omicron-nexus.workspace = true
 omicron-test-utils.workspace = true
-regex.workspace = true
 subprocess.workspace = true
+camino-tempfile.workspace = true
 
 # Disable doc builds by default for our binaries to work around issue
 # rust-lang/cargo#8373.  These docs would not be very useful anyway.

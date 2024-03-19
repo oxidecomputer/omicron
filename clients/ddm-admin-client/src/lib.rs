@@ -9,26 +9,19 @@
 #![allow(clippy::match_single_binding)]
 #![allow(clippy::clone_on_copy)]
 
-#[allow(dead_code)]
-mod inner {
-    include!(concat!(env!("OUT_DIR"), "/ddm-admin-client.rs"));
+pub use ddm_admin_client::types;
+pub use ddm_admin_client::Error;
 
-    impl Copy for types::Ipv6Prefix {}
-}
-
-pub use inner::types;
-pub use inner::Error;
-
+use ddm_admin_client::Client as InnerClient;
+use ddm_admin_client::{Ipv6Prefix, TunnelOrigin};
 use either::Either;
-use inner::types::{Ipv6Prefix, TunnelOrigin};
-use inner::Client as InnerClient;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
-use sled_hardware::underlay::BootstrapInterface;
-use sled_hardware::underlay::BOOTSTRAP_MASK;
-use sled_hardware::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware_types::underlay::BOOTSTRAP_MASK;
+use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use slog::info;
 use slog::Logger;
 use std::net::Ipv6Addr;

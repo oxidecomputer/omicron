@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use ddm_admin_client::Client as DdmAdminClient;
 use futures::stream::FuturesUnordered;
-use sled_hardware::underlay::BootstrapInterface;
-use sled_hardware::Baseboard;
+use omicron_ddm_admin_client::Client as DdmAdminClient;
+use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware_types::Baseboard;
 use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;

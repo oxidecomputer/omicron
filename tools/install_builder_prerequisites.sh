@@ -128,6 +128,7 @@ function install_packages {
     fi
   elif [[ "${HOST_OS}" == "SunOS" ]]; then
     CLANGVER=15
+    RTVER=13
     PGVER=13
     packages=(
       "pkg:/package/pkg"
@@ -135,6 +136,8 @@ function install_packages {
       "library/postgresql-$PGVER"
       "pkg-config"
       "library/libxmlsec1"
+      "system/library/gcc-runtime@$RTVER"
+      "system/library/g++-runtime@$RTVER"
       # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
       "pkg:/ooce/developer/clang-$CLANGVER"
       "system/library/gcc-runtime"
@@ -159,7 +162,8 @@ function install_packages {
     }
 
     pkg mediator -a
-    pkg list -v "${packages[@]}"
+    pkg publisher
+    pkg list -afv "${packages[@]}"
   elif [[ "${HOST_OS}" == "Darwin" ]]; then
     packages=(
       'coreutils'
@@ -212,6 +216,9 @@ retry ./tools/ci_download_maghemite_mgd
 # Download transceiver-control. This is used as the source for the
 # xcvradm binary which is bundled with the switch zone.
 retry ./tools/ci_download_transceiver_control
+
+# Download thundermuffin. This is required to launch network probes.
+retry ./tools/ci_download_thundermuffin
 
 # Validate the PATH:
 expected_in_path=(

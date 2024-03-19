@@ -228,13 +228,14 @@ async fn upsert_synthetic_zpools_if_needed(
     config: &Config,
 ) {
     if let Some(pools) = &config.zpools {
-        for pool in pools {
+        for (i, pool) in pools.iter().enumerate() {
             info!(
                 log,
                 "Upserting synthetic zpool to Storage Manager: {}",
                 pool.to_string()
             );
-            let disk = SyntheticDisk::new(pool.clone()).into();
+            let disk =
+                SyntheticDisk::new(pool.clone(), i.try_into().unwrap()).into();
             storage_manager.upsert_disk(disk).await;
         }
     }

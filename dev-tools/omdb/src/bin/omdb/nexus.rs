@@ -4,18 +4,29 @@
 
 //! omdb commands that query or update specific Nexus instances
 
+use crate::check_allow_destructive::DestructiveOperationToken;
+use crate::db::DbUrlOptions;
 use crate::Omdb;
+use anyhow::bail;
 use anyhow::Context;
 use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
 use clap::Subcommand;
+use clap::ValueEnum;
 use futures::TryStreamExt;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
 use nexus_client::types::LastResult;
+use nexus_client::types::SledSelector;
+use nexus_client::types::UninitializedSledId;
+use nexus_db_queries::db::lookup::LookupPath;
+use nexus_types::inventory::BaseboardId;
+use reedline::DefaultPrompt;
+use reedline::DefaultPromptSegment;
+use reedline::Reedline;
 use serde::Deserialize;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
@@ -34,12 +45,15 @@ pub struct NexusArgs {
 }
 
 /// Subcommands for the "omdb nexus" subcommand
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 enum NexusCommands {
     /// print information about background tasks
     BackgroundTasks(BackgroundTasksArgs),
-    /// print information about blueprints
+    /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// interact with sleds
+    Sleds(SledsArgs),
 }
 
 #[derive(Debug, Args)]
@@ -74,7 +88,7 @@ enum BlueprintsCommands {
     Diff(BlueprintIdsArgs),
     /// Delete a blueprint
     Delete(BlueprintIdArgs),
-    /// Set the current target blueprint
+    /// Interact with the current target blueprint
     Target(BlueprintsTargetArgs),
     /// Generate an initial blueprint from a specific inventory collection
     GenerateFromCollection(CollectionIdArgs),
@@ -113,7 +127,69 @@ enum BlueprintTargetCommands {
     /// Show the current target blueprint
     Show,
     /// Change the current target blueprint
-    Set(BlueprintIdArgs),
+    Set(BlueprintTargetSetArgs),
+    /// Enable the current target blueprint
+    ///
+    /// Fails if the specified blueprint id is not the current target
+    Enable(BlueprintIdArgs),
+    /// Disable the current target blueprint
+    ///
+    /// Fails if the specified blueprint id is not the current target
+    Disable(BlueprintIdArgs),
+}
+
+#[derive(Debug, Args)]
+struct BlueprintTargetSetArgs {
+    /// id of blueprint to make target
+    blueprint_id: Uuid,
+    /// whether this blueprint should be enabled
+    enabled: BlueprintTargetSetEnabled,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum BlueprintTargetSetEnabled {
+    /// set the new current target as enabled
+    Enabled,
+    /// set the new current target as disabled
+    Disabled,
+    /// use the enabled setting from the parent blueprint
+    Inherit,
+}
+
+#[derive(Debug, Args)]
+struct SledsArgs {
+    #[command(subcommand)]
+    command: SledsCommands,
+}
+
+#[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
+enum SledsCommands {
+    /// List all uninitialized sleds
+    ListUninitialized,
+    /// Add an uninitialized sled
+    Add(SledAddArgs),
+    /// Expunge a sled (DANGEROUS)
+    Expunge(SledExpungeArgs),
+}
+
+#[derive(Debug, Args)]
+struct SledAddArgs {
+    /// sled's serial number
+    serial: String,
+    /// sled's part number
+    part: String,
+}
+
+#[derive(Debug, Args)]
+struct SledExpungeArgs {
+    // expunge is _extremely_ dangerous, so we also require a database
+    // connection to perform some safety checks
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
+
+    /// sled ID
+    sled_id: Uuid,
 }
 
 impl NexusArgs {
@@ -167,7 +243,10 @@ impl NexusArgs {
             }) => cmd_nexus_blueprints_diff(&client, args).await,
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Delete(args),
-            }) => cmd_nexus_blueprints_delete(&client, args).await,
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_delete(&client, args, token).await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command:
                     BlueprintsCommands::Target(BlueprintsTargetArgs {
@@ -179,15 +258,64 @@ impl NexusArgs {
                     BlueprintsCommands::Target(BlueprintsTargetArgs {
                         command: BlueprintTargetCommands::Set(args),
                     }),
-            }) => cmd_nexus_blueprints_target_set(&client, args).await,
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set(&client, args, token).await
+            }
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command:
+                    BlueprintsCommands::Target(BlueprintsTargetArgs {
+                        command: BlueprintTargetCommands::Enable(args),
+                    }),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set_enabled(
+                    &client, args, true, token,
+                )
+                .await
+            }
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command:
+                    BlueprintsCommands::Target(BlueprintsTargetArgs {
+                        command: BlueprintTargetCommands::Disable(args),
+                    }),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set_enabled(
+                    &client, args, false, token,
+                )
+                .await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
-            }) => cmd_nexus_blueprints_regenerate(&client).await,
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_regenerate(&client, token).await
+            }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::GenerateFromCollection(args),
             }) => {
-                cmd_nexus_blueprints_generate_from_collection(&client, args)
-                    .await
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_generate_from_collection(
+                    &client, args, token,
+                )
+                .await
+            }
+
+            NexusCommands::Sleds(SledsArgs {
+                command: SledsCommands::ListUninitialized,
+            }) => cmd_nexus_sleds_list_uninitialized(&client).await,
+            NexusCommands::Sleds(SledsArgs {
+                command: SledsCommands::Add(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_sled_add(&client, args, token).await
+            }
+            NexusCommands::Sleds(SledsArgs {
+                command: SledsCommands::Expunge(args),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_sled_expunge(&client, args, omdb, log, token).await
             }
         }
     }
@@ -762,13 +890,15 @@ async fn cmd_nexus_blueprints_list(
     struct BlueprintRow {
         #[tabled(rename = "T")]
         is_target: &'static str,
+        #[tabled(rename = "ENA")]
+        enabled: &'static str,
         id: String,
         parent: String,
         time_created: String,
     }
 
-    let target_id = match client.blueprint_target_view().await {
-        Ok(result) => Some(result.into_inner().target_id),
+    let target = match client.blueprint_target_view().await {
+        Ok(result) => Some(result.into_inner()),
         Err(error) => {
             // This request will fail if there's no target configured, so it's
             // not necessarily a big deal.
@@ -787,13 +917,17 @@ async fn cmd_nexus_blueprints_list(
         .context("listing blueprints")?
         .into_iter()
         .map(|blueprint| {
-            let is_target = match target_id {
-                Some(target_id) if target_id == blueprint.id => "*",
-                _ => "",
+            let (is_target, enabled) = match &target {
+                Some(target) if target.target_id == blueprint.id => {
+                    let enabled = if target.enabled { "yes" } else { "no" };
+                    ("*", enabled)
+                }
+                _ => ("", ""),
             };
 
             BlueprintRow {
                 is_target,
+                enabled,
                 id: blueprint.id.to_string(),
                 parent: blueprint
                     .parent_blueprint_id
@@ -824,39 +958,7 @@ async fn cmd_nexus_blueprints_show(
         .blueprint_view(&args.blueprint_id)
         .await
         .with_context(|| format!("fetching blueprint {}", args.blueprint_id))?;
-    println!("blueprint  {}", blueprint.id);
-    println!(
-        "parent:    {}",
-        blueprint
-            .parent_blueprint_id
-            .map(|u| u.to_string())
-            .unwrap_or_else(|| String::from("<none>"))
-    );
-    println!(
-        "created by {}{}",
-        blueprint.creator,
-        if blueprint.creator.parse::<Uuid>().is_ok() {
-            " (likely a Nexus instance)"
-        } else {
-            ""
-        }
-    );
-    println!(
-        "created at {}",
-        humantime::format_rfc3339_millis(blueprint.time_created.into(),)
-    );
-    println!("comment: {}", blueprint.comment);
-    println!("zones:\n");
-    for (sled_id, sled_zones) in &blueprint.omicron_zones {
-        println!(
-            "  sled {}: Omicron zones at generation {}",
-            sled_id, sled_zones.generation
-        );
-        for z in &sled_zones.zones {
-            println!("    {} {}", z.id, z.zone_type.label());
-        }
-    }
-
+    println!("{:?}", blueprint);
     Ok(())
 }
 
@@ -870,13 +972,14 @@ async fn cmd_nexus_blueprints_diff(
     let b2 = client.blueprint_view(&args.blueprint2_id).await.with_context(
         || format!("fetching blueprint {}", args.blueprint2_id),
     )?;
-    println!("{}", b1.diff(&b2));
+    println!("{}", b1.diff_sleds(&b2).display());
     Ok(())
 }
 
 async fn cmd_nexus_blueprints_delete(
     client: &nexus_client::Client,
     args: &BlueprintIdArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let _ = client
         .blueprint_delete(&args.blueprint_id)
@@ -901,14 +1004,27 @@ async fn cmd_nexus_blueprints_target_show(
 
 async fn cmd_nexus_blueprints_target_set(
     client: &nexus_client::Client,
-    args: &BlueprintIdArgs,
+    args: &BlueprintTargetSetArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    // Try to preserve the value of "enabled", if possible.
-    let enabled = client
-        .blueprint_target_view()
-        .await
-        .map(|current| current.into_inner().enabled)
-        .unwrap_or(true);
+    let enabled = match args.enabled {
+        BlueprintTargetSetEnabled::Enabled => true,
+        BlueprintTargetSetEnabled::Disabled => false,
+        // There's a small TOCTOU race with "inherit": What if the user wants to
+        // inherit the parent blueprint enabled bit but the current target
+        // blueprint enabled bit is flipped or the current target blueprint is
+        // changed? We expect neither of these to be problematic in practice:
+        // the only way for the `enable` bit to be set to anything at all is via
+        // `omdb`, so the user would have to be racing with another `omdb`
+        // operator. (In the case of the current target blueprint being changed
+        // entirely, that will result in a failure to set the current target
+        // below, because its parent will no longer be the current target.)
+        BlueprintTargetSetEnabled::Inherit => client
+            .blueprint_target_view()
+            .await
+            .map(|current| current.into_inner().enabled)
+            .context("failed to fetch current target blueprint")?,
+    };
     client
         .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
             target_id: args.blueprint_id,
@@ -922,9 +1038,32 @@ async fn cmd_nexus_blueprints_target_set(
     Ok(())
 }
 
+async fn cmd_nexus_blueprints_target_set_enabled(
+    client: &nexus_client::Client,
+    args: &BlueprintIdArgs,
+    enabled: bool,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let description = if enabled { "enabled" } else { "disabled" };
+    client
+        .blueprint_target_set_enabled(
+            &nexus_client::types::BlueprintTargetSet {
+                target_id: args.blueprint_id,
+                enabled,
+            },
+        )
+        .await
+        .with_context(|| {
+            format!("setting blueprint {} to {description}", args.blueprint_id)
+        })?;
+    eprintln!("set target blueprint {} to {description}", args.blueprint_id);
+    Ok(())
+}
+
 async fn cmd_nexus_blueprints_generate_from_collection(
     client: &nexus_client::Client,
     args: &CollectionIdArgs,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let blueprint = client
         .blueprint_generate_from_collection(
@@ -934,15 +1073,190 @@ async fn cmd_nexus_blueprints_generate_from_collection(
         )
         .await
         .context("creating blueprint from collection id")?;
-    eprintln!("created blueprint {} from collection id", blueprint.id);
+    eprintln!(
+        "created blueprint {} from collection id {}",
+        blueprint.id, args.collection_id
+    );
     Ok(())
 }
 
 async fn cmd_nexus_blueprints_regenerate(
     client: &nexus_client::Client,
+    _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
     let blueprint =
         client.blueprint_regenerate().await.context("generating blueprint")?;
     eprintln!("generated new blueprint {}", blueprint.id);
+    Ok(())
+}
+
+/// Runs `omdb nexus sleds list-uninitialized`
+async fn cmd_nexus_sleds_list_uninitialized(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let response = client
+        .sled_list_uninitialized()
+        .await
+        .context("listing uninitialized sleds")?;
+    let sleds = response.into_inner();
+    if sleds.next_page.is_some() {
+        eprintln!(
+            "warning: response includes next_page token; \
+             pagination not implemented"
+        );
+    }
+    let mut sleds = sleds.items;
+    sleds.sort_by_key(|sled| sled.cubby);
+
+    #[derive(Tabled)]
+    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+    struct UninitializedSledRow {
+        rack_id: Uuid,
+        cubby: u16,
+        serial: String,
+        part: String,
+        revision: i64,
+    }
+    let rows = sleds.into_iter().map(|sled| UninitializedSledRow {
+        rack_id: sled.rack_id,
+        cubby: sled.cubby,
+        serial: sled.baseboard.serial,
+        part: sled.baseboard.part,
+        revision: sled.baseboard.revision,
+    });
+    let table = tabled::Table::new(rows)
+        .with(tabled::settings::Style::empty())
+        .with(tabled::settings::Padding::new(0, 1, 0, 0))
+        .to_string();
+    println!("{}", table);
+    Ok(())
+}
+
+/// Runs `omdb nexus sleds add`
+async fn cmd_nexus_sled_add(
+    client: &nexus_client::Client,
+    args: &SledAddArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    client
+        .sled_add(&UninitializedSledId {
+            part: args.part.clone(),
+            serial: args.serial.clone(),
+        })
+        .await
+        .context("adding sled")?;
+    eprintln!("added sled {} ({})", args.serial, args.part);
+    Ok(())
+}
+
+/// Runs `omdb nexus sleds expunge`
+async fn cmd_nexus_sled_expunge(
+    client: &nexus_client::Client,
+    args: &SledExpungeArgs,
+    omdb: &Omdb,
+    log: &slog::Logger,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    // This is an extremely dangerous and irreversible operation. We put a
+    // couple of safeguards in place to ensure this cannot be called without
+    // due consideration:
+    //
+    // 1. We'll require manual input on stdin to confirm the sled to be removed
+    // 2. We'll warn sternly if the sled-to-be-expunged is still present in the
+    //    most recent inventory collection
+    use nexus_db_queries::context::OpContext;
+
+    let datastore = args.db_url_opts.connect(omdb, log).await?;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let opctx = &opctx;
+
+    // First, we need to look up the sled so we know its serial number.
+    let (_authz_sled, sled) = LookupPath::new(opctx, &datastore)
+        .sled_id(args.sled_id)
+        .fetch()
+        .await
+        .with_context(|| format!("failed to find sled {}", args.sled_id))?;
+
+    // Helper to get confirmation messages from the user.
+    let mut line_editor = Reedline::create();
+    let mut read_with_prompt = move |message: &str| {
+        let prompt = DefaultPrompt::new(
+            DefaultPromptSegment::Basic(message.to_string()),
+            DefaultPromptSegment::Empty,
+        );
+        if let Ok(reedline::Signal::Success(input)) =
+            line_editor.read_line(&prompt)
+        {
+            Ok(input)
+        } else {
+            bail!("expungement aborted")
+        }
+    };
+
+    // Now check whether its sled-agent or SP were found in the most recent
+    // inventory collection.
+    match datastore
+        .inventory_get_latest_collection(opctx)
+        .await
+        .context("loading latest collection")?
+    {
+        Some(collection) => {
+            let sled_baseboard = BaseboardId {
+                part_number: sled.part_number().to_string(),
+                serial_number: sled.serial_number().to_string(),
+            };
+            // Check the collection for either the sled-id or the baseboard. In
+            // general a sled-agent's self report should result in both the
+            // sled-id and the baseboard being present in the collection, but
+            // there are some test environments (e.g., `omicron-dev run-all`)
+            // where that isn't guaranteed.
+            let sled_present_in_collection =
+                collection.sled_agents.contains_key(&args.sled_id)
+                    || collection.baseboards.contains(&sled_baseboard);
+            if sled_present_in_collection {
+                eprintln!(
+                    "WARNING: sled {} is PRESENT in the most recent inventory \
+                     collection (spotted at {}). It is dangerous to expunge a \
+                     sled that is still running. Are you sure you want to \
+                     proceed anyway?",
+                    args.sled_id, collection.time_done,
+                );
+                let confirm = read_with_prompt("y/N")?;
+                if confirm != "y" {
+                    eprintln!("expungement not confirmed: aborting");
+                    return Ok(());
+                }
+            }
+        }
+        None => {
+            eprintln!(
+                "WARNING: cannot verify that the sled is physically gone \
+                 because there are no inventory collections present. Please \
+                 make sure that the sled has been physically removed."
+            );
+        }
+    }
+
+    eprintln!(
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark sled \
+        {} ({}) expunged. To proceed, type the sled's serial number.",
+        args.sled_id,
+        sled.serial_number(),
+    );
+    let confirm = read_with_prompt("sled serial number")?;
+    if confirm != sled.serial_number() {
+        eprintln!("sled serial number not confirmed: aborting");
+        return Ok(());
+    }
+
+    let old_policy = client
+        .sled_expunge(&SledSelector { sled: args.sled_id })
+        .await
+        .context("expunging sled")?
+        .into_inner();
+    eprintln!(
+        "expunged sled {} (previous policy: {old_policy:?})",
+        args.sled_id
+    );
     Ok(())
 }

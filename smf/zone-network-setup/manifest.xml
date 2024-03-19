@@ -18,7 +18,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='/opt/oxide/zone-network-setup/bin/zone-networking -d %{config/datalink} -s %{config/static_addr} -g %{config/gateway}'
+    exec='/opt/oxide/zone-network-cli/bin/zone-networking set-up -d %{config/datalink} -s %{config/static_addr} -g %{config/gateway}'
     timeout_seconds='0' />
   
   <property_group name='startd' type='framework'>

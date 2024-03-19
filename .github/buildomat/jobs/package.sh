@@ -84,7 +84,7 @@ stamp_packages() {
 
 # Keep the single-sled Nexus zone around for the deploy job. (The global zone
 # build below overwrites the file.)
-mv out/omicron-nexus.tar.gz out/omicron-nexus-single-sled.tar.gz
+mv out/nexus.tar.gz out/nexus-single-sled.tar.gz
 
 # Build necessary for the global zone
 ptime -m cargo run --locked --release --bin omicron-package -- \
@@ -111,12 +111,12 @@ zones=(
   out/clickhouse.tar.gz
   out/clickhouse_keeper.tar.gz
   out/cockroachdb.tar.gz
-  out/crucible-pantry.tar.gz
-  out/crucible.tar.gz
+  out/crucible-pantry-zone.tar.gz
+  out/crucible-zone.tar.gz
   out/external-dns.tar.gz
   out/internal-dns.tar.gz
-  out/omicron-nexus.tar.gz
-  out/omicron-nexus-single-sled.tar.gz
+  out/nexus.tar.gz
+  out/nexus-single-sled.tar.gz
   out/oximeter.tar.gz
   out/propolis-server.tar.gz
   out/switch-*.tar.gz
@@ -124,6 +124,7 @@ zones=(
   out/omicron-gateway-softnpu.tar.gz
   out/omicron-gateway-asic.tar.gz
   out/overlay.tar.gz
+  out/probe.tar.gz
 )
 cp "${zones[@]}" /work/zones/
 

@@ -7,13 +7,15 @@
 use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_omicron_zone, inv_omicron_zone_nic, inv_root_of_trust,
-    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
-    inv_sled_omicron_zones, sw_caboose, sw_root_of_trust_page,
+    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
+    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
+    inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
+    sw_root_of_trust_page,
 };
+use crate::PhysicalDiskKind;
 use crate::{
-    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, SqlU16, SqlU32,
-    SqlU8,
+    impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, ServiceKind,
+    SqlU16, SqlU32, SqlU8,
 };
 use anyhow::anyhow;
 use chrono::DateTime;
@@ -28,6 +30,7 @@ use ipnetwork::IpNetwork;
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
+use omicron_common::api::internal::shared::NetworkInterface;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -652,6 +655,88 @@ impl InvSledAgent {
     }
 }
 
+/// See [`nexus_types::inventory::PhysicalDisk`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_physical_disk)]
+pub struct InvPhysicalDisk {
+    pub inv_collection_id: Uuid,
+    pub sled_id: Uuid,
+    pub slot: i64,
+    pub vendor: String,
+    pub model: String,
+    pub serial: String,
+    pub variant: PhysicalDiskKind,
+}
+
+impl InvPhysicalDisk {
+    pub fn new(
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        disk: nexus_types::inventory::PhysicalDisk,
+    ) -> Self {
+        Self {
+            inv_collection_id,
+            sled_id,
+            slot: disk.slot,
+            vendor: disk.identity.vendor,
+            model: disk.identity.model,
+            serial: disk.identity.serial,
+            variant: disk.variant.into(),
+        }
+    }
+}
+
+impl From<InvPhysicalDisk> for nexus_types::inventory::PhysicalDisk {
+    fn from(disk: InvPhysicalDisk) -> Self {
+        Self {
+            identity: omicron_common::disk::DiskIdentity {
+                vendor: disk.vendor,
+                serial: disk.serial,
+                model: disk.model,
+            },
+            variant: disk.variant.into(),
+            slot: disk.slot,
+        }
+    }
+}
+
+/// See [`nexus_types::inventory::Zpool`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_zpool)]
+pub struct InvZpool {
+    pub inv_collection_id: Uuid,
+    pub time_collected: DateTime<Utc>,
+    pub id: Uuid,
+    pub sled_id: Uuid,
+    pub total_size: ByteCount,
+}
+
+impl InvZpool {
+    pub fn new(
+        inv_collection_id: Uuid,
+        sled_id: Uuid,
+        zpool: &nexus_types::inventory::Zpool,
+    ) -> Self {
+        Self {
+            inv_collection_id,
+            time_collected: zpool.time_collected,
+            id: zpool.id,
+            sled_id,
+            total_size: zpool.total_size.into(),
+        }
+    }
+}
+
+impl From<InvZpool> for nexus_types::inventory::Zpool {
+    fn from(pool: InvZpool) -> Self {
+        Self {
+            time_collected: pool.time_collected,
+            id: pool.id,
+            total_size: *pool.total_size,
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::OmicronZonesFound`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_omicron_zones)]
@@ -714,6 +799,23 @@ impl_enum_type!(
     Nexus => b"nexus"
     Oximeter => b"oximeter"
 );
+
+impl From<ZoneType> for ServiceKind {
+    fn from(zone_type: ZoneType) -> Self {
+        match zone_type {
+            ZoneType::BoundaryNtp | ZoneType::InternalNtp => Self::Ntp,
+            ZoneType::Clickhouse => Self::Clickhouse,
+            ZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
+            ZoneType::CockroachDb => Self::Cockroach,
+            ZoneType::Crucible => Self::Crucible,
+            ZoneType::CruciblePantry => Self::CruciblePantry,
+            ZoneType::ExternalDns => Self::ExternalDns,
+            ZoneType::InternalDns => Self::InternalDns,
+            ZoneType::Nexus => Self::Nexus,
+            ZoneType::Oximeter => Self::Oximeter,
+        }
+    }
+}
 
 /// See [`nexus_types::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
@@ -855,7 +957,7 @@ impl InvOmicronZoneNic {
     pub fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+    ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
     }

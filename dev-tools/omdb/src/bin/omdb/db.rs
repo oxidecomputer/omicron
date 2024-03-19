@@ -22,6 +22,7 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
+use camino::Utf8PathBuf;
 use chrono::SecondsFormat;
 use clap::Args;
 use clap::Subcommand;
@@ -34,8 +35,11 @@ use diesel::JoinOnDsl;
 use diesel::NullableExpressionMethods;
 use diesel::OptionalExtension;
 use diesel::TextExpressionMethods;
+use dropshot::PaginationOrder;
+use futures::StreamExt;
 use gateway_client::types::SpType;
 use ipnetwork::IpNetwork;
+use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
 use nexus_db_model::Disk;
 use nexus_db_model::DnsGroup;
@@ -50,6 +54,7 @@ use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::Probe;
 use nexus_db_model::Project;
 use nexus_db_model::Region;
 use nexus_db_model::RegionSnapshot;
@@ -67,22 +72,28 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
+use nexus_db_queries::db::datastore::DataStoreInventoryTest;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::ServiceKind;
+use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
-use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
+use nexus_reconfigurator_preparation::policy_from_db;
+use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::OmicronZoneType;
+use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use nexus_types::internal_api::params::Srv;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPageWhich;
+use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MacAddr;
-use omicron_common::postgres_config::PostgresConfigWithUrl;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -137,15 +148,79 @@ impl Display for MaybeSledId {
 
 #[derive(Debug, Args)]
 pub struct DbArgs {
-    /// URL of the database SQL interface
-    #[clap(long, env("OMDB_DB_URL"))]
-    db_url: Option<PostgresConfigWithUrl>,
+    #[clap(flatten)]
+    db_url_opts: DbUrlOptions,
 
     #[clap(flatten)]
     fetch_opts: DbFetchOptions,
 
     #[command(subcommand)]
     command: DbCommands,
+}
+
+#[derive(Debug, Args)]
+pub struct DbUrlOptions {
+    /// URL of the database SQL interface
+    #[clap(long, env("OMDB_DB_URL"))]
+    db_url: Option<PostgresConfigWithUrl>,
+}
+
+impl DbUrlOptions {
+    async fn resolve_pg_url(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> anyhow::Result<PostgresConfigWithUrl> {
+        match &self.db_url {
+            Some(cli_or_env_url) => Ok(cli_or_env_url.clone()),
+            None => {
+                eprintln!(
+                    "note: database URL not specified.  Will search DNS."
+                );
+                eprintln!("note: (override with --db-url or OMDB_DB_URL)");
+                let addrs = omdb
+                    .dns_lookup_all(
+                        log.clone(),
+                        internal_dns::ServiceName::Cockroach,
+                    )
+                    .await?;
+
+                format!(
+                    "postgresql://root@{}/omicron?sslmode=disable",
+                    addrs
+                        .into_iter()
+                        .map(|a| a.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+                .parse()
+                .context("failed to parse constructed postgres URL")
+            }
+        }
+    }
+
+    pub async fn connect(
+        &self,
+        omdb: &Omdb,
+        log: &slog::Logger,
+    ) -> anyhow::Result<Arc<DataStore>> {
+        let db_url = self.resolve_pg_url(omdb, log).await?;
+        eprintln!("note: using database URL {}", &db_url);
+
+        let db_config = db::Config { url: db_url.clone() };
+        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
+
+        // Being a dev tool, we want to try this operation even if the schema
+        // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
+        // here.  We will then check the schema version explicitly and warn the
+        // user if it doesn't match.
+        let datastore = Arc::new(
+            DataStore::new_unchecked(log.clone(), pool)
+                .map_err(|e| anyhow!(e).context("creating datastore"))?,
+        );
+        check_schema_version(&datastore).await;
+        Ok(datastore)
+    }
 }
 
 #[derive(Debug, Args)]
@@ -175,6 +250,8 @@ enum DbCommands {
     Dns(DnsArgs),
     /// Print information about collected hardware/software inventory
     Inventory(InventoryArgs),
+    /// Save the current Reconfigurator inputs to a file
+    ReconfiguratorSave(ReconfiguratorSaveArgs),
     /// Print information about control plane services
     Services(ServicesArgs),
     /// Print information about sleds
@@ -311,6 +388,12 @@ struct CollectionsShowArgs {
 }
 
 #[derive(Debug, Args)]
+struct ReconfiguratorSaveArgs {
+    /// where to save the output
+    output_file: Utf8PathBuf,
+}
+
+#[derive(Debug, Args)]
 struct ServicesArgs {
     #[command(subcommand)]
     command: ServicesCommands,
@@ -386,47 +469,7 @@ impl DbArgs {
         omdb: &Omdb,
         log: &slog::Logger,
     ) -> Result<(), anyhow::Error> {
-        let db_url = match &self.db_url {
-            Some(cli_or_env_url) => cli_or_env_url.clone(),
-            None => {
-                eprintln!(
-                    "note: database URL not specified.  Will search DNS."
-                );
-                eprintln!("note: (override with --db-url or OMDB_DB_URL)");
-                let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Cockroach,
-                    )
-                    .await?;
-
-                format!(
-                    "postgresql://root@{}/omicron?sslmode=disable",
-                    addrs
-                        .into_iter()
-                        .map(|a| a.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )
-                .parse()
-                .context("failed to parse constructed postgres URL")?
-            }
-        };
-        eprintln!("note: using database URL {}", &db_url);
-
-        let db_config = db::Config { url: db_url.clone() };
-        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
-
-        // Being a dev tool, we want to try this operation even if the schema
-        // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
-        // here.  We will then check the schema version explicitly and warn the
-        // user if it doesn't match.
-        let datastore = Arc::new(
-            DataStore::new_unchecked(log.clone(), pool)
-                .map_err(|e| anyhow!(e).context("creating datastore"))?,
-        );
-        check_schema_version(&datastore).await;
-
+        let datastore = self.db_url_opts.connect(omdb, log).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
         match &self.command {
             DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
@@ -461,6 +504,15 @@ impl DbArgs {
                     &datastore,
                     &self.fetch_opts,
                     inventory_args,
+                )
+                .await
+            }
+            DbCommands::ReconfiguratorSave(reconfig_save_args) => {
+                cmd_db_reconfigurator_save(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    reconfig_save_args,
                 )
                 .await
             }
@@ -602,7 +654,7 @@ fn first_page<'a, T>(limit: NonZeroU32) -> DataPageParams<'a, T> {
     }
 }
 
-/// Helper function to looks up an instance with the given ID.
+/// Helper function to look up an instance with the given ID.
 async fn lookup_instance(
     datastore: &DataStore,
     instance_id: Uuid,
@@ -618,6 +670,88 @@ async fn lookup_instance(
         .await
         .optional()
         .with_context(|| format!("loading instance {instance_id}"))
+}
+
+/// Helper function to look up the kind of the service with the given ID.
+///
+/// Requires the caller to first have fetched the current target blueprint, so
+/// we can find services that have been added by Reconfigurator.
+async fn lookup_service_kind(
+    datastore: &DataStore,
+    service_id: Uuid,
+    current_target_blueprint: Option<&Blueprint>,
+) -> anyhow::Result<Option<ServiceKind>> {
+    let conn = datastore.pool_connection_for_tests().await?;
+
+    // We need to check the `service` table (populated during rack setup)...
+    {
+        use db::schema::service::dsl;
+        if let Some(kind) = dsl::service
+            .filter(dsl::id.eq(service_id))
+            .limit(1)
+            .select(dsl::kind)
+            .get_result_async(&*conn)
+            .await
+            .optional()
+            .with_context(|| format!("loading service {service_id}"))?
+        {
+            return Ok(Some(kind));
+        }
+    }
+
+    // ...and if we don't find the service, check the latest blueprint, because
+    // the service might have been added by Reconfigurator after RSS ran.
+    let Some(blueprint) = current_target_blueprint else {
+        return Ok(None);
+    };
+
+    let Some(zone_config) =
+        blueprint.all_omicron_zones().find_map(|(_sled_id, zone_config)| {
+            if zone_config.id == service_id {
+                Some(zone_config)
+            } else {
+                None
+            }
+        })
+    else {
+        return Ok(None);
+    };
+
+    let service_kind = match &zone_config.zone_type {
+        OmicronZoneType::BoundaryNtp { .. }
+        | OmicronZoneType::InternalNtp { .. } => ServiceKind::Ntp,
+        OmicronZoneType::Clickhouse { .. } => ServiceKind::Clickhouse,
+        OmicronZoneType::ClickhouseKeeper { .. } => {
+            ServiceKind::ClickhouseKeeper
+        }
+        OmicronZoneType::CockroachDb { .. } => ServiceKind::Cockroach,
+        OmicronZoneType::Crucible { .. } => ServiceKind::Crucible,
+        OmicronZoneType::CruciblePantry { .. } => ServiceKind::CruciblePantry,
+        OmicronZoneType::ExternalDns { .. } => ServiceKind::ExternalDns,
+        OmicronZoneType::InternalDns { .. } => ServiceKind::InternalDns,
+        OmicronZoneType::Nexus { .. } => ServiceKind::Nexus,
+        OmicronZoneType::Oximeter { .. } => ServiceKind::Oximeter,
+    };
+
+    Ok(Some(service_kind))
+}
+
+/// Helper function to looks up a probe with the given ID.
+async fn lookup_probe(
+    datastore: &DataStore,
+    probe_id: Uuid,
+) -> anyhow::Result<Option<Probe>> {
+    use db::schema::probe::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await?;
+    dsl::probe
+        .filter(dsl::id.eq(probe_id))
+        .limit(1)
+        .select(Probe::as_select())
+        .get_result_async(&*conn)
+        .await
+        .optional()
+        .with_context(|| format!("loading probe {probe_id}"))
 }
 
 /// Helper function to looks up a project with the given ID.
@@ -1860,26 +1994,26 @@ async fn cmd_db_eips(
 
     let mut rows = Vec::new();
 
+    let current_target_blueprint = datastore
+        .blueprint_target_get_current_full(opctx)
+        .await
+        .context("loading current target blueprint")?
+        .map(|(_, blueprint)| blueprint);
+
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let service = match LookupPath::new(opctx, datastore)
-                    .service_id(owner_id)
-                    .fetch()
-                    .await
+                let kind = match lookup_service_kind(
+                    datastore,
+                    owner_id,
+                    current_target_blueprint.as_ref(),
+                )
+                .await?
                 {
-                    Ok(instance) => instance,
-                    Err(e) => {
-                        eprintln!(
-                            "error looking up service with id {owner_id}: {e}"
-                        );
-                        continue;
-                    }
+                    Some(kind) => format!("{kind:?}"),
+                    None => "UNKNOWN (service ID not found)".to_string(),
                 };
-                Owner::Service {
-                    id: owner_id,
-                    kind: format!("{:?}", service.1.kind),
-                }
+                Owner::Service { id: owner_id, kind }
             } else {
                 let instance =
                     match lookup_instance(datastore, owner_id).await? {
@@ -2029,6 +2163,28 @@ async fn cmd_db_network_list_vnics(
                     None => {
                         ("instance?", "parent instance not found".to_string())
                     }
+                }
+            }
+            NetworkInterfaceKind::Probe => {
+                match lookup_probe(datastore, nic.parent_id).await? {
+                    Some(probe) => {
+                        match lookup_project(datastore, probe.project_id)
+                            .await?
+                        {
+                            Some(project) => (
+                                "probe",
+                                format!("{}/{}", project.name(), probe.name()),
+                            ),
+                            None => {
+                                eprintln!(
+                                    "project with id {} not found",
+                                    probe.project_id
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    None => ("probe?", "parent probe not found".to_string()),
                 }
             }
             NetworkInterfaceKind::Service => {
@@ -3103,4 +3259,114 @@ impl LongStringFormatter {
         // wide, so return it as-is
         s.into()
     }
+}
+
+// Reconfigurator
+
+/// Packages up database state that's used as input to the Reconfigurator
+/// planner into a file so that it can be loaded into `reconfigurator-cli`
+async fn cmd_db_reconfigurator_save(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    reconfig_save_args: &ReconfiguratorSaveArgs,
+) -> Result<(), anyhow::Error> {
+    // See Nexus::blueprint_planning_context().
+    eprint!("assembling policy ... ");
+    let sled_rows = datastore
+        .sled_list_all_batched(opctx)
+        .await
+        .context("listing sleds")?;
+    let zpool_rows = datastore
+        .zpool_list_all_external_batched(opctx)
+        .await
+        .context("listing zpools")?;
+    let ip_pool_range_rows = {
+        let (authz_service_ip_pool, _) = datastore
+            .ip_pools_service_lookup(opctx)
+            .await
+            .context("fetching IP services pool")?;
+        datastore
+            .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
+            .await
+            .context("listing services IP pool ranges")?
+    };
+
+    let policy = policy_from_db(
+        &sled_rows,
+        &zpool_rows,
+        &ip_pool_range_rows,
+        NEXUS_REDUNDANCY,
+    )
+    .context("assembling policy")?;
+    eprintln!("done.");
+
+    eprint!("loading inventory collections ... ");
+    let collection_ids = datastore
+        .inventory_collections()
+        .await
+        .context("listing collections")?;
+    let collections = futures::stream::iter(collection_ids)
+        .filter_map(|id| async move {
+            let read = datastore
+                .inventory_collection_read(opctx, id)
+                .await
+                .with_context(|| format!("reading collection {}", id));
+            if let Err(error) = &read {
+                eprintln!("warning: {}", error);
+            }
+            read.ok()
+        })
+        .collect::<Vec<Collection>>()
+        .await;
+    eprintln!("done.");
+
+    eprint!("loading blueprints ... ");
+    let limit = fetch_opts.fetch_limit;
+    let pagparams = DataPageParams {
+        marker: None,
+        direction: PaginationOrder::Ascending,
+        limit,
+    };
+    let blueprint_ids = datastore
+        .blueprints_list(opctx, &pagparams)
+        .await
+        .context("listing blueprints")?;
+    check_limit(&blueprint_ids, limit, || "listing blueprint ids");
+    let blueprints = futures::stream::iter(blueprint_ids)
+        .filter_map(|bpm| async move {
+            let blueprint_id = bpm.id;
+            let read = datastore
+                .blueprint_read(
+                    opctx,
+                    &nexus_db_queries::authz::Blueprint::new(
+                        nexus_db_queries::authz::FLEET,
+                        blueprint_id,
+                        LookupType::ById(blueprint_id),
+                    ),
+                )
+                .await
+                .with_context(|| format!("reading blueprint {}", blueprint_id));
+            if let Err(error) = &read {
+                eprintln!("warning: {}", error);
+            }
+            read.ok()
+        })
+        .collect::<Vec<Blueprint>>()
+        .await;
+    eprintln!("done.");
+
+    let state =
+        UnstableReconfiguratorState { policy: policy, collections, blueprints };
+
+    let output_path = &reconfig_save_args.output_file;
+    let file = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&output_path)
+        .with_context(|| format!("open {:?}", output_path))?;
+    serde_json::to_writer_pretty(&file, &state)
+        .with_context(|| format!("write {:?}", output_path))?;
+    eprintln!("wrote {}", output_path);
+    Ok(())
 }

@@ -50,6 +50,10 @@ use tokio::fs;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+const CLICKHOUSE_DB_MISSING: &'static str = "Database oximeter does not exist";
+const CLICKHOUSE_DB_VERSION_MISSING: &'static str =
+    "Table oximeter.version does not exist";
+
 #[usdt::provider(provider = "clickhouse_client")]
 mod probes {
     fn query__start(_: &usdt::UniqueId, sql: &str) {}
@@ -856,10 +860,10 @@ impl Client {
             })?,
             Err(Error::Database(err))
                 // Case 1: The database has not been created.
-                if err.contains("Database oximeter doesn't exist") ||
+                if err.contains(CLICKHOUSE_DB_MISSING) ||
                 // Case 2: The database has been created, but it's old (exists
                 // prior to the version table).
-                    err.contains("Table oximeter.version doesn't exist") =>
+                    err.contains(CLICKHOUSE_DB_VERSION_MISSING) =>
             {
                 warn!(self.log, "oximeter database does not exist, or is out-of-date");
                 0
@@ -1944,19 +1948,22 @@ mod tests {
         let sql = String::from(
             "INSERT INTO oximeter.measurements_string (datum) VALUES ('hiya');",
         );
-        client_2.execute_with_body(sql).await.unwrap();
+        let result = client_2.execute_with_body(sql.clone()).await.unwrap();
+        info!(log, "Inserted datum to client #2"; "sql" => sql, "result" => result);
 
         // Make sure replicas are synched
         let sql = String::from(
             "SYSTEM SYNC REPLICA oximeter.measurements_string_local;",
         );
-        client_1.execute_with_body(sql).await.unwrap();
+        let result = client_1.execute_with_body(sql.clone()).await.unwrap();
+        info!(log, "Synced replicas via client #1"; "sql" => sql, "result" => result);
 
         // Make sure data exists in the other replica
         let sql = String::from(
             "SELECT * FROM oximeter.measurements_string FORMAT JSONEachRow;",
         );
-        let result = client_1.execute_with_body(sql).await.unwrap();
+        let result = client_1.execute_with_body(sql.clone()).await.unwrap();
+        info!(log, "Retrieved values via client #1"; "sql" => sql, "result" => result.clone());
         assert!(result.contains("hiya"));
 
         client_1.wipe_replicated_db().await?;
