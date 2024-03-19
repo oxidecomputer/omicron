@@ -311,11 +311,6 @@ struct InstanceRunner {
     // Properties visible to Propolis
     properties: propolis_client::types::InstanceProperties,
 
-    // This is currently unused, but will be sent to Propolis as part of the
-    // work tracked in https://github.com/oxidecomputer/omicron/issues/4851. It
-    // will be included in the InstanceProperties above, most likely.
-    _metadata: InstanceMetadata,
-
     // The ID of the Propolis server (and zone) running this instance
     propolis_id: Uuid,
 
@@ -926,6 +921,7 @@ impl Instance {
     ///   instance manager's tracking table.
     /// * `state`: The initial state of this instance.
     /// * `services`: A set of instance manager-provided services.
+    /// * `metadata`: Instance-related metadata used to track statistics.
     pub(crate) fn new(
         log: Logger,
         id: Uuid,
@@ -1010,10 +1006,8 @@ impl Instance {
                 // TODO: we should probably make propolis aligned with
                 // InstanceCpuCount here, to avoid any casting...
                 vcpus: hardware.properties.ncpus.0 as u8,
+                metadata: metadata.into(),
             },
-            // This will be used in a follow up, tracked under
-            // https://github.com/oxidecomputer/omicron/issues/4851.
-            _metadata: metadata,
             propolis_id,
             propolis_addr,
             vnic_allocator,

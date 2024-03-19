@@ -29,11 +29,12 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(45, "first-named-migration"),
+        KnownVersion::new(46, "first-named-migration"),
         // The first many schema versions only vary by major or patch number and
         // their path is predictable based on the version number.  (This was
         // historically a problem because two pull requests both adding a new
         // schema version might merge cleanly but produce an invalid result.)
+        KnownVersion::legacy(45, 0),
         KnownVersion::legacy(44, 0),
         KnownVersion::legacy(43, 0),
         KnownVersion::legacy(42, 0),

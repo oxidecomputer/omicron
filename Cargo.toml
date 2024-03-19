@@ -194,9 +194,9 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "952c7d60d22be5198b892bec8d92f4291b9160c2" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "952c7d60d22be5198b892bec8d92f4291b9160c2" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "952c7d60d22be5198b892bec8d92f4291b9160c2" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
@@ -333,9 +333,9 @@ prettyplease = { version = "0.2.16", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"

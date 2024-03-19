@@ -5723,6 +5723,44 @@
         }
       }
     },
+    "/v1/system/ip-pools/{pool}/utilization": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch IP pool utilization",
+        "operationId": "ip_pool_utilization_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
@@ -13652,6 +13690,31 @@
           }
         }
       },
+      "IpPoolUtilization": {
+        "type": "object",
+        "properties": {
+          "ipv4": {
+            "description": "Number of allocated and total available IPv4 addresses in pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Utilization"
+              }
+            ]
+          },
+          "ipv6": {
+            "description": "Number of allocated and total available IPv6 addresses in pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Utilization"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ipv4",
+          "ipv6"
+        ]
+      },
       "IpRange": {
         "oneOf": [
           {
@@ -13697,6 +13760,27 @@
           "last"
         ]
       },
+      "Ipv4Utilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "The number of IPv4 addresses allocated from this pool",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "capacity": {
+            "description": "The total number of IPv4 addresses in the pool, i.e., the sum of the lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit integer because there are only 2^32 IPv4 addresses.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
+        ]
+      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
@@ -13720,6 +13804,25 @@
         "required": [
           "first",
           "last"
+        ]
+      },
+      "Ipv6Utilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "The number of IPv6 addresses allocated from this pool. A 128-bit integer string to match the capacity field.",
+            "type": "string",
+            "format": "uint128"
+          },
+          "capacity": {
+            "description": "The total number of IPv6 addresses in the pool, i.e., the sum of the lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
+            "type": "string",
+            "format": "uint128"
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
         ]
       },
       "L4PortRange": {

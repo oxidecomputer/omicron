@@ -130,6 +130,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(ip_pool_update)?;
         // Variants for internal services
         api.register(ip_pool_service_view)?;
+        api.register(ip_pool_utilization_view)?;
 
         // Operator-Accessible IP Pool Range API
         api.register(ip_pool_range_list)?;
@@ -1553,6 +1554,31 @@ async fn ip_pool_update(
         let pool_lookup = nexus.ip_pool_lookup(&opctx, &path.pool)?;
         let pool = nexus.ip_pool_update(&opctx, &pool_lookup, &updates).await?;
         Ok(HttpResponseOk(pool.into()))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Fetch IP pool utilization
+#[endpoint {
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}/utilization",
+    tags = ["system/networking"],
+}]
+async fn ip_pool_utilization_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::IpPoolPath>,
+) -> Result<HttpResponseOk<views::IpPoolUtilization>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let nexus = &apictx.nexus;
+        let pool_selector = path_params.into_inner().pool;
+        // We do not prevent the service pool from being fetched by name or ID
+        // like we do for update, delete, associate.
+        let pool_lookup = nexus.ip_pool_lookup(&opctx, &pool_selector)?;
+        let utilization =
+            nexus.ip_pool_utilization_view(&opctx, &pool_lookup).await?;
+        Ok(HttpResponseOk(utilization.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

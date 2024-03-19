@@ -238,9 +238,7 @@ impl SledAgent {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
-        // This is currently unused, but will be included as part of work
-        // tracked in https://github.com/oxidecomputer/omicron/issues/4851.
-        _metadata: InstanceMetadata,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -294,6 +292,7 @@ impl SledAgent {
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),
                     vcpus: hardware.properties.ncpus.0 as u8,
+                    metadata: metadata.into(),
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,

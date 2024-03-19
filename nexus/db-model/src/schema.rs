@@ -1521,6 +1521,16 @@ table! {
 }
 
 table! {
+    bootstore_config (key, generation) {
+        key -> Text,
+        generation -> Int8,
+        data -> Jsonb,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+    }
+}
+
+table! {
     bfd_session (remote, switch) {
         id -> Uuid,
         local -> Nullable<Inet>,
