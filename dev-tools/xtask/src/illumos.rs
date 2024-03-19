@@ -82,7 +82,7 @@ fn verify_executable(
 
     Ok(())
 }
-fn cmd_verify_libraries() -> Result<()> {
+pub fn cmd_verify_libraries() -> Result<()> {
     let metadata = load_workspace()?;
     let mut config_path = metadata.workspace_root;
     config_path.push(".cargo/xtask.toml");
