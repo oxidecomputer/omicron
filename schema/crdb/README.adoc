@@ -75,7 +75,7 @@ Process:
 *** If only one SQL statement is necessary to get from `OLD_VERSION` to
     `NEW_VERSION`, put that statement into `schema/crdb/NAME/up.sql`.  If
     multiple statements are required, put each one into a separate file, naming
-    these `schema/crdb/NAME/upN.sql` for as many `N` as you need, staring with
+    these `schema/crdb/NAME/upN.sql` for as many `N` as you need, starting with
     `N=1`.
 *** Each file should contain _either_ one schema-modifying statement _or_ some
     number of data-modifying statements.  You can combine multiple data-modifying

@@ -29,7 +29,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(45, "migration-demo"),
+        KnownVersion::new(45, "first-named-migration"),
         // The first many schema versions only vary by major or patch number and
         // their path is predictable based on the version number.  (This was
         // historically a problem because two pull requests both adding a new
@@ -94,7 +94,8 @@ pub const EARLIEST_SUPPORTED_VERSION: SemverVersion =
 /// Describes one version of the database schema
 #[derive(Debug, Clone)]
 struct KnownVersion {
-    /// All versions have an associated SemVer.  We only use the major number.
+    /// All versions have an associated SemVer.  We only use the major number in
+    /// terms of determining compatibility.
     semver: SemverVersion,
 
     /// Path relative to the root of the schema ("schema/crdb" in the root of

@@ -18,7 +18,6 @@ use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::SemverVersion;
 use slog::{error, info, o, Logger};
-use std::ops::Bound;
 use std::str::FromStr;
 
 impl DataStore {
@@ -105,10 +104,7 @@ impl DataStore {
         );
 
         let target_versions: Vec<&SchemaVersion> = all_versions
-            .versions_range((
-                Bound::Excluded(&found_version),
-                Bound::Included(&desired_version),
-            ))
+            .versions_range(&found_version..=&desired_version)
             .collect();
 
         let mut current_version = found_version;
