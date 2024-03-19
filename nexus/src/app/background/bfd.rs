@@ -140,11 +140,11 @@ impl BackgroundTask for BfdManager {
             let mgd_clients = build_mgd_clients(mappings, log);
 
             for (location, c) in &mgd_clients {
-                let client_current = match c.inner.get_bfd_peers().await {
+                let client_current = match c.get_bfd_peers().await {
                     Ok(x) => x.into_inner(),
                     Err(e) => {
                         error!(&log, "failed to get bfd sessions from mgd: {}",
-                            c.inner.baseurl();
+                            c.baseurl();
                             "error" => e.to_string()
                         );
                         continue;
@@ -194,7 +194,6 @@ impl BackgroundTask for BfdManager {
                     }
                 };
                 if let Err(e) = mg
-                    .inner
                     .add_bfd_peer(&BfdPeerConfig {
                         peer: x.remote,
                         detection_threshold: x.detection_threshold,
@@ -224,7 +223,7 @@ impl BackgroundTask for BfdManager {
                         continue;
                     }
                 };
-                if let Err(e) = mg.inner.remove_bfd_peer(&x.remote).await {
+                if let Err(e) = mg.remove_bfd_peer(&x.remote).await {
                     error!(&log, "failed to remove bfd peer from switch daemon";
                         "error" => e.to_string(),
                         "switch" => x.switch.to_string(),

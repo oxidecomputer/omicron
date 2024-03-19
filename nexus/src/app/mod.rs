@@ -253,8 +253,10 @@ impl Nexus {
             dpd_clients.insert(*location, Arc::new(dpd_client));
         }
         for (location, config) in &config.pkg.mgd {
-            let mg_client = mg_admin_client::Client::new(&log, config.address)
-                .map_err(|e| format!("mg admin client: {e}"))?;
+            let mg_client = mg_admin_client::Client::new(
+                &format!("http://{}", config.address),
+                log.clone(),
+            );
             mg_clients.insert(*location, Arc::new(mg_client));
         }
         if config.pkg.dendrite.is_empty() {
@@ -310,10 +312,15 @@ impl Nexus {
                         for (location, addr) in &mappings {
                             let port = MGD_PORT;
                             let mgd_client = mg_admin_client::Client::new(
-                                &log,
-                                std::net::SocketAddr::new((*addr).into(), port),
-                            )
-                            .map_err(|e| format!("mg admin client: {e}"))?;
+                                &format!(
+                                    "http://{}",
+                                    &std::net::SocketAddr::new(
+                                        (*addr).into(),
+                                        port,
+                                    )
+                                ),
+                                log.clone(),
+                            );
                             mg_clients.insert(*location, Arc::new(mgd_client));
                         }
                         break;
@@ -903,22 +910,10 @@ impl Nexus {
             let port = MGD_PORT;
             let socketaddr =
                 std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
-            let client = match mg_admin_client::Client::new(
-                &self.log.clone(),
-                socketaddr,
-            ) {
-                Ok(client) => client,
-                Err(e) => {
-                    error!(
-                        self.log,
-                        "error building mgd client";
-                        "location" => %location,
-                        "addr" => %addr,
-                        "error" => %e,
-                    );
-                    continue;
-                }
-            };
+            let client = mg_admin_client::Client::new(
+                format!("http://{}", socketaddr).as_str(),
+                self.log.clone(),
+            );
             clients.push((*location, client));
         }
         Ok(clients.into_iter().collect::<HashMap<_, _>>())
