@@ -35,7 +35,7 @@ function ensure_vdevs {
             )
         for VDEV in "${VDEVS[@]}"; do
             echo "Device: [$VDEV]"
-            VDEV_PATH="${VDEV_DIR:-$OMICRON_TOP}/$VDEV.vdev"
+            VDEV_PATH="${VDEV_DIR:-$OMICRON_TOP}/$VDEV"
             if ! [[ -f "$VDEV_PATH" ]]; then
                 dd if=/dev/zero of="$VDEV_PATH" bs=1 count=0 seek=20G
             fi
