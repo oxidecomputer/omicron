@@ -33,7 +33,7 @@ impl Default for MountConfig {
             root: Utf8PathBuf::from(
                 illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT,
             ),
-            synthetic_disk_root: Utf8PathBuf::from("/tmp"),
+            synthetic_disk_root: Utf8PathBuf::from("/var/tmp"),
         }
     }
 }
