@@ -576,6 +576,8 @@ pub const DEMO_BGP_STATUS_URL: &'static str =
     "/v1/system/networking/bgp-status";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
     "/v1/system/networking/bgp-routes-ipv4?asn=47";
+pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
+    "/v1/system/networking/bgp-message-history?asn=47";
 
 pub const DEMO_BFD_STATUS_URL: &'static str =
     "/v1/system/networking/bfd-status";
@@ -2240,6 +2242,15 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
 
         VerifyEndpoint {
             url: &DEMO_BGP_ROUTES_IPV4_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_MESSAGE_HISTORY_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
