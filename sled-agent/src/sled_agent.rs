@@ -34,7 +34,6 @@ use crate::zone_bundle;
 use crate::zone_bundle::BundleError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use ddm_admin_client::Client as DdmAdminClient;
 use derive_more::From;
 use dropshot::HttpError;
 use futures::stream::FuturesUnordered;
@@ -65,6 +64,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service,
     retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use oximeter::types::ProducerRegistry;
 use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
@@ -1092,7 +1092,7 @@ impl SledAgent {
     ///
     /// This is basically a GET version of the information we push to Nexus on
     /// startup.
-    pub(crate) fn inventory(&self) -> Result<Inventory, InventoryError> {
+    pub(crate) async fn inventory(&self) -> Result<Inventory, InventoryError> {
         let sled_id = self.inner.id;
         let sled_agent_address = self.inner.sled_address();
         let is_scrimlet = self.inner.hardware.is_scrimlet();
@@ -1108,6 +1108,22 @@ impl SledAgent {
             crate::params::SledRole::Gimlet
         };
 
+        let mut disks = vec![];
+        let mut zpools = vec![];
+        for (identity, (disk, pool)) in
+            self.storage().get_latest_resources().await.disks().iter()
+        {
+            disks.push(crate::params::InventoryDisk {
+                identity: identity.clone(),
+                variant: disk.variant(),
+                slot: disk.slot(),
+            });
+            zpools.push(crate::params::InventoryZpool {
+                id: pool.name.id(),
+                total_size: ByteCount::try_from(pool.info.size())?,
+            });
+        }
+
         Ok(Inventory {
             sled_id,
             sled_agent_address,
@@ -1116,6 +1132,8 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
+            disks,
+            zpools,
         })
     }
 }
@@ -1156,7 +1174,7 @@ pub enum AddSledError {
         err: bootstrap_agent_client::Error,
     },
     #[error("Failed to connect to DDM")]
-    DdmAdminClient(#[source] ddm_admin_client::DdmError),
+    DdmAdminClient(#[source] omicron_ddm_admin_client::DdmError),
     #[error("Failed to learn bootstrap ip for {0:?}")]
     NotFound(BaseboardId),
     #[error("Failed to initialize {sled_id}: {err}")]

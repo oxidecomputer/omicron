@@ -4,7 +4,6 @@
 
 //! Routines that manage instance-related networking state.
 
-use crate::app::sagas::retry_until_known_result;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
 use nexus_db_model::ExternalIp;
@@ -24,11 +23,11 @@ use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::retry_until_known_result;
 use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;
 use std::str::FromStr;
-use std::sync::Arc;
 use uuid::Uuid;
 
 impl super::Nexus {
@@ -464,7 +463,7 @@ impl super::Nexus {
         probe_id: Uuid,
         sled_ip_address: std::net::Ipv6Addr,
         ip_index_filter: Option<usize>,
-        dpd_client: &Arc<dpd_client::Client>,
+        dpd_client: &dpd_client::Client,
     ) -> Result<(), Error> {
         let log = &self.log;
 
@@ -738,7 +737,12 @@ impl super::Nexus {
                        "instance_id" => ?instance_id,
                        "switch" => switch.to_string());
 
-            let client_result = self.dpd_clients.get(switch).ok_or_else(|| {
+            let clients = self.dpd_clients().await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to get dpd clients: {e}"
+                ))
+            })?;
+            let client_result = clients.get(switch).ok_or_else(|| {
                 Error::internal_error(&format!(
                     "unable to find dendrite client for {switch}"
                 ))
@@ -823,7 +827,13 @@ impl super::Nexus {
                        "probe_id" => %probe_id,
                        "switch" => switch.to_string());
 
-            let client_result = self.dpd_clients.get(switch).ok_or_else(|| {
+            let dpd_clients = self.dpd_clients().await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "unable to get dpd_clients: {e}"
+                ))
+            })?;
+
+            let client_result = dpd_clients.get(switch).ok_or_else(|| {
                 Error::internal_error(&format!(
                     "unable to find dendrite client for {switch}"
                 ))

@@ -986,6 +986,9 @@ impl super::Nexus {
                 //
                 // If the operation failed, kick the sled agent error back up to
                 // the caller to let it decide how to handle it.
+                //
+                // When creating the zone for the first time, we just get
+                // Ok(None) here, which is a no-op in write_returned_instance_state.
                 match instance_put_result {
                     Ok(state) => self
                         .write_returned_instance_state(&instance_id, state)

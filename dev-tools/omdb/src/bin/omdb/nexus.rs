@@ -128,6 +128,14 @@ enum BlueprintTargetCommands {
     Show,
     /// Change the current target blueprint
     Set(BlueprintTargetSetArgs),
+    /// Enable the current target blueprint
+    ///
+    /// Fails if the specified blueprint id is not the current target
+    Enable(BlueprintIdArgs),
+    /// Disable the current target blueprint
+    ///
+    /// Fails if the specified blueprint id is not the current target
+    Disable(BlueprintIdArgs),
 }
 
 #[derive(Debug, Args)]
@@ -253,6 +261,30 @@ impl NexusArgs {
             }) => {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_target_set(&client, args, token).await
+            }
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command:
+                    BlueprintsCommands::Target(BlueprintsTargetArgs {
+                        command: BlueprintTargetCommands::Enable(args),
+                    }),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set_enabled(
+                    &client, args, true, token,
+                )
+                .await
+            }
+            NexusCommands::Blueprints(BlueprintsArgs {
+                command:
+                    BlueprintsCommands::Target(BlueprintsTargetArgs {
+                        command: BlueprintTargetCommands::Disable(args),
+                    }),
+            }) => {
+                let token = omdb.check_allow_destructive()?;
+                cmd_nexus_blueprints_target_set_enabled(
+                    &client, args, false, token,
+                )
+                .await
             }
             NexusCommands::Blueprints(BlueprintsArgs {
                 command: BlueprintsCommands::Regenerate,
@@ -858,13 +890,15 @@ async fn cmd_nexus_blueprints_list(
     struct BlueprintRow {
         #[tabled(rename = "T")]
         is_target: &'static str,
+        #[tabled(rename = "ENA")]
+        enabled: &'static str,
         id: String,
         parent: String,
         time_created: String,
     }
 
-    let target_id = match client.blueprint_target_view().await {
-        Ok(result) => Some(result.into_inner().target_id),
+    let target = match client.blueprint_target_view().await {
+        Ok(result) => Some(result.into_inner()),
         Err(error) => {
             // This request will fail if there's no target configured, so it's
             // not necessarily a big deal.
@@ -883,13 +917,17 @@ async fn cmd_nexus_blueprints_list(
         .context("listing blueprints")?
         .into_iter()
         .map(|blueprint| {
-            let is_target = match target_id {
-                Some(target_id) if target_id == blueprint.id => "*",
-                _ => "",
+            let (is_target, enabled) = match &target {
+                Some(target) if target.target_id == blueprint.id => {
+                    let enabled = if target.enabled { "yes" } else { "no" };
+                    ("*", enabled)
+                }
+                _ => ("", ""),
             };
 
             BlueprintRow {
                 is_target,
+                enabled,
                 id: blueprint.id.to_string(),
                 parent: blueprint
                     .parent_blueprint_id
@@ -1000,6 +1038,28 @@ async fn cmd_nexus_blueprints_target_set(
     Ok(())
 }
 
+async fn cmd_nexus_blueprints_target_set_enabled(
+    client: &nexus_client::Client,
+    args: &BlueprintIdArgs,
+    enabled: bool,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let description = if enabled { "enabled" } else { "disabled" };
+    client
+        .blueprint_target_set_enabled(
+            &nexus_client::types::BlueprintTargetSet {
+                target_id: args.blueprint_id,
+                enabled,
+            },
+        )
+        .await
+        .with_context(|| {
+            format!("setting blueprint {} to {description}", args.blueprint_id)
+        })?;
+    eprintln!("set target blueprint {} to {description}", args.blueprint_id);
+    Ok(())
+}
+
 async fn cmd_nexus_blueprints_generate_from_collection(
     client: &nexus_client::Client,
     args: &CollectionIdArgs,
@@ -1013,7 +1073,10 @@ async fn cmd_nexus_blueprints_generate_from_collection(
         )
         .await
         .context("creating blueprint from collection id")?;
-    eprintln!("created blueprint {} from collection id", blueprint.id);
+    eprintln!(
+        "created blueprint {} from collection id {}",
+        blueprint.id, args.collection_id
+    );
     Ok(())
 }
 

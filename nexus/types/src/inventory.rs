@@ -9,6 +9,7 @@
 //! nexus/inventory does not currently know about nexus/db-model and it's
 //! convenient to separate these concerns.)
 
+use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UninitializedSledId;
 use crate::external_api::shared::Baseboard;
 use chrono::DateTime;
@@ -344,6 +345,45 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
     }
 }
 
+/// A physical disk reported by a sled agent.
+///
+/// This identifies that a physical disk appears in a Sled.
+/// The existence of this object does not necessarily imply that
+/// the disk is being actively managed by the control plane.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct PhysicalDisk {
+    pub identity: omicron_common::disk::DiskIdentity,
+    pub variant: PhysicalDiskKind,
+    pub slot: i64,
+}
+
+impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
+    fn from(disk: sled_agent_client::types::InventoryDisk) -> PhysicalDisk {
+        PhysicalDisk {
+            identity: disk.identity.into(),
+            variant: disk.variant.into(),
+            slot: disk.slot,
+        }
+    }
+}
+
+/// A zpool reported by a sled agent.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Zpool {
+    pub time_collected: DateTime<Utc>,
+    pub id: Uuid,
+    pub total_size: ByteCount,
+}
+
+impl Zpool {
+    pub fn new(
+        time_collected: DateTime<Utc>,
+        pool: sled_agent_client::types::InventoryZpool,
+    ) -> Zpool {
+        Zpool { time_collected, id: pool.id, total_size: pool.total_size }
+    }
+}
+
 /// Inventory reported by sled agent
 ///
 /// This is a software notion of a sled, distinct from an underlying baseboard.
@@ -361,6 +401,8 @@ pub struct SledAgent {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    pub disks: Vec<PhysicalDisk>,
+    pub zpools: Vec<Zpool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

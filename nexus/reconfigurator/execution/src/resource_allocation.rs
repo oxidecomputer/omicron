@@ -93,6 +93,14 @@ impl<'a> ResourceAllocator<'a> {
         external_ip: IpAddr,
         port_range: Option<(u16, u16)>,
     ) -> anyhow::Result<bool> {
+        // localhost is used by many components in the test suite.  We can't use
+        // the normal path because normally a given external IP must only be
+        // used once.  Just treat localhost in the test suite as though it's
+        // already allocated.  We do the same in is_nic_already_allocated().
+        if cfg!(test) && external_ip.is_loopback() {
+            return Ok(true);
+        }
+
         let allocated_ips = self
             .datastore
             .service_lookup_external_ips(self.opctx, zone_id)
@@ -157,6 +165,11 @@ impl<'a> ResourceAllocator<'a> {
         zone_id: Uuid,
         nic: &NetworkInterface,
     ) -> anyhow::Result<bool> {
+        // See the comment in is_external_ip_already_allocated().
+        if cfg!(test) && nic.ip.is_loopback() {
+            return Ok(true);
+        }
+
         let allocated_nics = self
             .datastore
             .service_list_network_interfaces(self.opctx, zone_id)

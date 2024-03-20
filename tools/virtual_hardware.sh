@@ -41,7 +41,7 @@ function ensure_zpools {
             fi
             success "ZFS vdev $VDEV_PATH exists"
             if [[ -z "$(zpool list -o name | grep $ZPOOL)" ]]; then
-                zpool create -f "$ZPOOL" "$VDEV_PATH"
+                zpool create -o ashift=12 -f "$ZPOOL" "$VDEV_PATH"
             fi
             success "ZFS zpool $ZPOOL exists"
         done

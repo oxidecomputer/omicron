@@ -6,10 +6,15 @@
 //! Responsible for cleaning up soft deleted entries once they
 //! have been propagated to running dpd instances.
 
+use crate::app::map_switch_zone_addrs;
+
 use super::common::BackgroundTask;
+use super::networking::build_dpd_clients;
 use chrono::{Duration, Utc};
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns::resolver::Resolver;
+use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use serde_json::json;
@@ -19,15 +24,15 @@ use std::sync::Arc;
 /// from ipv4_nat_entry table
 pub struct Ipv4NatGarbageCollector {
     datastore: Arc<DataStore>,
-    dpd_clients: Vec<Arc<dpd_client::Client>>,
+    resolver: Resolver,
 }
 
 impl Ipv4NatGarbageCollector {
     pub fn new(
         datastore: Arc<DataStore>,
-        dpd_clients: Vec<Arc<dpd_client::Client>>,
+        resolver: Resolver,
     ) -> Ipv4NatGarbageCollector {
-        Ipv4NatGarbageCollector { datastore, dpd_clients }
+        Ipv4NatGarbageCollector { datastore, resolver }
     }
 }
 
@@ -60,7 +65,30 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
                 }
             };
 
-            for client in &self.dpd_clients {
+            let switch_zone_addresses = match self
+                .resolver
+                .lookup_all_ipv6(ServiceName::Dendrite)
+                .await
+            {
+                Ok(addrs) => addrs,
+                Err(e) => {
+                    error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                    return json!({
+                        "error":
+                            format!(
+                                "failed to resolve addresses for Dendrite services: {:#}",
+                                e
+                            )
+                        });
+                },
+            };
+
+            let mappings =
+                map_switch_zone_addrs(log, switch_zone_addresses).await;
+
+            let dpd_clients = build_dpd_clients(&mappings, log);
+
+            for (_location, client) in dpd_clients {
                 let response = client.ipv4_nat_generation().await;
                 match response {
                     Ok(gen) => min_gen = std::cmp::min(min_gen, *gen),
@@ -84,11 +112,21 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
 
             let retention_threshold = Utc::now() - Duration::weeks(2);
 
-            let result = self
+            let result = match self
                 .datastore
                 .ipv4_nat_cleanup(opctx, min_gen, retention_threshold)
-                .await
-                .unwrap();
+                .await {
+                    Ok(v) => v,
+                    Err(e) => {
+                     return json!({
+                        "error":
+                            format!(
+                                "failed to perform cleanup operation: {:#}",
+                                e
+                            )
+                    });
+                    },
+                };
 
             let rv = serde_json::to_value(&result).unwrap_or_else(|error| {
                 json!({

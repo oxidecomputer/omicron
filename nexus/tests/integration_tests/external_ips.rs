@@ -17,6 +17,7 @@ use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_instance_with;
@@ -151,12 +152,16 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     // automatically linked to current silo
     create_default_ip_pool(&client).await;
 
+    assert_ip_pool_utilization(client, "default", 0, 65536, 0, 0).await;
+
     let other_pool_range = IpRange::V4(
         Ipv4Range::new(Ipv4Addr::new(10, 1, 0, 1), Ipv4Addr::new(10, 1, 0, 5))
             .unwrap(),
     );
     // not automatically linked to currently silo. see below
     create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+
+    assert_ip_pool_utilization(client, "other-pool", 0, 5, 0, 0).await;
 
     let project = create_project(client, PROJECT_NAME).await;
 
@@ -175,6 +180,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 0, 0, 0)));
 
+    assert_ip_pool_utilization(client, "default", 1, 65536, 0, 0).await;
+
     // Create with chosen IP and fallback to default pool.
     let fip_name = FIP_NAMES[1];
     let ip_addr = "10.0.12.34".parse().unwrap();
@@ -191,6 +198,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
 
+    assert_ip_pool_utilization(client, "default", 2, 65536, 0, 0).await;
+
     // Creating with other-pool fails with 404 until it is linked to the current silo
     let fip_name = FIP_NAMES[2];
     let params = params::FloatingIpCreate {
@@ -206,6 +215,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
         object_create_error(client, &url, &params, StatusCode::NOT_FOUND).await;
     assert_eq!(error.message, "not found: ip-pool with name \"other-pool\"");
 
+    assert_ip_pool_utilization(client, "other-pool", 0, 5, 0, 0).await;
+
     // now link the pool and everything should work with the exact same params
     let silo_id = DEFAULT_SILO.id();
     link_ip_pool(&client, "other-pool", &silo_id, false).await;
@@ -216,6 +227,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, IpAddr::from(Ipv4Addr::new(10, 1, 0, 1)));
+
+    assert_ip_pool_utilization(client, "other-pool", 1, 5, 0, 0).await;
 
     // Create with chosen IP from fleet-scoped named pool.
     let fip_name = FIP_NAMES[3];
@@ -232,6 +245,8 @@ async fn test_floating_ip_create(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(fip.project_id, project.identity.id);
     assert_eq!(fip.instance_id, None);
     assert_eq!(fip.ip, ip_addr);
+
+    assert_ip_pool_utilization(client, "other-pool", 2, 5, 0, 0).await;
 }
 
 #[nexus_test]
@@ -586,6 +601,8 @@ async fn test_external_ip_live_attach_detach(
     create_default_ip_pool(&client).await;
     let project = create_project(client, PROJECT_NAME).await;
 
+    assert_ip_pool_utilization(client, "default", 0, 65536, 0, 0).await;
+
     // Create 2 instances, and a floating IP for each instance.
     // One instance will be started, and one will be stopped.
     let mut fips = vec![];
@@ -601,6 +618,9 @@ async fn test_external_ip_live_attach_detach(
             .await,
         );
     }
+
+    // 2 floating IPs have been allocated
+    assert_ip_pool_utilization(client, "default", 2, 65536, 0, 0).await;
 
     let mut instances = vec![];
     for (i, start) in [false, true].iter().enumerate() {
@@ -632,6 +652,10 @@ async fn test_external_ip_live_attach_detach(
 
         instances.push(instance);
     }
+
+    // the two instances above were deliberately not given ephemeral IPs, but
+    // they still always get SNAT IPs, so we went from 2 to 4
+    assert_ip_pool_utilization(client, "default", 4, 65536, 0, 0).await;
 
     // Attach a floating IP and ephemeral IP to each instance.
     let mut recorded_ephs = vec![];
@@ -675,6 +699,10 @@ async fn test_external_ip_live_attach_detach(
         recorded_ephs.push(eph_resp);
     }
 
+    // now 6 because an ephemeral IP was added for each instance. floating IPs
+    // were attached, but they were already allocated
+    assert_ip_pool_utilization(client, "default", 6, 65536, 0, 0).await;
+
     // Detach a floating IP and ephemeral IP from each instance.
     for (instance, fip) in instances.iter().zip(&fips) {
         let instance_name = instance.identity.name.as_str();
@@ -704,6 +732,9 @@ async fn test_external_ip_live_attach_detach(
             "instance does not have an ephemeral IP attached".to_string()
         );
     }
+
+    // 2 ephemeral go away on detachment but still 2 floating and 2 SNAT
+    assert_ip_pool_utilization(client, "default", 4, 65536, 0, 0).await;
 
     // Finally, two kind of funny tests. There is special logic in the handler
     // for the case where the floating IP is specified by name but the instance
@@ -763,6 +794,9 @@ async fn test_external_ip_live_attach_detach(
         fetch_instance_external_ips(client, instance_name, PROJECT_NAME).await;
     assert_eq!(eip_list.len(), 1);
     assert_eq!(eip_list[0].ip(), fips[1].ip);
+
+    // none of that changed the number of allocated IPs
+    assert_ip_pool_utilization(client, "default", 4, 65536, 0, 0).await;
 }
 
 #[nexus_test]
