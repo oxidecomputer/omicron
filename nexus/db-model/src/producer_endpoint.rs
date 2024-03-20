@@ -46,7 +46,7 @@ impl From<ProducerKind> for internal::nexus::ProducerKind {
 
 /// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
-#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
+#[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset, PartialEq)]
 #[diesel(table_name = metric_producer)]
 pub struct ProducerEndpoint {
     #[diesel(embed)]

@@ -222,3 +222,136 @@ impl DataStore {
         Ok(producers)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use db::datastore::pub_test_utils::datastore_test;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::internal_api::params;
+    use omicron_common::api::internal::nexus;
+    use omicron_test_utils::dev;
+    use std::time::Duration;
+
+    async fn read_time_modified(
+        datastore: &DataStore,
+        producer_id: Uuid,
+    ) -> DateTime<Utc> {
+        use db::schema::metric_producer::dsl;
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        match dsl::metric_producer
+            .filter(dsl::id.eq(producer_id))
+            .select(dsl::time_modified)
+            .first_async(&*conn)
+            .await
+        {
+            Ok(time_modified) => time_modified,
+            Err(err) => panic!(
+                "failed to read time_modified for producer {producer_id}: \
+                {err}"
+            ),
+        }
+    }
+
+    async fn read_expired_producers(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        expiration: DateTime<Utc>,
+    ) -> Vec<ProducerEndpoint> {
+        let expired_one_page = datastore
+            .producers_list_expired(
+                opctx,
+                expiration,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("failed to read max_page of expired producers");
+        let expired_batched = datastore
+            .producers_list_expired_batched(opctx, expiration)
+            .await
+            .expect("failed to read batched expired producers");
+        assert_eq!(expired_one_page, expired_batched);
+        expired_batched
+    }
+
+    #[tokio::test]
+    async fn test_producers_list_expired() {
+        // Setup
+        let logctx = dev::test_setup_log("test_prune_expired_producers");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        // Insert an Oximeter collector
+        let collector_info = OximeterInfo::new(&params::OximeterInfo {
+            collector_id: Uuid::new_v4(),
+            address: "[::1]:0".parse().unwrap(), // unused
+        });
+        datastore
+            .oximeter_create(&collector_info)
+            .await
+            .expect("failed to insert collector");
+
+        // Insert a producer
+        let producer = ProducerEndpoint::new(
+            &nexus::ProducerEndpoint {
+                id: Uuid::new_v4(),
+                kind: nexus::ProducerKind::Service,
+                address: "[::1]:0".parse().unwrap(), // unused
+                base_route: "/".to_string(),         // unused
+                interval: Duration::from_secs(0),    // unused
+            },
+            collector_info.id,
+        );
+        datastore
+            .producer_endpoint_create(&producer)
+            .await
+            .expect("failed to insert producer");
+
+        // Our producer should show up when we list by its collector
+        let mut all_producers = datastore
+            .producers_list_by_oximeter_id(
+                collector_info.id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("failed to list all producers");
+        assert_eq!(all_producers.len(), 1);
+        assert_eq!(all_producers[0].id(), producer.id());
+
+        // Steal this producer so we have a database-precision timestamp and can
+        // use full equality checks moving forward.
+        let producer = all_producers.pop().unwrap();
+
+        let producer_time_modified =
+            read_time_modified(&datastore, producer.id()).await;
+
+        // Whether it's expired depends on the expiration date we specify; it
+        // should show up if the expiration time is newer than the producer's
+        // time_modified...
+        let expired_producers = read_expired_producers(
+            &opctx,
+            &datastore,
+            producer_time_modified + Duration::from_secs(1),
+        )
+        .await;
+        assert_eq!(
+            expired_producers.as_slice(),
+            std::slice::from_ref(&producer)
+        );
+
+        // ... but not if the the producer has been modified since the
+        // expiration.
+        let expired_producers = read_expired_producers(
+            &opctx,
+            &datastore,
+            producer_time_modified - Duration::from_secs(1),
+        )
+        .await;
+        assert_eq!(expired_producers.as_slice(), &[]);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+}

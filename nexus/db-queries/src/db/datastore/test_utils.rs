@@ -6,7 +6,6 @@
 
 use crate::authz;
 use crate::context::OpContext;
-use crate::db;
 use crate::db::datastore::ValidateTransition;
 use crate::db::lookup::LookupPath;
 use crate::db::DataStore;
