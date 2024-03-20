@@ -4425,6 +4425,8 @@ name = "nexus-db-model"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "camino",
+ "camino-tempfile",
  "chrono",
  "db-macros",
  "derive-where",
@@ -4443,6 +4445,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "once_cell",
  "parse-display",
  "pq-sys",
  "rand 0.8.5",
@@ -4455,6 +4458,7 @@ dependencies = [
  "steno",
  "strum 0.26.1",
  "thiserror",
+ "tokio",
  "uuid 1.7.0",
 ]
 
