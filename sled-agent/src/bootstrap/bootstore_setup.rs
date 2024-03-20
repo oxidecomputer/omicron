@@ -11,7 +11,7 @@ use super::config::BOOTSTORE_PORT;
 use super::server::StartError;
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
-use ddm_admin_client::Client as DdmAdminClient;
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
 use sled_storage::dataset::CLUSTER_DATASET;

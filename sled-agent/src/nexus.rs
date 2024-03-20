@@ -60,6 +60,16 @@ impl NexusClientWithResolver {
         }
     }
 
+    // for when we have a NexusClient constructed from a FakeNexusServer
+    // (no need to expose this function outside of tests)
+    #[cfg(test)]
+    pub(crate) fn new_with_client(
+        client: NexusClient,
+        resolver: Arc<Resolver>,
+    ) -> Self {
+        Self { client, resolver }
+    }
+
     /// Access the progenitor-based Nexus Client.
     pub fn client(&self) -> &NexusClient {
         &self.client
@@ -446,10 +456,11 @@ impl NexusNotifierTask {
             (Some(tx), rx)
         };
 
+        const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
+        let mut interval = interval(RETRY_TIMEOUT);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         loop {
-            const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
-            let mut interval = interval(RETRY_TIMEOUT);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             tokio::select! {
                 req = self.rx.recv() => {
                     let Some(req) = req else {

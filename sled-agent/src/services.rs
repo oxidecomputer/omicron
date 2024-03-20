@@ -41,7 +41,6 @@ use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
 use camino::{Utf8Path, Utf8PathBuf};
-use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use dpd_client::{types as DpdTypes, Client as DpdClient, Error as DpdError};
 use dropshot::HandlerTaskMode;
 use illumos_utils::addrobj::AddrObject;
@@ -87,6 +86,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_hardware::is_gimlet;

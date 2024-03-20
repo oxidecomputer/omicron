@@ -5267,6 +5267,12 @@
           },
           "usable_physical_ram": {
             "$ref": "#/components/schemas/ByteCount"
+          },
+          "zpools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryZpool"
+            }
           }
         },
         "required": [
@@ -5277,7 +5283,8 @@
           "sled_id",
           "sled_role",
           "usable_hardware_threads",
-          "usable_physical_ram"
+          "usable_physical_ram",
+          "zpools"
         ]
       },
       "InventoryDisk": {
@@ -5299,6 +5306,23 @@
           "identity",
           "slot",
           "variant"
+        ]
+      },
+      "InventoryZpool": {
+        "description": "Identifies information about zpools managed by the control plane",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "id",
+          "total_size"
         ]
       },
       "IpNet": {

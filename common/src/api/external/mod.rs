@@ -9,9 +9,6 @@
 
 mod error;
 pub mod http_pagination;
-use dropshot::HttpError;
-pub use error::*;
-
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactHash;
 use crate::update::ArtifactId;
@@ -20,7 +17,9 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
+pub use error::*;
 use futures::stream::BoxStream;
 use parse_display::Display;
 use parse_display::FromStr;
@@ -31,6 +30,7 @@ use semver;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -2718,6 +2718,21 @@ pub enum BgpPeerState {
     Established,
 }
 
+impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
+    fn from(s: mg_admin_client::types::FsmStateKind) -> BgpPeerState {
+        use mg_admin_client::types::FsmStateKind;
+        match s {
+            FsmStateKind::Idle => BgpPeerState::Idle,
+            FsmStateKind::Connect => BgpPeerState::Connect,
+            FsmStateKind::Active => BgpPeerState::Active,
+            FsmStateKind::OpenSent => BgpPeerState::OpenSent,
+            FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
+            FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
+            FsmStateKind::Established => BgpPeerState::Established,
+        }
+    }
+}
+
 /// The current status of a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpPeerStatus {
@@ -2738,6 +2753,56 @@ pub struct BgpPeerStatus {
 
     /// Switch with the peer session.
     pub switch: SwitchLocation,
+}
+
+/// Opaque object representing BGP message history for a given BGP peer. The
+/// contents of this object are not yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BgpMessageHistory(mg_admin_client::MessageHistory);
+
+impl BgpMessageHistory {
+    pub fn new(arg: mg_admin_client::MessageHistory) -> Self {
+        Self(arg)
+    }
+}
+
+impl JsonSchema for BgpMessageHistory {
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "BgpMessageHistory".to_owned()
+    }
+}
+
+/// BGP message history for a particular switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SwitchBgpHistory {
+    /// Switch this message history is associated with.
+    pub switch: SwitchLocation,
+
+    /// Message history indexed by peer address.
+    pub history: HashMap<String, BgpMessageHistory>,
+}
+
+/// BGP message history for rack switches.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AggregateBgpMessageHistory {
+    /// BGP history organized by switch.
+    switch_histories: Vec<SwitchBgpHistory>,
+}
+
+impl AggregateBgpMessageHistory {
+    pub fn new(switch_histories: Vec<SwitchBgpHistory>) -> Self {
+        Self { switch_histories }
+    }
 }
 
 /// A route imported from a BGP peer.

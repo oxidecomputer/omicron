@@ -14,6 +14,7 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
+use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -34,10 +35,13 @@ impl DataStore {
         use db::schema::{
             bgp_announce_set, bgp_announce_set::dsl as announce_set_dsl,
         };
+        use diesel::sql_types;
+        use diesel::IntoSql;
+
         let conn = self.pool_connection_authorized(opctx).await?;
         self.transaction_retry_wrapper("bgp_config_set")
             .transaction(&conn, |conn| async move {
-                let id: Uuid = match &config.bgp_announce_set_id {
+                let announce_set_id: Uuid = match &config.bgp_announce_set_id {
                     NameOrId::Name(name) => {
                         announce_set_dsl::bgp_announce_set
                             .filter(bgp_announce_set::time_deleted.is_null())
@@ -50,14 +54,58 @@ impl DataStore {
                     NameOrId::Id(id) => *id,
                 };
 
-                let config = BgpConfig::from_config_create(config, id);
+                let config =
+                    BgpConfig::from_config_create(config, announce_set_id);
 
-                let result = diesel::insert_into(dsl::bgp_config)
-                    .values(config.clone())
-                    .returning(BgpConfig::as_returning())
-                    .get_result_async(&conn)
+                let matching_entry_subquery = dsl::bgp_config
+                    .filter(dsl::name.eq(Name::from(config.name().clone())))
+                    .filter(dsl::time_deleted.is_null())
+                    .select(dsl::name);
+
+                // SELECT exactly the values we're trying to INSERT, but only
+                // if it does not already exist.
+                let new_entry_subquery = diesel::dsl::select((
+                    config.id().into_sql::<sql_types::Uuid>(),
+                    config.name().to_string().into_sql::<sql_types::Text>(),
+                    config
+                        .description()
+                        .to_string()
+                        .into_sql::<sql_types::Text>(),
+                    config.asn.into_sql::<sql_types::BigInt>(),
+                    config.bgp_announce_set_id.into_sql::<sql_types::Uuid>(),
+                    config
+                        .vrf
+                        .clone()
+                        .into_sql::<sql_types::Nullable<sql_types::Text>>(),
+                    Utc::now().into_sql::<sql_types::Timestamptz>(),
+                    Utc::now().into_sql::<sql_types::Timestamptz>(),
+                ))
+                .filter(diesel::dsl::not(diesel::dsl::exists(
+                    matching_entry_subquery,
+                )));
+
+                diesel::insert_into(dsl::bgp_config)
+                    .values(new_entry_subquery)
+                    .into_columns((
+                        dsl::id,
+                        dsl::name,
+                        dsl::description,
+                        dsl::asn,
+                        dsl::bgp_announce_set_id,
+                        dsl::vrf,
+                        dsl::time_created,
+                        dsl::time_modified,
+                    ))
+                    .execute_async(&conn)
                     .await?;
-                Ok(result)
+
+                dsl::bgp_config
+                    .filter(dsl::name.eq(Name::from(config.name().clone())))
+                    .filter(dsl::time_deleted.is_null())
+                    .select(BgpConfig::as_select())
+                    .limit(1)
+                    .first_async(&conn)
+                    .await
             })
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -277,12 +325,29 @@ impl DataStore {
             .transaction(&conn, |conn| async move {
                 let bas: BgpAnnounceSet = announce.clone().into();
 
-                let db_as: BgpAnnounceSet =
-                    diesel::insert_into(announce_set_dsl::bgp_announce_set)
-                        .values(bas.clone())
-                        .returning(BgpAnnounceSet::as_returning())
-                        .get_result_async::<BgpAnnounceSet>(&conn)
-                        .await?;
+                let found_as: Option<BgpAnnounceSet> =
+                    announce_set_dsl::bgp_announce_set
+                        .filter(
+                            announce_set_dsl::name
+                                .eq(Name::from(bas.name().clone())),
+                        )
+                        .filter(announce_set_dsl::time_deleted.is_null())
+                        .select(BgpAnnounceSet::as_select())
+                        .limit(1)
+                        .first_async(&conn)
+                        .await
+                        .ok();
+
+                let db_as = match found_as {
+                    Some(v) => v,
+                    None => {
+                        diesel::insert_into(announce_set_dsl::bgp_announce_set)
+                            .values(bas.clone())
+                            .returning(BgpAnnounceSet::as_returning())
+                            .get_result_async::<BgpAnnounceSet>(&conn)
+                            .await?
+                    }
+                };
 
                 let mut db_annoucements = Vec::new();
                 for a in &announce.announcement {
@@ -291,13 +356,36 @@ impl DataStore {
                         address_lot_block_id: bas.identity.id,
                         network: a.network.into(),
                     };
-                    let an = diesel::insert_into(
-                        bgp_announcement_dsl::bgp_announcement,
-                    )
-                    .values(an.clone())
-                    .returning(BgpAnnouncement::as_returning())
-                    .get_result_async::<BgpAnnouncement>(&conn)
-                    .await?;
+
+                    let found_an: Option<BgpAnnouncement> =
+                        bgp_announcement_dsl::bgp_announcement
+                            .filter(
+                                bgp_announcement_dsl::announce_set_id
+                                    .eq(db_as.id()),
+                            )
+                            .filter(
+                                bgp_announcement_dsl::network
+                                    .eq(IpNetwork::from(a.network)),
+                            )
+                            .select(BgpAnnouncement::as_select())
+                            .limit(1)
+                            .first_async(&conn)
+                            .await
+                            .ok();
+
+                    let an = match found_an {
+                        Some(v) => v,
+                        None => {
+                            diesel::insert_into(
+                                bgp_announcement_dsl::bgp_announcement,
+                            )
+                            .values(an.clone())
+                            .returning(BgpAnnouncement::as_returning())
+                            .get_result_async::<BgpAnnouncement>(&conn)
+                            .await?
+                        }
+                    };
+
                     db_annoucements.push(an);
                 }
 

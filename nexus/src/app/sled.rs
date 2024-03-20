@@ -264,12 +264,7 @@ impl super::Nexus {
                 )
                 .fetch()
                 .await?;
-        let zpool = db::model::Zpool::new(
-            id,
-            sled_id,
-            db_disk.uuid(),
-            info.size.into(),
-        );
+        let zpool = db::model::Zpool::new(id, sled_id, db_disk.uuid());
         self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }

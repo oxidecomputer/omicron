@@ -17,15 +17,14 @@ use super::nat_cleanup;
 use super::phantom_disks;
 use super::region_replacement;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
+use super::sync_switch_configuration::SwitchPortSettingsManager;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
-use omicron_common::api::internal::shared::SwitchLocation;
 use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 use uuid::Uuid;
@@ -76,6 +75,9 @@ pub struct BackgroundTasks {
     /// task handle for the service zone nat tracker
     pub task_service_zone_nat_tracker: common::TaskHandle,
 
+    /// task handle for the switch port settings manager
+    pub task_switch_port_settings_manager: common::TaskHandle,
+
     /// task handle for the task that detects if regions need replacement and
     /// begins the process
     pub task_region_replacement: common::TaskHandle,
@@ -88,8 +90,6 @@ impl BackgroundTasks {
         opctx: &OpContext,
         datastore: Arc<DataStore>,
         config: &BackgroundTaskConfig,
-        dpd_clients: &HashMap<SwitchLocation, Arc<dpd_client::Client>>,
-        mgd_clients: &HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
         nexus_id: Uuid,
         resolver: internal_dns::resolver::Resolver,
         saga_request: Sender<SagaRequest>,
@@ -134,8 +134,6 @@ impl BackgroundTasks {
             (task, watcher_channel)
         };
 
-        let dpd_clients: Vec<_> = dpd_clients.values().cloned().collect();
-
         let nat_cleanup = {
             driver.register(
                 "nat_v4_garbage_collector".to_string(),
@@ -146,7 +144,7 @@ impl BackgroundTasks {
                 config.nat_cleanup.period_secs,
                 Box::new(nat_cleanup::Ipv4NatGarbageCollector::new(
                     datastore.clone(),
-                    dpd_clients.clone(),
+                    resolver.clone()
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -163,7 +161,7 @@ impl BackgroundTasks {
                 config.bfd_manager.period_secs,
                 Box::new(bfd::BfdManager::new(
                     datastore.clone(),
-                    mgd_clients.clone(),
+                    resolver.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -227,7 +225,7 @@ impl BackgroundTasks {
         let task_inventory_collection = {
             let collector = inventory_collection::InventoryCollector::new(
                 datastore.clone(),
-                resolver,
+                resolver.clone(),
                 &nexus_id.to_string(),
                 config.inventory.nkeep,
                 config.inventory.disable,
@@ -256,7 +254,21 @@ impl BackgroundTasks {
                 config.sync_service_zone_nat.period_secs,
                 Box::new(ServiceZoneNatTracker::new(
                     datastore.clone(),
-                    dpd_clients.clone(),
+                    resolver.clone(),
+                )),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
+
+        let task_switch_port_settings_manager = {
+            driver.register(
+                "switch_port_config_manager".to_string(),
+                String::from("manages switch port settings for rack switches"),
+                config.switch_port_settings_manager.period_secs,
+                Box::new(SwitchPortSettingsManager::new(
+                    datastore.clone(),
+                    resolver.clone(),
                 )),
                 opctx.child(BTreeMap::new()),
                 vec![],
@@ -298,6 +310,7 @@ impl BackgroundTasks {
             task_blueprint_loader,
             task_blueprint_executor,
             task_service_zone_nat_tracker,
+            task_switch_port_settings_manager,
             task_region_replacement,
         }
     }

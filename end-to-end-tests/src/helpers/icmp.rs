@@ -125,7 +125,7 @@ impl Pinger4 {
 
     fn show(self: Arc<Self>) {
         println!(
-            "{:15} {:7} {:7} {:7} {:7} {:7} {:7} {}",
+            "{:15} {:7} {:7} {:7} {:7} {:7} {:9} {}",
             "addr".dimmed(),
             "low".dimmed(),
             "avg".dimmed(),
@@ -140,7 +140,7 @@ impl Pinger4 {
             // print a status line for each target
             for (_id, t) in self.targets.lock().unwrap().iter() {
                 println!(
-                    "{:15} {:7} {:7} {:7} {:7} {:7} {:7} {:<7}",
+                    "{:15} {:7} {:7} {:7} {:7} {:7} {:9} {:<7}",
                     t.dest.to_string().cyan(),
                     format!("{:.3}", (t.low.as_micros() as f32 / 1000.0)),
                     if t.rx_count == 0 {

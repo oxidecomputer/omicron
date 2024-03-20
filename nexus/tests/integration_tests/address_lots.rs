@@ -4,7 +4,6 @@
 
 //! Integration tests for operating on Address Lots
 
-use dropshot::HttpErrorResponseBody;
 use http::method::Method;
 use http::StatusCode;
 use nexus_test_utils::http_testing::AuthnMode;
@@ -77,27 +76,6 @@ async fn test_address_lot_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(
         blocks[0].last_address,
         "203.0.113.20".parse::<IpAddr>().unwrap()
-    );
-
-    // Verify conflict error on recreate
-    let error: HttpErrorResponseBody = NexusRequest::new(
-        RequestBuilder::new(
-            client,
-            Method::POST,
-            "/v1/system/networking/address-lot",
-        )
-        .body(Some(&params))
-        .expect_status(Some(StatusCode::BAD_REQUEST)),
-    )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body()
-    .unwrap();
-    assert_eq!(
-        error.message,
-        "already exists: address-lot \"parkinglot\"".to_string()
     );
 
     // Verify there are lots

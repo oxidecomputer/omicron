@@ -231,12 +231,10 @@ first = \"$SERVICE_IP_POOL_START\"
 		/^last/c\\
 last = \"$SERVICE_IP_POOL_END\"
 	}
-	/^\\[rack_network_config/,/^$/ {
-		/^infra_ip_first/c\\
+	/^infra_ip_first/c\\
 infra_ip_first = \"$UPLINK_IP\"
-		/^infra_ip_last/c\\
+	/^infra_ip_last/c\\
 infra_ip_last = \"$UPLINK_IP\"
-	}
 	/^\\[\\[rack_network_config.ports/,/^\$/ {
 		/^routes/c\\
 routes = \\[{nexthop = \"$GATEWAY_IP\", destination = \"0.0.0.0/0\"}\\]
@@ -334,6 +332,18 @@ while [[ $(pfexec svcs -z $(zoneadm list -n | grep oxz_ntp) \
 	retry=$((retry + 1))
 done
 echo "Waited for chrony: ${retry}s"
+
+# Wait for at least one nexus zone to become available
+retry=0
+until zoneadm list | grep nexus; do
+	if [[ $retry -gt 300 ]]; then
+		echo "Failed to start at least one nexus zone after 300 seconds"
+		exit 1
+	fi
+	sleep 1
+	retry=$((retry + 1))
+done
+echo "Waited for nexus: ${retry}s"
 
 export RUST_BACKTRACE=1
 export E2E_TLS_CERT IPPOOL_START IPPOOL_END

@@ -53,14 +53,35 @@ impl DataStore {
             .transaction(&conn, |conn| async move {
                 let lot = AddressLot::new(&params.identity, params.kind.into());
 
-                let db_lot: AddressLot =
-                    diesel::insert_into(lot_dsl::address_lot)
-                        .values(lot)
-                        .returning(AddressLot::as_returning())
-                        .get_result_async(&conn)
-                        .await?;
+                // @internet-diglett says:
+                // I hate this. I know how to replace this transaction with
+                // CTEs but for the life of me I can't get it to work in
+                // diesel. I gave up and just extended the logic inside
+                // of the transaction instead chasing diesel trait bound errors.
+                let found_lot: Option<AddressLot> = lot_dsl::address_lot
+                    .filter(
+                        lot_dsl::name
+                            .eq(Name::from(params.identity.name.clone())),
+                    )
+                    .filter(lot_dsl::time_deleted.is_null())
+                    .select(AddressLot::as_select())
+                    .limit(1)
+                    .first_async(&conn)
+                    .await
+                    .ok();
 
-                let blocks: Vec<AddressLotBlock> = params
+                let db_lot = match found_lot {
+                    Some(v) => v,
+                    None => {
+                        diesel::insert_into(lot_dsl::address_lot)
+                            .values(lot)
+                            .returning(AddressLot::as_returning())
+                            .get_result_async(&conn)
+                            .await?
+                    }
+                };
+
+                let desired_blocks: Vec<AddressLotBlock> = params
                     .blocks
                     .iter()
                     .map(|b| {
@@ -72,14 +93,51 @@ impl DataStore {
                     })
                     .collect();
 
-                let db_blocks =
-                    diesel::insert_into(block_dsl::address_lot_block)
-                        .values(blocks)
-                        .returning(AddressLotBlock::as_returning())
+                let found_blocks: Vec<AddressLotBlock> =
+                    block_dsl::address_lot_block
+                        .filter(block_dsl::address_lot_id.eq(db_lot.id()))
+                        .filter(
+                            block_dsl::first_address.eq_any(
+                                desired_blocks
+                                    .iter()
+                                    .map(|b| b.first_address)
+                                    .collect::<Vec<_>>(),
+                            ),
+                        )
+                        .filter(
+                            block_dsl::last_address.eq_any(
+                                desired_blocks
+                                    .iter()
+                                    .map(|b| b.last_address)
+                                    .collect::<Vec<_>>(),
+                            ),
+                        )
                         .get_results_async(&conn)
                         .await?;
 
-                Ok(AddressLotCreateResult { lot: db_lot, blocks: db_blocks })
+                let mut blocks = vec![];
+
+                // If the block is found in the database, use the found block.
+                // If the block is not found in the database, insert it.
+                for desired_block in desired_blocks {
+                    let block = match found_blocks.iter().find(|db_b| {
+                        db_b.first_address == desired_block.first_address
+                            && db_b.last_address == desired_block.last_address
+                    }) {
+                        Some(block) => block.clone(),
+                        None => {
+                            diesel::insert_into(block_dsl::address_lot_block)
+                                .values(desired_block)
+                                .returning(AddressLotBlock::as_returning())
+                                .get_results_async(&conn)
+                                .await?[0]
+                                .clone()
+                        }
+                    };
+                    blocks.push(block);
+                }
+
+                Ok(AddressLotCreateResult { lot: db_lot, blocks })
             })
             .await
             .map_err(|e| {
@@ -87,7 +145,7 @@ impl DataStore {
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::AddressLot,
-                        &params.identity.name.as_str(),
+                        params.identity.name.as_str(),
                     ),
                 )
             })
@@ -224,6 +282,35 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(address_lot_id)
+    }
+
+    // Take the name of an address lot and look up its blocks
+    pub async fn address_lot_blocks_by_name(
+        &self,
+        opctx: &OpContext,
+        name: String,
+    ) -> LookupResult<Vec<AddressLotBlock>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::address_lot::dsl as lot_dsl;
+        use db::schema::address_lot_block::dsl as block_dsl;
+
+        let address_lot_id = lot_dsl::address_lot
+            .filter(lot_dsl::name.eq(name))
+            .select(lot_dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let blocks = block_dsl::address_lot_block
+            .filter(block_dsl::address_lot_id.eq(address_lot_id))
+            .select(AddressLotBlock::as_select())
+            .load_async::<AddressLotBlock>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(blocks)
     }
 }
 

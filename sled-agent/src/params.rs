@@ -93,6 +93,12 @@ pub struct InstanceMetadata {
     pub project_id: Uuid,
 }
 
+impl From<InstanceMetadata> for propolis_client::types::InstanceMetadata {
+    fn from(md: InstanceMetadata) -> Self {
+        Self { silo_id: md.silo_id, project_id: md.project_id }
+    }
+}
+
 /// The body of a request to ensure that a instance and VMM are known to a sled
 /// agent.
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -129,7 +135,7 @@ pub struct InstancePutStateBody {
 
 /// The response sent from a request to move an instance into a specific runtime
 /// state.
-#[derive(Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct InstancePutStateResponse {
     /// The current runtime state of the instance after handling the request to
     /// change its state. If the instance's state did not change, this field is
@@ -882,6 +888,13 @@ pub struct InventoryDisk {
     pub slot: i64,
 }
 
+/// Identifies information about zpools managed by the control plane
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct InventoryZpool {
+    pub id: Uuid,
+    pub total_size: ByteCount,
+}
+
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Inventory {
@@ -893,6 +906,7 @@ pub struct Inventory {
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
     pub disks: Vec<InventoryDisk>,
+    pub zpools: Vec<InventoryZpool>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]

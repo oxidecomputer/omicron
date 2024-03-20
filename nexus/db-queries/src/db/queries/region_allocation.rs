@@ -17,7 +17,7 @@ use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::result::Error as DieselError;
 use diesel::PgBinaryExpressionMethods;
 use diesel::{
-    sql_types, BoolExpressionMethods, Column, CombineDsl, ExpressionMethods,
+    sql_types, BoolExpressionMethods, CombineDsl, ExpressionMethods,
     Insertable, IntoSql, JoinOnDsl, NullableExpressionMethods, QueryDsl,
     RunQueryDsl,
 };
@@ -316,7 +316,11 @@ impl CandidateZpools {
         // into a BigInt, not a Numeric. I welcome a better solution.
         let it_will_fit = (old_zpool_usage::dsl::size_used
             + diesel::dsl::sql(&zpool_size_delta.to_string()))
-        .le(diesel::dsl::sql(zpool_dsl::total_size::NAME));
+        .le(diesel::dsl::sql(
+            "(SELECT total_size FROM omicron.public.inv_zpool WHERE
+              inv_zpool.id = old_zpool_usage.pool_id
+              ORDER BY inv_zpool.time_collected DESC LIMIT 1)",
+        ));
 
         // We need to join on the sled table to access provision_state.
         let with_sled = sled_dsl::sled.on(zpool_dsl::sled_id.eq(sled_dsl::id));

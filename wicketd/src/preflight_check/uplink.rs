@@ -11,7 +11,6 @@ use dpd_client::types::PortFec as DpdPortFec;
 use dpd_client::types::PortId;
 use dpd_client::types::PortSettings;
 use dpd_client::types::PortSpeed as DpdPortSpeed;
-use dpd_client::types::RouteSettingsV4;
 use dpd_client::Client as DpdClient;
 use dpd_client::ClientState as DpdClientState;
 use either::Either;
@@ -723,11 +722,7 @@ fn add_steps_for_single_local_uplink_preflight_check<'a>(
                     .port_settings_apply(
                         &port_id,
                         Some(OMICRON_DPD_TAG),
-                        &PortSettings {
-                            links: HashMap::new(),
-                            v4_routes: HashMap::new(),
-                            v6_routes: HashMap::new(),
-                        },
+                        &PortSettings { links: HashMap::new() },
                     )
                     .await
                     .map_err(|err| {
@@ -765,11 +760,7 @@ fn build_port_settings(
         OmicronPortSpeed::Speed400G => DpdPortSpeed::Speed400G,
     };
 
-    let mut port_settings = PortSettings {
-        links: HashMap::new(),
-        v4_routes: HashMap::new(),
-        v6_routes: HashMap::new(),
-    };
+    let mut port_settings = PortSettings { links: HashMap::new() };
 
     let addrs = uplink.addresses.iter().map(|a| a.ip()).collect();
 
@@ -788,13 +779,10 @@ fn build_port_settings(
     );
 
     for r in &uplink.routes {
-        if let (IpNetwork::V4(dst), IpAddr::V4(nexthop)) =
+        if let (IpNetwork::V4(_dst), IpAddr::V4(_nexthop)) =
             (r.destination, r.nexthop)
         {
-            port_settings.v4_routes.insert(
-                dst.to_string(),
-                vec![RouteSettingsV4 { link_id: link_id.0, nexthop }],
-            );
+            // TODO: do we need to create config for mgd?
         }
     }
 

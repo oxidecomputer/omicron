@@ -130,6 +130,7 @@ where
     FromSqlRow,
     Serialize,
     Deserialize,
+    QueryId,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 #[repr(transparent)]

@@ -72,11 +72,18 @@ impl super::Nexus {
             self.boundary_switches(&self.opctx_alloc).await?;
 
         for switch in &boundary_switches {
-            let dpd_client = self.dpd_clients.get(switch).ok_or_else(|| {
+            let dpd_clients = self.dpd_clients().await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to get dpd_clients: {e}"
+                ))
+            })?;
+
+            let dpd_client = dpd_clients.get(switch).ok_or_else(|| {
                 Error::internal_error(&format!(
                     "could not find dpd client for {switch}"
                 ))
             })?;
+
             self.probe_ensure_dpd_config(
                 opctx,
                 probe.id(),

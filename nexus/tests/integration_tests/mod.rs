@@ -18,7 +18,6 @@ mod images;
 mod initialization;
 mod instances;
 mod ip_pools;
-mod loopback_address;
 mod metrics;
 mod oximeter;
 mod pantry;
