@@ -4,7 +4,6 @@
 
 //! Routines that manage instance-related networking state.
 
-use crate::app::sagas::retry_until_known_result;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv6Network;
 use nexus_db_model::ExternalIp;
@@ -22,7 +21,9 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Ipv6Net;
 use omicron_common::api::internal::nexus;
+use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_common::retry_until_known_result;
 use sled_agent_client::types::DeleteVirtualNetworkInterfaceHost;
 use sled_agent_client::types::SetVirtualNetworkInterfaceHost;
 use std::collections::HashSet;
@@ -452,11 +453,105 @@ impl super::Nexus {
         Ok(nat_entries)
     }
 
+    // The logic of this function should follow very closely what
+    // `instance_ensure_dpd_config` does. However, there are enough differences
+    // in the mechanics of how the logic is being carried out to justify having
+    // this separate function, it seems.
+    pub(crate) async fn probe_ensure_dpd_config(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+        sled_ip_address: std::net::Ipv6Addr,
+        ip_index_filter: Option<usize>,
+        dpd_client: &dpd_client::Client,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+
+        // All external IPs map to the primary network interface, so find that
+        // interface. If there is no such interface, there's no way to route
+        // traffic destined to those IPs, so there's nothing to configure and
+        // it's safe to return early.
+        let network_interface = match self
+            .db_datastore
+            .derive_probe_network_interface_info(&opctx, probe_id)
+            .await?
+            .into_iter()
+            .find(|interface| interface.primary)
+        {
+            Some(interface) => interface,
+            None => {
+                info!(log, "probe has no primary network interface";
+                      "probe_id" => %probe_id);
+                return Ok(());
+            }
+        };
+
+        let mac_address =
+            macaddr::MacAddr6::from_str(&network_interface.mac.to_string())
+                .map_err(|e| {
+                    Error::internal_error(&format!(
+                        "failed to convert mac address: {e}"
+                    ))
+                })?;
+
+        info!(log, "looking up probe's external IPs";
+              "probe_id" => %probe_id);
+
+        let ips = self
+            .db_datastore
+            .probe_lookup_external_ips(&opctx, probe_id)
+            .await?;
+
+        if let Some(wanted_index) = ip_index_filter {
+            if let None = ips.get(wanted_index) {
+                return Err(Error::internal_error(&format!(
+                    "failed to find external ip address at index: {}",
+                    wanted_index
+                )));
+            }
+        }
+
+        let sled_address =
+            Ipv6Net(Ipv6Network::new(sled_ip_address, 128).unwrap());
+
+        for target_ip in ips
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| {
+                if let Some(wanted_index) = ip_index_filter {
+                    *index == wanted_index
+                } else {
+                    true
+                }
+            })
+            .map(|(_, ip)| ip)
+        {
+            // For each external ip, add a nat entry to the database
+            self.ensure_nat_entry(
+                target_ip,
+                sled_address,
+                &network_interface,
+                mac_address,
+                opctx,
+            )
+            .await?;
+        }
+
+        // Notify dendrite that there are changes for it to reconcile.
+        // In the event of a failure to notify dendrite, we'll log an error
+        // and rely on dendrite's RPW timer to catch it up.
+        if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+            error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
+        };
+
+        Ok(())
+    }
+
     async fn ensure_nat_entry(
         &self,
         target_ip: &nexus_db_model::ExternalIp,
         sled_address: Ipv6Net,
-        network_interface: &sled_agent_client::types::NetworkInterface,
+        network_interface: &NetworkInterface,
         mac_address: macaddr::MacAddr6,
         opctx: &OpContext,
     ) -> Result<Ipv4NatEntry, Error> {
@@ -642,7 +737,12 @@ impl super::Nexus {
                        "instance_id" => ?instance_id,
                        "switch" => switch.to_string());
 
-            let client_result = self.dpd_clients.get(switch).ok_or_else(|| {
+            let clients = self.dpd_clients().await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "failed to get dpd clients: {e}"
+                ))
+            })?;
+            let client_result = clients.get(switch).ok_or_else(|| {
                 Error::internal_error(&format!(
                     "unable to find dendrite client for {switch}"
                 ))
@@ -669,6 +769,93 @@ impl super::Nexus {
         }
 
         if let Some(e) = errors.into_iter().next() {
+            return Err(e);
+        }
+
+        Ok(())
+    }
+
+    // The logic of this function should follow very closely what
+    // `instance_delete_dpd_config` does. However, there are enough differences
+    // in the mechanics of how the logic is being carried out to justify having
+    // this separate function, it seems.
+    pub(crate) async fn probe_delete_dpd_config(
+        &self,
+        opctx: &OpContext,
+        probe_id: Uuid,
+    ) -> Result<(), Error> {
+        let log = &self.log;
+
+        info!(log, "deleting probe dpd configuration";
+              "probe_id" => %probe_id);
+
+        let external_ips = self
+            .db_datastore
+            .probe_lookup_external_ips(opctx, probe_id)
+            .await?;
+
+        let mut errors = vec![];
+        for entry in external_ips {
+            // Soft delete the NAT entry
+            match self
+                .db_datastore
+                .ipv4_nat_delete_by_external_ip(&opctx, &entry)
+                .await
+            {
+                Ok(_) => Ok(()),
+                Err(err) => match err {
+                    Error::ObjectNotFound { .. } => {
+                        warn!(log, "no matching nat entries to soft delete");
+                        Ok(())
+                    }
+                    _ => {
+                        let message = format!(
+                            "failed to delete nat entry due to error: {err:?}"
+                        );
+                        error!(log, "{}", message);
+                        Err(Error::internal_error(&message))
+                    }
+                },
+            }?;
+        }
+
+        let boundary_switches =
+            self.boundary_switches(&self.opctx_alloc).await?;
+
+        for switch in &boundary_switches {
+            debug!(&self.log, "notifying dendrite of updates";
+                       "probe_id" => %probe_id,
+                       "switch" => switch.to_string());
+
+            let dpd_clients = self.dpd_clients().await.map_err(|e| {
+                Error::internal_error(&format!(
+                    "unable to get dpd_clients: {e}"
+                ))
+            })?;
+
+            let client_result = dpd_clients.get(switch).ok_or_else(|| {
+                Error::internal_error(&format!(
+                    "unable to find dendrite client for {switch}"
+                ))
+            });
+
+            let dpd_client = match client_result {
+                Ok(client) => client,
+                Err(new_error) => {
+                    errors.push(new_error);
+                    continue;
+                }
+            };
+
+            // Notify dendrite that there are changes for it to reconcile.
+            // In the event of a failure to notify dendrite, we'll log an error
+            // and rely on dendrite's RPW timer to catch it up.
+            if let Err(e) = dpd_client.ipv4_nat_trigger_update().await {
+                error!(self.log, "failed to notify dendrite of nat updates"; "error" => ?e);
+            };
+        }
+
+        if let Some(e) = errors.into_iter().nth(0) {
             return Err(e);
         }
 

@@ -3506,6 +3506,26 @@
           "target"
         ]
       },
+      "DiskIdentity": {
+        "description": "Uniquely identifies a disk.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "vendor"
+        ]
+      },
       "DiskRequest": {
         "description": "DiskRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"device\", \"name\", \"read_only\", \"slot\", \"volume_construction_request\" ], \"properties\": { \"device\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"read_only\": { \"type\": \"boolean\" }, \"slot\": { \"$ref\": \"#/components/schemas/Slot\" }, \"volume_construction_request\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } } } ``` </details>",
         "type": "object",
@@ -3833,6 +3853,13 @@
         ]
       },
       "DiskType": {
+        "type": "string",
+        "enum": [
+          "U2",
+          "M2"
+        ]
+      },
+      "DiskVariant": {
         "type": "string",
         "enum": [
           "U2",
@@ -5214,6 +5241,12 @@
           "baseboard": {
             "$ref": "#/components/schemas/Baseboard"
           },
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryDisk"
+            }
+          },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
           },
@@ -5234,16 +5267,62 @@
           },
           "usable_physical_ram": {
             "$ref": "#/components/schemas/ByteCount"
+          },
+          "zpools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryZpool"
+            }
           }
         },
         "required": [
           "baseboard",
+          "disks",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
           "sled_role",
           "usable_hardware_threads",
-          "usable_physical_ram"
+          "usable_physical_ram",
+          "zpools"
+        ]
+      },
+      "InventoryDisk": {
+        "description": "Identifies information about disks which may be attached to Sleds.",
+        "type": "object",
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/DiskVariant"
+          }
+        },
+        "required": [
+          "identity",
+          "slot",
+          "variant"
+        ]
+      },
+      "InventoryZpool": {
+        "description": "Identifies information about zpools managed by the control plane",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "total_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "id",
+          "total_size"
         ]
       },
       "IpNet": {
@@ -5663,6 +5742,26 @@
                 "type": "string",
                 "enum": [
                   "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
                 ]
               }
             },

@@ -27,8 +27,12 @@ use dropshot::ConfigDropshot;
 use external_api::http_entrypoints::external_api;
 use internal_api::http_entrypoints::internal_api;
 use nexus_config::NexusConfig;
+use nexus_types::deployment::Blueprint;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use nexus_types::internal_api::params::ServiceKind;
+use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
+use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::{
     ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
@@ -231,12 +235,14 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start(
         internal_server: InternalServer,
         config: &NexusConfig,
+        blueprint: Blueprint,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_zone_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
         certs: Vec<nexus_types::internal_api::params::Certificate>,
+        disable_sled_id: Uuid,
     ) -> Self {
         // Perform the "handoff from RSS".
         //
@@ -274,6 +280,7 @@ impl nexus_test_interface::NexusServer for Server {
                 &opctx,
                 config.deployment.rack_id,
                 internal_api::params::RackInitializationRequest {
+                    blueprint,
                     services,
                     datasets,
                     internal_services_ip_pool_ranges,
@@ -302,7 +309,25 @@ impl nexus_test_interface::NexusServer for Server {
             .expect("Could not initialize rack");
 
         // Start the Nexus external API.
-        Server::start(internal_server).await.unwrap()
+        let rv = Server::start(internal_server).await.unwrap();
+
+        // Historically, tests have assumed that there's only one provisionable
+        // sled, and that's convenient for a lot of purposes.  Mark our second
+        // sled non-provisionable.
+        let nexus = &rv.apictx().nexus;
+        nexus
+            .sled_set_provision_policy(
+                &opctx,
+                &nexus_db_queries::db::lookup::LookupPath::new(
+                    &opctx,
+                    nexus.datastore(),
+                )
+                .sled_id(disable_sled_id),
+                SledProvisionPolicy::NonProvisionable,
+            )
+            .await
+            .unwrap();
+        rv
     }
 
     async fn get_http_server_external_address(&self) -> SocketAddr {
@@ -329,6 +354,17 @@ impl nexus_test_interface::NexusServer for Server {
             )
             .await
             .unwrap();
+    }
+
+    async fn inventory_collect_and_get_latest_collection(
+        &self,
+    ) -> Result<Option<Collection>, Error> {
+        let nexus = &self.apictx.nexus;
+
+        nexus.activate_inventory_collection();
+
+        let opctx = nexus.opctx_for_internal_api();
+        nexus.datastore().inventory_get_latest_collection(&opctx).await
     }
 
     async fn close(mut self) {

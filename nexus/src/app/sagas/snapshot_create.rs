@@ -99,7 +99,6 @@ use super::{
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::retry_until_known_result;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use anyhow::anyhow;
@@ -109,6 +108,7 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use omicron_common::retry_until_known_result;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;

@@ -60,6 +60,16 @@ impl NexusClientWithResolver {
         }
     }
 
+    // for when we have a NexusClient constructed from a FakeNexusServer
+    // (no need to expose this function outside of tests)
+    #[cfg(test)]
+    pub(crate) fn new_with_client(
+        client: NexusClient,
+        resolver: Arc<Resolver>,
+    ) -> Self {
+        Self { client, resolver }
+    }
+
     /// Access the progenitor-based Nexus Client.
     pub fn client(&self) -> &NexusClient {
         &self.client
@@ -140,7 +150,9 @@ impl ConvertInto<nexus_client::types::PhysicalDiskKind>
     }
 }
 
-impl ConvertInto<nexus_client::types::Baseboard> for sled_hardware::Baseboard {
+impl ConvertInto<nexus_client::types::Baseboard>
+    for sled_hardware_types::Baseboard
+{
     fn convert(self) -> nexus_client::types::Baseboard {
         nexus_client::types::Baseboard {
             serial: self.identifier().to_string(),
@@ -444,10 +456,11 @@ impl NexusNotifierTask {
             (Some(tx), rx)
         };
 
+        const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
+        let mut interval = interval(RETRY_TIMEOUT);
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
         loop {
-            const RETRY_TIMEOUT: Duration = Duration::from_secs(2);
-            let mut interval = interval(RETRY_TIMEOUT);
-            interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
             tokio::select! {
                 req = self.rx.recv() => {
                     let Some(req) = req else {
@@ -644,7 +657,7 @@ mod test {
         ByteCount, Error, Generation, LookupType, MessagePair, ResourceType,
     };
     use omicron_test_utils::dev::test_setup_log;
-    use sled_hardware::Baseboard;
+    use sled_hardware_types::Baseboard;
 
     /// Pretend to be CRDB storing info about a sled-agent
     #[derive(Default, Clone)]

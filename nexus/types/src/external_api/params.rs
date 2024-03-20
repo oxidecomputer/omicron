@@ -80,6 +80,7 @@ path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 path_param!(AddressLotPath, address_lot, "address lot");
+path_param!(ProbePath, probe, "probe");
 
 id_path_param!(GroupPath, group_id, "group");
 
@@ -91,6 +92,7 @@ id_path_param!(SwitchPath, switch_id, "switch");
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SledSelector {
     /// ID of the sled
     pub sled: Uuid,
@@ -1325,6 +1327,16 @@ pub enum PhysicalDiskKind {
     U2,
 }
 
+impl From<sled_agent_client::types::DiskVariant> for PhysicalDiskKind {
+    fn from(variant: sled_agent_client::types::DiskVariant) -> Self {
+        use sled_agent_client::types::DiskVariant;
+        match variant {
+            DiskVariant::U2 => Self::U2,
+            DiskVariant::M2 => Self::M2,
+        }
+    }
+}
+
 /// Different sources for a disk
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -2041,4 +2053,22 @@ pub struct UpdatesPutRepositoryParams {
 pub struct UpdatesGetRepositoryParams {
     /// The version to get.
     pub system_version: SemverVersion,
+}
+
+// Probes
+
+/// Create time parameters for probes.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct ProbeCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub sled: Uuid,
+    pub ip_pool: Option<NameOrId>,
+}
+
+/// List probes with an optional name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct ProbeListSelector {
+    /// A name or id to use when selecting a probe.
+    pub name_or_id: Option<NameOrId>,
 }

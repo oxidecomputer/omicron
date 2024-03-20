@@ -33,6 +33,9 @@
 
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
+use nexus_types::deployment::Blueprint;
+use nexus_types::inventory::Collection;
+use omicron_common::api::external::Error;
 use slog::Logger;
 use std::net::{SocketAddr, SocketAddrV6};
 use uuid::Uuid;
@@ -50,12 +53,14 @@ pub trait NexusServer: Send + Sync + 'static {
     async fn start(
         internal_server: Self::InternalServer,
         config: &NexusConfig,
+        blueprint: Blueprint,
         services: Vec<nexus_types::internal_api::params::ServicePutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
         recovery_silo: nexus_types::internal_api::params::RecoverySiloConfig,
         tls_certificates: Vec<nexus_types::internal_api::params::Certificate>,
+        disable_sled_id: Uuid,
     ) -> Self;
 
     async fn get_http_server_external_address(&self) -> SocketAddr;
@@ -87,6 +92,10 @@ pub trait NexusServer: Send + Sync + 'static {
         zpool_id: Uuid,
         address: SocketAddrV6,
     );
+
+    async fn inventory_collect_and_get_latest_collection(
+        &self,
+    ) -> Result<Option<Collection>, Error>;
 
     async fn close(self);
 }

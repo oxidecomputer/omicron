@@ -125,6 +125,217 @@
         }
       }
     },
+    "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request": {
+      "post": {
+        "summary": "An Upstairs will update this endpoint if a Downstairs client task is",
+        "description": "requested to stop",
+        "operationId": "cpapi_downstairs_client_stop_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "downstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDownstairsKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownstairsClientStopRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped": {
+      "post": {
+        "summary": "An Upstairs will update this endpoint if a Downstairs client task stops for",
+        "description": "any reason (not just after being requested to)",
+        "operationId": "cpapi_downstairs_client_stopped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "downstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDownstairsKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownstairsClientStopped"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress": {
+      "post": {
+        "summary": "An Upstairs will update this endpoint with the progress of a repair",
+        "operationId": "cpapi_upstairs_repair_progress",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "repair_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairProgress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/crucible/0/upstairs/{upstairs_id}/repair-finish": {
+      "post": {
+        "summary": "An Upstairs will notify this endpoint when a repair finishes.",
+        "operationId": "cpapi_upstairs_repair_finish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairFinishInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/crucible/0/upstairs/{upstairs_id}/repair-start": {
+      "post": {
+        "summary": "An Upstairs will notify this endpoint when a repair starts",
+        "operationId": "cpapi_upstairs_repair_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "upstairs_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForUpstairsKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepairStartInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/deployment/blueprints/all": {
       "get": {
         "summary": "Lists blueprints",
@@ -329,6 +540,40 @@
       "post": {
         "summary": "Make the specified blueprint the new target",
         "operationId": "blueprint_target_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BlueprintTargetSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlueprintTarget"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/deployment/blueprints/target/enabled": {
+      "put": {
+        "summary": "Set the `enabled` field of the current target blueprint",
+        "operationId": "blueprint_target_set_enabled",
         "requestBody": {
           "content": {
             "application/json": {
@@ -667,6 +912,75 @@
         }
       }
     },
+    "/probes/{sled}": {
+      "get": {
+        "summary": "Get all the probes associated with a given sled.",
+        "operationId": "probes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sled",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/IdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ProbeInfo",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProbeInfo"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      }
+    },
     "/racks/{rack_id}/initialization-complete": {
       "put": {
         "summary": "Report that the Rack Setup Service initialization is complete",
@@ -968,6 +1282,41 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sleds/expunge": {
+      "post": {
+        "summary": "Mark a sled as expunged",
+        "description": "This is an irreversible process! It should only be called after sufficient warning to the operator.\nThis is idempotent, and it returns the old policy of the sled.",
+        "operationId": "sled_expunge",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledSelector"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledPolicy"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2203,6 +2552,14 @@
             "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
             "type": "string"
           },
+          "external_dns_version": {
+            "description": "external DNS version when thi blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "id": {
             "description": "unique identifier for this blueprint",
             "type": "string",
@@ -2247,6 +2604,7 @@
         "required": [
           "comment",
           "creator",
+          "external_dns_version",
           "id",
           "internal_dns_version",
           "omicron_zones",
@@ -2265,6 +2623,14 @@
           "creator": {
             "description": "identity of the component that generated the blueprint (for debugging) This would generally be the Uuid of a Nexus instance.",
             "type": "string"
+          },
+          "external_dns_version": {
+            "description": "external DNS version when this blueprint was created",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
           },
           "id": {
             "description": "unique identifier for this blueprint",
@@ -2294,6 +2660,7 @@
         "required": [
           "comment",
           "creator",
+          "external_dns_version",
           "id",
           "internal_dns_version",
           "time_created"
@@ -3493,6 +3860,81 @@
           }
         ]
       },
+      "DownstairsClientStopRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DownstairsClientStopRequestReason"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reason",
+          "time"
+        ]
+      },
+      "DownstairsClientStopRequestReason": {
+        "type": "string",
+        "enum": [
+          "replacing",
+          "disabled",
+          "failed_reconcile",
+          "i_o_error",
+          "bad_negotiation_order",
+          "incompatible",
+          "failed_live_repair",
+          "too_many_outstanding_jobs",
+          "deactivated"
+        ]
+      },
+      "DownstairsClientStopped": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/DownstairsClientStoppedReason"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reason",
+          "time"
+        ]
+      },
+      "DownstairsClientStoppedReason": {
+        "type": "string",
+        "enum": [
+          "connection_timeout",
+          "connection_failed",
+          "timeout",
+          "write_failed",
+          "read_failed",
+          "requested_stop",
+          "finished",
+          "queue_closed",
+          "receive_task_cancelled"
+        ]
+      },
+      "DownstairsUnderRepair": {
+        "type": "object",
+        "properties": {
+          "region_uuid": {
+            "$ref": "#/components/schemas/TypedUuidForDownstairsRegionKind"
+          },
+          "target_addr": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "region_uuid",
+          "target_addr"
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -4358,14 +4800,31 @@
           }
         ]
       },
+      "IpKind": {
+        "type": "string",
+        "enum": [
+          "snat",
+          "floating",
+          "ephemeral"
+        ]
+      },
       "IpNet": {
-        "description": "IpNet\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"title\": \"v4\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Ipv4Net\" } ] }, { \"title\": \"v6\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Ipv6Net\" } ] } ] } ``` </details>",
-        "anyOf": [
+        "oneOf": [
           {
-            "$ref": "#/components/schemas/Ipv4Net"
+            "title": "v4",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            ]
           },
           {
-            "$ref": "#/components/schemas/Ipv6Net"
+            "title": "v6",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Net"
+              }
+            ]
           }
         ]
       },
@@ -4457,8 +4916,11 @@
         ]
       },
       "Ipv4Net": {
-        "description": "An IPv4 subnet, including prefix and subnet mask\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"An IPv4 subnet\", \"description\": \"An IPv4 subnet, including prefix and subnet mask\", \"examples\": [ \"192.168.1.0/24\" ], \"type\": \"string\", \"pattern\": \"^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$\" } ``` </details>",
-        "type": "string"
+        "example": "192.168.1.0/24",
+        "title": "An IPv4 subnet",
+        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
       },
       "Ipv4Network": {
         "type": "string",
@@ -4483,8 +4945,11 @@
         ]
       },
       "Ipv6Net": {
-        "description": "An IPv6 subnet, including prefix and subnet mask\n\n<details><summary>JSON schema</summary>\n\n```json { \"title\": \"An IPv6 subnet\", \"description\": \"An IPv6 subnet, including prefix and subnet mask\", \"examples\": [ \"fd12:3456::/64\" ], \"type\": \"string\", \"pattern\": \"^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$\" } ``` </details>",
-        "type": "string"
+        "example": "fd12:3456::/64",
+        "title": "An IPv6 subnet",
+        "description": "An IPv6 subnet, including prefix and subnet mask",
+        "type": "string",
+        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
       "Ipv6Network": {
         "type": "string",
@@ -4825,7 +5290,7 @@
         "maxLength": 63
       },
       "NetworkInterface": {
-        "description": "Information required to construct a virtual network interface\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Information required to construct a virtual network interface\", \"type\": \"object\", \"required\": [ \"id\", \"ip\", \"kind\", \"mac\", \"name\", \"primary\", \"slot\", \"subnet\", \"vni\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"ip\": { \"type\": \"string\", \"format\": \"ip\" }, \"kind\": { \"$ref\": \"#/components/schemas/NetworkInterfaceKind\" }, \"mac\": { \"$ref\": \"#/components/schemas/MacAddr\" }, \"name\": { \"$ref\": \"#/components/schemas/Name\" }, \"primary\": { \"type\": \"boolean\" }, \"slot\": { \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 }, \"subnet\": { \"$ref\": \"#/components/schemas/IpNet\" }, \"vni\": { \"$ref\": \"#/components/schemas/Vni\" } } } ``` </details>",
+        "description": "Information required to construct a virtual network interface",
         "type": "object",
         "properties": {
           "id": {
@@ -4873,7 +5338,7 @@
         ]
       },
       "NetworkInterfaceKind": {
-        "description": "The type of network interface\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"The type of network interface\", \"oneOf\": [ { \"description\": \"A vNIC attached to a guest instance\", \"type\": \"object\", \"required\": [ \"id\", \"type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"instance\" ] } } }, { \"description\": \"A vNIC associated with an internal service\", \"type\": \"object\", \"required\": [ \"id\", \"type\" ], \"properties\": { \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"service\" ] } } } ] } ``` </details>",
+        "description": "The type of network interface",
         "oneOf": [
           {
             "description": "A vNIC attached to a guest instance",
@@ -4907,6 +5372,26 @@
                 "type": "string",
                 "enum": [
                   "service"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
                 ]
               }
             },
@@ -5504,6 +5989,66 @@
           "speed400_g"
         ]
       },
+      "ProbeExternalIp": {
+        "type": "object",
+        "properties": {
+          "first_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/IpKind"
+          },
+          "last_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "first_port",
+          "ip",
+          "kind",
+          "last_port"
+        ]
+      },
+      "ProbeInfo": {
+        "type": "object",
+        "properties": {
+          "external_ips": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeExternalIp"
+            }
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface": {
+            "$ref": "#/components/schemas/NetworkInterface"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "sled": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "external_ips",
+          "id",
+          "interface",
+          "name",
+          "sled"
+        ]
+      },
       "ProducerEndpoint": {
         "description": "Information announced by a metric server, used so that clients can contact it and collect available metric data from it.",
         "type": "object",
@@ -5707,6 +6252,14 @@
       "RackInitializationRequest": {
         "type": "object",
         "properties": {
+          "blueprint": {
+            "description": "Blueprint describing services initialized by RSS.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Blueprint"
+              }
+            ]
+          },
           "certs": {
             "description": "x.509 Certificates used to encrypt communication with the external API.",
             "type": "array",
@@ -5773,6 +6326,7 @@
           }
         },
         "required": [
+          "blueprint",
           "certs",
           "datasets",
           "external_dns_zone_name",
@@ -5841,6 +6395,94 @@
           "silo_name",
           "user_name",
           "user_password_hash"
+        ]
+      },
+      "RepairFinishInfo": {
+        "type": "object",
+        "properties": {
+          "aborted": {
+            "type": "boolean"
+          },
+          "repair_id": {
+            "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+          },
+          "repair_type": {
+            "$ref": "#/components/schemas/UpstairsRepairType"
+          },
+          "repairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownstairsUnderRepair"
+            }
+          },
+          "session_id": {
+            "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "aborted",
+          "repair_id",
+          "repair_type",
+          "repairs",
+          "session_id",
+          "time"
+        ]
+      },
+      "RepairProgress": {
+        "type": "object",
+        "properties": {
+          "current_item": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "total_items": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "current_item",
+          "time",
+          "total_items"
+        ]
+      },
+      "RepairStartInfo": {
+        "type": "object",
+        "properties": {
+          "repair_id": {
+            "$ref": "#/components/schemas/TypedUuidForUpstairsRepairKind"
+          },
+          "repair_type": {
+            "$ref": "#/components/schemas/UpstairsRepairType"
+          },
+          "repairs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DownstairsUnderRepair"
+            }
+          },
+          "session_id": {
+            "$ref": "#/components/schemas/TypedUuidForUpstairsSessionKind"
+          },
+          "time": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "repair_id",
+          "repair_type",
+          "repairs",
+          "session_id",
+          "time"
         ]
       },
       "RouteConfig": {
@@ -6529,6 +7171,69 @@
           "vmm_state"
         ]
       },
+      "SledPolicy": {
+        "description": "The operator-defined policy of a sled.",
+        "oneOf": [
+          {
+            "description": "The operator has indicated that the sled is in-service.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "in_service"
+                ]
+              },
+              "provision_policy": {
+                "description": "Determines whether new resources can be provisioned onto the sled.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SledProvisionPolicy"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "provision_policy"
+            ]
+          },
+          {
+            "description": "The operator has indicated that the sled has been permanently removed from service.\n\nThis is a terminal state: once a particular sled ID is expunged, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new sled.)\n\nAn expunged sled is always non-provisionable.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "expunged"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        ]
+      },
+      "SledProvisionPolicy": {
+        "description": "The operator-defined provision policy of a sled.\n\nThis controls whether new resources are going to be provisioned on this sled.",
+        "oneOf": [
+          {
+            "description": "New resources will be provisioned on this sled.",
+            "type": "string",
+            "enum": [
+              "provisionable"
+            ]
+          },
+          {
+            "description": "New resources will not be provisioned on this sled. However, if the sled is currently in service, existing resources will continue to be on this sled unless manually migrated off.",
+            "type": "string",
+            "enum": [
+              "non_provisionable"
+            ]
+          }
+        ]
+      },
       "SledRole": {
         "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
@@ -6546,6 +7251,19 @@
               "scrimlet"
             ]
           }
+        ]
+      },
+      "SledSelector": {
+        "type": "object",
+        "properties": {
+          "sled": {
+            "description": "ID of the sled",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "sled"
         ]
       },
       "SourceNatConfig": {
@@ -6644,6 +7362,18 @@
       "SwitchPutResponse": {
         "type": "object"
       },
+      "TypedUuidForDownstairsRegionKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForUpstairsRepairKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForUpstairsSessionKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",
         "type": "object",
@@ -6702,6 +7432,13 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UpstairsRepairType": {
+        "type": "string",
+        "enum": [
+          "live",
+          "reconciliation"
         ]
       },
       "UserId": {
@@ -6789,6 +7526,14 @@
       "SemverVersion": {
         "type": "string",
         "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "TypedUuidForDownstairsKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForUpstairsKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "IdSortMode": {
         "description": "Supported set of sort modes for scanning by id only.\n\nCurrently, we only support scanning in ascending order.",

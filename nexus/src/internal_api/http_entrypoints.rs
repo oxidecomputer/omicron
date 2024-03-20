@@ -25,12 +25,15 @@ use dropshot::ResultsPage;
 use dropshot::TypedBody;
 use hyper::Body;
 use nexus_db_model::Ipv4NatEntryView;
+use nexus_db_queries::db::datastore::ProbeInfo;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
+use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::UninitializedSled;
+use nexus_types::external_api::views::SledPolicy;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -42,9 +45,18 @@ use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
+use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
+use omicron_common::api::internal::nexus::DownstairsClientStopped;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
+use omicron_common::api::internal::nexus::RepairFinishInfo;
+use omicron_common::api::internal::nexus::RepairProgress;
+use omicron_common::api::internal::nexus::RepairStartInfo;
 use omicron_common::api::internal::nexus::SledInstanceState;
 use omicron_common::update::ArtifactId;
+use omicron_uuid_kinds::DownstairsKind;
+use omicron_uuid_kinds::TypedUuid;
+use omicron_uuid_kinds::UpstairsKind;
+use omicron_uuid_kinds::UpstairsRepairKind;
 use oximeter::types::ProducerResults;
 use oximeter_producer::{collect, ProducerIdPathParams};
 use schemars::JsonSchema;
@@ -75,6 +87,12 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
 
+        api.register(cpapi_upstairs_repair_start)?;
+        api.register(cpapi_upstairs_repair_finish)?;
+        api.register(cpapi_upstairs_repair_progress)?;
+        api.register(cpapi_downstairs_client_stop_request)?;
+        api.register(cpapi_downstairs_client_stopped)?;
+
         api.register(saga_list)?;
         api.register(saga_view)?;
 
@@ -88,11 +106,15 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_delete)?;
         api.register(blueprint_target_view)?;
         api.register(blueprint_target_set)?;
+        api.register(blueprint_target_set_enabled)?;
         api.register(blueprint_generate_from_collection)?;
         api.register(blueprint_regenerate)?;
 
         api.register(sled_list_uninitialized)?;
         api.register(sled_add)?;
+        api.register(sled_expunge)?;
+
+        api.register(probes_get)?;
 
         Ok(())
     }
@@ -506,6 +528,171 @@ async fn cpapi_artifact_download(
     Ok(HttpResponseOk(Body::from(body).into()))
 }
 
+/// Path parameters for Upstairs requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct UpstairsPathParam {
+    upstairs_id: TypedUuid<UpstairsKind>,
+}
+
+/// An Upstairs will notify this endpoint when a repair starts
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/repair-start",
+ }]
+async fn cpapi_upstairs_repair_start(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsPathParam>,
+    repair_start_info: TypedBody<RepairStartInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .upstairs_repair_start(
+                &opctx,
+                path.upstairs_id,
+                repair_start_info.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// An Upstairs will notify this endpoint when a repair finishes.
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/repair-finish",
+ }]
+async fn cpapi_upstairs_repair_finish(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsPathParam>,
+    repair_finish_info: TypedBody<RepairFinishInfo>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .upstairs_repair_finish(
+                &opctx,
+                path.upstairs_id,
+                repair_finish_info.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Upstairs requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct UpstairsRepairPathParam {
+    upstairs_id: TypedUuid<UpstairsKind>,
+    repair_id: TypedUuid<UpstairsRepairKind>,
+}
+
+/// An Upstairs will update this endpoint with the progress of a repair
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/repair/{repair_id}/progress",
+ }]
+async fn cpapi_upstairs_repair_progress(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsRepairPathParam>,
+    repair_progress: TypedBody<RepairProgress>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .upstairs_repair_progress(
+                &opctx,
+                path.upstairs_id,
+                path.repair_id,
+                repair_progress.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for Downstairs requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+struct UpstairsDownstairsPathParam {
+    upstairs_id: TypedUuid<UpstairsKind>,
+    downstairs_id: TypedUuid<DownstairsKind>,
+}
+
+/// An Upstairs will update this endpoint if a Downstairs client task is
+/// requested to stop
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request",
+ }]
+async fn cpapi_downstairs_client_stop_request(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsDownstairsPathParam>,
+    downstairs_client_stop_request: TypedBody<DownstairsClientStopRequest>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .downstairs_client_stop_request_notification(
+                &opctx,
+                path.upstairs_id,
+                path.downstairs_id,
+                downstairs_client_stop_request.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// An Upstairs will update this endpoint if a Downstairs client task stops for
+/// any reason (not just after being requested to)
+#[endpoint {
+     method = POST,
+     path = "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stopped",
+ }]
+async fn cpapi_downstairs_client_stopped(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<UpstairsDownstairsPathParam>,
+    downstairs_client_stopped: TypedBody<DownstairsClientStopped>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        nexus
+            .downstairs_client_stopped_notification(
+                &opctx,
+                path.upstairs_id,
+                path.downstairs_id,
+                downstairs_client_stopped.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Sagas
 
 /// List sagas
@@ -635,7 +822,7 @@ struct RpwNatQueryParam {
 /// change or until the `limit` is reached. If there are no changes, an
 /// empty vec is returned.
 #[endpoint {
-   method = GET,
+    method = GET,
     path = "/nat/ipv4/changeset/{from_gen}"
 }]
 async fn ipv4_nat_changeset(
@@ -775,6 +962,26 @@ async fn blueprint_target_set(
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
 
+/// Set the `enabled` field of the current target blueprint
+#[endpoint {
+    method = PUT,
+    path = "/deployment/blueprints/target/enabled",
+}]
+async fn blueprint_target_set_enabled(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    target: TypedBody<BlueprintTargetSet>,
+) -> Result<HttpResponseOk<BlueprintTarget>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let target = target.into_inner();
+        let target = nexus.blueprint_target_set_enabled(&opctx, target).await?;
+        Ok(HttpResponseOk(target))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
 // Generating blueprints
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -861,6 +1068,61 @@ async fn sled_add(
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         nexus.sled_add(&opctx, sled.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Mark a sled as expunged
+///
+/// This is an irreversible process! It should only be called after
+/// sufficient warning to the operator.
+///
+/// This is idempotent, and it returns the old policy of the sled.
+#[endpoint {
+    method = POST,
+    path = "/sleds/expunge",
+}]
+async fn sled_expunge(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    sled: TypedBody<SledSelector>,
+) -> Result<HttpResponseOk<SledPolicy>, HttpError> {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let previous_policy =
+            nexus.sled_expunge(&opctx, sled.into_inner().sled).await?;
+        Ok(HttpResponseOk(previous_policy))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Path parameters for probes
+#[derive(Deserialize, JsonSchema)]
+struct ProbePathParam {
+    sled: Uuid,
+}
+
+/// Get all the probes associated with a given sled.
+#[endpoint {
+    method = GET,
+    path = "/probes/{sled}"
+}]
+async fn probes_get(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<ProbePathParam>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let query = query_params.into_inner();
+        let path = path_params.into_inner();
+        let nexus = &apictx.nexus;
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let pagparams = data_page_params_for(&rqctx, &query)?;
+        Ok(HttpResponseOk(
+            nexus.probe_list_for_sled(&opctx, &pagparams, path.sled).await?,
+        ))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
