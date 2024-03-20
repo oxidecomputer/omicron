@@ -1520,7 +1520,7 @@ impl InstanceRunner {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "illumos"))]
 mod tests {
     use super::*;
     use crate::fakes::nexus::{FakeNexusServer, ServerContext};
