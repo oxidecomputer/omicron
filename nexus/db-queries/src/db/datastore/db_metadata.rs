@@ -13,6 +13,7 @@ use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::AllSchemaVersions;
+use nexus_db_model::SchemaUpgradeStep;
 use nexus_db_model::SchemaVersion;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use omicron_common::api::external::Error;
@@ -20,6 +21,84 @@ use omicron_common::api::external::SemverVersion;
 use slog::{error, info, o, Logger};
 use std::ops::Bound;
 use std::str::FromStr;
+
+// A SchemaVersion which uses a pre-release value to indicate
+// "incremental progress".
+//
+// Although we organize our schema changes into higher-level versions,
+// transaction semantics of CockroachDB do not allow multiple DDL statements
+// to be applied together. As a result, an upgrade from "1.0.0" to "2.0.0"
+// may involve multiple smaller "step" versions, each separated by
+// an auto-generated pre-release version.
+#[derive(Clone)]
+struct StepSemverVersion {
+    version: SemverVersion,
+    i: usize,
+}
+
+impl StepSemverVersion {
+    // Durably store our progress in the target version as the
+    // pre-release extension of "target_version".
+    //
+    // Note that the format of "step.{i}" is load-bearing, see:
+    // https://docs.rs/semver/1.0.22/semver/struct.Prerelease.html#examples
+    //
+    // By using "dot number" notation, we can order the pre-release
+    // steps, which matters while comparing their order.
+    fn new(target_version: &SemverVersion, i: usize) -> anyhow::Result<Self> {
+        let mut target_step_version = target_version.clone();
+        target_step_version.0.pre =
+            semver::Prerelease::new(&format!("step.{i}"))
+                .context("Cannot parse step as semver pre-release")?;
+        Ok(Self { version: target_step_version, i })
+    }
+
+    // Drops the pre-release information about this target version.
+    //
+    // This is the version we are upgrading to, using these incremental steps.
+    fn without_prerelease(&self) -> SemverVersion {
+        let mut target_version = self.version.clone();
+        target_version.0.pre = semver::Prerelease::EMPTY;
+        target_version
+    }
+
+    fn previous(&self) -> anyhow::Result<Self> {
+        if self.i == 0 {
+            bail!("No prior step version possible");
+        }
+        Self::new(&self.version, self.i - 1)
+    }
+}
+
+// Identifies if we have already completed the "target_step_version", by
+// comparing with the `target_version` value stored in the DB as
+// "found_target_version".
+fn skippable_version(
+    log: &Logger,
+    target_step_version: &SemverVersion,
+    found_target_version: &Option<SemverVersion>,
+) -> bool {
+    if let Some(found_target_version) = found_target_version.as_ref() {
+        info!(
+            log,
+            "Considering found target version";
+            "found_target_version" => ?found_target_version,
+        );
+
+        // This case only occurs if an upgrade failed and needed to
+        // restart, for whatever reason. We skip all the incremental
+        // steps that we know have completed.
+        if found_target_version > target_step_version {
+            warn!(
+                log,
+                "Observed target version greater than this upgrade step. Skipping.";
+                "found_target_version" => %found_target_version,
+            );
+            return true;
+        }
+    }
+    return false;
+}
 
 impl DataStore {
     // Ensures that the database schema matches "desired_version".
@@ -117,12 +196,17 @@ impl DataStore {
         // These are the user-defined `KNOWN_VERSIONS` defined in
         // nexus/db-model/src/schema_versions.rs.
         let mut current_version = found_version;
-        for target_version in target_versions.into_iter().cloned() {
+        for target_version in target_versions.into_iter() {
             let log = log.new(o!(
                 "current_version" => current_version.to_string(),
                 "target_version" => target_version.semver().to_string(),
             ));
             info!(log, "Attempting to upgrade schema");
+
+            // For the rationale here, see: StepSemverVersion::new.
+            if target_version.semver().0.pre != semver::Prerelease::EMPTY {
+                bail!("Cannot upgrade to version which includes pre-release");
+            }
 
             // Iterate over each individual file that comprises a schema change.
             //
@@ -132,84 +216,23 @@ impl DataStore {
             // the same (unless another Nexus concurrently completes the
             // update), but the "target_version" will keep shifting on each
             // incremental step.
-            let mut prior_step_version = None;
+            let mut last_step_version = None;
 
             for (i, step) in target_version.upgrade_steps().enumerate() {
-                // Durably store our progress in the target version as the
-                // pre-release extension of "target_version".
-                let mut target_step_version = target_version.semver().clone();
-                target_step_version.0.pre =
-                    semver::Prerelease::new(&format!("step.{i}"))
-                        .context("Cannot parse step as semver pre-release")?;
-                let log = log.new(o!("target_step_version" => target_step_version.to_string()));
+                let target_step =
+                    StepSemverVersion::new(&target_version.semver(), i)?;
+                let log = log.new(o!("target_step.version" => target_step.version.to_string()));
 
-                info!(
-                    log,
-                    "Considering found target version";
-                    "found_target_version" => ?found_target_version,
-                );
-
-                if let Some(found_target_version) =
-                    found_target_version.as_ref()
-                {
-                    // This case only occurs if an upgrade failed and needed to
-                    // restart, for whatever reason. We skip all the incremental
-                    // steps that we know have completed.
-                    if found_target_version > &target_step_version {
-                        warn!(
-                            log,
-                            "Observed target version greater than this upgrade step. Skipping.";
-                            "found_target_version" => %found_target_version,
-                        );
-                        continue;
-                    }
-                }
-
-                info!(
-                    log,
-                    "Marking schema upgrade as prepared";
-                    "prior_step_version" => ?prior_step_version,
-                );
-
-                // Confirm the current version, set the "target_step_version"
-                // column to indicate that a schema update is in-progress.
-                //
-                // Sets the following:
-                // - db_metadata.target_version = new version
-                self.prepare_schema_update(
+                self.apply_step_version_update(
+                    &log,
+                    &step,
+                    &target_step,
                     &current_version,
-                    &target_step_version,
-                    prior_step_version.as_ref(),
+                    &found_target_version,
                 )
-                .await
-                .context("Failed to prepare schema change")?;
+                .await?;
 
-                info!(
-                    log,
-                    "Marked schema upgrade as prepared";
-                );
-
-                // Perform the schema change.
-                self.apply_schema_update(
-                    &current_version,
-                    &target_step_version,
-                    step.sql(),
-                )
-                .await
-                .with_context(|| {
-                    format!(
-                        "update to {}, applying step {:?}",
-                        target_step_version,
-                        step.label()
-                    )
-                })?;
-
-                info!(
-                    log,
-                    "Applied subcomponent of schema upgrade";
-                );
-
-                prior_step_version = Some(target_step_version.clone());
+                last_step_version = Some(target_step.clone());
             }
 
             info!(
@@ -239,15 +262,11 @@ impl DataStore {
             // Now that the schema change has completed, set the following:
             // - db_metadata.version = new version
             // - db_metadata.target_version = NULL
-            let last_step_target_version = prior_step_version
+            let last_step_version = last_step_version
                 .ok_or_else(|| anyhow::anyhow!("Missing final step version"))?;
-            self.finalize_schema_update(
-                &current_version,
-                &last_step_target_version,
-                &target_version.semver(),
-            )
-            .await
-            .context("Failed to finalize schema update")?;
+            self.finalize_schema_update(&current_version, &last_step_version)
+                .await
+                .context("Failed to finalize schema update")?;
 
             info!(
                 log,
@@ -258,6 +277,67 @@ impl DataStore {
         }
 
         info!(log, "Schema update complete");
+        Ok(())
+    }
+
+    // Executes (or skips, if unnecessary) a single "step" of a schema upgrade.
+    //
+    // - `step`: The schema upgrade step under consideration.
+    // - `target_step`: The target version, indicating the step by pre-release.
+    // - `current_version`: The last-known value of `db_metadata.version`.
+    // - `found_target_version`: The last-known value of
+    // `db_metadata.target_version`.
+    async fn apply_step_version_update(
+        &self,
+        log: &Logger,
+        step: &SchemaUpgradeStep,
+        target_step: &StepSemverVersion,
+        current_version: &SemverVersion,
+        found_target_version: &Option<SemverVersion>,
+    ) -> Result<(), anyhow::Error> {
+        if skippable_version(&log, &target_step.version, &found_target_version)
+        {
+            return Ok(());
+        }
+
+        info!(
+            log,
+            "Marking schema upgrade as prepared";
+        );
+
+        // Confirm the current version, set the "target_version"
+        // column to indicate that a schema update is in-progress.
+        //
+        // Sets the following:
+        // - db_metadata.target_version = new version
+        self.prepare_schema_update(&current_version, &target_step)
+            .await
+            .context("Failed to prepare schema change")?;
+
+        info!(
+            log,
+            "Marked schema upgrade as prepared";
+        );
+
+        // Perform the schema change.
+        self.apply_schema_update(
+            &current_version,
+            &target_step.version,
+            step.sql(),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "update to {}, applying step {:?}",
+                target_step.version,
+                step.label()
+            )
+        })?;
+
+        info!(
+            log,
+            "Applied subcomponent of schema upgrade";
+        );
         Ok(())
     }
 
@@ -293,8 +373,8 @@ impl DataStore {
     // This is only valid if the current version matches `from_version`,
     // and the prior `target_version` is either:
     // - None (no update in-progress)
-    // - to_version (another Nexus attempted to prepare this same update).
-    // - previous_step_version (we are incrementally working through a
+    // - target_step.version (another Nexus attempted to prepare this same update).
+    // - target_step.previous() (we are incrementally working through a
     // multi-stage update).
     //
     // NOTE: This function should be idempotent -- if Nexus crashes mid-update,
@@ -303,14 +383,13 @@ impl DataStore {
     async fn prepare_schema_update(
         &self,
         from_version: &SemverVersion,
-        to_version: &SemverVersion,
-        previous_step_version: Option<&SemverVersion>,
+        target_step: &StepSemverVersion,
     ) -> Result<(), Error> {
         use db::schema::db_metadata::dsl;
 
-        let mut valid_prior_targets = vec![Some(to_version.to_string())];
-        if let Some(previous) = previous_step_version {
-            valid_prior_targets.push(Some(previous.to_string()));
+        let mut valid_prior_targets = vec![target_step.version.to_string()];
+        if let Some(previous) = target_step.previous().ok() {
+            valid_prior_targets.push(previous.version.to_string());
         };
 
         let rows_updated = diesel::update(
@@ -327,7 +406,7 @@ impl DataStore {
         )
         .set((
             dsl::time_modified.eq(Utc::now()),
-            dsl::target_version.eq(Some(to_version.to_string())),
+            dsl::target_version.eq(Some(target_step.version.to_string())),
         ))
         .execute_async(&*self.pool_connection_unauthorized().await?)
         .await
@@ -379,23 +458,20 @@ impl DataStore {
     // Completes a schema migration, upgrading to the new version.
     //
     // - from_version: What we expect "version" must be to proceed
-    // - expected_target_version: What we expect "target_version" must be to
-    // proceed.
-    // - to_version: The new value of "version".
+    // - last_step: What we expect "target_version" must be to proceed.
     async fn finalize_schema_update(
         &self,
         from_version: &SemverVersion,
-        expected_target_version: &SemverVersion,
-        to_version: &SemverVersion,
+        last_step: &StepSemverVersion,
     ) -> Result<(), Error> {
         use db::schema::db_metadata::dsl;
+
+        let to_version = last_step.without_prerelease();
         let rows_updated = diesel::update(
             dsl::db_metadata
                 .filter(dsl::singleton.eq(true))
                 .filter(dsl::version.eq(from_version.to_string()))
-                .filter(
-                    dsl::target_version.eq(expected_target_version.to_string()),
-                ),
+                .filter(dsl::target_version.eq(last_step.version.to_string())),
         )
         .set((
             dsl::time_modified.eq(Utc::now()),
