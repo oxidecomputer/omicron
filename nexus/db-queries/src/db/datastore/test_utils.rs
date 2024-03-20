@@ -23,52 +23,12 @@ use std::sync::Arc;
 use strum::EnumCount;
 use uuid::Uuid;
 
-/// Constructs a DataStore for use in test suites that has preloaded the
-/// built-in users, roles, and role assignments that are needed for basic
-/// operation
-#[cfg(test)]
-pub async fn datastore_test(
+pub(crate) async fn datastore_test(
     logctx: &LogContext,
     db: &CockroachInstance,
 ) -> (OpContext, Arc<DataStore>) {
-    use crate::authn;
-
-    let cfg = db::Config { url: db.pg_config().clone() };
-    let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
-    let datastore =
-        Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
-
-    // Create an OpContext with the credentials of "db-init" just for the
-    // purpose of loading the built-in users, roles, and assignments.
-    let opctx = OpContext::for_background(
-        logctx.log.new(o!()),
-        Arc::new(authz::Authz::new(&logctx.log)),
-        authn::Context::internal_db_init(),
-        Arc::clone(&datastore),
-    );
-
-    // TODO: Can we just call "Populate" instead of doing this?
     let rack_id = Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap();
-    datastore.load_builtin_users(&opctx).await.unwrap();
-    datastore.load_builtin_roles(&opctx).await.unwrap();
-    datastore.load_builtin_role_asgns(&opctx).await.unwrap();
-    datastore.load_builtin_silos(&opctx).await.unwrap();
-    datastore.load_builtin_projects(&opctx).await.unwrap();
-    datastore.load_builtin_vpcs(&opctx).await.unwrap();
-    datastore.load_silo_users(&opctx).await.unwrap();
-    datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
-    datastore
-        .load_builtin_fleet_virtual_provisioning_collection(&opctx)
-        .await
-        .unwrap();
-    datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
-
-    // Create an OpContext with the credentials of "test-privileged" for general
-    // testing.
-    let opctx =
-        OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
-
-    (opctx, datastore)
+    super::pub_test_utils::datastore_test(logctx, db, rack_id).await
 }
 
 /// Denotes a specific way in which a sled is ineligible.
