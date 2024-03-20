@@ -62,11 +62,12 @@ impl StepSemverVersion {
         target_version
     }
 
-    fn previous(&self) -> anyhow::Result<Self> {
+    // Returns the 'previous' step before this one, if such a step exists.
+    fn previous(&self) -> Option<Self> {
         if self.i == 0 {
-            bail!("No prior step version possible");
+            return None;
         }
-        Self::new(&self.version, self.i - 1)
+        Self::new(&self.version, self.i - 1).ok()
     }
 }
 
@@ -388,7 +389,7 @@ impl DataStore {
         use db::schema::db_metadata::dsl;
 
         let mut valid_prior_targets = vec![target_step.version.to_string()];
-        if let Some(previous) = target_step.previous().ok() {
+        if let Some(previous) = target_step.previous() {
             valid_prior_targets.push(previous.version.to_string());
         };
 
