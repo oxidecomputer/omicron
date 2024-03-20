@@ -138,13 +138,15 @@ async fn apply_update(
             .expect("Failed to bump version number");
     }
 
-    for _ in 0..times_to_apply {
-        for step in version.upgrade_steps() {
-            info!(
-                log,
-                "Applying sql schema upgrade step";
-                "file" => step.label()
-            );
+    // Each step is applied `times_to_apply` times, but once we start applying
+    // a step within an upgrade, we will not attempt to apply prior steps.
+    for step in version.upgrade_steps() {
+        info!(
+            log,
+            "Applying sql schema upgrade step";
+            "file" => step.label()
+        );
+        for _ in 0..times_to_apply {
             apply_update_as_transaction(&log, &client, step.sql()).await;
         }
     }
