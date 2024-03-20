@@ -51,6 +51,7 @@ use sled_agent_client::types::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
+    hash::Hash,
     net::{IpAddr, Ipv4Addr},
     str::FromStr,
     sync::Arc,
@@ -787,7 +788,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         error!(log, "no blocks assigned to infra lot");
                         continue;
                     },
-                };
+                }
+                ;
+
 
                 let mut desired_config = EarlyNetworkConfig {
                     generation: 0,
@@ -804,7 +807,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                // should_update is a boolean value that determines whether or not we need to
+                // bootstore_needs_update is a boolean value that determines whether or not we need to
                 // increment the bootstore version and push a new config to the sled agents.
                 //
                 // * If the config we've built from the switchport configuration information is
@@ -822,15 +825,32 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     Ok(Some(BootstoreConfig { data, .. })) => {
                         match serde_json::from_value::<EarlyNetworkConfig>(data.clone()) {
                             Ok(config) => {
-                                if config.body.ntp_servers != desired_config.body.ntp_servers {
+                                let current_ntp_servers: HashSet<String> = config.body.ntp_servers.clone().into_iter().collect();
+                                let desired_ntp_servers: HashSet<String> = desired_config.body.ntp_servers.clone().into_iter().collect();
+
+                                let rnc_differs = match (config.body.rack_network_config.clone(), desired_config.body.rack_network_config.clone()) {
+                                    (Some(current_rnc), Some(desired_rnc)) => {
+                                        !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
+                                        !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
+                                        current_rnc.rack_subnet != desired_rnc.rack_subnet ||
+                                        current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
+                                        current_rnc.infra_ip_last != desired_rnc.infra_ip_last
+                                    },
+                                    (None, Some(_)) => true,
+                                    _ => {
+                                        todo!("error")
+                                    }
+                                };
+
+                                if current_ntp_servers != desired_ntp_servers {
                                     info!(
                                         log,
                                         "ntp servers have changed";
-                                        "old" => ?config.body.ntp_servers,
-                                        "new" => ?desired_config.body.ntp_servers,
+                                        "old" => ?current_ntp_servers,
+                                        "new" => ?desired_ntp_servers,
                                     );
                                     true
-                                } else if config.body.rack_network_config != desired_config.body.rack_network_config {
+                                } else if rnc_differs {
                                     info!(
                                         log,
                                         "rack network config has changed";
@@ -961,6 +981,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
         }
         .boxed()
     }
+}
+
+fn hashset_eq<T>(left: Vec<T>, right: Vec<T>) -> bool
+where
+    T: Hash + Eq,
+{
+    let left = left.into_iter().collect::<HashSet<T>>();
+    let right = right.into_iter().collect::<HashSet<T>>();
+    left == right
 }
 
 async fn add_loopback_addresses_to_switch(
