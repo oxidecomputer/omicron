@@ -81,13 +81,14 @@ async fn main() -> anyhow::Result<()> {
 
     match args.cmd {
         Cmd::List => {
-            let current_version = datastore
+            let (current_version, target_version) = datastore
                 .database_schema_version()
                 .await
-                .map(|v| v.to_string())
-                .unwrap_or_else(|_| "Unknown".to_string());
+                .map(|(v, t)| (v.to_string(), t.map(|t| t.to_string())))
+                .unwrap_or_else(|_| ("Unknown".to_string(), None));
 
-            println!("Current Version: {current_version}");
+            println!("Current Version: {current_version:?}");
+            println!("Target Version: {target_version:?}");
 
             let mut dir =
                 tokio::fs::read_dir(&schema_config.schema_dir).await.map_err(

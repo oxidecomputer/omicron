@@ -8,6 +8,7 @@ use super::DataStore;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use anyhow::{anyhow, bail, Context};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
@@ -167,9 +168,12 @@ impl DataStore {
         log: &Logger,
         desired_version: SemverVersion,
         config: Option<&SchemaConfig>,
-    ) -> Result<(), String> {
-        let mut current_version = match self.database_schema_version().await {
-            Ok(current_version) => {
+    ) -> Result<(), anyhow::Error> {
+        let (mut current_version, found_target_version) = match self
+            .database_schema_version()
+            .await
+        {
+            Ok((current_version, target_version)) => {
                 // NOTE: We could run with a less tight restriction.
                 //
                 // If we respect the meaning of the semver version, it should be possible
@@ -183,21 +187,19 @@ impl DataStore {
                 }
                 let observed = &current_version.0;
                 warn!(log, "Database schema {observed} does not match expected {desired_version}");
-                current_version
+                (current_version, target_version)
             }
             Err(e) => {
-                return Err(format!("Cannot read schema version: {e}"));
+                bail!("Cannot read schema version: {e}");
             }
         };
 
         let Some(config) = config else {
-            return Err(
-                "Not configured to automatically update schema".to_string()
-            );
+            bail!("Not configured to automatically update schema");
         };
 
         if current_version > desired_version {
-            return Err("Nexus older than DB version: automatic downgrades are unsupported".to_string());
+            bail!("Nexus older than DB version: automatic downgrades are unsupported");
         }
 
         // If we're here, we know the following:
@@ -213,41 +215,39 @@ impl DataStore {
         info!(log, "Reading schemas from {}", config.schema_dir);
         let mut dir = tokio::fs::read_dir(&config.schema_dir)
             .await
-            .map_err(|e| format!("Failed to read schema config dir: {e}"))?;
+            .context("Failed to read schema config dir")?;
         let mut all_versions = BTreeSet::new();
-        while let Some(entry) = dir
-            .next_entry()
-            .await
-            .map_err(|e| format!("Failed to read schema dir: {e}"))?
+        while let Some(entry) =
+            dir.next_entry().await.context("Failed to read schema dir")?
         {
-            if entry.file_type().await.map_err(|e| e.to_string())?.is_dir() {
+            if entry.file_type().await?.is_dir() {
                 let name = entry
                     .file_name()
                     .into_string()
-                    .map_err(|_| "Non-unicode schema dir".to_string())?;
+                    .map_err(|_| anyhow!("Non-unicode schema dir"))?;
                 if let Ok(observed_version) = name.parse::<SemverVersion>() {
                     all_versions.insert(observed_version);
                 } else {
                     let err_msg =
                         format!("Failed to parse {name} as a semver version");
                     warn!(log, "{err_msg}");
-                    return Err(err_msg);
+                    bail!(err_msg);
                 }
             }
         }
 
         if !all_versions.contains(&current_version) {
-            return Err(format!(
+            bail!(
                 "Current DB version {current_version} was not found in {}",
                 config.schema_dir
-            ));
+            );
         }
         // TODO: Test this?
         if !all_versions.contains(&desired_version) {
-            return Err(format!(
+            bail!(
                 "Target DB version {desired_version} was not found in {}",
                 config.schema_dir
-            ));
+            );
         }
 
         let target_versions = all_versions.range((
@@ -255,36 +255,93 @@ impl DataStore {
             Bound::Included(&desired_version),
         ));
 
-        for target_version in target_versions.into_iter() {
+        // Iterate over semver versions (e.g., "1.0.0 -> 2.0.0").
+        for mut target_version in target_versions.into_iter().map(|v| v.clone())
+        {
             info!(
                 log,
                 "Attempting to upgrade schema";
-                "current_version" => current_version.to_string(),
-                "target_version" => target_version.to_string(),
+                "current_version" => %current_version,
+                "target_version" => %target_version,
             );
 
             let target_dir = config.schema_dir.join(target_version.to_string());
 
-            let schema_change =
-                all_sql_for_version_migration(&target_dir).await?;
-
-            // Confirm the current version, set the "target_version"
-            // column to indicate that a schema update is in-progress.
-            //
-            // Sets the following:
-            // - db_metadata.target_version = new version
-            self.prepare_schema_update(&current_version, &target_version)
+            let schema_change = all_sql_for_version_migration(&target_dir)
                 .await
-                .map_err(|e| e.to_string())?;
+                .map_err(anyhow::Error::msg)
+                .context("Failed to access all SQL statements for a version migration")?;
 
-            info!(
-                log,
-                "Marked schema upgrade as prepared";
-                "current_version" => current_version.to_string(),
-                "target_version" => target_version.to_string(),
-            );
+            // Iterate over each individual file that comprises a schema change.
+            //
+            // For example, this contains "up01.sql", "up02.sql", etc.
+            //
+            // While this update happens, the "current_version" will remain
+            // the same (unless another Nexus concurrently completes the
+            // update), but the "target_version" will keep shifting on each
+            // incremental step.
+            let mut prior_step_version = None;
+            for (i, SchemaUpgradeStep { path: _, sql }) in
+                schema_change.steps.iter().enumerate()
+            {
+                // Durably store our progress in the target version as the
+                // pre-release extension of "target_version".
+                target_version.0.pre =
+                    semver::Prerelease::new(&format!("step.{i}"))
+                        .context("Cannot parse step as semver pre-release")?;
 
-            for SchemaUpgradeStep { path: _, sql } in &schema_change.steps {
+                info!(
+                    log,
+                    "Considering found target version";
+                    "observed_target_version" => ?found_target_version,
+                    "attempted_target_version" => %target_version,
+                );
+
+                if let Some(found_target_version) =
+                    found_target_version.as_ref()
+                {
+                    // This case only occurs if an upgrade failed and needed to
+                    // restart, for whatever reason. We skip all the incremental
+                    // steps that we know have completed.
+                    if found_target_version > &target_version {
+                        warn!(
+                            log,
+                            "Observed target version greater than this upgrade step. Skipping.";
+                            "observed_target_version" => %found_target_version,
+                            "attempted_target_version" => %target_version,
+                        );
+                        continue;
+                    }
+                }
+
+                info!(
+                    log,
+                    "Marking schema upgrade as prepared";
+                    "current_version" => %current_version,
+                    "target_version" => %target_version,
+                    "prior_step_version" => ?prior_step_version,
+                );
+
+                // Confirm the current version, set the "target_version"
+                // column to indicate that a schema update is in-progress.
+                //
+                // Sets the following:
+                // - db_metadata.target_version = new version
+                self.prepare_schema_update(
+                    &current_version,
+                    &target_version,
+                    prior_step_version.as_ref(),
+                )
+                .await
+                .context("Failed to prepare schema change")?;
+
+                info!(
+                    log,
+                    "Marked schema upgrade as prepared";
+                    "current_version" => %current_version,
+                    "target_version" => %target_version,
+                );
+
                 // Perform the schema change.
                 self.apply_schema_update(
                     &current_version,
@@ -292,14 +349,23 @@ impl DataStore {
                     &sql,
                 )
                 .await
-                .map_err(|e| e.to_string())?;
+                .context("Failed to apply schema update")?;
+
+                info!(
+                    log,
+                    "Applied subcomponent of schema upgrade";
+                    "current_version" => %current_version,
+                    "target_version" => %target_version,
+                );
+
+                prior_step_version = Some(target_version.clone());
             }
 
             info!(
                 log,
                 "Applied schema upgrade";
-                "current_version" => current_version.to_string(),
-                "target_version" => target_version.to_string(),
+                "current_version" => %current_version,
+                "target_version" => %target_version,
             );
 
             // NOTE: We could execute the schema change in a background task,
@@ -324,18 +390,28 @@ impl DataStore {
             // Now that the schema change has completed, set the following:
             // - db_metadata.version = new version
             // - db_metadata.target_version = NULL
-            self.finalize_schema_update(&current_version, &target_version)
-                .await
-                .map_err(|e| e.to_string())?;
+            //
+            // The "version" field ignores all this pre-release versioning that we
+            // abuse in the "target_version" field.
+            let mut new_version = target_version.clone();
+            new_version.0.pre = semver::Prerelease::EMPTY;
+
+            self.finalize_schema_update(
+                &current_version,
+                &target_version,
+                &new_version,
+            )
+            .await
+            .context("Failed to finalize schema update")?;
 
             info!(
                 log,
                 "Finalized schema upgrade";
                 "current_version" => current_version.to_string(),
-                "target_version" => target_version.to_string(),
+                "new_version" => new_version.to_string(),
             );
 
-            current_version = target_version.clone();
+            current_version = new_version.clone();
         }
 
         Ok(())
@@ -343,25 +419,39 @@ impl DataStore {
 
     pub async fn database_schema_version(
         &self,
-    ) -> Result<SemverVersion, Error> {
+    ) -> Result<(SemverVersion, Option<SemverVersion>), Error> {
         use db::schema::db_metadata::dsl;
 
-        let version: String = dsl::db_metadata
+        let (version, target): (String, Option<String>) = dsl::db_metadata
             .filter(dsl::singleton.eq(true))
-            .select(dsl::version)
+            .select((dsl::version, dsl::target_version))
             .get_result_async(&*self.pool_connection_unauthorized().await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        SemverVersion::from_str(&version).map_err(|e| {
+        let version = SemverVersion::from_str(&version).map_err(|e| {
             Error::internal_error(&format!("Invalid schema version: {e}"))
-        })
+        })?;
+
+        if let Some(target) = target {
+            let target = SemverVersion::from_str(&target).map_err(|e| {
+                Error::internal_error(&format!("Invalid schema version: {e}"))
+            })?;
+            return Ok((version, Some(target)));
+        };
+
+        Ok((version, None))
     }
 
     // Updates the DB metadata to indicate that a transition from
-    // `from_version` to `to_version` is occuring.
+    // `from_version` to `to_version` is occurring.
     //
-    // This is only valid if the current version matches `from_version`.
+    // This is only valid if the current version matches `from_version`,
+    // and the prior `target_version` is either:
+    // - None (no update in-progress)
+    // - previous_step_version (we are incrementally working through a
+    // multi-stage update).
+    // - to_version (another Nexus attempted to prepare this same update).
     //
     // NOTE: This function should be idempotent -- if Nexus crashes mid-update,
     // a new Nexus instance should be able to re-call this function and
@@ -370,8 +460,14 @@ impl DataStore {
         &self,
         from_version: &SemverVersion,
         to_version: &SemverVersion,
+        previous_step_version: Option<&SemverVersion>,
     ) -> Result<(), Error> {
         use db::schema::db_metadata::dsl;
+
+        let mut valid_prior_targets = vec![Some(to_version.to_string())];
+        if let Some(previous) = previous_step_version {
+            valid_prior_targets.push(Some(previous.to_string()));
+        };
 
         let rows_updated = diesel::update(
             dsl::db_metadata
@@ -381,7 +477,7 @@ impl DataStore {
                 // in-progress.
                 .filter(
                     dsl::target_version
-                        .eq(Some(to_version.to_string()))
+                        .eq_any(valid_prior_targets)
                         .or(dsl::target_version.is_null()),
                 ),
         )
@@ -437,18 +533,25 @@ impl DataStore {
     }
 
     // Completes a schema migration, upgrading to the new version.
+    //
+    // - from_version: What we expect "version" must be to proceed
+    // - expected_target_version: What we expect "target_version" must be to
+    // proceed.
+    // - to_version: The new value of "version".
     async fn finalize_schema_update(
         &self,
         from_version: &SemverVersion,
+        expected_target_version: &SemverVersion,
         to_version: &SemverVersion,
     ) -> Result<(), Error> {
         use db::schema::db_metadata::dsl;
-
         let rows_updated = diesel::update(
             dsl::db_metadata
                 .filter(dsl::singleton.eq(true))
                 .filter(dsl::version.eq(from_version.to_string()))
-                .filter(dsl::target_version.eq(to_version.to_string())),
+                .filter(
+                    dsl::target_version.eq(expected_target_version.to_string()),
+                ),
         )
         .set((
             dsl::time_modified.eq(Utc::now()),
@@ -636,6 +739,30 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    // Helper to create the version directory and "up.sql".
+    async fn add_upgrade<S: AsRef<str>>(
+        config_dir_path: &Utf8Path,
+        version: SemverVersion,
+        sql: S,
+    ) {
+        let dir = config_dir_path.join(version.to_string());
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join("up.sql"), sql.as_ref()).await.unwrap();
+    }
+
+    async fn add_upgrade_subcomponent<S: AsRef<str>>(
+        config_dir_path: &Utf8Path,
+        version: SemverVersion,
+        sql: S,
+        i: usize,
+    ) {
+        let dir = config_dir_path.join(version.to_string());
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        tokio::fs::write(dir.join(format!("up{i}.sql")), sql.as_ref())
+            .await
+            .unwrap();
+    }
+
     // Confirms that calling ensure_schema from concurrent Nexus instances
     // only permit the latest schema migration, rather than re-applying old
     // schema updates.
@@ -652,17 +779,6 @@ mod test {
 
         // Mimic the layout of "schema/crdb".
         let config_dir = Utf8TempDir::new().unwrap();
-
-        // Helper to create the version directory and "up.sql".
-        let add_upgrade = |version: SemverVersion, sql: String| {
-            let config_dir_path = config_dir.path();
-            async move {
-                let dir = config_dir_path.join(version.to_string());
-                tokio::fs::create_dir_all(&dir).await.unwrap();
-
-                tokio::fs::write(dir.join("up.sql"), sql).await.unwrap();
-            }
-        };
 
         // Create the old version directory, and also update the on-disk "current version" to
         // this value.
@@ -686,24 +802,28 @@ mod test {
 
         // This version must exist so Nexus can see the sequence of updates from
         // v0 to v1 to v2, but it doesn't need to re-apply it.
-        add_upgrade(v0.clone(), "SELECT true;".to_string()).await;
+        add_upgrade(config_dir.path(), v0.clone(), "SELECT true;").await;
 
         // This version adds a new table, but it takes a little while.
         //
         // This delay is intentional, so that some Nexus instances issuing
         // the update act quickly, while others lag behind.
         add_upgrade(
+            config_dir.path(),
             v1.clone(),
             "SELECT pg_sleep(RANDOM() / 10); \
              CREATE TABLE IF NOT EXISTS widget(); \
-             SELECT pg_sleep(RANDOM() / 10);"
-                .to_string(),
+             SELECT pg_sleep(RANDOM() / 10);",
         )
         .await;
 
         // The table we just created is deleted by a subsequent update.
-        add_upgrade(v2.clone(), "DROP TABLE IF EXISTS widget;".to_string())
-            .await;
+        add_upgrade(
+            config_dir.path(),
+            v2.clone(),
+            "DROP TABLE IF EXISTS widget;",
+        )
+        .await;
 
         // Show that the datastores can be created concurrently.
         let config =
@@ -740,6 +860,105 @@ mod test {
         .into_iter()
         .collect::<Result<Vec<DataStore>, _>>()
         .expect("Failed to create datastore");
+
+        crdb.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn schema_version_subcomponents_save_progress() {
+        let logctx =
+            dev::test_setup_log("schema_version_subcomponents_save_progress");
+        let log = &logctx.log;
+        let mut crdb = test_db::test_setup_database(&logctx.log).await;
+
+        let cfg = db::Config { url: crdb.pg_config().clone() };
+        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let conn = pool.pool().get().await.unwrap();
+
+        // Mimic the layout of "schema/crdb".
+        let config_dir = Utf8TempDir::new().unwrap();
+
+        // Create the old version directory, and also update the on-disk "current version" to
+        // this value.
+        //
+        // Nexus will decide to upgrade to, at most, the version that its own binary understands.
+        //
+        // To trigger this action within a test, we manually set the "known to DB" version.
+        let v0 = SemverVersion::new(0, 0, 0);
+        use db::schema::db_metadata::dsl;
+        diesel::update(dsl::db_metadata.filter(dsl::singleton.eq(true)))
+            .set(dsl::version.eq(v0.to_string()))
+            .execute_async(&*conn)
+            .await
+            .expect("Failed to set version back to 0.0.0");
+
+        let v1 = SemverVersion::new(1, 0, 0);
+        let v2 = SCHEMA_VERSION;
+
+        assert!(v0 < v1);
+        assert!(v1 < v2);
+
+        // This version must exist so Nexus can see the sequence of updates from
+        // v0 to v1 to v2, but it doesn't need to re-apply it.
+        add_upgrade(config_dir.path(), v0.clone(), "SELECT true;").await;
+
+        // Add a new version with a table that we'll populate in V2.
+        add_upgrade(
+            config_dir.path(),
+            v1.clone(),
+            "CREATE TABLE t(id INT PRIMARY KEY, data TEXT NOT NULL);",
+        )
+        .await;
+
+        // Populate the table in a few incremental steps that might fail.
+        let add = |sql: &str, i: usize| {
+            let config_dir_path = config_dir.path();
+            let v2 = v2.clone();
+            let sql = sql.to_string();
+            async move {
+                add_upgrade_subcomponent(&config_dir_path, v2.clone(), &sql, i)
+                    .await
+            }
+        };
+
+        // This is just:
+        //   data = 'abcd',
+        // but with some spurious errors thrown in for good measure.
+        add("INSERT INTO t (id, data) VALUES (1, '')", 1).await;
+        add("UPDATE t SET data = data || 'a' WHERE id = 1", 2).await;
+        add("SELECT CAST(IF ((SELECT RANDOM() < 0.5), 'true', 'failure') AS BOOL)", 3).await;
+        add("UPDATE t SET data = data || 'b' WHERE id = 1", 4).await;
+        add("SELECT CAST(IF ((SELECT RANDOM() < 0.5), 'true', 'failure') AS BOOL)", 5).await;
+        add("SELECT CAST(IF ((SELECT RANDOM() < 0.5), 'true', 'failure') AS BOOL)", 6).await;
+        add("UPDATE t SET data = data || 'c' WHERE id = 1", 7).await;
+        add("SELECT CAST(IF ((SELECT RANDOM() < 0.5), 'true', 'failure') AS BOOL)", 8).await;
+        add("SELECT CAST(IF ((SELECT RANDOM() < 0.5), 'true', 'failure') AS BOOL)", 9).await;
+        add("SELECT CAST(IF ((SELECT RANDOM() < 0.5), 'true', 'failure') AS BOOL)", 10).await;
+        add("UPDATE t SET data = data || 'd' WHERE id = 1", 11).await;
+
+        // Create the datastore, which should apply the update on boot
+        let config =
+            SchemaConfig { schema_dir: config_dir.path().to_path_buf() };
+        let datastore =
+            DataStore::new(&log, pool.clone(), Some(&config)).await.unwrap();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        // Let's validate a couple things:
+        // 1. The version is what we expect
+        use diesel::dsl::sql;
+        use diesel::sql_types::Text;
+        let version = sql::<Text>("SELECT version FROM omicron.public.db_metadata WHERE singleton = true")
+            .get_result_async::<String>(&*conn)
+            .await
+            .expect("Failed to get DB version");
+        assert_eq!(version, SCHEMA_VERSION.to_string());
+        // 2. We only applied each incremental step once
+        let data = sql::<Text>("SELECT data FROM t WHERE id = 1")
+            .get_result_async::<String>(&*conn)
+            .await
+            .expect("Failed to get data");
+        assert_eq!(data, "abcd");
 
         crdb.cleanup().await.unwrap();
         logctx.cleanup_successful();
