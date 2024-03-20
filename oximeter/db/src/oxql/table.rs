@@ -207,7 +207,7 @@ impl Table {
     /// If the timeseries already exists, an error is returned. Use
     /// [`Table::replace()`] to replace an existing timeseries.
     ///
-    /// It is an error of the timeseries does not have the same schema as the
+    /// It is an error if the timeseries does not have the same schema as the
     /// others in the table (if any).
     pub fn insert(&mut self, timeseries: Timeseries) -> Result<(), Error> {
         anyhow::ensure!(

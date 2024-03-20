@@ -381,7 +381,8 @@ impl Points {
 
     /// Construct a list of gauge points from a list of gauge measurements.
     ///
-    /// An error is returned if the provided
+    /// An error is returned if the provided input measurements are not gauges,
+    /// or do not all have the same datum type.
     pub fn gauge_from_gauge(
         measurements: &[Measurement],
     ) -> Result<Self, Error> {
@@ -749,7 +750,7 @@ impl Points {
                             new.push(None);
                         }
                     }
-                    ValueArray::Integer(new)
+                    ValueArray::Double(new)
                 }
 
                 // Cast i64 -> bool
@@ -1090,10 +1091,11 @@ impl ValueArray {
             | DatumType::HistogramI32
             | DatumType::HistogramU32
             | DatumType::HistogramI64
-            | DatumType::HistogramU64
-            | DatumType::HistogramF32
-            | DatumType::HistogramF64 => {
+            | DatumType::HistogramU64 => {
                 self.as_integer_distribution_mut()?.push(None)
+            }
+            DatumType::HistogramF32 | DatumType::HistogramF64 => {
+                self.as_double_distribution_mut()?.push(None)
             }
         }
         Ok(())
@@ -1623,8 +1625,10 @@ f64_dist_from!(f64);
 
 #[cfg(test)]
 mod tests {
-    use super::Points;
-    use chrono::Utc;
+    use crate::oxql::point::{DataType, ValueArray};
+
+    use super::{Distribution, MetricType, Points, Values};
+    use chrono::{DateTime, Utc};
     use oximeter::types::Cumulative;
     use oximeter::Measurement;
     use std::time::Duration;
@@ -1721,5 +1725,296 @@ mod tests {
             meas2.start_time().unwrap(),
             meas2.timestamp(),
         );
+    }
+
+    fn timestamps(n: usize) -> Vec<DateTime<Utc>> {
+        let now = Utc::now();
+        let mut out = Vec::with_capacity(n);
+        for i in 0..n {
+            out.push(now - Duration::from_secs(i as _));
+        }
+        out.into_iter().rev().collect()
+    }
+
+    #[test]
+    fn test_cast_points_from_bool() {
+        let points = Points {
+            start_times: None,
+            timestamps: timestamps(2),
+            values: vec![Values {
+                values: ValueArray::Boolean(vec![Some(false), Some(true)]),
+                metric_type: MetricType::Gauge,
+            }],
+        };
+
+        let as_same = points.cast(&[DataType::Boolean]).unwrap();
+        let vals = as_same.values[0].values.as_boolean().unwrap();
+        assert_eq!(vals, points.values[0].values.as_boolean().unwrap());
+
+        let as_int = points.cast(&[DataType::Integer]).unwrap();
+        let vals = as_int.values[0].values.as_integer().unwrap();
+        assert_eq!(vals, &vec![Some(0), Some(1)]);
+
+        let as_double = points.cast(&[DataType::Double]).unwrap();
+        let vals = as_double.values[0].values.as_double().unwrap();
+        assert_eq!(vals, &vec![Some(0.0), Some(1.0)]);
+
+        let as_string = points.cast(&[DataType::String]).unwrap();
+        let vals = as_string.values[0].values.as_string().unwrap();
+        assert_eq!(
+            vals,
+            &vec![Some("false".to_string()), Some("true".to_string())]
+        );
+
+        for ty in [DataType::IntegerDistribution, DataType::DoubleDistribution]
+        {
+            assert!(
+                points.cast(&[ty]).is_err(),
+                "Should not be able to cast bool array to distributions"
+            );
+        }
+        assert!(points.cast(&[]).is_err(), "Should fail to cast with no types");
+        assert!(
+            points.cast(&[DataType::Boolean, DataType::Boolean]).is_err(),
+            "Should fail to cast to the wrong number of types"
+        );
+    }
+
+    #[test]
+    fn test_cast_points_from_integer() {
+        let points = Points {
+            start_times: None,
+            timestamps: timestamps(2),
+            values: vec![Values {
+                values: ValueArray::Integer(vec![Some(0), Some(10)]),
+                metric_type: MetricType::Gauge,
+            }],
+        };
+
+        let as_same = points.cast(&[DataType::Integer]).unwrap();
+        let vals = as_same.values[0].values.as_integer().unwrap();
+        assert_eq!(vals, points.values[0].values.as_integer().unwrap());
+
+        let as_bools = points.cast(&[DataType::Boolean]).unwrap();
+        let vals = as_bools.values[0].values.as_boolean().unwrap();
+        assert_eq!(vals, &vec![Some(false), Some(true)]);
+
+        let as_double = points.cast(&[DataType::Double]).unwrap();
+        let vals = as_double.values[0].values.as_double().unwrap();
+        assert_eq!(vals, &vec![Some(0.0), Some(10.0)]);
+
+        let as_string = points.cast(&[DataType::String]).unwrap();
+        let vals = as_string.values[0].values.as_string().unwrap();
+        assert_eq!(vals, &vec![Some("0".to_string()), Some("10".to_string())]);
+
+        for ty in [DataType::IntegerDistribution, DataType::DoubleDistribution]
+        {
+            assert!(
+                points.cast(&[ty]).is_err(),
+                "Should not be able to cast int array to distributions"
+            );
+        }
+        assert!(points.cast(&[]).is_err(), "Should fail to cast with no types");
+        assert!(
+            points.cast(&[DataType::Boolean, DataType::Boolean]).is_err(),
+            "Should fail to cast to the wrong number of types"
+        );
+    }
+
+    #[test]
+    fn test_cast_points_from_double() {
+        let points = Points {
+            start_times: None,
+            timestamps: timestamps(2),
+            values: vec![Values {
+                values: ValueArray::Double(vec![Some(0.0), Some(10.5)]),
+                metric_type: MetricType::Gauge,
+            }],
+        };
+
+        let as_same = points.cast(&[DataType::Double]).unwrap();
+        let vals = as_same.values[0].values.as_double().unwrap();
+        assert_eq!(vals, points.values[0].values.as_double().unwrap());
+
+        let as_bools = points.cast(&[DataType::Boolean]).unwrap();
+        let vals = as_bools.values[0].values.as_boolean().unwrap();
+        assert_eq!(vals, &vec![Some(false), Some(true)]);
+
+        let as_ints = points.cast(&[DataType::Integer]).unwrap();
+        let vals = as_ints.values[0].values.as_integer().unwrap();
+        assert_eq!(vals, &vec![Some(0), Some(10)]);
+
+        let as_string = points.cast(&[DataType::String]).unwrap();
+        let vals = as_string.values[0].values.as_string().unwrap();
+        assert_eq!(
+            vals,
+            &vec![Some("0".to_string()), Some("10.5".to_string())]
+        );
+
+        let points = Points {
+            start_times: None,
+            timestamps: timestamps(2),
+            values: vec![Values {
+                values: ValueArray::Double(vec![Some(0.0), Some(f64::MAX)]),
+                metric_type: MetricType::Gauge,
+            }],
+        };
+        assert!(
+            points.cast(&[DataType::Integer]).is_err(),
+            "Should fail to cast out-of-range doubles to integer"
+        );
+
+        for ty in [DataType::IntegerDistribution, DataType::DoubleDistribution]
+        {
+            assert!(
+                points.cast(&[ty]).is_err(),
+                "Should not be able to cast double array to distributions"
+            );
+        }
+        assert!(points.cast(&[]).is_err(), "Should fail to cast with no types");
+        assert!(
+            points.cast(&[DataType::Boolean, DataType::Boolean]).is_err(),
+            "Should fail to cast to the wrong number of types"
+        );
+    }
+
+    #[test]
+    fn test_cast_points_from_string() {
+        fn make_points(strings: &[&str]) -> Points {
+            Points {
+                start_times: None,
+                timestamps: timestamps(strings.len()),
+                values: vec![Values {
+                    values: ValueArray::String(
+                        strings.iter().map(|&s| Some(s.into())).collect(),
+                    ),
+                    metric_type: MetricType::Gauge,
+                }],
+            }
+        }
+
+        let points = make_points(&["some", "strings"]);
+        let as_same = points.cast(&[DataType::String]).unwrap();
+        assert_eq!(as_same, points);
+
+        // Any non-empty string is truthy, even "false".
+        let points = make_points(&["", "false", "true"]);
+        let as_bools = points.cast(&[DataType::Boolean]).unwrap();
+        let vals = as_bools.values[0].values.as_boolean().unwrap();
+        assert_eq!(vals, &vec![Some(false), Some(true), Some(true)]);
+
+        // Conversion to integers happens by parsing.
+        let points = make_points(&["0", "1"]);
+        let as_ints = points.cast(&[DataType::Integer]).unwrap();
+        let vals = as_ints.values[0].values.as_integer().unwrap();
+        assert_eq!(vals, &vec![Some(0), Some(1)]);
+        for bad in ["1.0", "", "foo", "[]"] {
+            assert!(
+                make_points(&[bad]).cast(&[DataType::Integer]).is_err(),
+                "Should fail to cast non-int string '{}' to integers",
+                bad,
+            );
+        }
+
+        // Conversion to doubles happens by parsing.
+        let points = make_points(&["0", "1.1"]);
+        let as_doubles = points.cast(&[DataType::Double]).unwrap();
+        let vals = as_doubles.values[0].values.as_double().unwrap();
+        assert_eq!(vals, &vec![Some(0.0), Some(1.1)]);
+        for bad in ["", "foo", "[]"] {
+            assert!(
+                make_points(&[bad]).cast(&[DataType::Double]).is_err(),
+                "Should fail to cast non-double string '{}' to double",
+                bad,
+            );
+        }
+
+        // Checks for invalid casts
+        for ty in [DataType::IntegerDistribution, DataType::DoubleDistribution]
+        {
+            assert!(
+                points.cast(&[ty]).is_err(),
+                "Should not be able to cast double array to distributions"
+            );
+        }
+        assert!(points.cast(&[]).is_err(), "Should fail to cast with no types");
+        assert!(
+            points.cast(&[DataType::Boolean, DataType::Boolean]).is_err(),
+            "Should fail to cast to the wrong number of types"
+        );
+    }
+
+    #[test]
+    fn test_cast_points_from_int_distribution() {
+        // We can only "cast" to the same type here.
+        let points = Points {
+            start_times: None,
+            timestamps: timestamps(1),
+            values: vec![Values {
+                values: ValueArray::IntegerDistribution(vec![Some(
+                    Distribution { bins: vec![0, 1, 2], counts: vec![0; 3] },
+                )]),
+                metric_type: MetricType::Gauge,
+            }],
+        };
+        let as_same = points.cast(&[DataType::IntegerDistribution]).unwrap();
+        assert_eq!(points, as_same);
+
+        for ty in [
+            DataType::Boolean,
+            DataType::String,
+            DataType::Integer,
+            DataType::Double,
+            DataType::DoubleDistribution,
+        ] {
+            assert!(
+                points.cast(&[ty]).is_err(),
+                "Should not be able to cast distributions to anything other than itself"
+            );
+        }
+        assert!(points.cast(&[]).is_err());
+        assert!(points
+            .cast(&[
+                DataType::IntegerDistribution,
+                DataType::IntegerDistribution
+            ])
+            .is_err());
+    }
+
+    #[test]
+    fn test_cast_points_from_double_distribution() {
+        // We can only "cast" to the same type here.
+        let points = Points {
+            start_times: None,
+            timestamps: timestamps(1),
+            values: vec![Values {
+                values: ValueArray::DoubleDistribution(vec![Some(
+                    Distribution {
+                        bins: vec![0.0, 1.0, 2.0],
+                        counts: vec![0; 3],
+                    },
+                )]),
+                metric_type: MetricType::Gauge,
+            }],
+        };
+        let as_same = points.cast(&[DataType::DoubleDistribution]).unwrap();
+        assert_eq!(points, as_same);
+
+        for ty in [
+            DataType::Boolean,
+            DataType::String,
+            DataType::Integer,
+            DataType::Double,
+            DataType::IntegerDistribution,
+        ] {
+            assert!(
+                points.cast(&[ty]).is_err(),
+                "Should not be able to cast distributions to anything other than itself"
+            );
+        }
+        assert!(points.cast(&[]).is_err());
+        assert!(points
+            .cast(&[DataType::DoubleDistribution, DataType::DoubleDistribution])
+            .is_err());
     }
 }

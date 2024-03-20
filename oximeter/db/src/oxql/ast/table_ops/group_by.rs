@@ -69,7 +69,7 @@ impl GroupBy {
             let key = dropped.key();
 
             // Fetch the existing table, if one exists. If one does _not_ exist,
-            // we'll insert the table with the data type converted to a thee
+            // we'll insert the table with the data type converted to the
             // appropriate type. For a mean reducer, the output is always a
             // double. For others, the value may be the same as the input type.
             //

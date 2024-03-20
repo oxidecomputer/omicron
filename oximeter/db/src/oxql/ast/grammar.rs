@@ -43,7 +43,7 @@ peg::parser! {
         // Parse boolean literals.
         rule true_literal() -> bool = "true" { true }
         rule false_literal() -> bool = "false" { false }
-        pub(in super) rule boolean_literal_impl() -> bool
+        pub(super) rule boolean_literal_impl() -> bool
             = quiet! { true_literal() / false_literal() } / expected!("boolean literal")
 
         pub rule boolean_literal() -> Literal
@@ -70,7 +70,7 @@ peg::parser! {
             = "us" { duration_consts::MICROSECOND }
         rule nanosecond() -> Duration
             = "ns" { duration_consts::NANOSECOND }
-        pub(in super) rule duration_literal_impl() -> Duration
+        pub(super) rule duration_literal_impl() -> Duration
             = count:integer_literal_impl() base:(
                 year() /
                 month() /
@@ -125,7 +125,7 @@ peg::parser! {
             = timestamp_string()
             / now_timestamp()
 
-        pub(in super) rule timestamp_string() -> DateTime<Utc>
+        pub(super) rule timestamp_string() -> DateTime<Utc>
             = "@" s:$(['0'..='9' | '-' | 'T' | ':' | '.']+)
         {?
             if let Ok(t) = NaiveDate::parse_from_str(s, "%F") {
@@ -147,7 +147,7 @@ peg::parser! {
             (negative, dur)
         }
 
-        pub(in super) rule now_timestamp() -> DateTime<Utc>
+        pub(super) rule now_timestamp() -> DateTime<Utc>
             = "@now()" maybe_offset:now_offset()?
         {
             let now = Utc::now();
@@ -167,13 +167,13 @@ peg::parser! {
             = ip:ipv4_literal() { Literal::IpAddr(IpAddr::V4(ip)) }
             / ip:ipv6_literal() { Literal::IpAddr(IpAddr::V6(ip)) }
 
-        pub(in super) rule ipv4_literal() -> Ipv4Addr
+        pub(super) rule ipv4_literal() -> Ipv4Addr
             = "\"" s:$((['0'..='9']*<1,3>)**<4> ".") "\""
         {?
             s.parse().map_err(|_| "an IPv4 address")
         }
 
-        pub(in super) rule ipv6_literal() -> Ipv6Addr
+        pub(super) rule ipv6_literal() -> Ipv6Addr
             = "\"" s:$(['a'..='f' | '0'..='9' | ':']+) "\""
         {?
             s.parse().map_err(|_| "an IPv6 address")
@@ -201,7 +201,7 @@ peg::parser! {
             };
             middle.parse().or(Err("invalid UUID literal"))
         }
-        pub(in super) rule uuid_literal_impl() -> Uuid
+        pub(super) rule uuid_literal_impl() -> Uuid
             = dashed_uuid_literal() / undashed_uuid_literal()
 
         /// Parse UUID literals.
@@ -233,7 +233,7 @@ peg::parser! {
         rule double_quoted_string() -> String
             = "\"" s:any_but_double_quote() "\"" { s }
 
-        pub(in super) rule string_literal_impl() -> String
+        pub(super) rule string_literal_impl() -> String
             = single_quoted_string() / double_quoted_string()
 
         /// Parse a string literal, either single- or double-quoted.
@@ -272,7 +272,7 @@ peg::parser! {
         pub rule string_literal() -> Literal
             = s:string_literal_impl() { Literal::String(s) }
 
-        pub(in super) rule integer_literal_impl() -> i128
+        pub(super) rule integer_literal_impl() -> i128
             = n:$("-"? ['0'..='9']+ !['e' | 'E' | '.'])
         {?
             let Ok(x) = n.parse() else {
@@ -294,7 +294,7 @@ peg::parser! {
         // We're being a bit lazy here, since the rule expression isn't exactly
         // right. But we rely on calling `f64`'s `FromStr` implementation to
         // actually verify the values can be parsed.
-        pub(in super) rule double_literal_impl() -> f64
+        pub(super) rule double_literal_impl() -> f64
             = n:$("-"? ['0'..='9']* "."? ['0'..='9']* (['e' | 'E'] "-"?  ['0'..='9']+)*) {?
                 n.parse().or(Err("double literal"))
             }
@@ -323,16 +323,16 @@ peg::parser! {
             lit
         }
 
-        pub(in super) rule logical_op_impl() -> LogicalOp
+        pub(super) rule logical_op_impl() -> LogicalOp
             = "||" { LogicalOp::Or} / "&&" { LogicalOp::And }
 
         // Parse a filter item, which is one logical expression used in a filter
         // operation.
         #[cache_left_rec]
-        pub(in super) rule filter_item() -> Filter = precedence! {
+        pub(super) rule filter_item() -> Filter = precedence! {
             // Note: We need to separate the logical operations into different
             // levels of precedence.
-            left:(@) _? "||"  _? right:@ {
+            left:(@) _? "||" _? right:@ {
                 Filter::Expr(FilterExpr {
                     left: Box::new(left),
                     op: LogicalOp::Or,
@@ -340,7 +340,7 @@ peg::parser! {
                 })
             }
             --
-            left:(@) _? "&&"  _? right:@ {
+            left:(@) _? "&&" _? right:@ {
                 Filter::Expr(FilterExpr {
                     left: Box::new(left),
                     op: LogicalOp::And,
@@ -385,7 +385,7 @@ peg::parser! {
             item
         }
 
-        pub(in super) rule ident_impl() -> &'input str
+        pub(super) rule ident_impl() -> &'input str
             = quiet!{ inner:$(['a'..='z']+ ['a'..='z' | '0'..='9']* ("_" ['a'..='z' | '0'..='9']+)*) } /
                 expected!("A valid identifier")
 
@@ -393,7 +393,7 @@ peg::parser! {
         pub rule ident() -> Ident
             = inner:ident_impl() { Ident(inner.to_string()) }
 
-        pub(in super) rule comparison() -> Comparison
+        pub(super) rule comparison() -> Comparison
             = "==" { Comparison::Eq }
             / "!=" { Comparison::Ne }
             / ">=" { Comparison::Ge }
@@ -452,14 +452,14 @@ peg::parser! {
             Align { method, period }
         }
 
-        pub(in super) rule basic_table_op() -> TableOp
+        pub(super) rule basic_table_op() -> TableOp
             = g:"get" _ t:timeseries_name() { TableOp::Basic(BasicTableOp::Get(t)) }
             / f:filter() { TableOp::Basic(BasicTableOp::Filter(f)) }
             / g:group_by() { TableOp::Basic(BasicTableOp::GroupBy(g)) }
             / join() { TableOp::Basic(BasicTableOp::Join(Join)) }
             / a:align() { TableOp::Basic(BasicTableOp::Align(a)) }
 
-        pub(in super) rule grouped_table_op() -> TableOp
+        pub(super) rule grouped_table_op() -> TableOp
             = "{" _? ops:(query() ++ grouped_table_op_delim()) _? "}"
         {
             TableOp::Grouped(GroupedTableOp { ops })

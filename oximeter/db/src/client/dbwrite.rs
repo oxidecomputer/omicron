@@ -64,8 +64,8 @@ impl DbWrite for Client {
         self.run_many_sql_statements(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/schema/replicated/db-init.sql"
-        ),))
-            .await
+        )))
+        .await
     }
 
     /// Wipe the ClickHouse database entirely from a replicated set up.
