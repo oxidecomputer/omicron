@@ -11,6 +11,7 @@ use clap::Args;
 use crossterm::style::Stylize;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
+use oximeter_db::oxql::query::special_idents;
 use oximeter_db::oxql::Table;
 use oximeter_db::Client;
 use oximeter_db::OxqlResult;
@@ -58,11 +59,12 @@ timeseries from the database, by name. For example:
 
 `get physical_data_link:bytes_received`
 
-The support timeseries operations are:
+The supported timeseries operations are:
 
 - get: Select a timeseries by name
 - filter: Filter timeseries by field or sample values
 - group_by: Group timeseries by fields, applying a reducer.
+- join: Join two or more timeseries together
 
 Run `\ql <operation>` to get specific help about that operation.
     "#;
@@ -82,7 +84,7 @@ Get instances of a timeseries by name"#;
             const HELP: &str = r#"filter <expr>");
 
 Filter timeseries based on their attributes.
-<expr> can be a logical combination of filtering.
+<expr> can be a logical combination of filtering
 \"atoms\", such as `field_foo > 0`. Expressions
 may use any of the usual comparison operators, and
 can be nested and combined with && or ||.
@@ -149,7 +151,11 @@ async fn describe_timeseries(
     timeseries: &str,
 ) -> anyhow::Result<()> {
     match timeseries.parse() {
-        Err(_) => println!("Invalid timeseries name: {timeseries}"),
+        Err(_) => eprintln!(
+            "Invalid timeseries name '{timeseries}, \
+            use \\l to list available timeseries by name
+        "
+        ),
         Ok(name) => {
             if let Some(schema) = client.schema_for_timeseries(&name).await? {
                 let mut cols =
@@ -159,33 +165,30 @@ async fn describe_timeseries(
                     cols.push(field.name.clone());
                     types.push(field.field_type.to_string());
                 }
-                cols.push("timestamp".into());
-                types.push("DateTime64".into());
+                cols.push(special_idents::TIMESTAMP.into());
+                types.push(special_idents::DATETIME64.into());
 
                 if schema.datum_type.is_histogram() {
-                    cols.push("start_time".into());
-                    types.push("DateTime64".into());
+                    cols.push(special_idents::START_TIME.into());
+                    types.push(special_idents::DATETIME64.into());
 
-                    cols.push("bins".into());
-                    types.push(format!(
-                        "Array[{}]",
-                        schema
-                            .datum_type
-                            .to_string()
-                            .strip_prefix("Histogram")
-                            .unwrap()
-                            .to_lowercase(),
-                    ));
+                    cols.push(special_idents::BINS.into());
+                    types.push(
+                        special_idents::array_type_name_from_histogram_type(
+                            schema.datum_type,
+                        )
+                        .unwrap(),
+                    );
 
-                    cols.push("counts".into());
-                    types.push("Array[u64]".into());
+                    cols.push(special_idents::COUNTS.into());
+                    types.push(special_idents::ARRAYU64.into());
                 } else if schema.datum_type.is_cumulative() {
-                    cols.push("start_time".into());
-                    types.push("DateTime64".into());
-                    cols.push("datum".into());
+                    cols.push(special_idents::START_TIME.into());
+                    types.push(special_idents::DATETIME64.into());
+                    cols.push(special_idents::DATUM.into());
                     types.push(schema.datum_type.to_string());
                 } else {
-                    cols.push("datum".into());
+                    cols.push(special_idents::DATUM.into());
                     types.push(schema.datum_type.to_string());
                 }
 
@@ -197,7 +200,7 @@ async fn describe_timeseries(
                     builder.build().with(tabled::settings::Style::psql())
                 );
             } else {
-                println!("No such timeseries: {timeseries}");
+                eprintln!("No such timeseries: {timeseries}");
             }
         }
     }
@@ -281,7 +284,7 @@ pub async fn oxql_shell(
             }
             Ok(Signal::CtrlD) => return Ok(()),
             Ok(Signal::CtrlC) => continue,
-            err => println!("err: {err:?}"),
+            err => eprintln!("err: {err:?}"),
         }
     }
 }

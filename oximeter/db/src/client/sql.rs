@@ -19,37 +19,15 @@
 // Copyright 2024 Oxide Computer Company
 
 use super::query_summary::QuerySummary;
-use crate::client::Client;
 pub use crate::sql::RestrictedQuery;
 use crate::Error;
+use crate::{
+    client::Client,
+    sql::{QueryResult, Table},
+};
 pub use indexmap::IndexMap;
 use slog::debug;
 pub use std::time::Instant;
-
-/// A tabular result from a SQL query against a timeseries.
-#[derive(Clone, Debug, Default, serde::Serialize)]
-pub struct Table {
-    /// The name of each column in the result set.
-    pub column_names: Vec<String>,
-    /// The rows of the result set, one per column.
-    pub rows: Vec<Vec<serde_json::Value>>,
-}
-
-/// The full result of running a SQL query against a timeseries.
-#[derive(Clone, Debug)]
-pub struct QueryResult {
-    /// The query as written by the client.
-    pub original_query: String,
-    /// The rewritten query, run against the JOINed representation of the
-    /// timeseries.
-    ///
-    /// This is the query that is actually run in the database itself.
-    pub rewritten_query: String,
-    /// Summary of the resource usage of the query.
-    pub summary: QuerySummary,
-    /// The result of the query, with column names and rows.
-    pub table: Table,
-}
 
 impl Client {
     /// Transform a SQL query against a timeseries, but do not execute it.

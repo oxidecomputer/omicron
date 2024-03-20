@@ -11,10 +11,10 @@ use clap::Args;
 use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
 use oximeter_db::sql::function_allow_list;
+use oximeter_db::sql::QueryResult;
+use oximeter_db::sql::Table;
 use oximeter_db::Client;
-use oximeter_db::QueryMetadata;
-use oximeter_db::QueryResult;
-use oximeter_db::Table;
+use oximeter_db::QuerySummary;
 use reedline::DefaultPrompt;
 use reedline::DefaultPromptSegment;
 use reedline::Reedline;
@@ -175,12 +175,12 @@ fn print_sql_query(query: &str) {
     println!();
 }
 
-fn print_query_metadata(table: &Table, metadata: &QueryMetadata) {
-    println!("Metadata");
-    println!(" Query ID:    {}", metadata.id);
+fn print_query_summary(table: &Table, summary: &QuerySummary) {
+    println!("Summary");
+    println!(" Query ID:    {}", summary.id);
     println!(" Result rows: {}", table.rows.len());
-    println!(" Time:        {:?}", metadata.elapsed);
-    println!(" Read:        {}\n", metadata.summary.read);
+    println!(" Time:        {:?}", summary.elapsed);
+    println!(" Read:        {}\n", summary.io_summary.read);
 }
 
 pub async fn sql_shell(
@@ -257,7 +257,7 @@ pub async fn sql_shell(
                                 Ok(QueryResult {
                                     original_query,
                                     rewritten_query,
-                                    metadata,
+                                    summary,
                                     table,
                                 }) => {
                                     println!();
@@ -282,7 +282,7 @@ pub async fn sql_shell(
                                         )
                                     );
                                     if opts.print_metadata {
-                                        print_query_metadata(&table, &metadata);
+                                        print_query_summary(&table, &summary);
                                     }
                                 }
                             }
@@ -292,7 +292,7 @@ pub async fn sql_shell(
             }
             Ok(Signal::CtrlD) => return Ok(()),
             Ok(Signal::CtrlC) => continue,
-            err => println!("err: {err:?}"),
+            err => eprintln!("err: {err:?}"),
         }
     }
 }
