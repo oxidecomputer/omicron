@@ -89,7 +89,7 @@ pub fn cmd_verify_libraries() -> Result<()> {
     config_path.push(".cargo/xtask.toml");
     let config = read_xtask_toml(&config_path)?;
 
-    let cargo = std::env::var("CARGO").context("CARGO env variable")?;
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_string());
     let mut command = Command::new(cargo)
         .args(["build", "--bins", "--message-format=json-render-diagnostics"])
         .stdout(Stdio::piped())
