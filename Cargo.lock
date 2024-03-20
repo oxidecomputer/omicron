@@ -4561,6 +4561,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-metrics-producer-gc"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures",
+ "nexus-db-queries",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-workspace-hack",
+ "oximeter-client",
+ "pq-sys",
+ "slog",
+ "slog-error-chain",
+ "thiserror",
+ "uuid 1.7.0",
+]
+
+[[package]]
 name = "nexus-networking"
 version = "0.1.0"
 dependencies = [

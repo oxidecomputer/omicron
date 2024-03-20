@@ -5,13 +5,18 @@
 //! [`DataStore`] methods related to Oximeter.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::db;
+use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
+use crate::db::identity::Asset;
 use crate::db::model::OximeterInfo;
 use crate::db::model::ProducerEndpoint;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::DataPageParams;
@@ -158,5 +163,62 @@ impl DataStore {
                     ),
                 )
             })
+    }
+
+    /// Fetches a page of the list of producer endpoint records with a
+    /// `time_modified` date older than `expiration`
+    pub async fn producers_list_expired(
+        &self,
+        opctx: &OpContext,
+        expiration: DateTime<Utc>,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<ProducerEndpoint> {
+        use db::schema::metric_producer::dsl;
+
+        paginated(dsl::metric_producer, dsl::id, pagparams)
+            .filter(dsl::time_modified.lt(expiration))
+            .order_by((dsl::oximeter_id, dsl::id))
+            .select(ProducerEndpoint::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::MetricProducer,
+                        "By Oximeter ID",
+                    ),
+                )
+            })
+    }
+
+    /// List all producer endpoint records with a `time_modified` date older
+    /// than `expiration`, making as many queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn producers_list_expired_batched(
+        &self,
+        opctx: &OpContext,
+        expiration: DateTime<Utc>,
+    ) -> ListResultVec<ProducerEndpoint> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut producers = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .producers_list_expired(
+                    opctx,
+                    expiration,
+                    &p.current_pagparams(),
+                )
+                .await?;
+            paginator = p.found_batch(&batch, &|p: &ProducerEndpoint| p.id());
+            producers.extend(batch);
+        }
+
+        Ok(producers)
     }
 }
