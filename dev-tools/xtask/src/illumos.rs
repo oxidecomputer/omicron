@@ -1,13 +1,18 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use anyhow::{bail, Context, Result};
 use camino::Utf8Path;
 use cargo_metadata::Message;
 use fs_err as fs;
 use serde::Deserialize;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet},
     io::BufReader,
     process::{Command, Stdio},
 };
+use swrite::{swriteln, SWrite};
 
 use crate::load_workspace;
 
@@ -33,17 +38,13 @@ enum LibraryError {
 fn verify_executable(
     config: &XtaskConfig,
     path: &Utf8Path,
-    errors: &mut HashMap<String, Vec<LibraryError>>,
+    errors: &mut BTreeMap<String, Vec<LibraryError>>,
 ) -> Result<()> {
     let binary = path.file_name().context("basename of executable")?;
 
     let command = Command::new("elfedit")
-        .arg("-o")
-        .arg("simple")
-        .arg("-r")
-        .arg("-e")
-        .arg("dyn:tag NEEDED")
-        .arg(&path)
+        .args(["-o", "simple", "-r", "-e", "dyn:tag NEEDED"])
+        .arg(path)
         .output()
         .context("exec elfedit")?;
 
@@ -88,8 +89,9 @@ pub fn cmd_verify_libraries() -> Result<()> {
     config_path.push(".cargo/xtask.toml");
     let config = read_xtask_toml(&config_path)?;
 
-    let mut command = Command::new("cargo")
-        .args(&["build", "--message-format=json-render-diagnostics"])
+    let cargo = std::env::var("CARGO").context("CARGO env variable")?;
+    let mut command = Command::new(cargo)
+        .args(["build", "--bins", "--message-format=json-render-diagnostics"])
         .stdout(Stdio::piped())
         .spawn()
         .context("failed to spawn cargo build")?;
@@ -98,14 +100,11 @@ pub fn cmd_verify_libraries() -> Result<()> {
 
     let mut errors = Default::default();
     for message in cargo_metadata::Message::parse_stream(reader) {
-        match message? {
-            Message::CompilerArtifact(artifact) => {
-                // We are only interested in artifacts that are binaries
-                if let Some(executable) = artifact.executable {
-                    verify_executable(&config, &executable, &mut errors)?;
-                }
+        if let Message::CompilerArtifact(artifact) = message? {
+            // We are only interested in artifacts that are binaries
+            if let Some(executable) = artifact.executable {
+                verify_executable(&config, &executable, &mut errors)?;
             }
-            _ => (),
         }
     }
 
@@ -116,15 +115,14 @@ pub fn cmd_verify_libraries() -> Result<()> {
 
     if !errors.is_empty() {
         let mut msg = String::new();
-        use std::fmt::Write;
         errors.iter().for_each(|(binary, errors)| {
-            write!(msg, "{binary}\n").unwrap();
+            swriteln!(msg, "{binary}");
             errors.iter().for_each(|error| match error {
                 LibraryError::Unexpected(lib) => {
-                    write!(msg, "\tUNEXPECTED dependency on {lib}\n").unwrap()
+                    swriteln!(msg, "\tUNEXPECTED dependency on {lib}");
                 }
                 LibraryError::NotAllowed(lib) => {
-                    write!(msg, "\tNEEDS {lib} but is not allowed\n").unwrap()
+                    swriteln!(msg, "\tNEEDS {lib} but is not allowed");
                 }
             });
         });

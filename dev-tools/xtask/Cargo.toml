@@ -13,3 +13,4 @@ clap.workspace = true
 serde.workspace = true
 toml.workspace = true
 fs-err.workspace = true
+swrite.workspace = true
