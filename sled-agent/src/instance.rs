@@ -1689,7 +1689,6 @@ mod tests {
         (srv, client)
     }
 
-    // make a FakeStorageManager with a "U2" upserted
     async fn setup_storage_manager(log: &Logger) -> StorageManagerTestHarness {
         let mut harness = StorageManagerTestHarness::new(log).await;
         let raw_disks =
