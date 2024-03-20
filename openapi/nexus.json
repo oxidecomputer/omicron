@@ -5432,6 +5432,7 @@
           "system/networking"
         ],
         "summary": "Add range to IP pool",
+        "description": "IPv6 ranges are not allowed yet.",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -5847,6 +5848,7 @@
           "system/networking"
         ],
         "summary": "Add IP range to Oxide service pool",
+        "description": "IPv6 ranges are not allowed yet.",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {

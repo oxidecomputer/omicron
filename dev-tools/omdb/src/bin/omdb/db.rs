@@ -583,7 +583,7 @@ impl DbArgs {
 /// incompatible because in practice it may well not matter and it's very
 /// valuable for this tool to work if it possibly can.
 async fn check_schema_version(datastore: &DataStore) {
-    let expected_version = nexus_db_model::schema::SCHEMA_VERSION;
+    let expected_version = nexus_db_model::SCHEMA_VERSION;
     let version_check = datastore.database_schema_version().await;
 
     match version_check {
