@@ -20,29 +20,34 @@ use crate::TimeseriesKey;
 use oximeter::TimeseriesSchema;
 use slog::debug;
 use slog::trace;
+use slog::Logger;
 use std::collections::BTreeMap;
 use std::time::Duration;
 use std::time::Instant;
+use uuid::Uuid;
 
 #[usdt::provider(provider = "clickhouse_client")]
 mod probes {
-    /// Fires when an OxQL query starts, with the query string.
-    fn oxql__query__start(_: &usdt::UniqueId, query: &str) {}
+    /// Fires when an OxQL query starts, with the query ID and string.
+    fn oxql__query__start(_: &usdt::UniqueId, _: &Uuid, query: &str) {}
 
     /// Fires when an OxQL query ends, either in success or failure.
-    fn oxql__query__done(_: &usdt::UniqueId) {}
+    fn oxql__query__done(_: &usdt::UniqueId, _: &Uuid) {}
 
-    /// Fires when an OxQL table operation starts, with the details of the
-    /// operation itself.
-    fn oxql__table__op__start(_: &usdt::UniqueId, op: &str) {}
+    /// Fires when an OxQL table operation starts, with the query ID and details
+    /// of the operation itself.
+    fn oxql__table__op__start(_: &usdt::UniqueId, _: &Uuid, op: &str) {}
 
     /// Fires when an OxQL table operation ends.
-    fn oxql__table__op__done(_: &usdt::UniqueId) {}
+    fn oxql__table__op__done(_: &usdt::UniqueId, _: &Uuid) {}
 }
 
 /// The full result of an OxQL query.
 #[derive(Clone, Debug)]
 pub struct OxqlResult {
+    /// A query ID assigned to this OxQL query.
+    pub query_id: Uuid,
+
     /// The total duration of the OxQL query.
     ///
     /// This includes the time to run SQL queries against the database, and the
@@ -82,16 +87,20 @@ impl Client {
         // we can attach the other filters ourselves.
         let query = query.as_ref();
         let parsed_query = oxql::Query::new(query)?;
+        let query_id = Uuid::new_v4();
+        let query_log =
+            self.log.new(slog::o!("query_id" => query_id.to_string()));
         debug!(
-            &self.log,
+            query_log,
             "parsed OxQL query";
             "query" => query,
             "parsed_query" => ?parsed_query,
         );
         let id = usdt::UniqueId::new();
-        probes::oxql__query__start!(|| (&id, query));
-        let result = self.run_oxql_query(parsed_query, None).await;
-        probes::oxql__query__done!(|| (&id));
+        probes::oxql__query__start!(|| (&id, &query_id, query));
+        let result =
+            self.run_oxql_query(&query_log, query_id, parsed_query, None).await;
+        probes::oxql__query__done!(|| (&id, &query_id));
         result
     }
 
@@ -217,6 +226,8 @@ impl Client {
     #[async_recursion::async_recursion]
     async fn run_oxql_query(
         &self,
+        query_log: &Logger,
+        query_id: Uuid,
         query: oxql::Query,
         outer_predicates: Option<Filter>,
     ) -> Result<OxqlResult, Error> {
@@ -225,7 +236,7 @@ impl Client {
             split
         {
             trace!(
-                &self.log,
+                query_log,
                 "OxQL query contains subqueries, running recursively"
             );
             // Create the new set of outer predicates to pass in to the
@@ -241,24 +252,34 @@ impl Client {
             let query_start = Instant::now();
             for subq in subqueries.into_iter() {
                 let res = self
-                    .run_oxql_query(subq, new_outer_predicates.clone())
+                    .run_oxql_query(
+                        query_log,
+                        query_id,
+                        subq,
+                        new_outer_predicates.clone(),
+                    )
                     .await?;
                 query_summaries.extend(res.query_summaries);
                 tables.extend(res.tables);
             }
             for tr in transformations.into_iter() {
                 trace!(
-                    &self.log,
+                    query_log,
                     "applying query transformation";
                     "transformation" => ?tr,
                 );
                 let id = usdt::UniqueId::new();
-                probes::oxql__table__op__start!(|| (&id, format!("{tr:?}")));
+                probes::oxql__table__op__start!(|| (
+                    &id,
+                    &query_id,
+                    format!("{tr:?}")
+                ));
                 let new_tables = tr.apply(&tables, query.end_time());
-                probes::oxql__table__op__done!(|| (&id));
+                probes::oxql__table__op__done!(|| (&id, &query_id));
                 tables = new_tables?;
             }
             let result = OxqlResult {
+                query_id,
                 total_duration: query_start.elapsed(),
                 query_summaries,
                 tables,
@@ -277,7 +298,7 @@ impl Client {
             return Err(Error::TimeseriesNotFound(name.to_string()));
         };
         debug!(
-            &self.log,
+            query_log,
             "running flat OxQL query";
             "query" => ?query,
             "timeseries_name" => %name,
@@ -289,7 +310,7 @@ impl Client {
         // them in with the predicates passed in from a possible outer query.
         let preds = query.coalesced_predicates(outer_predicates.clone());
         debug!(
-            &self.log,
+            query_log,
             "coalesced predicates from flat query";
             "outer_predicates" => ?&outer_predicates,
             "coalesced" => ?&preds,
@@ -306,7 +327,7 @@ impl Client {
             .select_matching_timeseries_info(&all_fields_query, &schema)
             .await?;
         debug!(
-            &self.log,
+            query_log,
             "fetched information for matching timeseries keys";
             "n_keys" => info.len(),
         );
@@ -315,6 +336,7 @@ impl Client {
         // If there are no consistent keys, we can just return an empty table.
         if info.is_empty() {
             let result = OxqlResult {
+                query_id,
                 total_duration: query_start.elapsed(),
                 query_summaries,
                 tables: vec![oxql::Table::new(schema.timeseries_name.as_str())],
@@ -325,6 +347,7 @@ impl Client {
         // First, let's check that we're not going to return an enormous
         // amount of data here.
         self.verify_measurement_query_limit(
+            query_log,
             &schema,
             preds.as_ref(),
             info.keys(),
@@ -338,7 +361,7 @@ impl Client {
         // samples at once, so we get many concrete _timeseries_ in the returned
         // response, even though they're all from the same schema.
         let (summary, timeseries_by_key) = self
-            .select_matching_samples(&schema, preds.as_ref(), &info)
+            .select_matching_samples(query_log, &schema, preds.as_ref(), &info)
             .await?;
         query_summaries.push(summary);
 
@@ -351,7 +374,7 @@ impl Client {
 
         let transformations = query.transformations();
         debug!(
-            &self.log,
+            query_log,
             "constructed OxQL table, starting transformation pipeline";
             "name" => tables[0].name(),
             "n_timeseries" => tables[0].n_timeseries(),
@@ -359,17 +382,22 @@ impl Client {
         );
         for tr in transformations {
             trace!(
-                &self.log,
+                query_log,
                 "applying query transformation";
                 "transformation" => ?tr,
             );
             let id = usdt::UniqueId::new();
-            probes::oxql__table__op__start!(|| (&id, format!("{tr:?}")));
+            probes::oxql__table__op__start!(|| (
+                &id,
+                &query_id,
+                format!("{tr:?}")
+            ));
             let new_tables = tr.apply(&tables, query.end_time());
-            probes::oxql__table__op__done!(|| (&id));
+            probes::oxql__table__op__done!(|| (&id, &query_id));
             tables = new_tables?;
         }
         let result = OxqlResult {
+            query_id,
             total_duration: query_start.elapsed(),
             query_summaries,
             tables,
@@ -383,6 +411,7 @@ impl Client {
     // samples, depending on how data was requested.
     async fn select_matching_samples(
         &self,
+        query_log: &Logger,
         schema: &TimeseriesSchema,
         preds: Option<&oxql::ast::table_ops::filter::Filter>,
         info: &BTreeMap<TimeseriesKey, (Target, Metric)>,
@@ -403,7 +432,7 @@ impl Client {
             n_measurements += 1;
         }
         debug!(
-            &self.log,
+            query_log,
             "fetched measurements for OxQL query";
             "n_keys" => measurements_by_key.len(),
             "n_measurements" => n_measurements,
@@ -436,7 +465,7 @@ impl Client {
             };
             timeseries.points = points;
             debug!(
-                &self.log,
+                query_log,
                 "inserted new OxQL timeseries";
                 "key" => key,
                 "metric_type" => ?timeseries.points.metric_type(),
@@ -449,6 +478,7 @@ impl Client {
 
     async fn verify_measurement_query_limit<'keys>(
         &self,
+        query_log: &Logger,
         schema: &TimeseriesSchema,
         preds: Option<&oxql::ast::table_ops::filter::Filter>,
         consistent_keys: impl ExactSizeIterator<Item = &'keys TimeseriesKey>,
@@ -471,7 +501,7 @@ impl Client {
             )));
         }
         trace!(
-            &self.log,
+            query_log,
             "verified OxQL measurement query returns few enough results";
             "n_measurements" => count,
             "limit" => MAX_ROWS_PER_TIMESERIES_PER_QUERY,
