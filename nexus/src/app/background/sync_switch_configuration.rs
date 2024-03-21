@@ -300,7 +300,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                info!(&log, "applying switch port config changes"; "changes" => ?changes);
                 apply_switch_port_changes(&dpd_clients, &changes, &log).await;
 
                 //
