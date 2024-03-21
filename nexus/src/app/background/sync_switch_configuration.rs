@@ -18,8 +18,7 @@ use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, LoopbackAddress,
-    SwitchLinkFec, SwitchLinkSpeed, SwitchPortBgpPeerConfig, INFRA_LOT,
-    NETWORK_KEY,
+    SwitchLinkFec, SwitchLinkSpeed, INFRA_LOT, NETWORK_KEY,
 };
 use uuid::Uuid;
 
@@ -301,7 +300,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                info!(&log, "applying switch port config changes"; "changes" => ?changes);
                 apply_switch_port_changes(&dpd_clients, &changes, &log).await;
 
                 //
@@ -436,8 +434,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // Prefixes are associated to BgpConfig via the config id
                 let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix4>> = HashMap::new();
 
-                let mut bootstore_bgp_peer_info: Vec<(SwitchPortBgpPeerConfig, u32, Ipv4Addr)> = vec![];
-
                 for (location, port, change) in &changes {
                     let PortSettingsChange::Apply(settings) = change else {
                         continue;
@@ -550,15 +546,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             keepalive: peer.keepalive.0.into(),
                             resolution: BGP_SESSION_RESOLUTION,
                             passive: false,
-                        };
-
-                        // add it to data for the bootstore
-                        // only ipv4 is supported now
-                        match peer.addr {
-                            ipnetwork::IpNetwork::V4(addr) => {
-                                bootstore_bgp_peer_info.push((peer.clone(), bgp_config.asn.0, addr.ip()));
-                            },
-                            ipnetwork::IpNetwork::V6(_) => continue, //TODO v6
                         };
 
                         // update the stored vec if it exists, create a new on if it doesn't exist
@@ -690,7 +677,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 };
 
                 // TODO: @rcgoodfellow is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
-                let bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
+                let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
                     let announcements: Vec<Ipv4Network> = bgp_announce_prefixes
                         .get(&config.bgp_announce_set_id)
                         .expect("bgp config is present but announce set is not populated")
@@ -707,11 +694,27 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }).collect();
 
+                bgp.dedup();
+
                 let mut ports: Vec<PortConfigV1> = vec![];
 
                 for (location, port, change) in &changes {
                     let PortSettingsChange::Apply(info) = change else {
                         continue;
+                    };
+
+                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *location, port.port_name.clone()).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to fetch bgp peer config for switch port";
+                                "switch_location" => ?location,
+                                "port" => &port.port_name,
+                                "error" => %e,
+                            );
+                            continue;
+                        },
                     };
 
                     let port_config = PortConfigV1 {
@@ -721,19 +724,24 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .get(0) //TODO breakout support
                             .map(|l| l.autoneg)
                             .unwrap_or(false),
-                        bgp_peers: bootstore_bgp_peer_info
-                            .iter()
-                            .map(|(p, asn, addr)| SledBgpPeerConfig {
-                                addr: *addr,
-                                asn: *asn,
-                                port: port.port_name.clone(),
-                                hold_time: Some(p.hold_time.0.into()),
-                                connect_retry: Some(p.connect_retry.0.into()),
-                                delay_open: Some(p.delay_open.0.into()),
-                                idle_hold_time: Some(p.idle_hold_time.0.into()),
-                                keepalive: Some(p.keepalive.0.into()),
+                        bgp_peers: peer_configs.into_iter()
+                            // filter maps are cool
+                            .filter_map(|c| match c.addr.ip() {
+                                IpAddr::V4(addr) => Some((c, addr)),
+                                IpAddr::V6(_) => None,
                             })
-                            .collect(),
+                            .map(|(c, addr)| {
+                                SledBgpPeerConfig {
+                                    asn: *c.asn,
+                                    port: c.port_name,
+                                    addr,
+                                    hold_time: Some(c.hold_time.0.into()),
+                                    idle_hold_time: Some(c.idle_hold_time.0.into()),
+                                    delay_open: Some(c.delay_open.0.into()),
+                                    connect_retry: Some(c.connect_retry.0.into()),
+                                    keepalive: Some(c.keepalive.0.into()),
+                                }
+                        }).collect(),
                         port: port.port_name.clone(),
                         routes: info
                             .routes
