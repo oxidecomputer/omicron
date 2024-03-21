@@ -69,6 +69,34 @@ pub struct OxqlResult {
     pub tables: Vec<oxql::Table>,
 }
 
+/// The maximum number of data values fetched from the database for an OxQL
+/// query.
+//
+// The `Client::oxql_query()` API is currently unpaginated. It's also not clear
+// _how_ to paginate it. The objects contributing to the size of the returned
+// value, the actual data points, are nested several layers deep, inside the
+// `Timeseries` and `Table`s. A page size is supposed to refer to the top-level
+// object, so we'd need to flatten this hierarchy for that to work. That's
+// undesirable because it will lead to a huge amount of duplication of the table
+// / timeseries-level information, once for each point.
+//
+// Also, since we cannot use a cursor-based pagination, we're stuck with
+// limit-offset. That means we may need to run substantially all of the query,
+// just to know how to retrieve the next page, sidestepping one of the main
+// goals of pagination (to limit resource usage).
+//
+// Note that it's also hard or impossible to _predict_ how much data a query
+// will use. We need to count the number of rows in the database, for example,
+// _and also_ understand how table operations might change that size. For
+// example, alignment is allowed to upsample the data (within limits), so the
+// number of rows in the database are not the only factor.
+//
+// This limit here is a crude attempt to limit just the raw data fetched from
+// ClickHouse itself. For any OxQL query, we may retrieve many measurements from
+// the database. Each time we do so, we increment a counter, and compare it to
+// this. If we exceed it, the whole query fails.
+pub const MAX_DATABASE_ROWS: u64 = 1_000_000;
+
 impl Client {
     /// Run a OxQL query.
     pub async fn oxql_query(
@@ -85,6 +113,8 @@ impl Client {
         //
         // This probably means we'll need to parse the query in Nexus, so that
         // we can attach the other filters ourselves.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/5298.
         let query = query.as_ref();
         let parsed_query = oxql::Query::new(query)?;
         let query_id = Uuid::new_v4();
@@ -98,8 +128,16 @@ impl Client {
         );
         let id = usdt::UniqueId::new();
         probes::oxql__query__start!(|| (&id, &query_id, query));
-        let result =
-            self.run_oxql_query(&query_log, query_id, parsed_query, None).await;
+        let mut total_rows_fetched = 0;
+        let result = self
+            .run_oxql_query(
+                &query_log,
+                query_id,
+                parsed_query,
+                &mut total_rows_fetched,
+                None,
+            )
+            .await;
         probes::oxql__query__done!(|| (&id, &query_id));
         result
     }
@@ -229,6 +267,7 @@ impl Client {
         query_log: &Logger,
         query_id: Uuid,
         query: oxql::Query,
+        total_rows_fetched: &mut u64,
         outer_predicates: Option<Filter>,
     ) -> Result<OxqlResult, Error> {
         let split = query.split();
@@ -256,6 +295,7 @@ impl Client {
                         query_log,
                         query_id,
                         subq,
+                        total_rows_fetched,
                         new_outer_predicates.clone(),
                     )
                     .await?;
@@ -344,16 +384,6 @@ impl Client {
             return Ok(result);
         }
 
-        // First, let's check that we're not going to return an enormous
-        // amount of data here.
-        self.verify_measurement_query_limit(
-            query_log,
-            &schema,
-            preds.as_ref(),
-            info.keys(),
-        )
-        .await?;
-
         // Fetch the consistent measurements for this timeseries.
         //
         // We'll keep track of all the measurements for this timeseries schema,
@@ -361,7 +391,13 @@ impl Client {
         // samples at once, so we get many concrete _timeseries_ in the returned
         // response, even though they're all from the same schema.
         let (summary, timeseries_by_key) = self
-            .select_matching_samples(query_log, &schema, preds.as_ref(), &info)
+            .select_matching_samples(
+                query_log,
+                &schema,
+                preds.as_ref(),
+                &info,
+                total_rows_fetched,
+            )
             .await?;
         query_summaries.push(summary);
 
@@ -415,14 +451,19 @@ impl Client {
         schema: &TimeseriesSchema,
         preds: Option<&oxql::ast::table_ops::filter::Filter>,
         info: &BTreeMap<TimeseriesKey, (Target, Metric)>,
+        total_rows_fetched: &mut u64,
     ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, oxql::Timeseries>), Error>
     {
         // We'll create timeseries for each key on the fly. To enable computing
         // deltas, we need to track the last measurement we've seen as well.
         let mut measurements_by_key: BTreeMap<_, Vec<_>> = BTreeMap::new();
-        let measurements_query =
-            self.measurements_query(schema, preds, info.keys())?;
-        let mut n_measurements: usize = 0;
+        let measurements_query = self.measurements_query(
+            schema,
+            preds,
+            info.keys(),
+            total_rows_fetched,
+        )?;
+        let mut n_measurements: u64 = 0;
         let (summary, body) =
             self.execute_with_body(&measurements_query).await?;
         for line in body.lines() {
@@ -437,6 +478,18 @@ impl Client {
             "n_keys" => measurements_by_key.len(),
             "n_measurements" => n_measurements,
         );
+
+        // At this point, we need to check that we're still within our maximum
+        // result size. The measurement query we issued limited the returned
+        // result to 1 more than the remainder on our allotment. So if we get
+        // exactly that limit, we know that there are more rows than we can
+        // allow. We don't know how many more, but we don't care, and we fail
+        // the query regardless.
+        update_total_rows_and_check(
+            query_log,
+            total_rows_fetched,
+            n_measurements,
+        )?;
 
         // Remove the last measurement, returning just the keys and timeseries.
         let mut out = BTreeMap::new();
@@ -476,75 +529,12 @@ impl Client {
         Ok((summary, out))
     }
 
-    async fn verify_measurement_query_limit<'keys>(
-        &self,
-        query_log: &Logger,
-        schema: &TimeseriesSchema,
-        preds: Option<&oxql::ast::table_ops::filter::Filter>,
-        consistent_keys: impl ExactSizeIterator<Item = &'keys TimeseriesKey>,
-    ) -> Result<(), Error> {
-        const MAX_ROWS_PER_TIMESERIES_PER_QUERY: usize = 100_000;
-        let count_query =
-            self.count_measurements_query(schema, preds, consistent_keys)?;
-        let res = self.execute_with_body(&count_query).await?.1;
-        let Ok(count): Result<usize, _> = res.trim().parse() else {
-            return Err(Error::Database(
-                "Failed to get measurement query row count".to_string(),
-            ));
-        };
-        if count > MAX_ROWS_PER_TIMESERIES_PER_QUERY {
-            return Err(Error::from(anyhow::anyhow!(
-                "Measurement query returns {} rows, more than the \
-                current max of {}",
-                count,
-                MAX_ROWS_PER_TIMESERIES_PER_QUERY,
-            )));
-        }
-        trace!(
-            query_log,
-            "verified OxQL measurement query returns few enough results";
-            "n_measurements" => count,
-            "limit" => MAX_ROWS_PER_TIMESERIES_PER_QUERY,
-        );
-        Ok(())
-    }
-
-    // Return a query that will select the count of measurements consistent with
-    // the provided predicates and keys.
-    fn count_measurements_query<'keys>(
-        &self,
-        schema: &TimeseriesSchema,
-        preds: Option<&oxql::ast::table_ops::filter::Filter>,
-        consistent_keys: impl ExactSizeIterator<Item = &'keys TimeseriesKey>,
-    ) -> Result<String, Error> {
-        self.measurements_query_impl(
-            schema,
-            preds,
-            consistent_keys,
-            /* select_count = */ true,
-        )
-    }
-
     fn measurements_query<'keys>(
         &self,
         schema: &TimeseriesSchema,
         preds: Option<&oxql::ast::table_ops::filter::Filter>,
         consistent_keys: impl ExactSizeIterator<Item = &'keys TimeseriesKey>,
-    ) -> Result<String, Error> {
-        self.measurements_query_impl(
-            schema,
-            preds,
-            consistent_keys,
-            /* select_count = */ false,
-        )
-    }
-
-    fn measurements_query_impl<'keys>(
-        &self,
-        schema: &TimeseriesSchema,
-        preds: Option<&oxql::ast::table_ops::filter::Filter>,
-        consistent_keys: impl ExactSizeIterator<Item = &'keys TimeseriesKey>,
-        select_count: bool,
+        total_rows_fetched: &mut u64,
     ) -> Result<String, Error> {
         use std::fmt::Write;
 
@@ -555,8 +545,7 @@ impl Client {
             .map(|p| Self::rewrite_predicate_for_measurements(schema, p))
             .transpose()?
             .flatten();
-        let mut query =
-            self.measurements_query_raw(schema.datum_type, select_count);
+        let mut query = self.measurements_query_raw(schema.datum_type);
         query.push_str(" WHERE ");
         if let Some(preds) = preds_for_measurements {
             query.push_str(&preds);
@@ -575,24 +564,39 @@ impl Client {
             );
             query.push(')');
         }
-        // Use JSON format if we're selecting data, otherwise, use the default,
-        // which is TSV. This is just easier to parse and check for the count()
-        // query. We also order by timestamp.
-        if !select_count {
-            query.push_str(" ORDER BY timestamp FORMAT ");
-            query.push_str(crate::DATABASE_SELECT_FORMAT);
-        }
+
+        // Always order by timestamp. This is critical, and the basis for many
+        // of the operations downstream, which assume ordered timestamps.
+        query.push_str(" ORDER BY timestamp ");
+
+        // Push a limit clause, which restricts the number of records we could
+        // return.
+        //
+        // This is used to ensure that we never go above the limit in
+        // `MAX_RESULT_SIZE`. That restricts the _total_ number of rows we want
+        // to retch from the database. So we set our limit to be one more than
+        // the remainder on our allotment. If we get exactly as many as we set
+        // in the limit, then we fail the query because there are more rows that
+        // _would_ be returned. We don't know how many more, but there is at
+        // least 1 that pushes us over the limit. This prevents tricky
+        // TOCTOU-like bugs where we need to check the limit twice, and improves
+        // performance, since we don't return much more than we could possibly
+        // handle.
+        let remainder = MAX_DATABASE_ROWS - *total_rows_fetched;
+        query.push_str(" LIMIT ");
+        write!(query, "{}", remainder + 1).unwrap();
+
+        // Finally, use JSON format.
+        query.push_str(" FORMAT ");
+        query.push_str(crate::DATABASE_SELECT_FORMAT);
         Ok(query)
     }
 
     fn measurements_query_raw(
         &self,
         datum_type: oximeter::DatumType,
-        select_count: bool,
     ) -> String {
-        let value_columns = if select_count {
-            "count()"
-        } else if datum_type.is_histogram() {
+        let value_columns = if datum_type.is_histogram() {
             "timeseries_key, timestamp, start_time, bins, counts"
         } else if datum_type.is_cumulative() {
             "timeseries_key, timestamp, start_time, datum"
@@ -731,4 +735,30 @@ impl Client {
             }
         }
     }
+}
+
+// Helper to update the number of total rows fetched so far, and check it's
+// still under the limit.
+fn update_total_rows_and_check(
+    query_log: &Logger,
+    total_rows_fetched: &mut u64,
+    count: u64,
+) -> Result<(), Error> {
+    *total_rows_fetched += count;
+    if *total_rows_fetched > MAX_DATABASE_ROWS {
+        return Err(Error::from(anyhow::anyhow!(
+            "Query requires fetching more than the \
+            current limit of {} data points from the \
+            timeseries database",
+            MAX_DATABASE_ROWS,
+        )));
+    }
+    trace!(
+        query_log,
+        "verified OxQL measurement query returns few enough results";
+        "n_new_measurements" => count,
+        "n_total" => *total_rows_fetched,
+        "limit" => MAX_DATABASE_ROWS,
+    );
+    Ok(())
 }

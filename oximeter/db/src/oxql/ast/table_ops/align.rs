@@ -21,6 +21,45 @@ use chrono::TimeDelta;
 use chrono::Utc;
 use std::time::Duration;
 
+// The maximum factor by which an alignment operation may upsample data.
+//
+// This is a crude way to limit the size of a query result. We do not currently
+// paginate the results of OxQL queries, so we need to find other ways to avoid
+// DOS attacks due to large query results.
+//
+// While we also apply limits on the total number of samples fetched from the
+// ClickHouse database, this alone is insufficient. For example, suppose we have
+// two samples, spaced 1 second apart, which are then passed to an alignment
+// table operation with a period of 1 nanosecond. Now you have a billion points!
+//
+// To prevent this, we restrict the total amount by which any alignment
+// operation can upsample the data. Another way to think of it is that this
+// limits the ratio between the requested period and the largest interval
+// between timestamps in the data.
+const MAX_UPSAMPLING_RATIO: u128 = 10;
+
+fn verify_max_upsampling_ratio(
+    timestamps: &[DateTime<Utc>],
+    period: &Duration,
+) -> Result<(), Error> {
+    let period = period.as_nanos();
+    let max = MAX_UPSAMPLING_RATIO * period;
+    for (t1, t0) in timestamps.iter().skip(1).zip(timestamps.iter()) {
+        let Some(nanos) = t1.signed_duration_since(t0).num_nanoseconds() else {
+            anyhow::bail!("Overflow computing timestamp delta");
+        };
+        assert!(nanos > 0, "Timestamps should be sorted");
+        let nanos = nanos as u128;
+        println!("{nanos} - {period} - {max}");
+        anyhow::ensure!(
+            nanos <= max,
+            "A table alignment operation may not upsample data by \
+            more than a factor of {MAX_UPSAMPLING_RATIO}"
+        );
+    }
+    Ok(())
+}
+
 /// An `align` table operation, used to produce data at well-defined periods.
 ///
 /// Alignment is important for any kind of aggregation. Data is actually
@@ -104,6 +143,7 @@ fn align_mean_within(
             "Alignment by mean requires a gauge or delta metric, not {}",
             metric_type,
         );
+        verify_max_upsampling_ratio(&points.timestamps, &period)?;
 
         // Always convert the output to doubles, when computing the mean. The
         // output is always a gauge, so we do not need the start times of the
@@ -621,6 +661,48 @@ mod tests {
             )
             .is_none(),
             "This window should overlap none of the points"
+        );
+    }
+
+    #[test]
+    fn test_verify_max_upsampling_ratio() {
+        // We'll use a 1 second period, and ensure that we allow downsampling,
+        // and upsampling up to the max factor. That's 1/10th of a second,
+        // currently.
+        let now = Utc::now();
+        let timestamps = &[now - Duration::from_secs(1), now];
+
+        // All values within the threshold.
+        for period in [
+            Duration::from_secs_f64(0.5),
+            Duration::from_secs(10),
+            Duration::from_millis(100),
+        ] {
+            assert!(verify_max_upsampling_ratio(timestamps, &period).is_ok());
+        }
+
+        // Just below the threshold.
+        assert!(verify_max_upsampling_ratio(
+            timestamps,
+            &Duration::from_millis(99),
+        )
+        .is_err());
+
+        // Sanity check for way below the threshold.
+        assert!(verify_max_upsampling_ratio(
+            timestamps,
+            &Duration::from_nanos(1),
+        )
+        .is_err());
+
+        // Arrays where we can't compute an interval are fine.
+        assert!(verify_max_upsampling_ratio(
+            &timestamps[..1],
+            &Duration::from_nanos(1),
+        )
+        .is_ok());
+        assert!(
+            verify_max_upsampling_ratio(&[], &Duration::from_nanos(1),).is_ok()
         );
     }
 }
