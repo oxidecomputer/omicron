@@ -81,7 +81,11 @@ peg::parser! {
                 second() /
                 microsecond() /
                 nanosecond()
-            ) {?
+            )
+        {?
+            // NOTE: This count is the factor by which we multiply the base
+            // unit. So it counts the number of nanos, millis, or days, etc. It
+            // does not limit the total duration itself.
             let Ok(count) = u32::try_from(count) else {
                 return Err("invalid count for duration literal");
             };
@@ -495,6 +499,10 @@ peg::parser! {
 //
 // If the string contains an invalid escape sequence, such as "\uFFFF", or a
 // control code, such as `\u07`, `None` is returned.
+//
+// Note that the main goal of this method is to _unescape_ relevant sequences.
+// We will get queries that may contain escaped sequences, like `\\\n`, which
+// this method will unescape to `\n`.
 fn recognize_escape_sequences(s: &str) -> Option<String> {
     let mut out = String::with_capacity(s.len());
 
