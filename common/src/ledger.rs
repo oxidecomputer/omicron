@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{de::DeserializeOwned, Serialize};
-use slog::{debug, info, warn, Logger};
+use slog::{debug, error, info, warn, Logger};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
