@@ -4,6 +4,7 @@
 
 //! Mechanisms to launch and control propolis VMs via falcon
 
+use anyhow::anyhow;
 use camino_tempfile::tempdir;
 use libfalcon::{unit::gb, Runner};
 use std::env;
@@ -18,7 +19,6 @@ async fn main() -> Result<(), anyhow::Error> {
     let node_name = format!("{}_test_vm", name);
     let mut d = Runner::new(&runner_name);
     let vm = d.node(&node_name, "helios-2.0", 2, gb(8));
-    //    d.persistent = true;
 
     let cargo_bay = tempdir()?;
     eprintln!("Set cargo-bay to {} on host machine", cargo_bay.path());
@@ -39,9 +39,26 @@ async fn main() -> Result<(), anyhow::Error> {
     eprintln!("Launched test vm {node_name}");
 
     eprintln!("Running test: {test_file_name}::{test_name}");
-    let run_test = format!("cd /opt/cargo-bay && chmod +x {test_file_name} && ./{test_file_name} --color never --exact {test_name} --nocapture");
+    let run_test = format!(
+        "cd /opt/cargo-bay && chmod +x {test_file_name}; \
+        res=$?; \
+        if [[ $res -eq 0 ]]; then \
+          ./{test_file_name} --color never --exact {test_name} --nocapture; \
+          res=$?; \
+        fi; \
+        echo $res"
+    );
     let out = d.exec(vm, &run_test).await?;
-    eprintln!("TEST OUTPUT: {}", out);
 
-    Ok(())
+    // The last byte is always the exit code as we echo it at the end of our command
+    let exit_code = out.bytes().last().unwrap() as char;
+
+    eprintln!("{}", &out[..out.len() - 1]);
+
+    if exit_code == '0' {
+        Ok(())
+    } else {
+        //d.persistent = true;
+        Err(anyhow!("Test failed: exit code = {exit_code}"))
+    }
 }
