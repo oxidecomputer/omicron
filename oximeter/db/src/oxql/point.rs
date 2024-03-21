@@ -1482,6 +1482,26 @@ impl ValueArray {
             }
         }
     }
+
+    // Swap the value in self with other, asserting they're the same type.
+    pub(crate) fn swap(&mut self, mut values: ValueArray) {
+        use std::mem::swap;
+        match (self, &mut values) {
+            (ValueArray::Integer(x), ValueArray::Integer(y)) => swap(x, y),
+            (ValueArray::Double(x), ValueArray::Double(y)) => swap(x, y),
+            (ValueArray::Boolean(x), ValueArray::Boolean(y)) => swap(x, y),
+            (ValueArray::String(x), ValueArray::String(y)) => swap(x, y),
+            (
+                ValueArray::IntegerDistribution(x),
+                ValueArray::IntegerDistribution(y),
+            ) => swap(x, y),
+            (
+                ValueArray::DoubleDistribution(x),
+                ValueArray::DoubleDistribution(y),
+            ) => swap(x, y),
+            (_, _) => panic!("Cannot swap values of different types"),
+        }
+    }
 }
 
 mod private {

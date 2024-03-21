@@ -50,7 +50,6 @@ fn verify_max_upsampling_ratio(
         };
         assert!(nanos > 0, "Timestamps should be sorted");
         let nanos = nanos as u128;
-        println!("{nanos} - {period} - {max}");
         anyhow::ensure!(
             nanos <= max,
             "A table alignment operation may not upsample data by \
@@ -119,6 +118,8 @@ pub enum AlignmentMethod {
     MeanWithin,
 }
 
+// Align the timeseries in a table by computing the average within each output
+// period.
 fn align_mean_within(
     table: &Table,
     query_end: &DateTime<Utc>,
@@ -343,21 +344,18 @@ fn mean_delta_value_in_window(
         .zip(times.into_iter().copied())
         .zip(vals.into_iter().copied());
     let count = (last_timestamp - first_timestamp).max(1) as f64;
-    let sum: f64 = iter
-        .filter_map(|((start, time), maybe_val)| {
-            let Some(val) = maybe_val else {
-                return None;
-            };
-            let fraction = fraction_overlap_with_window(
-                start,
-                time,
-                window_start,
-                window_end,
-            );
-            Some(fraction * val)
-        })
-        .sum();
-    Some(sum / count)
+    let mut maybe_sum = None;
+    for it in iter.filter_map(|((start, time), maybe_val)| {
+        let Some(val) = maybe_val else {
+            return None;
+        };
+        let fraction =
+            fraction_overlap_with_window(start, time, window_start, window_end);
+        Some(fraction * val)
+    }) {
+        *maybe_sum.get_or_insert(0.0) += it;
+    }
+    maybe_sum.map(|sum| sum / count)
 }
 
 // For a gauge metric, compute the mean of points falling within the provided
@@ -390,12 +388,16 @@ fn mean_gauge_value_in_window(
     // If there are really zero points in this time interval, we add
     // a missing value.
     if start_index != output_index {
-        let output_value: f64 = input_points[start_index..output_index]
+        let mut maybe_sum = None;
+        for it in input_points[start_index..output_index]
             .iter()
-            .copied()
-            .flatten()
-            .sum();
-        Some(output_value / (output_index - start_index) as f64)
+            .filter_map(|x| x.as_ref().copied())
+        {
+            *maybe_sum.get_or_insert(0.0) += it;
+        }
+        maybe_sum.map(|output_value| {
+            output_value / (output_index - start_index) as f64
+        })
     } else {
         None
     }
@@ -703,6 +705,29 @@ mod tests {
         .is_ok());
         assert!(
             verify_max_upsampling_ratio(&[], &Duration::from_nanos(1),).is_ok()
+        );
+    }
+
+    #[test]
+    fn test_alignment_does_not_modify_missing_values() {
+        let now = Utc::now();
+        let start_times =
+            &[now - Duration::from_secs(2), now - Duration::from_secs(1)];
+        let timestamps = &[now - Duration::from_secs(1), now];
+        let input_points = &[Some(1.0), None];
+        let window_start = now - Duration::from_secs(1);
+        let window_end = now;
+        let mean = mean_delta_value_in_window(
+            start_times,
+            timestamps,
+            input_points,
+            window_start,
+            window_end,
+        );
+        assert!(
+            mean.is_none(),
+            "This time window contains only a None value, which should not be \
+            included in the sum"
         );
     }
 }
