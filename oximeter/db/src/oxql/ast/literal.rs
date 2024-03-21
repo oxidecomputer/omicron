@@ -177,17 +177,42 @@ impl Literal {
     }
 }
 
+/// Duration constants used for interpreting duration literals.
+///
+/// Many of the values here are **approximate**. For example, a "year" is always
+/// 365 24-hour periods, regardless of leap years, the current time, or any
+/// other context.
 pub(crate) mod duration_consts {
     use std::time::Duration;
+
+    /// Approximately 1 year, 365 24-hour periods.
     pub const YEAR: Duration = Duration::from_secs(60 * 60 * 24 * 365);
+
+    /// Approximately 1 month, 30 24-hour periods.
     pub const MONTH: Duration = Duration::from_secs(60 * 60 * 24 * 30);
+
+    /// Approximately 1 week, 7 24-hour periods.
     pub const WEEK: Duration = Duration::from_secs(60 * 60 * 24 * 7);
+
+    /// One day, equal to 24 hours.
     pub const DAY: Duration = Duration::from_secs(60 * 60 * 24);
+
+    /// An hour, exactly 3600 seconds.
     pub const HOUR: Duration = Duration::from_secs(60 * 60);
+
+    /// A minute, exactly 60 seconds.
     pub const MINUTE: Duration = Duration::from_secs(60);
+
+    /// One second.
     pub const SECOND: Duration = Duration::from_secs(1);
+
+    /// One millisecond, a thousandth of a second.
     pub const MILLISECOND: Duration = Duration::from_millis(1);
+
+    /// One microsecond, a millionth of a second.
     pub const MICROSECOND: Duration = Duration::from_micros(1);
+
+    /// One nanosecond, a billionth of a second.
     pub const NANOSECOND: Duration = Duration::from_nanos(1);
 }
 

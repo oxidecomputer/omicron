@@ -298,6 +298,7 @@ fn print_query_summary(
         return;
     }
     println!("{}", "Query summary".underlined().bold());
+    println!(" {}: {}", "ID".bold(), result.query_id);
     if print_elapsed {
         println!(" {}: {:?}\n", "Total duration".bold(), result.total_duration);
     }
