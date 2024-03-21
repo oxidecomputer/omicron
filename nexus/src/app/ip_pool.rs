@@ -27,6 +27,7 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use ref_cast::RefCast;
+use std::matches;
 use uuid::Uuid;
 
 /// Helper to make it easier to 404 on attempts to manipulate internal pools
@@ -291,6 +292,19 @@ impl super::Nexus {
             return Err(not_found_from_lookup(pool_lookup));
         }
 
+        // Disallow V6 ranges until IPv6 is fully supported by the networking
+        // subsystem. Instead of changing the API to reflect that (making this
+        // endpoint inconsistent with the rest) and changing it back when we
+        // add support, we accept them at the API layer and error here. It
+        // would be nice if we could do it in the datastore layer, but we'd
+        // have no way of creating IPv6 ranges for the purpose of testing IP
+        // pool utilization.
+        if matches!(range, IpRange::V6(_)) {
+            return Err(Error::invalid_request(
+                "IPv6 ranges are not allowed yet",
+            ));
+        }
+
         self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
@@ -347,6 +361,18 @@ impl super::Nexus {
         let (authz_pool, ..) =
             self.db_datastore.ip_pools_service_lookup(opctx).await?;
         opctx.authorize(authz::Action::Modify, &authz_pool).await?;
+        // Disallow V6 ranges until IPv6 is fully supported by the networking
+        // subsystem. Instead of changing the API to reflect that (making this
+        // endpoint inconsistent with the rest) and changing it back when we
+        // add support, we accept them at the API layer and error here. It
+        // would be nice if we could do it in the datastore layer, but we'd
+        // have no way of creating IPv6 ranges for the purpose of testing IP
+        // pool utilization.
+        if matches!(range, IpRange::V6(_)) {
+            return Err(Error::invalid_request(
+                "IPv6 ranges are not allowed yet",
+            ));
+        }
         self.db_datastore.ip_pool_add_range(opctx, &authz_pool, range).await
     }
 
