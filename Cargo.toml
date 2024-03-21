@@ -257,7 +257,6 @@ ipcc = { path = "ipcc" }
 ipnet = "2.9"
 itertools = "0.12.1"
 internet-checksum = "0.2"
-ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
@@ -313,7 +312,6 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-openssl-probe = "0.1.5"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "7ee353a470ea59529ee1b34729681da887aa88ce" }
 oso = "0.27"
 owo-colors = "4.0.0"
@@ -369,7 +367,6 @@ schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.22", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
-serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.114"
 serde_path_to_error = "0.1.16"
@@ -395,7 +392,6 @@ slog-envlogger = "2.2"
 slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
 slog-term = "2.9"
 smf = "0.2"
-snafu = "0.7"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
