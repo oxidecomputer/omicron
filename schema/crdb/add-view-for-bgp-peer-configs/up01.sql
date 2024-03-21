@@ -13,5 +13,4 @@ SELECT
 FROM omicron.public.switch_port sp
 JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
 ON sp.port_settings_id = bpc.port_settings_id
-AND sp.port_name = bpc.interface_name
 JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
