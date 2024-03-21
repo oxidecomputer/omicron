@@ -12,9 +12,7 @@ use chrono::Utc;
 use crate::oxql::ast::ident::Ident;
 use crate::oxql::point::DataType;
 use crate::oxql::point::MetricType;
-use crate::oxql::point::Points;
 use crate::oxql::point::ValueArray;
-use crate::oxql::point::Values;
 use crate::oxql::Error;
 use crate::oxql::Table;
 use crate::oxql::Timeseries;
@@ -144,10 +142,10 @@ impl GroupBy {
                                     Ok(ix) => {
                                         // This is an existing
                                         // timestamp, so we only need to
-                                        // add the new value.
-                                        *values[ix].as_mut().expect(
-                                            "Value must not be None",
-                                        ) += new_value;
+                                        // add the new value. If the value
+                                        // didn't exist before, replace it.
+                                        *values[ix].get_or_insert(0.0) +=
+                                            new_value;
                                     }
                                 }
                             }
@@ -212,10 +210,10 @@ impl GroupBy {
                                     Ok(ix) => {
                                         // This is an existing
                                         // timestamp, so we only need to
-                                        // add the new value.
-                                        *values[ix].as_mut().expect(
-                                            "Value must not be None",
-                                        ) += new_value;
+                                        // add the new value. If the value
+                                        // didn't exist before, replace it.
+                                        *values[ix].get_or_insert(0) +=
+                                            new_value;
                                     }
                                 }
                             }
@@ -235,64 +233,7 @@ impl GroupBy {
                         _ => unreachable!(),
                     }
                 }
-                None => {
-                    // There is no timeseries in the output table with this key,
-                    // i.e., it's the first in its group. Just directly insert
-                    // its data. No casting is needed at all, but we do need to
-                    // remove the values where the data points are missing.
-                    let Timeseries {
-                        fields,
-                        points: Points { timestamps, values, .. },
-                        alignment,
-                    } = dropped;
-
-                    // Compress the values and timestamps to those entries where
-                    // the value itself is not none.
-                    let values = values
-                        .into_iter()
-                        .next()
-                        .expect("Should have 1D data here")
-                        .values;
-                    let (timestamps, values) = match values {
-                        ValueArray::Integer(ints) => {
-                            let (timestamps, values): (Vec<_>, Vec<_>) =
-                                timestamps
-                                    .into_iter()
-                                    .zip(ints.into_iter())
-                                    .filter(|(_timestamp, value)| {
-                                        value.is_some()
-                                    })
-                                    .unzip();
-                            (timestamps, ValueArray::Integer(values))
-                        }
-                        ValueArray::Double(doubles) => {
-                            let (timestamps, values): (Vec<_>, Vec<_>) =
-                                timestamps
-                                    .into_iter()
-                                    .zip(doubles.into_iter())
-                                    .filter(|(_timestamp, value)| {
-                                        value.is_some()
-                                    })
-                                    .unzip();
-                            (timestamps, ValueArray::Double(values))
-                        }
-                        _ => unreachable!(),
-                    };
-
-                    // Reconstitute and insert the output timeseries.
-                    let values =
-                        vec![Values { values, metric_type: MetricType::Gauge }];
-                    let new_timeseries = Timeseries {
-                        fields,
-                        points: Points {
-                            start_times: None,
-                            timestamps,
-                            values,
-                        },
-                        alignment,
-                    };
-                    output_table.insert(new_timeseries)?;
-                }
+                None => output_table.insert(dropped)?,
             }
         }
         Ok(vec![output_table])
@@ -402,11 +343,9 @@ impl GroupBy {
                                 // This is an existing timestamp. _Add_
                                 // it into the output timeseries, and
                                 // count it. Its timestamp already
-                                // exists.
-                                *values[ix]
-                                    .as_mut()
-                                    .expect("Value must not be None") +=
-                                    new_value;
+                                // exists. If the value was previously None,
+                                // replace it now.
+                                *values[ix].get_or_insert(0.0) += new_value;
                                 *entry.get_mut() += 1.0;
                             }
                             (_, _) => {
@@ -432,62 +371,33 @@ impl GroupBy {
                         .swap(ValueArray::Double(values));
                 }
                 None => {
-                    // There is no timeseries in the output table with this key,
-                    // i.e., it's the first in its group. Just directly insert
-                    // its data, casting and removing missing values.
-                    let Timeseries {
-                        fields,
-                        points: Points { timestamps, values, .. },
-                        alignment,
-                    } = dropped.cast(&[DataType::Double])?;
-
-                    // Compress the values and timestamps to those entries where
-                    // the value itself is not none.
-                    let values = values
-                        .into_iter()
-                        .next()
-                        .expect("Should have 1D data here")
-                        .values;
-                    let (timestamps, values) = match values {
-                        ValueArray::Double(doubles) => {
-                            let (timestamps, values): (Vec<_>, Vec<_>) =
-                                timestamps
-                                    .into_iter()
-                                    .zip(doubles.into_iter())
-                                    .filter(|(_timestamp, value)| {
-                                        value.is_some()
-                                    })
-                                    .unzip();
-                            (timestamps, ValueArray::Double(values))
-                        }
-                        _ => {
-                            // NOTE: The case of ValueArray::Integer(_) is also
-                            // unreachable here, because we've just succeeded in
-                            // casting to a double right above.
-                            unreachable!();
-                        }
-                    };
-
-                    // Insert a count of 1.0 for each timestamp remaining.
-                    let ones = timestamps
+                    // There were no previous points for this group.
+                    //
+                    // We'll cast to doubles, but _keep_ any missing samples
+                    // (None) that were in there. Those will have a "count" of
+                    // 0, so that we don't incorrectly over-divide in the case
+                    // where there are both missing and non-missing samples.
+                    let new_timeseries = dropped.cast(&[DataType::Double])?;
+                    let values = new_timeseries
+                        .points
+                        .values(0)
+                        .unwrap()
+                        .as_double()
+                        .unwrap();
+                    // Insert a count of 1.0 for each timestamp remaining, and
+                    // _zero_ for any where the values are none.
+                    let counts = new_timeseries
+                        .points
+                        .timestamps
                         .iter()
-                        .map(|timestamp| (*timestamp, 1.0))
+                        .zip(values)
+                        .map(|(timestamp, maybe_value)| {
+                            let count = f64::from(maybe_value.is_some());
+                            (*timestamp, count)
+                        })
                         .collect();
-                    let old = sample_counts_by_group.insert(key, ones);
+                    let old = sample_counts_by_group.insert(key, counts);
                     assert!(old.is_none(), "Should not have counts entry for first timeseries in the group");
-
-                    // Reconstitute and insert the output timeseries.
-                    let values =
-                        vec![Values { values, metric_type: MetricType::Gauge }];
-                    let new_timeseries = Timeseries {
-                        fields,
-                        points: Points {
-                            start_times: None,
-                            timestamps,
-                            values,
-                        },
-                        alignment,
-                    };
                     output_table.insert(new_timeseries)?;
                 }
             }
