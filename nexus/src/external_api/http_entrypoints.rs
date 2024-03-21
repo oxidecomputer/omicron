@@ -1789,6 +1789,8 @@ async fn ip_pool_range_list(
 }
 
 /// Add range to IP pool
+///
+/// IPv6 ranges are not allowed yet.
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools/{pool}/ranges/add",
@@ -1880,6 +1882,8 @@ async fn ip_pool_service_range_list(
 }
 
 /// Add IP range to Oxide service pool
+///
+/// IPv6 ranges are not allowed yet.
 #[endpoint {
     method = POST,
     path = "/v1/system/ip-pools-service/ranges/add",
