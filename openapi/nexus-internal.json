@@ -2731,26 +2731,37 @@
               }
             ]
           },
-          "zone_policy": {
+          "zone_state": {
             "description": "The policy for this zone.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/BlueprintZonePolicy"
+                "$ref": "#/components/schemas/BlueprintZoneState"
               }
             ]
           }
         },
         "required": [
           "config",
-          "zone_policy"
+          "zone_state"
         ]
       },
-      "BlueprintZonePolicy": {
-        "description": "The policy for an Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZoneConfig`].",
-        "type": "string",
-        "enum": [
-          "in_service",
-          "not_in_service"
+      "BlueprintZoneState": {
+        "description": "The actual or desired Nexus-defined state of an Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZoneConfig`].",
+        "oneOf": [
+          {
+            "description": "The zone is in-service.",
+            "type": "string",
+            "enum": [
+              "in_service"
+            ]
+          },
+          {
+            "description": "The zone is not in service.",
+            "type": "string",
+            "enum": [
+              "quiesced"
+            ]
+          }
         ]
       },
       "BlueprintZonesConfig": {

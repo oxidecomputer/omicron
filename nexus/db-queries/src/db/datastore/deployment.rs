@@ -43,7 +43,7 @@ use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZoneState;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -122,9 +122,9 @@ impl DataStore {
             .all_blueprint_zones()
             .filter_map(|(_, zone)| {
                 // Exhaustive match so this fails if we add a new variant.
-                match zone.zone_policy {
-                    BlueprintZonePolicy::InService => None,
-                    BlueprintZonePolicy::NotInService => {
+                match zone.zone_state {
+                    BlueprintZoneState::InService => None,
+                    BlueprintZoneState::Quiesced => {
                         Some(BpOmicronZoneNotInService {
                             blueprint_id,
                             bp_omicron_zone_id: zone.config.id,
@@ -460,14 +460,14 @@ impl DataStore {
                             ))
                         })?;
                     let zone_id = z.id;
-                    let zone_policy =
+                    let zone_state =
                         if omicron_zones_not_in_service.remove(&zone_id) {
-                            BlueprintZonePolicy::NotInService
+                            BlueprintZoneState::Quiesced
                         } else {
-                            BlueprintZonePolicy::InService
+                            BlueprintZoneState::InService
                         };
                     let zone = z
-                        .into_blueprint_zone_config(nic_row, zone_policy)
+                        .into_blueprint_zone_config(nic_row, zone_state)
                         .with_context(|| {
                             format!("zone {:?}: parse from database", zone_id)
                         })
@@ -1871,7 +1871,7 @@ mod tests {
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
             .all_blueprint_zones()
-            .filter(|(_, z)| z.zone_policy != BlueprintZonePolicy::InService)
+            .filter(|(_, z)| z.zone_state != BlueprintZoneState::InService)
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),

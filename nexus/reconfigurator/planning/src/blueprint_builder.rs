@@ -14,7 +14,7 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZoneState;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
@@ -466,7 +466,7 @@ impl<'a> BlueprintBuilder<'a> {
         };
         let zone = BlueprintZoneConfig {
             config: zone,
-            zone_policy: BlueprintZonePolicy::InService,
+            zone_state: BlueprintZoneState::InService,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -515,7 +515,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let zone = BlueprintZoneConfig {
             config: zone,
-            zone_policy: BlueprintZonePolicy::InService,
+            zone_state: BlueprintZoneState::InService,
         };
         self.sled_add_zone(sled_id, zone)?;
         Ok(Ensure::Added)
@@ -649,7 +649,7 @@ impl<'a> BlueprintBuilder<'a> {
             };
             let zone = BlueprintZoneConfig {
                 config: zone,
-                zone_policy: BlueprintZonePolicy::InService,
+                zone_state: BlueprintZoneState::InService,
             };
             self.sled_add_zone(sled_id, zone)?;
         }

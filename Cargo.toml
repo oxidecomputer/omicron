@@ -10,7 +10,6 @@ members = [
     "clients/dpd-client",
     "clients/gateway-client",
     "clients/installinator-artifact-client",
-    "clients/mg-admin-client",
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
@@ -96,7 +95,6 @@ default-members = [
     "clients/oximeter-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
-    "clients/mg-admin-client",
     "common",
     "dev-tools/crdb-seed",
     "dev-tools/omdb",
@@ -194,14 +192,14 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "1c1574fb721f98f2df1b23e3fd27d83be018882e" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "952c7d60d22be5198b892bec8d92f4291b9160c2" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "952c7d60d22be5198b892bec8d92f4291b9160c2" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "952c7d60d22be5198b892bec8d92f4291b9160c2" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
 display-error-chain = "0.2.0"
-ddm-admin-client = { path = "clients/ddm-admin-client" }
+omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.17"
@@ -267,7 +265,8 @@ maplit = "1.0.2"
 mime_guess = "2.0.4"
 mockall = "0.12"
 newtype_derive = "0.1.6"
-mg-admin-client = { path = "clients/mg-admin-client" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "1d8b818b0fd000bc6d2739575c8868b0781dfe41" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "1d8b818b0fd000bc6d2739575c8868b0781dfe41" }
 multimap = "0.10.0"
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
@@ -299,7 +298,7 @@ omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-zone-package = "0.11.0"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "a4c956e44fc9b75b58b83ad2eec22f6bd9005262", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "7ee353a470ea59529ee1b34729681da887aa88ce", features = [ "api", "std" ] }
 once_cell = "1.19.0"
 openapi-lint = { git = "https://github.com/oxidecomputer/openapi-lint", branch = "main" }
 openapiv3 = "2.0.0"
@@ -307,7 +306,7 @@ openapiv3 = "2.0.0"
 openssl = "0.10"
 openssl-sys = "0.9"
 openssl-probe = "0.1.5"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "a4c956e44fc9b75b58b83ad2eec22f6bd9005262" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "7ee353a470ea59529ee1b34729681da887aa88ce" }
 oso = "0.27"
 owo-colors = "4.0.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -333,9 +332,9 @@ prettyplease = { version = "0.2.16", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a9fdbc464db4cbd4ac0f43ffa0d045b4b02e0c1c" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -669,6 +668,7 @@ branch = "oxide/omicron"
 # See also: uuid-kinds/README.adoc.
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
+omicron-common = { path = "common" }
 
 [patch.crates-io.zone]
 git = 'https://github.com/oxidecomputer/zone'

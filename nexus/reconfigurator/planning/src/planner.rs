@@ -524,9 +524,9 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), 10);
         for zone in &zones {
-            let OmicronZoneType::Crucible { .. } = zone.config.zone_type else {
+            if !zone.config.zone_type.is_crucible() {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
-            };
+            }
         }
         verify_blueprint(&blueprint5);
 
@@ -642,9 +642,9 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), policy.target_nexus_zone_count - 1);
         for zone in &zones {
-            let OmicronZoneType::Nexus { .. } = zone.config.zone_type else {
+            if !zone.config.zone_type.is_nexus() {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
-            };
+            }
         }
 
         logctx.cleanup_successful();
@@ -727,10 +727,9 @@ mod test {
                 }
             }
             for zone in &zones {
-                let OmicronZoneType::Nexus { .. } = zone.config.zone_type
-                else {
-                    panic!("unexpectedly added a non-Crucible zone: {zone:?}");
-                };
+                if !zone.config.zone_type.is_nexus() {
+                    panic!("unexpectedly added a non-Nexus zone: {zone:?}");
+                }
             }
         }
         assert_eq!(total_new_nexus_zones, 11);

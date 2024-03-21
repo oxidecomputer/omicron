@@ -9,12 +9,15 @@ use dropshot::HttpErrorResponseBody;
 use dropshot::ResultsPage;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::authz;
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::SERVICE_IP_POOL_NAME;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
 use nexus_test_utils::resource_helpers::create_instance;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_project;
@@ -37,7 +40,6 @@ use nexus_types::external_api::params::IpPoolSiloUpdate;
 use nexus_types::external_api::params::IpPoolUpdate;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
-use nexus_types::external_api::shared::Ipv6Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
 use nexus_types::external_api::views::IpPool;
 use nexus_types::external_api::views::IpPoolRange;
@@ -45,7 +47,9 @@ use nexus_types::external_api::views::IpPoolSiloLink;
 use nexus_types::external_api::views::Silo;
 use nexus_types::external_api::views::SiloIpPool;
 use nexus_types::identity::Resource;
+use omicron_common::address::Ipv6Range;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
+use omicron_common::api::external::LookupType;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::SimpleIdentity;
 use omicron_common::api::external::{IdentityMetadataCreateParams, Name};
@@ -757,6 +761,63 @@ async fn create_pool(client: &ClientTestContext, name: &str) -> IpPool {
         .unwrap()
 }
 
+// This is mostly about testing the total field with huge numbers.
+// testing allocated is done in a bunch of other places. look for
+// assert_ip_pool_utilization calls
+#[nexus_test]
+async fn test_ip_pool_utilization_total(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    let pool = create_pool(client, "p0").await;
+
+    assert_ip_pool_utilization(client, "p0", 0, 0, 0, 0).await;
+
+    let add_url = "/v1/system/ip-pools/p0/ranges/add";
+
+    // add just 5 addresses to get the party started
+    let range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 1),
+            std::net::Ipv4Addr::new(10, 0, 0, 5),
+        )
+        .unwrap(),
+    );
+    object_create::<IpRange, IpPoolRange>(client, &add_url, &range).await;
+
+    assert_ip_pool_utilization(client, "p0", 0, 5, 0, 0).await;
+
+    // Now let's add a gigantic range. This requires direct datastore
+    // shenanigans because adding IPv6 ranges through the API is currently not
+    // allowed. It's worth doing because we want this code to correctly handle
+    // IPv6 ranges when they are allowed again.
+
+    let nexus = &cptestctx.server.apictx().nexus;
+    let datastore = nexus.datastore();
+    let log = cptestctx.logctx.log.new(o!());
+    let opctx = OpContext::for_tests(log, datastore.clone());
+    let authz_pool = authz::IpPool::new(
+        authz::FLEET,
+        pool.identity.id,
+        LookupType::ByName("p0".to_string()),
+    );
+
+    let big_range = IpRange::V6(
+        Ipv6Range::new(
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
+            std::net::Ipv6Addr::new(
+                0xfd00, 0, 0, 0xffff, 0xffff, 0xffff, 0xffff, 0xffff,
+            ),
+        )
+        .unwrap(),
+    );
+    datastore
+        .ip_pool_add_range(&opctx, &authz_pool, &big_range)
+        .await
+        .expect("could not add range");
+
+    assert_ip_pool_utilization(client, "p0", 0, 5, 0, 2u128.pow(80)).await;
+}
+
 // Data for testing overlapping IP ranges
 struct TestRange {
     // A starting IP range that should be inserted correctly
@@ -853,59 +914,9 @@ async fn test_ip_pool_range_overlapping_ranges_fails(
     };
     test_bad_ip_ranges(client, &ip_pool_add_range_url, &ipv4_range).await;
 
-    // Test data for IPv6 ranges that should fail due to overlap
-    let ipv6_range = TestRange {
-        base_range: IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
-            )
-            .unwrap(),
-        ),
-        bad_ranges: vec![
-            // The exact same range
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
-                )
-                .unwrap(),
-            ),
-            // Overlaps below
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 5),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 15),
-                )
-                .unwrap(),
-            ),
-            // Overlaps above
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 15),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 25),
-                )
-                .unwrap(),
-            ),
-            // Contains the base range
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 100),
-                )
-                .unwrap(),
-            ),
-            // Contained by the base range
-            IpRange::V6(
-                Ipv6Range::new(
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 12),
-                    std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 13),
-                )
-                .unwrap(),
-            ),
-        ],
-    };
-    test_bad_ip_ranges(client, &ip_pool_add_range_url, &ipv6_range).await;
+    // IPv6 tests removed along with support for IPv6 ranges in
+    // https://github.com/oxidecomputer/omicron/pull/5107
+    // Put them back when IPv6 ranges are supported again.
 }
 
 async fn test_bad_ip_ranges(
@@ -952,6 +963,38 @@ async fn test_bad_ip_ranges(
     }
 }
 
+// Support for IPv6 ranges removed in
+// https://github.com/oxidecomputer/omicron/pull/5107
+// Delete this test when we support IPv6 again.
+#[nexus_test]
+async fn test_ip_pool_range_rejects_v6(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+
+    create_ip_pool(client, "p0", None).await;
+
+    let range = IpRange::V6(
+        Ipv6Range::new(
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+            std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
+        )
+        .unwrap(),
+    );
+
+    let add_url = "/v1/system/ip-pools/p0/ranges/add";
+    let error =
+        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
+            .await;
+
+    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
+
+    // same deal with service pool
+    let add_url = "/v1/system/ip-pools-service/ranges/add";
+    let error =
+        object_create_error(client, add_url, &range, StatusCode::BAD_REQUEST)
+            .await;
+    assert_eq!(error.message, "IPv6 ranges are not allowed yet");
+}
+
 #[nexus_test]
 async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -984,17 +1027,17 @@ async fn test_ip_pool_range_pagination(cptestctx: &ControlPlaneTestContext) {
     // address, which sorts all IPv4 before IPv6, then within protocol versions
     // by their first address.
     let ranges = [
-        IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 11),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 20),
+        IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 3),
+                std::net::Ipv4Addr::new(10, 0, 0, 4),
             )
             .unwrap(),
         ),
-        IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+        IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 5),
+                std::net::Ipv4Addr::new(10, 0, 0, 6),
             )
             .unwrap(),
         ),
@@ -1262,15 +1305,15 @@ async fn test_ip_pool_service(cptestctx: &ControlPlaneTestContext) {
     let ranges = [
         IpRange::V4(
             Ipv4Range::new(
-                std::net::Ipv4Addr::new(10, 0, 0, 1),
-                std::net::Ipv4Addr::new(10, 0, 0, 2),
+                std::net::Ipv4Addr::new(10, 0, 0, 3),
+                std::net::Ipv4Addr::new(10, 0, 0, 4),
             )
             .unwrap(),
         ),
-        IpRange::V6(
-            Ipv6Range::new(
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 0),
-                std::net::Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 10),
+        IpRange::V4(
+            Ipv4Range::new(
+                std::net::Ipv4Addr::new(10, 0, 0, 1),
+                std::net::Ipv4Addr::new(10, 0, 0, 2),
             )
             .unwrap(),
         ),

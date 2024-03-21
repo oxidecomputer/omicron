@@ -231,7 +231,7 @@ impl Blueprint {
                     .iter()
                     .map(|z| BlueprintZoneConfig {
                         config: z.clone(),
-                        zone_policy: BlueprintZonePolicy::InService,
+                        zone_state: BlueprintZoneState::InService,
                     })
                     .collect();
                 let zones = BlueprintZonesConfig {
@@ -340,7 +340,7 @@ impl BlueprintZonesConfig {
             .iter()
             .map(|z| BlueprintZoneConfig {
                 config: z.clone(),
-                zone_policy: BlueprintZonePolicy::InService,
+                zone_state: BlueprintZoneState::InService,
             })
             .collect();
 
@@ -384,7 +384,7 @@ pub struct BlueprintZoneConfig {
     pub config: OmicronZoneConfig,
 
     /// The policy for this zone.
-    pub zone_policy: BlueprintZonePolicy,
+    pub zone_state: BlueprintZoneState,
 }
 
 impl BlueprintZoneConfig {
@@ -412,38 +412,48 @@ impl<'a> fmt::Display for BlueprintZoneConfigDisplay<'a> {
             f,
             "{} {:<width$} {} [underlay IP {}]",
             z.config.id,
-            z.zone_policy,
+            z.zone_state,
             z.config.zone_type.label(),
             z.config.underlay_address,
-            width = BlueprintZonePolicy::DISPLAY_WIDTH,
+            width = BlueprintZoneState::DISPLAY_WIDTH,
         )
     }
 }
 
-/// The policy for an Omicron-managed zone in a blueprint.
+/// The actual or desired Nexus-defined state of an Omicron-managed zone in a
+/// blueprint.
 ///
 /// Part of [`BlueprintZoneConfig`].
 #[derive(
     Debug, Copy, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum BlueprintZonePolicy {
+pub enum BlueprintZoneState {
+    /// The zone is in-service.
     InService,
-    NotInService,
+
+    /// The zone is not in service.
+    Quiesced,
 }
 
-impl BlueprintZonePolicy {
+impl BlueprintZoneState {
     /// The maximum width of `Display` output.
-    const DISPLAY_WIDTH: usize = 14;
+    const DISPLAY_WIDTH: usize = 10;
+
+    /// Return the list of all zone policies corresponding to services that
+    /// are currently running.
+    pub fn all_alive() -> &'static [Self] {
+        &[Self::InService, Self::Quiesced]
+    }
 }
 
-impl fmt::Display for BlueprintZonePolicy {
+impl fmt::Display for BlueprintZoneState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
             // and alignment (used above), but this does.
-            BlueprintZonePolicy::InService => "in service".fmt(f),
-            BlueprintZonePolicy::NotInService => "not in service".fmt(f),
+            BlueprintZoneState::InService => "in service".fmt(f),
+            BlueprintZoneState::Quiesced => "quiesced".fmt(f),
         }
     }
 }
@@ -578,7 +588,7 @@ impl<'a> DiffZoneCommon<'a> {
     /// Returns true if the policy for the zone changed.
     #[inline]
     pub fn policy_changed(&self) -> bool {
-        self.zone_before.zone_policy != self.zone_after.zone_policy
+        self.zone_before.zone_state != self.zone_after.zone_state
     }
 }
 

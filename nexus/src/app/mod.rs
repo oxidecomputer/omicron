@@ -30,6 +30,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use slog::Logger;
 use std::collections::HashMap;
+use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -86,6 +87,7 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
+use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -181,12 +183,6 @@ pub struct Nexus {
     // https://github.com/oxidecomputer/omicron/issues/3732
     external_dns_servers: Vec<IpAddr>,
 
-    /// Mapping of SwitchLocations to their respective Dendrite Clients
-    dpd_clients: HashMap<SwitchLocation, Arc<dpd_client::Client>>,
-
-    /// Map switch location to maghemite admin clients.
-    mg_clients: HashMap<SwitchLocation, Arc<mg_admin_client::Client>>,
-
     /// Background tasks
     background_tasks: background::BackgroundTasks,
 
@@ -207,13 +203,16 @@ impl Nexus {
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
+        let all_versions = config
+            .pkg
+            .schema
+            .as_ref()
+            .map(|s| AllSchemaVersions::load(&s.schema_dir))
+            .transpose()
+            .map_err(|error| format!("{error:#}"))?;
         let db_datastore = Arc::new(
-            db::DataStore::new(
-                &log,
-                Arc::clone(&pool),
-                config.pkg.schema.as_ref(),
-            )
-            .await?,
+            db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
+                .await?,
         );
         db_datastore.register_producers(&producer_registry);
 
@@ -258,8 +257,10 @@ impl Nexus {
             dpd_clients.insert(*location, Arc::new(dpd_client));
         }
         for (location, config) in &config.pkg.mgd {
-            let mg_client = mg_admin_client::Client::new(&log, config.address)
-                .map_err(|e| format!("mg admin client: {e}"))?;
+            let mg_client = mg_admin_client::Client::new(
+                &format!("http://{}", config.address),
+                log.clone(),
+            );
             mg_clients.insert(*location, Arc::new(mg_client));
         }
         if config.pkg.dendrite.is_empty() {
@@ -315,10 +316,15 @@ impl Nexus {
                         for (location, addr) in &mappings {
                             let port = MGD_PORT;
                             let mgd_client = mg_admin_client::Client::new(
-                                &log,
-                                std::net::SocketAddr::new((*addr).into(), port),
-                            )
-                            .map_err(|e| format!("mg admin client: {e}"))?;
+                                &format!(
+                                    "http://{}",
+                                    &std::net::SocketAddr::new(
+                                        (*addr).into(),
+                                        port,
+                                    )
+                                ),
+                                log.clone(),
+                            );
                             mg_clients.insert(*location, Arc::new(mgd_client));
                         }
                         break;
@@ -372,8 +378,6 @@ impl Nexus {
             &background_ctx,
             Arc::clone(&db_datastore),
             &config.pkg.background_tasks,
-            &dpd_clients,
-            &mg_clients,
             config.deployment.id,
             resolver.clone(),
             saga_request,
@@ -422,8 +426,6 @@ impl Nexus {
                 .deployment
                 .external_dns_servers
                 .clone(),
-            dpd_clients,
-            mg_clients,
             background_tasks,
             default_region_allocation_strategy: config
                 .pkg
@@ -874,6 +876,69 @@ impl Nexus {
                 unimplemented!();
             }
         }
+    }
+
+    pub(crate) async fn dpd_clients(
+        &self,
+    ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
+        let mappings = self.switch_zone_address_mappings().await?;
+        let clients: HashMap<SwitchLocation, dpd_client::Client> = mappings
+            .iter()
+            .map(|(location, addr)| {
+                let port = DENDRITE_PORT;
+
+                let client_state = dpd_client::ClientState {
+                    tag: String::from("nexus"),
+                    log: self.log.new(o!(
+                        "component" => "DpdClient"
+                    )),
+                };
+
+                let dpd_client = dpd_client::Client::new(
+                    &format!("http://[{addr}]:{port}"),
+                    client_state,
+                );
+                (*location, dpd_client)
+            })
+            .collect();
+        Ok(clients)
+    }
+
+    pub(crate) async fn mg_clients(
+        &self,
+    ) -> Result<HashMap<SwitchLocation, mg_admin_client::Client>, String> {
+        let mappings = self.switch_zone_address_mappings().await?;
+        let mut clients: Vec<(SwitchLocation, mg_admin_client::Client)> =
+            vec![];
+        for (location, addr) in &mappings {
+            let port = MGD_PORT;
+            let socketaddr =
+                std::net::SocketAddr::V6(SocketAddrV6::new(*addr, port, 0, 0));
+            let client = mg_admin_client::Client::new(
+                format!("http://{}", socketaddr).as_str(),
+                self.log.clone(),
+            );
+            clients.push((*location, client));
+        }
+        Ok(clients.into_iter().collect::<HashMap<_, _>>())
+    }
+
+    async fn switch_zone_address_mappings(
+        &self,
+    ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
+        let switch_zone_addresses = match self
+            .resolver()
+            .await
+            .lookup_all_ipv6(ServiceName::Dendrite)
+            .await
+        {
+            Ok(addrs) => addrs,
+            Err(e) => {
+                error!(self.log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                return Err(e.to_string());
+            }
+        };
+        Ok(map_switch_zone_addrs(&self.log, switch_zone_addresses).await)
     }
 }
 

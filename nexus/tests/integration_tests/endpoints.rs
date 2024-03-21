@@ -576,6 +576,8 @@ pub const DEMO_BGP_STATUS_URL: &'static str =
     "/v1/system/networking/bgp-status";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
     "/v1/system/networking/bgp-routes-ipv4?asn=47";
+pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
+    "/v1/system/networking/bgp-message-history?asn=47";
 
 pub const DEMO_BFD_STATUS_URL: &'static str =
     "/v1/system/networking/bfd-status";
@@ -656,6 +658,8 @@ pub static DEMO_IP_POOL_PROJ_URL: Lazy<String> = Lazy::new(|| {
 });
 pub static DEMO_IP_POOL_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME));
+pub static DEMO_IP_POOL_UTILIZATION_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/utilization", *DEMO_IP_POOL_URL));
 pub static DEMO_IP_POOL_UPDATE: Lazy<params::IpPoolUpdate> =
     Lazy::new(|| params::IpPoolUpdate {
         identity: IdentityMetadataUpdateParams {
@@ -1101,6 +1105,16 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
                 ),
+            ],
+        },
+
+        // IP pool utilization
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_UTILIZATION_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 
@@ -2228,6 +2242,15 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
 
         VerifyEndpoint {
             url: &DEMO_BGP_ROUTES_IPV4_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_BGP_MESSAGE_HISTORY_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![

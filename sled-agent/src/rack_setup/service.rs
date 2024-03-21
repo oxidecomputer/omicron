@@ -86,14 +86,13 @@ use anyhow::{bail, Context};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
-use ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintZoneConfig, BlueprintZonePolicy, BlueprintZonesConfig,
+    Blueprint, BlueprintZoneConfig, BlueprintZoneState, BlueprintZonesConfig,
 };
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
@@ -102,6 +101,7 @@ use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
@@ -1161,7 +1161,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 .map(|z| BlueprintZoneConfig {
                     config: z.into(),
                     // All initial zones are in-service.
-                    zone_policy: BlueprintZonePolicy::InService,
+                    zone_state: BlueprintZoneState::InService,
                 })
                 .collect(),
         };

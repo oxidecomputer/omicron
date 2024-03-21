@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZoneState;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::internal::shared::NetworkInterface;
 use uuid::Uuid;
@@ -178,7 +178,7 @@ impl BpOmicronZone {
     pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-        zone_policy: BlueprintZonePolicy,
+        zone_state: BlueprintZoneState,
     ) -> Result<BlueprintZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
             sled_id: self.sled_id,
@@ -204,7 +204,7 @@ impl BpOmicronZone {
         };
         let config =
             zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))?;
-        Ok(BlueprintZoneConfig { config, zone_policy })
+        Ok(BlueprintZoneConfig { config, zone_state })
     }
 }
 

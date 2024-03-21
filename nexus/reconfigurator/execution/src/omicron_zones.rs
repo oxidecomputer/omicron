@@ -10,6 +10,7 @@ use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
+use nexus_types::deployment::BlueprintZoneState;
 use nexus_types::deployment::BlueprintZonesConfig;
 use slog::info;
 use slog::warn;
@@ -23,6 +24,15 @@ pub(crate) async fn deploy_zones(
     sleds_by_id: &BTreeMap<Uuid, Sled>,
     zones: &BTreeMap<Uuid, BlueprintZonesConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
+    // Make this code fail to compile if a new zone state is added.
+    {
+        let zs = BlueprintZoneState::InService;
+        match zs {
+            BlueprintZoneState::InService => (),
+            BlueprintZoneState::Quiesced => (),
+        }
+    }
+
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
             let db_sled = match sleds_by_id.get(sled_id) {
@@ -85,7 +95,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, BlueprintZoneConfig, BlueprintZonePolicy,
+        Blueprint, BlueprintTarget, BlueprintZoneConfig, BlueprintZoneState,
         BlueprintZonesConfig,
     };
     use nexus_types::inventory::{
@@ -182,9 +192,7 @@ mod test {
                             http_address: "some-ipv6-address".into(),
                         },
                     },
-                    // XXX: NotInService retains the previous test behavior --
-                    // we may wish to change this to InService.
-                    zone_policy: BlueprintZonePolicy::NotInService,
+                    zone_state: BlueprintZoneState::InService,
                 }],
             }
         }
@@ -285,7 +293,7 @@ mod test {
                 },
                 // XXX: NotInService retains the previous test behavior -- we
                 // may wish to change this to InService.
-                zone_policy: BlueprintZonePolicy::NotInService,
+                zone_state: BlueprintZoneState::Quiesced,
             });
         }
 

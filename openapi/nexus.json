@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "0.0.6"
+    "version": "20240327.0"
   },
   "paths": {
     "/device/auth": {
@@ -5432,6 +5432,7 @@
           "system/networking"
         ],
         "summary": "Add range to IP pool",
+        "description": "IPv6 ranges are not allowed yet.",
         "operationId": "ip_pool_range_add",
         "parameters": [
           {
@@ -5723,6 +5724,44 @@
         }
       }
     },
+    "/v1/system/ip-pools/{pool}/utilization": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Fetch IP pool utilization",
+        "operationId": "ip_pool_utilization_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpPoolUtilization"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
@@ -5809,6 +5848,7 @@
           "system/networking"
         ],
         "summary": "Add IP range to Oxide service pool",
+        "description": "IPv6 ranges are not allowed yet.",
         "operationId": "ip_pool_service_range_add",
         "requestBody": {
           "content": {
@@ -6478,6 +6518,46 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-message-history": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP router message history",
+        "operationId": "networking_bgp_message_history",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "asn",
+            "description": "The ASN to filter on. Required.",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AggregateBgpMessageHistory"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -8892,6 +8972,22 @@
           "items"
         ]
       },
+      "AggregateBgpMessageHistory": {
+        "description": "BGP message history for rack switches.",
+        "type": "object",
+        "properties": {
+          "switch_histories": {
+            "description": "BGP history organized by switch.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchBgpHistory"
+            }
+          }
+        },
+        "required": [
+          "switch_histories"
+        ]
+      },
       "Baseboard": {
         "description": "Properties that uniquely identify an Oxide hardware component",
         "type": "object",
@@ -9335,6 +9431,7 @@
           "switch"
         ]
       },
+      "BgpMessageHistory": {},
       "BgpPeer": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
@@ -13652,6 +13749,31 @@
           }
         }
       },
+      "IpPoolUtilization": {
+        "type": "object",
+        "properties": {
+          "ipv4": {
+            "description": "Number of allocated and total available IPv4 addresses in pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv4Utilization"
+              }
+            ]
+          },
+          "ipv6": {
+            "description": "Number of allocated and total available IPv6 addresses in pool",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Utilization"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ipv4",
+          "ipv6"
+        ]
+      },
       "IpRange": {
         "oneOf": [
           {
@@ -13697,6 +13819,27 @@
           "last"
         ]
       },
+      "Ipv4Utilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "The number of IPv4 addresses allocated from this pool",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "capacity": {
+            "description": "The total number of IPv4 addresses in the pool, i.e., the sum of the lengths of the IPv4 ranges. Unlike IPv6 capacity, can be a 32-bit integer because there are only 2^32 IPv4 addresses.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
+        ]
+      },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
@@ -13720,6 +13863,25 @@
         "required": [
           "first",
           "last"
+        ]
+      },
+      "Ipv6Utilization": {
+        "type": "object",
+        "properties": {
+          "allocated": {
+            "description": "The number of IPv6 addresses allocated from this pool. A 128-bit integer string to match the capacity field.",
+            "type": "string",
+            "format": "uint128"
+          },
+          "capacity": {
+            "description": "The total number of IPv6 addresses in the pool, i.e., the sum of the lengths of the IPv6 ranges. An IPv6 range can contain up to 2^128 addresses, so we represent this value in JSON as a numeric string with a custom \"uint128\" format.",
+            "type": "string",
+            "format": "uint128"
+          }
+        },
+        "required": [
+          "allocated",
+          "capacity"
         ]
       },
       "L4PortRange": {
@@ -15914,6 +16076,31 @@
           "rack_id",
           "time_created",
           "time_modified"
+        ]
+      },
+      "SwitchBgpHistory": {
+        "description": "BGP message history for a particular switch.",
+        "type": "object",
+        "properties": {
+          "history": {
+            "description": "Message history indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BgpMessageHistory"
+            }
+          },
+          "switch": {
+            "description": "Switch this message history is associated with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchLocation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "history",
+          "switch"
         ]
       },
       "SwitchInterfaceConfig": {

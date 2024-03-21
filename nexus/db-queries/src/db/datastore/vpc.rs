@@ -43,6 +43,7 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::BlueprintZoneState;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -647,6 +648,15 @@ impl DataStore {
         vpc_id: Uuid,
         sleds_filter: &[Uuid],
     ) -> Result<Vec<Sled>, Error> {
+        // Make this code fail to compile if a new zone state is added.
+        {
+            let zs = BlueprintZoneState::InService;
+            match zs {
+                BlueprintZoneState::InService => (),
+                BlueprintZoneState::Quiesced => (),
+            }
+        }
+
         // Resolve each VNIC in the VPC to the Sled it's on, so we know which
         // Sleds to notify when firewall rules change.
         use db::schema::{
@@ -1253,7 +1263,7 @@ mod tests {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZonePolicy;
+    use nexus_types::deployment::BlueprintZoneState;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
@@ -1602,9 +1612,7 @@ mod tests {
                 };
                 let zone_config = BlueprintZoneConfig {
                     config,
-                    // XXX: NotInService retains the previous test behavior --
-                    // we may wish to change this to InService.
-                    zone_policy: BlueprintZonePolicy::NotInService,
+                    zone_state: BlueprintZoneState::InService,
                 };
                 (service.sled_id, zone_config)
             })

@@ -8,8 +8,10 @@ use anyhow::Context;
 use async_trait::async_trait;
 use omicron_common::api::internal::shared::NetworkInterface;
 use std::convert::TryFrom;
+use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use types::{BgpConfig, BgpPeerConfig, PortConfigV1, RouteConfig};
 use uuid::Uuid;
 
 progenitor::generate_api!(
@@ -106,6 +108,24 @@ impl types::OmicronZoneType {
             | types::OmicronZoneType::CruciblePantry { .. }
             | types::OmicronZoneType::ExternalDns { .. }
             | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
+    /// Identifies whether this a Crucible (not Crucible pantry) zone
+    pub fn is_crucible(&self) -> bool {
+        match self {
+            types::OmicronZoneType::Crucible { .. } => true,
+
+            types::OmicronZoneType::BoundaryNtp { .. }
+            | types::OmicronZoneType::InternalNtp { .. }
+            | types::OmicronZoneType::Clickhouse { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CockroachDb { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::ExternalDns { .. }
+            | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Nexus { .. }
             | types::OmicronZoneType::Oximeter { .. } => false,
         }
     }
@@ -603,5 +623,49 @@ impl TestInterfaces for Client {
             .send()
             .await
             .expect("disk_finish_transition() failed unexpectedly");
+    }
+}
+
+impl Eq for BgpConfig {}
+
+impl Hash for BgpConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.asn.hash(state);
+        self.originate.hash(state);
+    }
+}
+
+impl Hash for BgpPeerConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.addr.hash(state);
+        self.asn.hash(state);
+        self.port.hash(state);
+        self.hold_time.hash(state);
+        self.connect_retry.hash(state);
+        self.delay_open.hash(state);
+        self.idle_hold_time.hash(state);
+        self.keepalive.hash(state);
+    }
+}
+
+impl Hash for RouteConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.destination.hash(state);
+        self.nexthop.hash(state);
+    }
+}
+
+impl Eq for PortConfigV1 {}
+
+impl Hash for PortConfigV1 {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.addresses.hash(state);
+        self.autoneg.hash(state);
+        self.bgp_peers.hash(state);
+        self.port.hash(state);
+        self.routes.hash(state);
+        self.switch.hash(state);
+        self.uplink_port_fec.hash(state);
+        self.uplink_port_speed.hash(state);
     }
 }
