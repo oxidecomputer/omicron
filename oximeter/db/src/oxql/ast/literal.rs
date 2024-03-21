@@ -48,8 +48,16 @@ impl Literal {
                 format!("'{}'", inner.format(crate::DATABASE_TIMESTAMP_FORMAT))
             }
             Literal::IpAddr(inner) => {
-                let fn_name = if inner.is_ipv6() { "toIPv6" } else { "toIPv4" };
-                format!("{fn_name}('{inner}')")
+                // NOTE: We store all IP addresses in ClickHouse as IPv6, with
+                // IPv4 addresses mapped to that. To run a comparison against a
+                // literal in Rust, we can use the value directly, since we
+                // decode it an convert to the right type during
+                // deserialization. But to compare in the DB itself, we need to
+                // do that with an IPv4-mapped IPv6 address.
+                //
+                // Helpfully, ClickHouse's `toIPv6` function takes a string of
+                // either family, and maps IPv4 into the IPv6 space, if needed.
+                format!("toIPv6('{inner}')")
             }
         }
     }
