@@ -11,6 +11,7 @@ use crate::app::{
     },
     map_switch_zone_addrs,
 };
+use slog::o;
 
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
@@ -34,6 +35,7 @@ use nexus_db_queries::{
     context::OpContext,
     db::{datastore::SwitchPortSettingsCombinedResult, DataStore},
 };
+use nexus_types::identity::Asset;
 use nexus_types::{external_api::params, identity::Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
@@ -48,6 +50,7 @@ use sled_agent_client::types::{
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
+    hash::Hash,
     net::{IpAddr, Ipv4Addr},
     str::FromStr,
     sync::Arc,
@@ -210,6 +213,7 @@ impl SwitchPortSettingsManager {
     }
 }
 
+#[derive(Debug)]
 enum PortSettingsChange {
     Apply(Box<SwitchPortSettingsCombinedResult>),
     Clear,
@@ -221,7 +225,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
-            let log = &opctx.log;
+            let log = opctx.log.clone();
 
             let racks = match self.datastore.rack_list_initialized(opctx, &DataPageParams::max_page()).await {
                 Ok(racks) => racks,
@@ -243,6 +247,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
             // but our logic for pulling switch ports and their related configurations
             // *isn't* per-rack, so that's something we'll need to revisit in the future.
             for rack in &racks {
+                let rack_id = rack.id().to_string();
+                let log = log.new(o!("rack_id" => rack_id));
 
                 // lookup switch zones via DNS
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
@@ -260,21 +266,21 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 let mappings =
-                    map_switch_zone_addrs(log, switch_zone_addresses).await;
+                    map_switch_zone_addrs(&log, switch_zone_addresses).await;
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build sled agent clients
-                let sled_agent_clients = build_sled_agent_clients(&mappings, log);
+                let sled_agent_clients = build_sled_agent_clients(&mappings, &log);
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build dpd clients
-                let dpd_clients = build_dpd_clients(&mappings, log);
+                let dpd_clients = build_dpd_clients(&mappings, &log);
 
                 // TODO https://github.com/oxidecomputer/omicron/issues/5201
                 // build mgd clients
-                let mgd_clients = build_mgd_clients(mappings, log);
+                let mgd_clients = build_mgd_clients(mappings, &log);
 
-                let port_list = match self.switch_ports(opctx, log).await {
+                let port_list = match self.switch_ports(opctx, &log).await {
                     Ok(value) => value,
                     Err(e) => {
                         error!(log, "failed to generate switchports for rack"; "error" => %e);
@@ -286,7 +292,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // calculate and apply switch port changes
                 //
 
-                let changes = match self.changes(port_list, opctx, log).await {
+                let changes = match self.changes(port_list, opctx, &log).await {
                     Ok(value) => value,
                     Err(e) => {
                         error!(log, "failed to generate changeset for switchport settings"; "error" => %e);
@@ -294,7 +300,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                apply_switch_port_changes(&dpd_clients, &changes, log).await;
+                info!(&log, "applying switch port config changes"; "changes" => ?changes);
+                apply_switch_port_changes(&dpd_clients, &changes, &log).await;
 
                 //
                 // calculate and apply routing changes
@@ -302,7 +309,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // get the static routes on each switch
                 let current_static_routes =
-                    static_routes_on_switch(&mgd_clients, log).await;
+                    static_routes_on_switch(&mgd_clients, &log).await;
                 info!(&log, "retrieved existing routes"; "routes" => ?current_static_routes);
 
                 // generate the complete set of static routes that should be on a given switch
@@ -314,7 +321,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 let routes_to_add = static_routes_to_add(
                     &desired_static_routes,
                     &current_static_routes,
-                    log,
+                    &log,
                 );
                 info!(&log, "calculated static routes to add"; "routes" => ?routes_to_add);
 
@@ -326,21 +333,26 @@ impl BackgroundTask for SwitchPortSettingsManager {
 
                 // delete the unneeded routes first, just in case there is a conflicting route for
                 // one we need to add
-                info!(&log, "deleting static routes"; "routes" => ?routes_to_del);
-                delete_static_routes(&mgd_clients, routes_to_del, log).await;
+                if !routes_to_del.is_empty() {
+                    info!(&log, "deleting static routes"; "routes" => ?routes_to_del);
+                    delete_static_routes(&mgd_clients, routes_to_del, &log).await;
+                }
 
                 // add the new routes
-                info!(&log, "adding static routes"; "routes" => ?routes_to_add);
-                add_static_routes(&mgd_clients, routes_to_add, log).await;
+                if !routes_to_add.is_empty() {
+                    info!(&log, "adding static routes"; "routes" => ?routes_to_add);
+                    add_static_routes(&mgd_clients, routes_to_add, &log).await;
+                }
 
 
                 //
                 // calculate and apply loopback address changes
                 //
 
-                match self.db_loopback_addresses(opctx, log).await {
+                info!(&log, "checking for changes to loopback addresses");
+                match self.db_loopback_addresses(opctx, &log).await {
                     Ok(desired_loopback_addresses) => {
-                        let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, log).await;
+                        let current_loopback_addresses = switch_loopback_addresses(&dpd_clients, &log).await;
 
                         let loopbacks_to_add: Vec<(SwitchLocation, IpAddr)> = desired_loopback_addresses
                             .difference(&current_loopback_addresses)
@@ -351,8 +363,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .map(|i| (i.0, i.1))
                             .collect();
 
-                        delete_loopback_addresses_from_switch(&loopbacks_to_del, &dpd_clients, log).await;
-                        add_loopback_addresses_to_switch(&loopbacks_to_add, dpd_clients, log).await;
+                        if !loopbacks_to_del.is_empty() {
+                            info!(&log, "deleting loopback addresses"; "addresses" => ?loopbacks_to_del);
+                            delete_loopback_addresses_from_switch(&loopbacks_to_del, &dpd_clients, &log).await;
+                        }
+
+                        if !loopbacks_to_add.is_empty() {
+                            info!(&log, "adding loopback addresses"; "addresses" => ?loopbacks_to_add);
+                            add_loopback_addresses_to_switch(&loopbacks_to_add, dpd_clients, &log).await;
+                        }
                     },
                     Err(e) => {
                         error!(
@@ -778,7 +797,9 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         error!(log, "no blocks assigned to infra lot");
                         continue;
                     },
-                };
+                }
+                ;
+
 
                 let mut desired_config = EarlyNetworkConfig {
                     generation: 0,
@@ -797,7 +818,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                // should_update is a boolean value that determines whether or not we need to
+                // bootstore_needs_update is a boolean value that determines whether or not we need to
                 // increment the bootstore version and push a new config to the sled agents.
                 //
                 // * If the config we've built from the switchport configuration information is
@@ -815,15 +836,32 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     Ok(Some(BootstoreConfig { data, .. })) => {
                         match serde_json::from_value::<EarlyNetworkConfig>(data.clone()) {
                             Ok(config) => {
-                                if config.body.ntp_servers != desired_config.body.ntp_servers {
+                                let current_ntp_servers: HashSet<String> = config.body.ntp_servers.clone().into_iter().collect();
+                                let desired_ntp_servers: HashSet<String> = desired_config.body.ntp_servers.clone().into_iter().collect();
+
+                                let rnc_differs = match (config.body.rack_network_config.clone(), desired_config.body.rack_network_config.clone()) {
+                                    (Some(current_rnc), Some(desired_rnc)) => {
+                                        !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
+                                        !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
+                                        current_rnc.rack_subnet != desired_rnc.rack_subnet ||
+                                        current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
+                                        current_rnc.infra_ip_last != desired_rnc.infra_ip_last
+                                    },
+                                    (None, Some(_)) => true,
+                                    _ => {
+                                        todo!("error")
+                                    }
+                                };
+
+                                if current_ntp_servers != desired_ntp_servers {
                                     info!(
                                         log,
                                         "ntp servers have changed";
-                                        "old" => ?config.body.ntp_servers,
-                                        "new" => ?desired_config.body.ntp_servers,
+                                        "old" => ?current_ntp_servers,
+                                        "new" => ?desired_ntp_servers,
                                     );
                                     true
-                                } else if config.body.rack_network_config != desired_config.body.rack_network_config {
+                                } else if rnc_differs {
                                     info!(
                                         log,
                                         "rack network config has changed";
@@ -866,6 +904,28 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
+                // The following code is designed to give us the following
+                // properties
+                // * We only push updates to the bootstore (sled-agents) if
+                //   configuration on our side (nexus) has relevant changes.
+                // * If the RPW encounters a critical error or crashes at any
+                //   point of the operation, it will retry the configuration
+                //   again during the next run
+                // * We are able to accomplish the above without inspecting
+                //   the bootstore on the sled-agents
+                //
+                // For example, in the event that we crash after pushing to
+                // the sled-agents successfully, but before writing the
+                // results to the db
+                // 1. RPW will restart
+                // 2. RPW will build a new network config
+                // 3. RPW will compare against the last version stored in the db
+                // 4. RPW will decide to apply the config (again)
+                // 5. RPW will bump the version (again)
+                // 6. RPW will send a new bootstore update to the agents (with
+                //    the same info as last time, but with a new version)
+                // 7. RPW will record the update in the db
+                // 8. We are now back on the happy path
                 if bootstore_needs_update {
                     let generation = match self.datastore
                         .bump_bootstore_generation(opctx, NETWORK_KEY.into())
@@ -889,7 +949,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         "config" => ?desired_config,
                     );
 
-                    // spush the updates to both scrimlets
+                    // push the updates to both scrimlets
                     // if both scrimlets are down, bootstore updates aren't happening anyway
                     let mut one_succeeded = false;
                     for (location, client) in &sled_agent_clients {
@@ -932,6 +992,15 @@ impl BackgroundTask for SwitchPortSettingsManager {
         }
         .boxed()
     }
+}
+
+fn hashset_eq<T>(left: Vec<T>, right: Vec<T>) -> bool
+where
+    T: Hash + Eq,
+{
+    let left = left.into_iter().collect::<HashSet<T>>();
+    let right = right.into_iter().collect::<HashSet<T>>();
+    left == right
 }
 
 async fn add_loopback_addresses_to_switch(
@@ -1123,6 +1192,13 @@ fn static_routes_to_del(
             continue;
         };
     }
+
+    // filter out switches with no routes to remove
+    let routes_to_del = routes_to_del
+        .into_iter()
+        .filter(|(_location, request)| !request.routes.list.is_empty())
+        .collect();
+
     routes_to_del
 }
 
@@ -1169,6 +1245,13 @@ fn static_routes_to_add(
             },
         );
     }
+
+    // filter out switches with no routes to add
+    let routes_to_add = routes_to_add
+        .into_iter()
+        .filter(|(_location, request)| !request.routes.list.is_empty())
+        .collect();
+
     routes_to_add
 }
 
@@ -1257,6 +1340,28 @@ async fn apply_switch_port_changes(
             }
         };
 
+        let config_on_switch =
+            match client.port_settings_get(&dpd_port_id, DPD_TAG).await {
+                Ok(v) => v,
+                Err(e) => {
+                    error!(
+                        log,
+                        "failed to retrieve port setttings from switch";
+                        "switch_port_id" => ?port_name,
+                        "switch_location" => ?location,
+                        "error" => format!("{:#}", e)
+                    );
+                    continue;
+                }
+            };
+
+        info!(
+            log,
+            "retrieved port settings from switch";
+            "switch_port_id" => ?port_name,
+            "settings" => ?config_on_switch,
+        );
+
         match change {
             PortSettingsChange::Apply(settings) => {
                 let dpd_port_settings = match api_to_dpd_port_settings(
@@ -1275,6 +1380,17 @@ async fn apply_switch_port_changes(
                         continue;
                     }
                 };
+
+                if config_on_switch.into_inner() == dpd_port_settings {
+                    info!(
+                        &log,
+                        "port settings up to date, skipping";
+                        "switch_port_id" => ?port_name,
+                        "switch_location" => ?location,
+                        "switch_port_settings_id" => ?settings.settings.id(),
+                    );
+                    continue;
+                }
 
                 // apply settings via dpd client
                 info!(
@@ -1312,6 +1428,17 @@ async fn apply_switch_port_changes(
                     "switch_location" => ?location,
                     "port_id" => ?dpd_port_id,
                 );
+
+                if config_on_switch.into_inner().links.is_empty() {
+                    info!(
+                        &log,
+                        "port settings up to date, skipping";
+                        "switch_port_id" => ?port_name,
+                        "switch_location" => ?location,
+                    );
+                    continue;
+                }
+
                 match client.port_settings_clear(&dpd_port_id, DPD_TAG).await {
                     Ok(_) => {}
                     Err(e) => {
