@@ -348,9 +348,15 @@ impl DataStore {
         let (ipv4, ipv6) = external_ip::table
             .filter(external_ip::ip_pool_id.eq(authz_pool.id()))
             .filter(external_ip::time_deleted.is_null())
+            // need to do distinct IP because SNAT IPs are shared between
+            // multiple instances, and each gets its own row in the table
             .select((
-                sql::<BigInt>("count(*) FILTER (WHERE family(ip) = 4)"),
-                sql::<BigInt>("count(*) FILTER (WHERE family(ip) = 6)"),
+                sql::<BigInt>(
+                    "count(distinct ip) FILTER (WHERE family(ip) = 4)",
+                ),
+                sql::<BigInt>(
+                    "count(distinct ip) FILTER (WHERE family(ip) = 6)",
+                ),
             ))
             .first_async::<(i64, i64)>(
                 &*self.pool_connection_authorized(opctx).await?,
