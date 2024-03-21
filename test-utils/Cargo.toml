@@ -33,6 +33,7 @@ rcgen.workspace = true
 reqwest.workspace = true
 walkdir.workspace = true
 omicron-workspace-hack.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true

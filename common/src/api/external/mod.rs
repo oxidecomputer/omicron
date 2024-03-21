@@ -2758,10 +2758,10 @@ pub struct BgpPeerStatus {
 /// Opaque object representing BGP message history for a given BGP peer. The
 /// contents of this object are not yet stable.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BgpMessageHistory(mg_admin_client::MessageHistory);
+pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
 
 impl BgpMessageHistory {
-    pub fn new(arg: mg_admin_client::MessageHistory) -> Self {
+    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
         Self(arg)
     }
 }
