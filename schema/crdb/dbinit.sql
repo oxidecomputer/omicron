@@ -3690,9 +3690,10 @@ JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
 ON sp.port_settings_id = bpc.port_settings_id
 JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
 
-CREATE INDEX ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
+CREATE INDEX IF NOT EXISTS switch_port_id_and_name
+ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
 
-CREATE INDEX switch_port_name ON omicron.public.switch_port (port_name);
+CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
 
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
