@@ -266,7 +266,9 @@ pub enum ExternalPortDiscovery {
 }
 
 /// Switchport Speed options
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PortSpeed {
     #[serde(alias = "0G")]
@@ -290,7 +292,9 @@ pub enum PortSpeed {
 }
 
 /// Switchport FEC options
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PortFec {
     Firecode,

@@ -112,11 +112,21 @@ impl BackgroundTask for Ipv4NatGarbageCollector {
 
             let retention_threshold = Utc::now() - Duration::weeks(2);
 
-            let result = self
+            let result = match self
                 .datastore
                 .ipv4_nat_cleanup(opctx, min_gen, retention_threshold)
-                .await
-                .unwrap();
+                .await {
+                    Ok(v) => v,
+                    Err(e) => {
+                     return json!({
+                        "error":
+                            format!(
+                                "failed to perform cleanup operation: {:#}",
+                                e
+                            )
+                    });
+                    },
+                };
 
             let rv = serde_json::to_value(&result).unwrap_or_else(|error| {
                 json!({
