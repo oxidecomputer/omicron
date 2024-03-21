@@ -1371,7 +1371,7 @@ async fn project_policy_update(
 
 // IP Pools
 
-/// List all IP pools
+/// List IP pools
 #[endpoint {
     method = GET,
     path = "/v1/ip-pools",
@@ -1927,7 +1927,7 @@ async fn ip_pool_service_range_remove(
 
 // Floating IP Addresses
 
-/// List all floating IPs
+/// List floating IPs
 #[endpoint {
     method = GET,
     path = "/v1/floating-ips",

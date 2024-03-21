@@ -1009,7 +1009,7 @@
         "tags": [
           "floating-ips"
         ],
-        "summary": "List all floating IPs",
+        "summary": "List floating IPs",
         "operationId": "floating_ip_list",
         "parameters": [
           {
@@ -2681,7 +2681,7 @@
         "tags": [
           "projects"
         ],
-        "summary": "List all IP pools",
+        "summary": "List IP pools",
         "operationId": "project_ip_pool_list",
         "parameters": [
           {
