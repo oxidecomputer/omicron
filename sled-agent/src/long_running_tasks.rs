@@ -229,7 +229,7 @@ async fn upsert_synthetic_disks_if_needed(
                 "Upserting synthetic device to Storage Manager";
                 "vdev" => vdev.to_string(),
             );
-            let disk = RawSyntheticDisk::new(vdev, i.try_into().unwrap())
+            let disk = RawSyntheticDisk::load(vdev, i.try_into().unwrap())
                 .expect("Failed to parse synthetic disk")
                 .into();
             storage_manager.detected_raw_disk(disk).await.await.unwrap();

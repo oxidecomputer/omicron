@@ -135,7 +135,7 @@ impl<T: Ledgerable> Ledger<T> {
         }
 
         if !one_successful_write {
-            warn!(self.log, "No successful writes to ledger");
+            error!(self.log, "No successful writes to ledger");
             return Err(Error::FailedToWrite { failed_paths });
         }
         Ok(())

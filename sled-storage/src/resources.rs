@@ -83,7 +83,7 @@ impl DisksManagementResult {
                 return true;
             }
         }
-        return false;
+        false
     }
 
     pub fn has_retryable_error(&self) -> bool {
@@ -94,7 +94,7 @@ impl DisksManagementResult {
                 }
             }
         }
-        return false;
+        false
     }
 }
 
@@ -105,7 +105,7 @@ impl DisksManagementResult {
 pub enum ManagedDisk {
     // A disk explicitly managed by the control plane.
     //
-    // This include U.2s which Nexus has told us to format and use.
+    // This includes U.2s which Nexus has told us to format and use.
     ExplicitlyManaged(Disk),
 
     // A disk implicitly managed by the control plane.
@@ -344,7 +344,7 @@ impl StorageResources {
         // other modifications to the underlying storage.
         for (identity, managed_disk) in &mut *disks {
             match managed_disk {
-                // This leaves the prescence of the disk still in "Self", but
+                // This leaves the presence of the disk still in "Self", but
                 // downgrades the disk to an unmanaged status.
                 ManagedDisk::ExplicitlyManaged(disk) => {
                     if self.control_plane_disks.get(identity).is_none() {

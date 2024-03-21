@@ -182,7 +182,7 @@ impl HardwareMonitor {
                     //
                     // Here and below, we're "dropping a future" rather than
                     // awaiting it. That's intentional - the hardware monitor
-                    // don't care when this work is finished, just when it's
+                    // doesn't care when this work is finished, just when it's
                     // enqueued.
                     #[allow(clippy::let_underscore_future)]
                     let _ = self

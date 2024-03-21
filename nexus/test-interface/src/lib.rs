@@ -80,6 +80,10 @@ pub trait NexusServer: Send + Sync + 'static {
     // control over dataset provisioning is shifting to Nexus. There is
     // a short window where RSS controls dataset provisioning, but afterwards,
     // Nexus should be calling the shots on "when to provision datasets".
+    // Furthermore, with https://github.com/oxidecomputer/omicron/pull/5172,
+    // physical disk and zpool provisioning has already moved into Nexus. This
+    // provides a "back-door" for tests to control the set of control plane
+    // disks that are considered active.
     //
     // For test purposes, we have many situations where we want to carve up
     // zpools and datasets precisely for disk-based tests. As a result, we

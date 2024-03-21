@@ -26,7 +26,7 @@ const BOOTSTORE_FSM_STATE_FILE: &str = "bootstore-fsm-state.json";
 const BOOTSTORE_NETWORK_CONFIG_FILE: &str = "bootstore-network-config.json";
 
 pub fn new_bootstore_config(
-    iter_all: &AllDisks,
+    all_disks: &AllDisks,
     baseboard: Baseboard,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> Result<bootstore::Config, StartError> {
@@ -37,15 +37,17 @@ pub fn new_bootstore_config(
         learn_timeout: Duration::from_secs(5),
         rack_init_timeout: Duration::from_secs(300),
         rack_secret_request_timeout: Duration::from_secs(5),
-        fsm_state_ledger_paths: bootstore_fsm_state_paths(&iter_all)?,
-        network_config_ledger_paths: bootstore_network_config_paths(&iter_all)?,
+        fsm_state_ledger_paths: bootstore_fsm_state_paths(&all_disks)?,
+        network_config_ledger_paths: bootstore_network_config_paths(
+            &all_disks,
+        )?,
     })
 }
 
 fn bootstore_fsm_state_paths(
-    iter_all: &AllDisks,
+    all_disks: &AllDisks,
 ) -> Result<Vec<Utf8PathBuf>, StartError> {
-    let paths: Vec<_> = iter_all
+    let paths: Vec<_> = all_disks
         .all_m2_mountpoints(CLUSTER_DATASET)
         .into_iter()
         .map(|p| p.join(BOOTSTORE_FSM_STATE_FILE))
@@ -58,9 +60,9 @@ fn bootstore_fsm_state_paths(
 }
 
 fn bootstore_network_config_paths(
-    iter_all: &AllDisks,
+    all_disks: &AllDisks,
 ) -> Result<Vec<Utf8PathBuf>, StartError> {
-    let paths: Vec<_> = iter_all
+    let paths: Vec<_> = all_disks
         .all_m2_mountpoints(CLUSTER_DATASET)
         .into_iter()
         .map(|p| p.join(BOOTSTORE_NETWORK_CONFIG_FILE))

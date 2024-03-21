@@ -134,7 +134,7 @@ impl SyntheticDisk {
 }
 
 // A synthetic disk that acts as one "found" by the hardware and that is backed
-// by a zpool
+// by a vdev.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct RawSyntheticDisk {
     pub path: Utf8PathBuf,
@@ -153,10 +153,12 @@ impl RawSyntheticDisk {
     ) -> Result<Self, anyhow::Error> {
         let file = std::fs::File::create(vdev.as_ref())?;
         file.set_len(length)?;
-        Self::new(vdev, slot)
+        Self::load(vdev, slot)
     }
 
-    pub fn new<P: AsRef<Utf8Path>>(
+    /// Treats a file at path `vdev` as a synthetic disk. The file
+    /// should already exist, and have the desired length.
+    pub fn load<P: AsRef<Utf8Path>>(
         vdev: P,
         slot: i64,
     ) -> Result<Self, anyhow::Error> {

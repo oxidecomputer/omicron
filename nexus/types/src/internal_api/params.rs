@@ -239,7 +239,7 @@ pub struct RackInitializationRequest {
     /// "Managed" physical disks owned by the control plane
     pub physical_disks: Vec<PhysicalDiskPutRequest>,
 
-    /// Zpools created withing the physical disks created by the control plane.
+    /// Zpools created within the physical disks created by the control plane.
     pub zpools: Vec<ZpoolPutRequest>,
 
     /// Datasets on the rack which have been provisioned by RSS.

@@ -87,7 +87,7 @@ impl super::Nexus {
         Ok(db_rack)
     }
 
-    /// Marks the rack as initialized with a set of services.
+    /// Marks the rack as initialized with information supplied by RSS.
     ///
     /// This function is a no-op if the rack has already been initialized.
     pub(crate) async fn rack_initialize(
