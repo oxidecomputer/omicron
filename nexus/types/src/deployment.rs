@@ -139,7 +139,7 @@ pub struct Blueprint {
     pub id: Uuid,
 
     /// A map of sled id -> zones deployed on each sled, along with the
-    /// [`BlueprintZonePolicy`] for each zone.
+    /// [`BlueprintZoneState`] for each zone.
     ///
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
@@ -314,7 +314,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
 /// Information about an Omicron zone as recorded in a blueprint.
 ///
 /// Currently, this is similar to [`OmicronZonesConfig`], but also contains a
-/// per-zone [`BlueprintZonePolicy`].
+/// per-zone [`BlueprintZoneState`].
 ///
 /// Part of [`Blueprint`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -375,7 +375,7 @@ impl BlueprintZonesConfig {
 /// Describes one Omicron-managed zone in a blueprint.
 ///
 /// This is a wrapper around an [`OmicronZoneConfig`] that also includes a
-/// [`BlueprintZonePolicy`].
+/// [`BlueprintZoneState`].
 ///
 /// Part of [`BlueprintZonesConfig`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -383,7 +383,7 @@ pub struct BlueprintZoneConfig {
     /// The underlying zone configuration.
     pub config: OmicronZoneConfig,
 
-    /// The policy for this zone.
+    /// The state of this zone recorded in the blueprint.
     pub zone_state: BlueprintZoneState,
 }
 
@@ -572,22 +572,22 @@ impl<'a> DiffZoneCommon<'a> {
     /// Returns true if there are any differences between `zone_before` and
     /// `zone_after`.
     ///
-    /// This is equivalent to `config_changed() || policy_changed()`.
+    /// This is equivalent to `config_changed() || state_changed()`.
     #[inline]
     pub fn is_changed(&self) -> bool {
-        // policy is smaller and easier to compare than config.
-        self.policy_changed() || self.config_changed()
+        // state is smaller and easier to compare than config.
+        self.state_changed() || self.config_changed()
     }
 
-    /// Returns true if the zone configuration (excluding the policy) changed.
+    /// Returns true if the zone configuration (excluding the state) changed.
     #[inline]
     pub fn config_changed(&self) -> bool {
         self.zone_before.config != self.zone_after.config
     }
 
-    /// Returns true if the policy for the zone changed.
+    /// Returns true if the [`BlueprintZoneState`] for the zone changed.
     #[inline]
-    pub fn policy_changed(&self) -> bool {
+    pub fn state_changed(&self) -> bool {
         self.zone_before.zone_state != self.zone_after.zone_state
     }
 }
@@ -792,15 +792,15 @@ impl<'diff, 'a> fmt::Display for OmicronZonesDiffDisplay<'diff, 'a> {
                         "+         {} (changed)",
                         zone_changes.zone_after.display(),
                     )?;
-                } else if zone_changes.policy_changed() {
+                } else if zone_changes.state_changed() {
                     writeln!(
                         f,
-                        "-         {} (policy changed)",
+                        "-         {} (state changed)",
                         zone_changes.zone_before.display(),
                     )?;
                     writeln!(
                         f,
-                        "+         {} (policy changed)",
+                        "+         {} (state changed)",
                         zone_changes.zone_after.display(),
                     )?;
                 } else {
