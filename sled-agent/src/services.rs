@@ -118,7 +118,7 @@ use illumos_utils::zone::Zones;
 
 const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
 pub enum Error {
     #[error("Failed to initialize CockroachDb: {err}")]
     CockroachInit {

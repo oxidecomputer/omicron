@@ -5538,6 +5538,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
+ "slog-error-chain",
  "slog-term",
  "smf",
  "static_assertions",

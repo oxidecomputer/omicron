@@ -15,9 +15,11 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
+use nexus_db_model::BgpPeerView;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
+use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::{
     CreateResult, DeleteResult, Error, ListResultVec, LookupResult, NameOrId,
     ResourceType,
@@ -473,5 +475,24 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
+    }
+
+    pub async fn bgp_peer_configs(
+        &self,
+        opctx: &OpContext,
+        switch: SwitchLocation,
+        port: String,
+    ) -> ListResultVec<BgpPeerView> {
+        use db::schema::bgp_peer_view::dsl;
+
+        let results = dsl::bgp_peer_view
+            .filter(dsl::switch_location.eq(switch.to_string()))
+            .filter(dsl::port_name.eq(port))
+            .select(BgpPeerView::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(results)
     }
 }

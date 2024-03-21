@@ -2,14 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::schema::{bgp_announce_set, bgp_announcement, bgp_config};
+use std::net::IpAddr;
+
+use crate::schema::{
+    bgp_announce_set, bgp_announcement, bgp_config, bgp_peer_view,
+};
 use crate::SqlU32;
 use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::external::{self};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -116,4 +120,18 @@ impl Into<external::BgpAnnouncement> for BgpAnnouncement {
             network: self.network.into(),
         }
     }
+}
+
+#[derive(Selectable, Clone, Debug, Serialize, Deserialize, FromSqlRow)]
+#[diesel(table_name = bgp_peer_view)]
+pub struct BgpPeerView {
+    switch_location: String,
+    port_name: String,
+    addr: IpAddr,
+    asn: SqlU32,
+    connect_retry: SqlU32,
+    delay_open: SqlU32,
+    hold_time: SqlU32,
+    idle_hold_time: SqlU32,
+    keepalive: SqlU32,
 }
