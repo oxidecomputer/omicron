@@ -3692,7 +3692,7 @@ JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
 
 CREATE INDEX ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
 
-CREATE INDEX omicron.public.switch_port_name ON switch_port (port_name);
+CREATE INDEX switch_port_name ON omicron.public.switch_port (port_name);
 
 /*
  * Metadata for the schema itself. This version number isn't great, as there's

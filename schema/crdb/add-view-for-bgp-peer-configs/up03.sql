@@ -1,1 +1,1 @@
-CREATE INDEX omicron.public.switch_port_name ON switch_port (port_name);
+CREATE INDEX switch_port_name ON omicron.public.switch_port (port_name);
