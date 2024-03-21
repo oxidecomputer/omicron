@@ -809,9 +809,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             rack_subnet: subnet,
                             infra_ip_first,
                             infra_ip_last,
-                            // FIX THIS
                             ports,
-                            // FIX THIS
                             bgp,
                         }),
                     },

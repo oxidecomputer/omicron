@@ -10,8 +10,7 @@ use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
-use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::{self};
+use omicron_common::api::external::{self, IdentityMetadataCreateParams};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
