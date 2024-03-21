@@ -546,9 +546,15 @@ impl DumpSetupWorker {
         debug_datasets: Vec<DebugZpool>,
         core_datasets: Vec<CoreZpool>,
     ) {
+        info!(
+            self.log,
+            "Updated view of disks";
+            "core_datasets" => %core_datasets.len(),
+            "debug_datasets" => %debug_datasets.len(),
+            "dump_slices" => %dump_slices.len(),
+        );
         self.core_dataset_names = core_datasets;
         self.debug_dataset_names = debug_datasets;
-
         self.known_dump_slices = dump_slices;
     }
 
