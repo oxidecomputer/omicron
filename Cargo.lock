@@ -4564,17 +4564,26 @@ dependencies = [
 name = "nexus-metrics-producer-gc"
 version = "0.1.0"
 dependencies = [
+ "async-bb8-diesel",
  "chrono",
+ "diesel",
  "futures",
+ "httptest",
+ "ipnetwork",
+ "nexus-db-model",
  "nexus-db-queries",
+ "nexus-test-utils",
+ "nexus-types",
  "omicron-common",
  "omicron-rpaths",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter-client",
  "pq-sys",
  "slog",
  "slog-error-chain",
  "thiserror",
+ "tokio",
  "uuid 1.7.0",
 ]
 

@@ -7,21 +7,11 @@ edition = "2021"
 omicron-rpaths.workspace = true
 
 [dependencies]
-#anyhow.workspace = true
-#dns-service-client.workspace = true
 chrono.workspace = true
 futures.workspace = true
-#illumos-utils.workspace = true
-#internal-dns.workspace = true
-#nexus-config.workspace = true
-#nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
-#nexus-networking.workspace = true
-#nexus-types.workspace = true
 omicron-common.workspace = true
 oximeter-client.workspace = true
-#reqwest.workspace = true
-#sled-agent-client.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 thiserror.workspace = true
@@ -34,14 +24,14 @@ pq-sys = "*"
 
 omicron-workspace-hack.workspace = true
 
-#[dev-dependencies]
-#httptest.workspace = true
-#ipnet.workspace = true
-#nexus-reconfigurator-planning.workspace = true
-#nexus-reconfigurator-preparation.workspace = true
-#nexus-inventory.workspace = true
-#nexus-test-utils.workspace = true
-#nexus-test-utils-macros.workspace = true
-#omicron-nexus.workspace = true
-#omicron-test-utils.workspace = true
-#tokio.workspace = true
+[dev-dependencies]
+async-bb8-diesel.workspace = true
+diesel.workspace = true
+httptest.workspace = true
+ipnetwork.workspace = true
+nexus-db-model.workspace = true
+nexus-db-queries = { workspace = true, features = ["testing"] }
+nexus-test-utils.workspace = true
+nexus-types.workspace = true
+omicron-test-utils.workspace = true
+tokio.workspace = true

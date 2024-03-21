@@ -71,6 +71,8 @@ mod oximeter;
 mod physical_disk;
 mod probe;
 mod project;
+#[cfg(any(test, feature = "testing"))]
+pub mod pub_test_utils;
 mod quota;
 mod rack;
 mod region;
@@ -88,8 +90,6 @@ mod ssh_key;
 mod switch;
 mod switch_interface;
 mod switch_port;
-#[cfg(any(test, feature = "testing"))]
-pub mod pub_test_utils;
 #[cfg(test)]
 pub(crate) mod test_utils;
 mod update;
