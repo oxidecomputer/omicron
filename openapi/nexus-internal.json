@@ -6197,7 +6197,7 @@
             }
           },
           "zpools": {
-            "description": "Zpools created withing the physical disks created by the control plane.",
+            "description": "Zpools created within the physical disks created by the control plane.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ZpoolPutRequest"
