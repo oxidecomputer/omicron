@@ -2,8 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::net::IpAddr;
-
 use crate::schema::{
     bgp_announce_set, bgp_announcement, bgp_config, bgp_peer_view,
 };
@@ -122,16 +120,16 @@ impl Into<external::BgpAnnouncement> for BgpAnnouncement {
     }
 }
 
-#[derive(Selectable, Clone, Debug, Serialize, Deserialize, FromSqlRow)]
+#[derive(Queryable, Selectable, Clone, Debug, Serialize, Deserialize)]
 #[diesel(table_name = bgp_peer_view)]
 pub struct BgpPeerView {
-    switch_location: String,
-    port_name: String,
-    addr: IpAddr,
-    asn: SqlU32,
-    connect_retry: SqlU32,
-    delay_open: SqlU32,
-    hold_time: SqlU32,
-    idle_hold_time: SqlU32,
-    keepalive: SqlU32,
+    pub switch_location: String,
+    pub port_name: String,
+    pub addr: IpNetwork,
+    pub asn: SqlU32,
+    pub connect_retry: SqlU32,
+    pub delay_open: SqlU32,
+    pub hold_time: SqlU32,
+    pub idle_hold_time: SqlU32,
+    pub keepalive: SqlU32,
 }

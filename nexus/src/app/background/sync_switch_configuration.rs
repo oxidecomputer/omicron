@@ -17,8 +17,7 @@ use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, LoopbackAddress,
-    SwitchLinkFec, SwitchLinkSpeed, SwitchPortBgpPeerConfig, INFRA_LOT,
-    NETWORK_KEY,
+    SwitchLinkFec, SwitchLinkSpeed, INFRA_LOT, NETWORK_KEY,
 };
 use uuid::Uuid;
 
@@ -686,14 +685,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         continue;
                     };
 
-                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, location, port.port_name).await {
+                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *location, port.port_name.clone()).await {
                         Ok(v) => v,
                         Err(e) => {
                             error!(
                                 log,
                                 "failed to fetch bgp peer config for switch port";
                                 "switch_location" => ?location,
-                                "port" => port.port_name,
+                                "port" => &port.port_name,
                                 "error" => %e,
                             );
                             continue;
@@ -707,19 +706,24 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .get(0) //TODO breakout support
                             .map(|l| l.autoneg)
                             .unwrap_or(false),
-                        // TODO filter a collection on (switch, port)
-                        bgp_peers: peer_configs.map(|c| {
-                            SledBgpPeerConfig {
-                                asn: c.asn,
-                                port: c.port_name,
-                                addr: c.addr,
-                                hold_time: Some(c.hold_time),
-                                idle_hold_time: Some(c.idle_hold_time),
-                                delay_open: Some(c.delay_open),
-                                connect_retry: Some(c.connect_retry),
-                                keepalive: Some(c.keepalive),
-                            }
-                        }),
+                        bgp_peers: peer_configs.into_iter()
+                            // filter maps are cool
+                            .filter_map(|c| match c.addr.ip() {
+                                IpAddr::V4(addr) => Some((c, addr)),
+                                IpAddr::V6(_) => None,
+                            })
+                            .map(|(c, addr)| {
+                                SledBgpPeerConfig {
+                                    asn: *c.asn,
+                                    port: c.port_name,
+                                    addr,
+                                    hold_time: Some(c.hold_time.0.into()),
+                                    idle_hold_time: Some(c.idle_hold_time.0.into()),
+                                    delay_open: Some(c.delay_open.0.into()),
+                                    connect_retry: Some(c.connect_retry.0.into()),
+                                    keepalive: Some(c.keepalive.0.into()),
+                                }
+                        }).collect(),
                         port: port.port_name.clone(),
                         routes: info
                             .routes
