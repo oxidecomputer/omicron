@@ -1579,6 +1579,21 @@ mod tests {
         }
     }
 
+    async fn assert_service_sled_ids(
+        datastore: &DataStore,
+        expected_sled_ids: &[Uuid],
+    ) {
+        let mut service_sled_ids = datastore
+            .vpc_resolve_to_sleds(*SERVICES_VPC_ID, &[])
+            .await
+            .expect("failed to resolve to sleds")
+            .into_iter()
+            .map(|sled| sled.id())
+            .collect::<Vec<_>>();
+        service_sled_ids.sort();
+        assert_eq!(expected_sled_ids, service_sled_ids);
+    }
+
     #[tokio::test]
     async fn test_vpc_resolve_to_sleds_uses_current_target_blueprint() {
         // Test setup.
@@ -1589,20 +1604,6 @@ mod tests {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Helper function to fetch and sort the IDs of sleds we've resolved the
-        // SERVICES_VPC_ID to.
-        let fetch_service_sled_ids = || async {
-            let mut service_sled_ids = datastore
-                .vpc_resolve_to_sleds(*SERVICES_VPC_ID, &[])
-                .await
-                .expect("failed to resolve to sleds")
-                .into_iter()
-                .map(|sled| sled.id())
-                .collect::<Vec<_>>();
-            service_sled_ids.sort();
-            service_sled_ids
-        };
-
         // Create four sleds.
         let harness = Harness::new(4);
         for sled in harness.db_sleds() {
@@ -1611,7 +1612,7 @@ mod tests {
 
         // We don't have a blueprint yet, so we shouldn't find any services on
         // sleds.
-        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &[]).await;
 
         // Create a blueprint that has a Nexus on our third sled. (This
         // blueprint is completely invalid in many ways, but all we care about
@@ -1650,7 +1651,7 @@ mod tests {
 
         // We haven't set a blueprint target yet, so we should still fail to see
         // any services on sleds.
-        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &[]).await;
 
         // Make bp1 the current target.
         datastore
@@ -1667,7 +1668,7 @@ mod tests {
 
         // bp1 is the target, but we haven't yet inserted a vNIC record, so
         // we still won't see any services on sleds.
-        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &[]).await;
 
         // Insert the relevant service NIC record (normally performed by the
         // reconfigurator's executor).
@@ -1680,10 +1681,7 @@ mod tests {
             .expect("failed to insert service VNIC");
 
         // We should now see our third sled running a service.
-        assert_eq!(
-            &[harness.sled_ids[2]] as &[Uuid],
-            fetch_service_sled_ids().await
-        );
+        assert_service_sled_ids(&datastore, &[harness.sled_ids[2]]).await;
 
         // Create another blueprint with no services and make it the target.
         let bp2_id = Uuid::new_v4();
@@ -1716,7 +1714,7 @@ mod tests {
 
         // We haven't removed the service NIC record, but we should no longer
         // see the third sled here. We should be back to no sleds with services.
-        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &[]).await;
 
         // Insert a service NIC record for our fourth sled's Nexus. This
         // shouldn't change our VPC resolution.
@@ -1727,7 +1725,7 @@ mod tests {
             )
             .await
             .expect("failed to insert service VNIC");
-        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &[]).await;
 
         // Create a blueprint that has a Nexus on our fourth sled. This
         // shouldn't change our VPC resolution.
@@ -1762,7 +1760,7 @@ mod tests {
             .blueprint_insert(&opctx, &bp3)
             .await
             .expect("failed to insert blueprint");
-        assert_eq!(&[] as &[Uuid], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &[]).await;
 
         // Make this blueprint the target. We've already created the service
         // VNIC, so we should immediately see our fourth sled in VPC resolution.
@@ -1777,10 +1775,7 @@ mod tests {
             )
             .await
             .expect("failed to set blueprint target");
-        assert_eq!(
-            &[harness.sled_ids[3]] as &[Uuid],
-            fetch_service_sled_ids().await
-        );
+        assert_service_sled_ids(&datastore, &[harness.sled_ids[3]]).await;
 
         // Finally, create a blueprint that includes our third and fourth sleds,
         // make it the target, and ensure we resolve to both of them.
@@ -1825,7 +1820,7 @@ mod tests {
             )
             .await
             .expect("failed to set blueprint target");
-        assert_eq!(&harness.sled_ids[2..], fetch_service_sled_ids().await);
+        assert_service_sled_ids(&datastore, &harness.sled_ids[2..]).await;
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
