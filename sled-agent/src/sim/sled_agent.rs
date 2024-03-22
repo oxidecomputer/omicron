@@ -13,7 +13,7 @@ use super::storage::Storage;
 use crate::nexus::NexusClient;
 use crate::params::{
     DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMigrationSourceParams, InstancePutStateResponse,
+    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
     InstanceStateRequested, InstanceUnregisterResponse, Inventory,
     OmicronZonesConfig, SledRole,
 };
@@ -26,8 +26,6 @@ use futures::lock::Mutex;
 use illumos_utils::opte::params::{
     DeleteVirtualNetworkInterfaceHost, SetVirtualNetworkInterfaceHost,
 };
-use nexus_client::types::PhysicalDiskKind;
-use omicron_common::address::PROPOLIS_PORT;
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
@@ -46,6 +44,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Simulates management of the control plane on a sled
@@ -75,6 +74,7 @@ pub struct SledAgent {
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
     instance_ensure_state_error: Mutex<Option<Error>>,
+    pub log: Logger,
 }
 
 fn extract_targets_from_volume_construction_request(
@@ -173,6 +173,7 @@ impl SledAgent {
                 zones: vec![],
             }),
             instance_ensure_state_error: Mutex::new(None),
+            log,
         })
     }
 
@@ -240,6 +241,7 @@ impl SledAgent {
         hardware: InstanceHardware,
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
+        metadata: InstanceMetadata,
     ) -> Result<SledInstanceState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
@@ -293,6 +295,7 @@ impl SledAgent {
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),
                     vcpus: hardware.properties.ncpus.0 as u8,
+                    metadata: metadata.into(),
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
@@ -399,7 +402,28 @@ impl SledAgent {
                     ));
                 }
                 InstanceStateRequested::Running => {
-                    propolis_client::types::InstanceStateRequested::Run
+                    let instances = self.instances.clone();
+                    let log = self.log.new(
+                        o!("component" => "SledAgent-insure_instance_state"),
+                    );
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(10)).await;
+                        match instances
+                            .sim_ensure(&instance_id, current, Some(state))
+                            .await
+                        {
+                            Ok(state) => {
+                                let instance_state: nexus_client::types::SledInstanceState = state.into();
+                                info!(log, "sim_ensure success"; "instance_state" => #?instance_state);
+                            }
+                            Err(instance_put_error) => {
+                                error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
+                            }
+                        }
+                    });
+                    return Ok(InstancePutStateResponse {
+                        updated_runtime: None,
+                    });
                 }
                 InstanceStateRequested::Stopped => {
                     propolis_client::types::InstanceStateRequested::Stop
@@ -501,7 +525,7 @@ impl SledAgent {
         serial: String,
         model: String,
     ) {
-        let variant = PhysicalDiskKind::U2;
+        let variant = sled_hardware::DiskVariant::U2;
         self.storage
             .lock()
             .await
@@ -684,14 +708,15 @@ impl SledAgent {
     }
 
     /// Used for integration tests that require a component to talk to a
-    /// mocked propolis-server API.
-    // TODO: fix schemas so propolis-server's port isn't hardcoded in nexus
-    // such that we can run more than one of these.
-    // (this is only needed by test_instance_serial at present)
+    /// mocked propolis-server API. Returns the socket on which the dropshot
+    /// service is listening, which *must* be patched into Nexus with
+    /// `nexus_db_queries::db::datastore::vmm_overwrite_addr_for_test` after
+    /// the instance creation saga if functionality touching propolis-server
+    /// is to be tested (e.g. serial console connection).
     pub async fn start_local_mock_propolis_server(
         &self,
         log: &Logger,
-    ) -> Result<(), Error> {
+    ) -> Result<SocketAddr, Error> {
         let mut mock_lock = self.mock_propolis.lock().await;
         if mock_lock.is_some() {
             return Err(Error::ObjectAlreadyExists {
@@ -700,7 +725,7 @@ impl SledAgent {
             });
         }
         let propolis_bind_address =
-            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), PROPOLIS_PORT);
+            SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
         let dropshot_config = dropshot::ConfigDropshot {
             bind_address: propolis_bind_address,
             ..Default::default()
@@ -721,25 +746,28 @@ impl SledAgent {
             Error::unavail(&format!("initializing propolis-server: {}", error))
         })?
         .start();
-        let client = propolis_client::Client::new(&format!(
-            "http://{}",
-            srv.local_addr()
-        ));
+        let addr = srv.local_addr();
+        let client = propolis_client::Client::new(&format!("http://{}", addr));
         *mock_lock = Some((srv, client));
-        Ok(())
+        Ok(addr)
     }
 
-    pub fn inventory(&self, addr: SocketAddr) -> anyhow::Result<Inventory> {
+    pub async fn inventory(
+        &self,
+        addr: SocketAddr,
+    ) -> anyhow::Result<Inventory> {
         let sled_agent_address = match addr {
             SocketAddr::V4(_) => {
                 bail!("sled_agent_ip must be v6 for inventory")
             }
             SocketAddr::V6(v6) => v6,
         };
+
+        let storage = self.storage.lock().await;
         Ok(Inventory {
             sled_id: self.id,
             sled_agent_address,
-            sled_role: SledRole::Gimlet,
+            sled_role: SledRole::Scrimlet,
             baseboard: self.config.hardware.baseboard.clone(),
             usable_hardware_threads: self.config.hardware.hardware_threads,
             usable_physical_ram: ByteCount::try_from(
@@ -750,6 +778,25 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
+            disks: storage
+                .physical_disks()
+                .iter()
+                .map(|(identity, info)| crate::params::InventoryDisk {
+                    identity: identity.clone(),
+                    variant: info.variant,
+                    slot: info.slot,
+                })
+                .collect(),
+            zpools: storage
+                .zpools()
+                .iter()
+                .map(|(id, zpool)| {
+                    Ok(crate::params::InventoryZpool {
+                        id: *id,
+                        total_size: ByteCount::try_from(zpool.total_size())?,
+                    })
+                })
+                .collect::<Result<Vec<_>, anyhow::Error>>()?,
         })
     }
 

@@ -303,10 +303,17 @@ impl OpContext {
     ///   either.  Clients and proxies often don't expect long requests and
     ///   apply aggressive timeouts.  Depending on the HTTP version, a
     ///   long-running request can tie up the TCP connection.
+    ///
+    /// We shouldn't allow these in either internal or external API handlers,
+    /// but we currently have some internal APIs for exercising some expensive
+    /// blueprint operations and so we allow these cases here.
     pub fn check_complex_operations_allowed(&self) -> Result<(), Error> {
         let api_handler = match self.kind {
-            OpKind::ExternalApiRequest | OpKind::InternalApiRequest => true,
-            OpKind::Saga | OpKind::Background | OpKind::Test => false,
+            OpKind::ExternalApiRequest => true,
+            OpKind::InternalApiRequest
+            | OpKind::Saga
+            | OpKind::Background
+            | OpKind::Test => false,
         };
         if api_handler {
             Err(Error::internal_error(
@@ -350,7 +357,8 @@ mod test {
         let logctx = dev::test_setup_log("test_background_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -382,7 +390,8 @@ mod test {
         let logctx = dev::test_setup_log("test_background_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_tests(logctx.log.new(o!()), datastore);
 
         // Like in test_background_context(), this is essentially a test of the
@@ -403,7 +412,8 @@ mod test {
         let logctx = dev::test_setup_log("test_child_context");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx = OpContext::for_background(
             logctx.log.new(o!()),
             Arc::new(authz::Authz::new(&logctx.log)),

@@ -15,6 +15,7 @@ use crate::{ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintTarget;
+use omicron_common::api::internal::shared::NetworkInterface;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -24,6 +25,7 @@ pub struct Blueprint {
     pub id: Uuid,
     pub parent_blueprint_id: Option<Uuid>,
     pub internal_dns_version: Generation,
+    pub external_dns_version: Generation,
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
@@ -35,6 +37,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             id: bp.id,
             parent_blueprint_id: bp.parent_blueprint_id,
             internal_dns_version: Generation(bp.internal_dns_version),
+            external_dns_version: Generation(bp.external_dns_version),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
@@ -48,6 +51,7 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
             id: value.id,
             parent_blueprint_id: value.parent_blueprint_id,
             internal_dns_version: *value.internal_dns_version,
+            external_dns_version: *value.external_dns_version,
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,
@@ -249,7 +253,7 @@ impl BpOmicronZoneNic {
     pub fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+    ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
     }

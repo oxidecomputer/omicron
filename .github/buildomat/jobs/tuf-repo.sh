@@ -93,7 +93,7 @@ target/release/omicron-package -t default target create -i standard -m gimlet -s
 ln -s /input/package/work/zones/* out/
 rm out/switch-softnpu.tar.gz  # not used when target switch=asic
 rm out/omicron-gateway-softnpu.tar.gz  # not used when target switch=asic
-rm out/omicron-nexus-single-sled.tar.gz # only used for deploy tests
+rm out/nexus-single-sled.tar.gz # only used for deploy tests
 for zone in out/*.tar.gz; do
     target/release/omicron-package stamp "$(basename "${zone%.tar.gz}")" "$VERSION"
 done
@@ -278,8 +278,8 @@ EOF
     done
 }
 # usage:              SERIES           ROT_DIR      ROT_VERSION              BOARDS...
-add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.5  "${ALL_BOARDS[@]}"
-add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.5     "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-staging-dev  staging/dev  cert-staging-dev-v1.0.7  "${ALL_BOARDS[@]}"
+add_hubris_artifacts  rot-prod-rel     prod/rel     cert-prod-rel-v1.0.7     "${ALL_BOARDS[@]}"
 
 for series in "${SERIES_LIST[@]}"; do
     /work/tufaceous assemble --no-generate-key /work/manifest-"$series".toml /work/repo-"$series".zip

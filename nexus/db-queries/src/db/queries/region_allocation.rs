@@ -17,18 +17,21 @@ use diesel::query_builder::{AstPass, Query, QueryFragment, QueryId};
 use diesel::result::Error as DieselError;
 use diesel::PgBinaryExpressionMethods;
 use diesel::{
-    sql_types, BoolExpressionMethods, Column, CombineDsl, ExpressionMethods,
+    sql_types, BoolExpressionMethods, CombineDsl, ExpressionMethods,
     Insertable, IntoSql, JoinOnDsl, NullableExpressionMethods, QueryDsl,
     RunQueryDsl,
 };
+use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::queries::region_allocation::{
     candidate_datasets, candidate_regions, candidate_zpools, cockroach_md5,
     do_insert, inserted_regions, old_regions, old_zpool_usage,
     proposed_dataset_changes, shuffled_candidate_datasets, updated_datasets,
 };
 use nexus_db_model::schema;
+use nexus_db_model::to_db_sled_policy;
+use nexus_db_model::SledState;
+use nexus_types::external_api::views::SledPolicy;
 use omicron_common::api::external;
-use omicron_common::nexus_config::RegionAllocationStrategy;
 
 const NOT_ENOUGH_DATASETS_SENTINEL: &'static str = "Not enough datasets";
 const NOT_ENOUGH_ZPOOL_SPACE_SENTINEL: &'static str = "Not enough space";
@@ -313,7 +316,11 @@ impl CandidateZpools {
         // into a BigInt, not a Numeric. I welcome a better solution.
         let it_will_fit = (old_zpool_usage::dsl::size_used
             + diesel::dsl::sql(&zpool_size_delta.to_string()))
-        .le(diesel::dsl::sql(zpool_dsl::total_size::NAME));
+        .le(diesel::dsl::sql(
+            "(SELECT total_size FROM omicron.public.inv_zpool WHERE
+              inv_zpool.id = old_zpool_usage.pool_id
+              ORDER BY inv_zpool.time_collected DESC LIMIT 1)",
+        ));
 
         // We need to join on the sled table to access provision_state.
         let with_sled = sled_dsl::sled.on(zpool_dsl::sled_id.eq(sled_dsl::id));
@@ -321,14 +328,16 @@ impl CandidateZpools {
             .on(zpool_dsl::id.eq(old_zpool_usage::dsl::pool_id))
             .inner_join(with_sled);
 
-        let sled_is_provisionable = sled_dsl::provision_state
-            .eq(crate::db::model::SledProvisionState::Provisionable);
+        let sled_is_provisionable = sled_dsl::sled_policy
+            .eq(to_db_sled_policy(SledPolicy::provisionable()));
+        let sled_is_active = sled_dsl::sled_state.eq(SledState::Active);
 
         let base_query = old_zpool_usage
             .query_source()
             .inner_join(with_zpool)
             .filter(it_will_fit)
             .filter(sled_is_provisionable)
+            .filter(sled_is_active)
             .select((old_zpool_usage::dsl::pool_id,));
 
         let query = if distinct_sleds {

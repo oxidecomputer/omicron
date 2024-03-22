@@ -20,6 +20,7 @@ pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
     nexus_label: String,
+    tx: watch::Sender<usize>,
 }
 
 impl BlueprintExecutor {
@@ -30,7 +31,12 @@ impl BlueprintExecutor {
         >,
         nexus_label: String,
     ) -> BlueprintExecutor {
-        BlueprintExecutor { datastore, rx_blueprint, nexus_label }
+        let (tx, _) = watch::channel(0);
+        BlueprintExecutor { datastore, rx_blueprint, nexus_label, tx }
+    }
+
+    pub fn watcher(&self) -> watch::Receiver<usize> {
+        self.tx.subscribe()
     }
 }
 
@@ -63,13 +69,16 @@ impl BackgroundTask for BlueprintExecutor {
                 });
             }
 
-            let result = nexus_blueprint_execution::realize_blueprint(
+            let result = nexus_reconfigurator_execution::realize_blueprint(
                 opctx,
                 &self.datastore,
                 blueprint,
                 &self.nexus_label,
             )
             .await;
+
+            // Trigger anybody waiting for this to finish.
+            self.tx.send_modify(|count| *count = *count + 1);
 
             // Return the result as a `serde_json::Value`
             match result {
@@ -100,6 +109,7 @@ mod test {
     use nexus_db_model::{
         ByteCount, SledBaseboard, SledSystemHardware, SledUpdate,
     };
+    use nexus_db_queries::authn;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::OmicronZonesConfig;
@@ -122,7 +132,7 @@ mod test {
 
     fn create_blueprint(
         omicron_zones: BTreeMap<Uuid, OmicronZonesConfig>,
-        internal_dns_version: Generation,
+        dns_version: Generation,
     ) -> (BlueprintTarget, Blueprint) {
         let id = Uuid::new_v4();
         (
@@ -136,7 +146,8 @@ mod test {
                 omicron_zones,
                 zones_in_service: BTreeSet::new(),
                 parent_blueprint_id: None,
-                internal_dns_version,
+                internal_dns_version: dns_version,
+                external_dns_version: dns_version,
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -149,8 +160,10 @@ mod test {
         // Set up the test.
         let nexus = &cptestctx.server.apictx().nexus;
         let datastore = nexus.datastore();
-        let opctx = OpContext::for_tests(
+        let opctx = OpContext::for_background(
             cptestctx.logctx.log.clone(),
+            nexus.authz.clone(),
+            authn::Context::internal_api(),
             datastore.clone(),
         );
 
@@ -182,6 +195,7 @@ mod test {
                     reservoir_size: ByteCount(999.into()),
                 },
                 rack_id,
+                nexus_db_model::Generation::new(),
             );
             datastore
                 .sled_upsert(update)
@@ -248,7 +262,7 @@ mod test {
 
         // Make sure that requests get made to the sled agent.  This is not a
         // careful check of exactly what gets sent.  For that, see the tests in
-        // nexus-blueprint-execution.
+        // nexus-reconfigurator-execution.
         for s in [&mut s1, &mut s2] {
             s.expect(
                 Expectation::matching(all_of![request::method_path(

@@ -40,9 +40,9 @@ impl super::Nexus {
     ) -> CreateResult<SwitchPortSettingsCombinedResult> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
 
-        //TODO(ry) race conditions on exists check versus update/create.
-        //         Normally I would use a DB lock here, but not sure what
-        //         the Omicron way of doing things here is.
+        //TODO race conditions on exists check versus update/create.
+        //     Normally I would use a DB lock here, but not sure what
+        //     the Omicron way of doing things here is.
 
         match self
             .db_datastore
@@ -92,37 +92,25 @@ impl super::Nexus {
             )
             .await?;
 
-        // run the port settings apply saga for each port referencing the
-        // updated settings
-
         let ports = self
             .db_datastore
             .switch_ports_using_settings(opctx, switch_port_settings_id)
             .await?;
 
-        for (switch_port_id, switch_port_name) in ports.into_iter() {
-            let saga_params = sagas::switch_port_settings_apply::Params {
-                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+        for (switch_port_id, _switch_port_name) in ports.into_iter() {
+            self.set_switch_port_settings_id(
+                &opctx,
                 switch_port_id,
-                switch_port_settings_id: result.settings.id(),
-                switch_port_name: switch_port_name.to_string(),
-            };
-
-            self.execute_saga::<
-                sagas::switch_port_settings_apply::SagaSwitchPortSettingsApply
-                >(
-                    saga_params,
-                )
-                .await
-            .map_err(|e| {
-                    let msg = e.to_string();
-                    if msg.contains("bad request") {
-                        external::Error::invalid_request(&msg.to_string())
-                    } else {
-                        e
-                    }
-                })?;
+                Some(switch_port_settings_id),
+                UpdatePrecondition::DontCare,
+            )
+            .await?;
         }
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(result)
     }
@@ -180,15 +168,6 @@ impl super::Nexus {
         self.db_datastore.switch_port_list(opctx, pagparams).await
     }
 
-    pub(crate) async fn get_switch_port(
-        &self,
-        opctx: &OpContext,
-        params: uuid::Uuid,
-    ) -> LookupResult<SwitchPort> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.switch_port_get(opctx, params).await
-    }
-
     pub(crate) async fn list_switch_ports_with_uplinks(
         &self,
         opctx: &OpContext,
@@ -242,27 +221,18 @@ impl super::Nexus {
             }
         };
 
-        let saga_params = sagas::switch_port_settings_apply::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+        self.set_switch_port_settings_id(
+            &opctx,
             switch_port_id,
-            switch_port_settings_id,
-            switch_port_name: port.to_string(),
-        };
-
-        self.execute_saga::<
-            sagas::switch_port_settings_apply::SagaSwitchPortSettingsApply
-        >(
-            saga_params,
+            Some(switch_port_settings_id),
+            UpdatePrecondition::DontCare,
         )
-        .await
-        .map_err(|e| {
-                let msg = e.to_string();
-                if msg.contains("bad request") {
-                    external::Error::invalid_request(&msg.to_string())
-                } else {
-                    e
-                }
-            })?;
+        .await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(())
     }
@@ -284,16 +254,19 @@ impl super::Nexus {
             )
             .await?;
 
-        let saga_params = sagas::switch_port_settings_clear::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+        // update the switch port settings association
+        self.set_switch_port_settings_id(
+            &opctx,
             switch_port_id,
-            port_name: port.to_string(),
-        };
-
-        self.execute_saga::<sagas::switch_port_settings_clear::SagaSwitchPortSettingsClear>(
-            saga_params,
+            None,
+            UpdatePrecondition::DontCare,
         )
         .await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(())
     }
@@ -322,26 +295,5 @@ impl super::Nexus {
         }
 
         Ok(())
-    }
-
-    // TODO it would likely be better to do this as a one shot db query.
-    pub(crate) async fn active_port_settings(
-        &self,
-        opctx: &OpContext,
-    ) -> LookupResult<Vec<(SwitchPort, SwitchPortSettingsCombinedResult)>> {
-        let mut ports = Vec::new();
-        let port_list =
-            self.switch_port_list(opctx, &DataPageParams::max_page()).await?;
-
-        for p in port_list {
-            if let Some(id) = p.port_settings_id {
-                ports.push((
-                    p.clone(),
-                    self.switch_port_settings_get(opctx, &id.into()).await?,
-                ));
-            }
-        }
-
-        LookupResult::Ok(ports)
     }
 }

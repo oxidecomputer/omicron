@@ -16,13 +16,16 @@ use nexus_db_queries::authz;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::queries::external_ip::SAFE_TRANSIENT_INSTANCE_STATES;
 use nexus_db_queries::{authn, context::OpContext, db, db::DataStore};
-use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
+use omicron_common::api::external::{Error, NameOrId};
 use serde::{Deserialize, Serialize};
 use steno::ActionError;
 use uuid::Uuid;
 
 use super::NexusActionContext;
+
+/// The port propolis-server listens on inside the propolis zone.
+const DEFAULT_PROPOLIS_PORT: u16 = 12400;
 
 /// Reserves resources for a new VMM whose instance has `ncpus` guest logical
 /// processors and `guest_memory` bytes of guest RAM. The selected sled is
@@ -98,6 +101,7 @@ pub async fn create_and_insert_vmm_record(
         instance_id,
         sled_id,
         IpAddr::V6(propolis_ip).into(),
+        DEFAULT_PROPOLIS_PORT,
         initial_state,
     );
 
@@ -464,4 +468,10 @@ pub async fn instance_ip_remove_opte(
         })?;
 
     Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum ExternalIpAttach {
+    Ephemeral { pool: Option<NameOrId> },
+    Floating { floating_ip: authz::FloatingIp },
 }

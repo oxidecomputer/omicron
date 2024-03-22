@@ -75,6 +75,9 @@ pub struct Filter {
     /// standard paths or don't follow the naming conventions of SMF service
     /// files. e.g. `/pool/ext/e12f29b8-1ab8-431e-bc96-1c1298947980/crypt/zone/oxz_cockroachdb_8bbea076-ff60-4330-8302-383e18140ef3/root/data/logs/cockroach.log`
     pub extra: bool,
+
+    /// Show a log file even if is has zero size.
+    pub show_empty: bool,
 }
 
 /// Path and metadata about a logfile
@@ -264,17 +267,21 @@ impl Zones {
         // 'archived'. These files have not yet been migrated into the debug
         // directory.
         if filter.current || filter.archived {
-            load_svc_logs(paths.primary.clone(), &mut output);
+            load_svc_logs(
+                paths.primary.clone(),
+                &mut output,
+                filter.show_empty,
+            );
         }
 
         if filter.archived {
             for dir in paths.debug.clone() {
-                load_svc_logs(dir, &mut output);
+                load_svc_logs(dir, &mut output, filter.show_empty);
             }
         }
         if filter.extra {
             for (svc_name, dir) in paths.extra.clone() {
-                load_extra_logs(dir, svc_name, &mut output);
+                load_extra_logs(dir, svc_name, &mut output, filter.show_empty);
             }
         }
         output
@@ -320,7 +327,11 @@ pub fn oxide_smf_service_name_from_log_file_name(
 
 // Given a directory, find all oxide specific SMF service logs and return them
 // mapped to their inferred service name.
-fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
+fn load_svc_logs(
+    dir: Utf8PathBuf,
+    logs: &mut BTreeMap<ServiceName, SvcLogs>,
+    show_empty: bool,
+) {
     let Ok(entries) = dir.read_dir_utf8() else {
         return;
     };
@@ -344,15 +355,14 @@ fn load_svc_logs(dir: Utf8PathBuf, logs: &mut BTreeMap<ServiceName, SvcLogs>) {
             };
 
             logfile.read_metadata(&entry);
-            if logfile.size == Some(0) {
+            if logfile.size == Some(0) && !show_empty {
                 // skip 0 size files
                 continue;
             }
 
             let is_current = filename.ends_with(".log");
 
-            let svc_logs =
-                logs.entry(svc_name.to_string()).or_insert(SvcLogs::default());
+            let svc_logs = logs.entry(svc_name.to_string()).or_default();
 
             if is_current {
                 svc_logs.current = Some(logfile.clone());
@@ -369,13 +379,13 @@ fn load_extra_logs(
     dir: Utf8PathBuf,
     svc_name: &str,
     logs: &mut BTreeMap<ServiceName, SvcLogs>,
+    show_empty: bool,
 ) {
     let Ok(entries) = dir.read_dir_utf8() else {
         return;
     };
 
-    let svc_logs =
-        logs.entry(svc_name.to_string()).or_insert(SvcLogs::default());
+    let svc_logs = logs.entry(svc_name.to_string()).or_default();
 
     for entry in entries {
         let Ok(entry) = entry else {
@@ -386,7 +396,7 @@ fn load_extra_logs(
         path.push(filename);
         let mut logfile = LogFile::new(path);
         logfile.read_metadata(&entry);
-        if logfile.size == Some(0) {
+        if logfile.size == Some(0) && !show_empty {
             // skip 0 size files
             continue;
         }

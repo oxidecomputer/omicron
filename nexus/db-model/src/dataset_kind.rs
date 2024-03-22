@@ -11,7 +11,7 @@ impl_enum_type!(
     #[diesel(postgres_type(name = "dataset_kind", schema = "public"))]
     pub struct DatasetKindEnum;
 
-    #[derive(Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
+    #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
     #[diesel(sql_type = DatasetKindEnum)]
     pub enum DatasetKind;
 

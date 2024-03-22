@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`Zpool`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
@@ -16,6 +17,7 @@ use crate::db::identity::Asset;
 use crate::db::model::Sled;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -44,7 +46,6 @@ impl DataStore {
                 .set((
                     dsl::time_modified.eq(Utc::now()),
                     dsl::sled_id.eq(excluded(dsl::sled_id)),
-                    dsl::total_size.eq(excluded(dsl::total_size)),
                 )),
         )
         .insert_and_get_result_async(
@@ -66,8 +67,8 @@ impl DataStore {
         })
     }
 
-    /// Paginates through all zpools on U.2 disks in all sleds
-    pub async fn zpool_list_all_external(
+    /// Fetches a page of the list of all zpools on U.2 disks in all sleds
+    async fn zpool_list_all_external(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -89,5 +90,31 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all zpools on U.2 disks in all sleds, making as many queries as
+    /// needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn zpool_list_all_external_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<Zpool> {
+        opctx.authorize(authz::Action::ListChildren, &authz::FLEET).await?;
+        opctx.check_complex_operations_allowed()?;
+        let mut zpools = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch = self
+                .zpool_list_all_external(opctx, &p.current_pagparams())
+                .await?;
+            paginator =
+                p.found_batch(&batch, &|z: &nexus_db_model::Zpool| z.id());
+            zpools.extend(batch);
+        }
+
+        Ok(zpools)
     }
 }

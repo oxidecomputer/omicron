@@ -36,6 +36,8 @@ pub enum NetworkInterfaceKind {
     Instance { id: Uuid },
     /// A vNIC associated with an internal service
     Service { id: Uuid },
+    /// A vNIC associated with a probe
+    Probe { id: Uuid },
 }
 
 /// Information required to construct a virtual network interface
@@ -264,7 +266,9 @@ pub enum ExternalPortDiscovery {
 }
 
 /// Switchport Speed options
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PortSpeed {
     #[serde(alias = "0G")]
@@ -288,7 +292,9 @@ pub enum PortSpeed {
 }
 
 /// Switchport FEC options
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema, Hash,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum PortFec {
     Firecode,

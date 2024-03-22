@@ -13,6 +13,7 @@ use camino_tempfile::{Builder, Utf8TempDir, Utf8TempPath};
 use clap::Parser;
 use dropshot::test_util::LogContext;
 use http::{Method, StatusCode};
+use nexus_config::UpdatesConfig;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::{load_test_config, test_setup, test_setup_with_config};
 use omicron_common::api::external::{
@@ -20,7 +21,6 @@ use omicron_common::api::external::{
     TufRepoInsertStatus,
 };
 use omicron_common::api::internal::nexus::KnownArtifactKind;
-use omicron_common::nexus_config::UpdatesConfig;
 use omicron_sled_agent::sim;
 use pretty_assertions::assert_eq;
 use serde::Deserialize;

@@ -6,8 +6,9 @@
 
 use oximeter::types::MetricsError;
 use oximeter::types::ProducerRegistry;
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use slog::Logger;
+use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -19,6 +20,7 @@ cfg_if::cfg_if! {
         use oximeter_instruments::kstat::KstatSampler;
         use oximeter_instruments::kstat::TargetId;
         use std::collections::BTreeMap;
+        use std::sync::Mutex;
     } else {
         use anyhow::anyhow;
     }
@@ -46,6 +48,21 @@ pub enum Error {
 
     #[error("Failed to fetch hostname")]
     Hostname(#[source] std::io::Error),
+
+    #[error("Non-UTF8 hostname")]
+    NonUtf8Hostname,
+
+    #[error("Missing NULL byte in hostname")]
+    HostnameMissingNull,
+}
+
+// Basic metadata about the sled agent used when publishing metrics.
+#[derive(Clone, Debug)]
+#[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
+struct SledIdentifiers {
+    sled_id: Uuid,
+    rack_id: Uuid,
+    baseboard: Baseboard,
 }
 
 /// Type managing all oximeter metrics produced by the sled-agent.
@@ -61,10 +78,7 @@ pub enum Error {
 // the name of fields that are not yet used.
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 pub struct MetricsManager {
-    sled_id: Uuid,
-    rack_id: Uuid,
-    baseboard: Baseboard,
-    hostname: Option<String>,
+    metadata: Arc<SledIdentifiers>,
     _log: Logger,
     #[cfg(target_os = "illumos")]
     kstat_sampler: KstatSampler,
@@ -78,7 +92,7 @@ pub struct MetricsManager {
     // namespace them internally, e.g., `"datalink:{link_name}"` would be the
     // real key.
     #[cfg(target_os = "illumos")]
-    tracked_links: BTreeMap<String, TargetId>,
+    tracked_links: Arc<Mutex<BTreeMap<String, TargetId>>>,
     registry: ProducerRegistry,
 }
 
@@ -101,14 +115,11 @@ impl MetricsManager {
                 registry
                     .register_producer(kstat_sampler.clone())
                     .map_err(Error::Registry)?;
-                let tracked_links = BTreeMap::new();
+                let tracked_links = Arc::new(Mutex::new(BTreeMap::new()));
             }
         }
         Ok(Self {
-            sled_id,
-            rack_id,
-            baseboard,
-            hostname: None,
+            metadata: Arc::new(SledIdentifiers { sled_id, rack_id, baseboard }),
             _log: log,
             #[cfg(target_os = "illumos")]
             kstat_sampler,
@@ -128,14 +139,14 @@ impl MetricsManager {
 impl MetricsManager {
     /// Track metrics for a physical datalink.
     pub async fn track_physical_link(
-        &mut self,
+        &self,
         link_name: impl AsRef<str>,
         interval: Duration,
     ) -> Result<(), Error> {
-        let hostname = self.hostname().await?;
+        let hostname = hostname()?;
         let link = link::PhysicalDataLink {
-            rack_id: self.rack_id,
-            sled_id: self.sled_id,
+            rack_id: self.metadata.rack_id,
+            sled_id: self.metadata.sled_id,
             serial: self.serial_number(),
             hostname,
             link_name: link_name.as_ref().to_string(),
@@ -146,7 +157,10 @@ impl MetricsManager {
             .add_target(link, details)
             .await
             .map_err(Error::Kstat)?;
-        self.tracked_links.insert(link_name.as_ref().to_string(), id);
+        self.tracked_links
+            .lock()
+            .unwrap()
+            .insert(link_name.as_ref().to_string(), id);
         Ok(())
     }
 
@@ -155,10 +169,12 @@ impl MetricsManager {
     /// This works for both physical and virtual links.
     #[allow(dead_code)]
     pub async fn stop_tracking_link(
-        &mut self,
+        &self,
         link_name: impl AsRef<str>,
     ) -> Result<(), Error> {
-        if let Some(id) = self.tracked_links.remove(link_name.as_ref()) {
+        let maybe_id =
+            self.tracked_links.lock().unwrap().remove(link_name.as_ref());
+        if let Some(id) = maybe_id {
             self.kstat_sampler.remove_target(id).await.map_err(Error::Kstat)
         } else {
             Ok(())
@@ -174,8 +190,8 @@ impl MetricsManager {
         interval: Duration,
     ) -> Result<(), Error> {
         let link = link::VirtualDataLink {
-            rack_id: self.rack_id,
-            sled_id: self.sled_id,
+            rack_id: self.metadata.rack_id,
+            sled_id: self.metadata.sled_id,
             serial: self.serial_number(),
             hostname: hostname.as_ref().to_string(),
             link_name: link_name.as_ref().to_string(),
@@ -190,32 +206,11 @@ impl MetricsManager {
 
     // Return the serial number out of the baseboard, if one exists.
     fn serial_number(&self) -> String {
-        match &self.baseboard {
+        match &self.metadata.baseboard {
             Baseboard::Gimlet { identifier, .. } => identifier.clone(),
             Baseboard::Unknown => String::from("unknown"),
             Baseboard::Pc { identifier, .. } => identifier.clone(),
         }
-    }
-
-    // Return the system's hostname.
-    //
-    // If we've failed to get it previously, we try again. If _that_ fails,
-    // return an error.
-    //
-    // TODO-cleanup: This will become much simpler once
-    // `OnceCell::get_or_try_init` is stabilized.
-    async fn hostname(&mut self) -> Result<String, Error> {
-        if let Some(hn) = &self.hostname {
-            return Ok(hn.clone());
-        }
-        let hn = tokio::process::Command::new("hostname")
-            .env_clear()
-            .output()
-            .await
-            .map(|out| String::from_utf8_lossy(&out.stdout).trim().to_string())
-            .map_err(Error::Hostname)?;
-        self.hostname.replace(hn.clone());
-        Ok(hn)
     }
 }
 
@@ -223,7 +218,7 @@ impl MetricsManager {
 impl MetricsManager {
     /// Track metrics for a physical datalink.
     pub async fn track_physical_link(
-        &mut self,
+        &self,
         _link_name: impl AsRef<str>,
         _interval: Duration,
     ) -> Result<(), Error> {
@@ -237,7 +232,7 @@ impl MetricsManager {
     /// This works for both physical and virtual links.
     #[allow(dead_code)]
     pub async fn stop_tracking_link(
-        &mut self,
+        &self,
         _link_name: impl AsRef<str>,
     ) -> Result<(), Error> {
         Err(Error::Kstat(anyhow!(
@@ -256,5 +251,30 @@ impl MetricsManager {
         Err(Error::Kstat(anyhow!(
             "kstat metrics are not supported on this platform"
         )))
+    }
+}
+
+// Return the current hostname if possible.
+#[cfg(target_os = "illumos")]
+fn hostname() -> Result<String, Error> {
+    // See netdb.h
+    const MAX_LEN: usize = 256;
+    let mut out = vec![0u8; MAX_LEN + 1];
+    if unsafe {
+        libc::gethostname(out.as_mut_ptr() as *mut libc::c_char, MAX_LEN)
+    } == 0
+    {
+        // Split into subslices by NULL bytes.
+        //
+        // We should have a NULL byte, since we've asked for no more than 255
+        // bytes in a 256 byte buffer, but you never know.
+        let Some(chunk) = out.split(|x| *x == 0).next() else {
+            return Err(Error::HostnameMissingNull);
+        };
+        let s = std::ffi::CString::new(chunk)
+            .map_err(|_| Error::NonUtf8Hostname)?;
+        s.into_string().map_err(|_| Error::NonUtf8Hostname)
+    } else {
+        Err(std::io::Error::last_os_error()).map_err(|_| Error::NonUtf8Hostname)
     }
 }
