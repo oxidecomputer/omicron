@@ -709,7 +709,7 @@ mod tests {
     }
 
     #[test]
-    fn test_alignment_does_not_modify_missing_values() {
+    fn test_mean_delta_does_not_modify_missing_values() {
         let now = Utc::now();
         let start_times =
             &[now - Duration::from_secs(2), now - Duration::from_secs(1)];
@@ -719,6 +719,26 @@ mod tests {
         let window_end = now;
         let mean = mean_delta_value_in_window(
             start_times,
+            timestamps,
+            input_points,
+            window_start,
+            window_end,
+        );
+        assert!(
+            mean.is_none(),
+            "This time window contains only a None value, which should not be \
+            included in the sum"
+        );
+    }
+
+    #[test]
+    fn test_mean_gauge_does_not_modify_missing_values() {
+        let now = Utc::now();
+        let timestamps = &[now - Duration::from_secs(1), now];
+        let input_points = &[Some(1.0), None];
+        let window_start = now - Duration::from_secs(1);
+        let window_end = now;
+        let mean = mean_gauge_value_in_window(
             timestamps,
             input_points,
             window_start,
