@@ -43,3 +43,6 @@ seed-gen = ["dep:filetime"]
 
 [[bin]]
 name = "falcon_runner"
+
+[[bin]]
+name = "falcon_runner_cli"

@@ -20,6 +20,10 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut d = Runner::new(&runner_name);
     let vm = d.node(&node_name, "helios-2.0", 2, gb(8));
 
+    let falcon_dir = tempdir()?;
+    eprintln!("Setting falcon directory to {}", falcon_dir.path());
+    d.falcon_dir = falcon_dir.path().into();
+
     let cargo_bay = tempdir()?;
     eprintln!("Set cargo-bay to {} on host machine", cargo_bay.path());
     let source_test_path = &args[1];
@@ -50,15 +54,28 @@ async fn main() -> Result<(), anyhow::Error> {
     );
     let out = d.exec(vm, &run_test).await?;
 
-    // The last byte is always the exit code as we echo it at the end of our command
-    let exit_code = out.bytes().last().unwrap() as char;
+    // The last line of our output contains the exit code
+    let exit_code_index = out.rfind("\n").unwrap();
+    let exit_code: u8 = (&out[exit_code_index + 1..]).parse().unwrap_or(255);
 
-    eprintln!("{}", &out[..out.len() - 1]);
+    eprintln!("{}", &out[..=exit_code_index]);
 
-    if exit_code == '0' {
+    if exit_code == 0u8 {
+        // We destroy here so that our tempdir doesn't get dropped first and
+        // give us an error.
+        let _ = d.destroy();
         Ok(())
     } else {
-        //d.persistent = true;
+        // Leave the VM running
+        d.persistent = true;
+
+        // Don't remove the falcon directory
+        eprintln!(
+            "Test failed: VM remains running, with falcon dir: {}",
+            falcon_dir.path()
+        );
+        std::mem::forget(falcon_dir);
+
         Err(anyhow!("Test failed: exit code = {exit_code}"))
     }
 }
