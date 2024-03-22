@@ -326,11 +326,12 @@ fn restrict_filter_idents(
                 None
             }
         }
-        Filter::Expr(FilterExpr { left, op, right }) => {
+        Filter::Expr(FilterExpr { negated, left, op, right }) => {
             let maybe_left = restrict_filter_idents(left, identifiers);
             let maybe_right = restrict_filter_idents(right, identifiers);
             match (maybe_left, maybe_right) {
                 (Some(left), Some(right)) => Some(Filter::Expr(FilterExpr {
+                    negated: *negated,
                     left: Box::new(left),
                     op: *op,
                     right: Box::new(right),
@@ -413,6 +414,7 @@ mod tests {
             expr: Literal::Boolean(false),
         });
         let filter = Filter::Expr(FilterExpr {
+            negated: false,
             left: Box::new(left.clone()),
             op: LogicalOp::And,
             right: Box::new(right.clone()),
@@ -521,6 +523,7 @@ mod tests {
             expr: Literal::Integer(0),
         });
         let preds = Filter::Expr(FilterExpr {
+            negated: false,
             left: Box::new(atom.clone()),
             op: LogicalOp::And,
             right: Box::new(atom.clone()),
@@ -540,6 +543,7 @@ mod tests {
             expr: Literal::Integer(0),
         });
         let preds = Filter::Expr(FilterExpr {
+            negated: false,
             left: Box::new(atom.clone()),
             op: LogicalOp::And,
             right: Box::new(atom.clone()),

@@ -51,7 +51,7 @@ peg::parser! {
 
         // Parse duration literals.
         rule year() -> Duration
-            = "y" { duration_consts::YEAR }
+            = "Y" { duration_consts::YEAR }
         rule month() -> Duration
             = "M" { duration_consts::MONTH }
         rule week() -> Duration
@@ -328,16 +328,17 @@ peg::parser! {
         }
 
         pub(super) rule logical_op_impl() -> LogicalOp
-            = "||" { LogicalOp::Or} / "&&" { LogicalOp::And }
+            = "||" { LogicalOp::Or}
+            / "&&" { LogicalOp::And }
+            / "^" { LogicalOp::Xor }
 
-        // Parse a filter item, which is one logical expression used in a filter
-        // operation.
-        #[cache_left_rec]
-        pub(super) rule filter_item() -> Filter = precedence! {
+        // A filter expression, built out of multiple other filter expressions.
+        pub(super) rule unnegated_filter_expr() -> Filter = precedence! {
             // Note: We need to separate the logical operations into different
             // levels of precedence.
             left:(@) _? "||" _? right:@ {
                 Filter::Expr(FilterExpr {
+                    negated: false,
                     left: Box::new(left),
                     op: LogicalOp::Or,
                     right: Box::new(right),
@@ -346,14 +347,42 @@ peg::parser! {
             --
             left:(@) _? "&&" _? right:@ {
                 Filter::Expr(FilterExpr {
+                    negated: false,
                     left: Box::new(left),
                     op: LogicalOp::And,
                     right: Box::new(right),
                 })
             }
             --
+            left:(@) _? "^" _? right:@ {
+                Filter::Expr(FilterExpr {
+                    negated: false,
+                    left: Box::new(left),
+                    op: LogicalOp::Xor,
+                    right: Box::new(right),
+                })
+            }
+            --
             a:filter_atom() { Filter::Atom(a) }
+            --
             "(" e:filter_item() ")" { e }
+        }
+
+        // A negated form of a filter expression
+        pub(super) rule negated_filter_expr() -> Filter
+            = "!(" _? e:unnegated_filter_expr() _? ")"
+        {
+            match e {
+                Filter::Atom(atom) => Filter::Atom(FilterAtom { negated: true, ..atom }),
+                Filter::Expr(expr) => Filter::Expr(FilterExpr { negated: true, ..expr }),
+            }
+        }
+
+        // Any filter expression, negated or otherwise.
+        pub(super) rule filter_expr() -> Filter
+            = e:(negated_filter_expr() / unnegated_filter_expr())
+        {
+            e
         }
 
         rule filter_atom() -> FilterAtom
@@ -381,6 +410,16 @@ peg::parser! {
                 Ok(FilterAtom { negated: true, ident, cmp, expr })
             }
         }
+
+        // Parse a filter item, which is the "data" for a `filter` table
+        // operation.
+        //
+        // E.g., for a table operation like `filter (x == 0) && (y > 'yes')`,
+        // this parses out `(x == 0) && (y > 'yes')`
+        #[cache_left_rec]
+        pub(super) rule filter_item() -> Filter
+            = expr:filter_expr() { expr }
+            / atom:filter_atom() { Filter::Atom(atom) }
 
         /// Parse a "filter" table operation.
         pub rule filter() -> Filter
@@ -594,7 +633,7 @@ mod tests {
     #[test]
     fn test_duration_literal() {
         for (as_str, dur) in [
-            ("7y", Duration::from_secs(60 * 60 * 24 * 365 * 7)),
+            ("7Y", Duration::from_secs(60 * 60 * 24 * 365 * 7)),
             ("7M", Duration::from_secs(60 * 60 * 24 * 30 * 7)),
             ("7w", Duration::from_secs(60 * 60 * 24 * 7 * 7)),
             ("7d", Duration::from_secs(60 * 60 * 24 * 7)),
@@ -828,6 +867,7 @@ mod tests {
 
         for op in [LogicalOp::And, LogicalOp::Or] {
             let expected = Filter::Expr(FilterExpr {
+                negated: false,
                 left: Box::new(left.clone()),
                 op,
                 right: Box::new(right.clone()),
@@ -848,21 +888,43 @@ mod tests {
             cmp: Comparison::Eq,
             expr: Literal::Boolean(true),
         });
-        let as_str = "a == true || a == true && a == true";
+        let as_str = "a == true || a == true && a == true ^ a == true";
         let parsed = query_parser::filter_item(as_str).unwrap();
 
-        // && should bind more tightly
-        let Filter::Expr(FilterExpr { left, op, right }) = parsed else {
+        assert_eq!(
+            parsed.to_string(),
+            "((a == true) || ((a == true) && ((a == true) ^ (a == true))))"
+        );
+
+        // This should bind most tighty from right to left: XOR, then AND, then
+        // OR. Since we're destructuring from out to in, though, we check in the
+        // opposite order, weakest to strongest, or left to right.
+        //
+        // Start with OR, which should bind the most weakly.
+        let Filter::Expr(FilterExpr { negated, left, op, right }) = parsed
+        else {
             unreachable!();
         };
+        assert!(!negated);
         assert_eq!(op, LogicalOp::Or);
         assert_eq!(atom, *left);
 
-        // Destructure the RHS, and check it.
-        let Filter::Expr(FilterExpr { left, op, right }) = *right else {
+        // && should bind next-most tightly
+        let Filter::Expr(FilterExpr { negated, left, op, right }) = *right
+        else {
             unreachable!();
         };
+        assert!(!negated);
         assert_eq!(op, LogicalOp::And);
+        assert_eq!(atom, *left);
+
+        // Followed by XOR, the tightest binding operator.
+        let Filter::Expr(FilterExpr { negated, left, op, right }) = *right
+        else {
+            unreachable!();
+        };
+        assert!(!negated);
+        assert_eq!(op, LogicalOp::Xor);
         assert_eq!(atom, *left);
         assert_eq!(atom, *right);
     }
@@ -880,19 +942,43 @@ mod tests {
 
         // Now, || should bind more tightly, so we should have (a && b) at the
         // top-level, where b is the test atom.
-        let Filter::Expr(FilterExpr { left, op, right }) = parsed else {
+        let Filter::Expr(FilterExpr { negated, left, op, right }) = parsed
+        else {
             unreachable!();
         };
+        assert!(!negated);
         assert_eq!(op, LogicalOp::And);
         assert_eq!(atom, *right);
 
         // Destructure the LHS and check it.
-        let Filter::Expr(FilterExpr { left, op, right }) = *left else {
+        let Filter::Expr(FilterExpr { negated, left, op, right }) = *left
+        else {
             unreachable!();
         };
+        assert!(!negated);
         assert_eq!(op, LogicalOp::Or);
         assert_eq!(atom, *left);
         assert_eq!(atom, *right);
+    }
+
+    #[test]
+    fn test_negated_filter_expr() {
+        let left = FilterAtom {
+            negated: false,
+            ident: Ident("a".into()),
+            cmp: Comparison::Eq,
+            expr: Literal::Boolean(true),
+        };
+        let right = FilterAtom { negated: true, ..left.clone() };
+        let expr = Filter::Expr(FilterExpr {
+            negated: true,
+            left: Box::new(Filter::Atom(left)),
+            op: LogicalOp::Xor,
+            right: Box::new(Filter::Atom(right)),
+        });
+        let as_str = "!(a == true ^ !(a == true))";
+        let parsed = query_parser::filter_item(as_str).unwrap();
+        assert_eq!(expr, parsed);
     }
 
     #[test]
