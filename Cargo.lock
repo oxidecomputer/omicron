@@ -10973,6 +10973,10 @@ dependencies = [
  "cargo_metadata",
  "cargo_toml",
  "clap 4.5.1",
+ "fs-err",
+ "serde",
+ "swrite",
+ "toml 0.8.10",
 ]
 
 [[package]]
