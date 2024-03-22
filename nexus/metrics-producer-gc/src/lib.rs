@@ -54,18 +54,18 @@ pub async fn prune_expired_producers(
     opctx: &OpContext,
     datastore: &DataStore,
     expiration: DateTime<Utc>,
-    log: &Logger,
 ) -> Result<PrunedProducers, Error> {
     // Get the list of expired producers we need to prune.
     let expired_producers =
-        ExpiredProducers::new(opctx, datastore, expiration, log).await?;
+        ExpiredProducers::new(opctx, datastore, expiration).await?;
 
     // Build a FuturesUnordered to prune each expired producer.
     let mut all_prunes = expired_producers
         .producer_client_pairs()
         .map(|(producer, client)| async {
             let result =
-                unregister_producer(datastore, producer, client, log).await;
+                unregister_producer(datastore, producer, client, &opctx.log)
+                    .await;
             (producer.id(), result)
         })
         .collect::<FuturesUnordered<_>>();
@@ -130,7 +130,6 @@ impl ExpiredProducers {
         opctx: &OpContext,
         datastore: &DataStore,
         expiration: DateTime<Utc>,
-        log: &Logger,
     ) -> Result<Self, Error> {
         let producers = datastore
             .producers_list_expired_batched(opctx, expiration)
@@ -151,7 +150,7 @@ impl ExpiredProducers {
                 err,
             })?;
             let client_log =
-                log.new(o!("oximeter-collector" => info.id.to_string()));
+                opctx.log.new(o!("oximeter-collector" => info.id.to_string()));
             let address = SocketAddr::new(info.ip.ip(), *info.port);
             let client =
                 OximeterClient::new(&format!("http://{address}"), client_log);
@@ -215,7 +214,6 @@ mod tests {
     async fn test_prune_expired_producers() {
         // Setup
         let logctx = dev::test_setup_log("test_prune_expired_producers");
-        let log = &logctx.log;
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
             datastore_test(&logctx, &db, Uuid::new_v4()).await;
@@ -232,10 +230,9 @@ mod tests {
 
         // GC'ing expired producers should succeed if there are no producers at
         // all.
-        let pruned =
-            prune_expired_producers(&opctx, &datastore, Utc::now(), log)
-                .await
-                .expect("failed to prune expired producers");
+        let pruned = prune_expired_producers(&opctx, &datastore, Utc::now())
+            .await
+            .expect("failed to prune expired producers");
         assert!(pruned.successes.is_empty());
         assert!(pruned.failures.is_empty());
 
@@ -264,7 +261,6 @@ mod tests {
             &opctx,
             &datastore,
             producer_time_modified - Duration::from_secs(1),
-            log,
         )
         .await
         .expect("failed to prune expired producers");
@@ -277,7 +273,6 @@ mod tests {
             &opctx,
             &datastore,
             producer_time_modified + Duration::from_secs(1),
-            log,
         )
         .await
         .expect("failed to prune expired producers");
@@ -292,7 +287,6 @@ mod tests {
             &opctx,
             &datastore,
             producer_time_modified + Duration::from_secs(1),
-            log,
         )
         .await
         .expect("failed to prune expired producers");
@@ -309,7 +303,6 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_prune_expired_producers_notifies_collector",
         );
-        let log = &logctx.log;
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
             datastore_test(&logctx, &db, Uuid::new_v4()).await;
@@ -360,7 +353,6 @@ mod tests {
             &opctx,
             &datastore,
             producer_time_modified + Duration::from_secs(1),
-            log,
         )
         .await
         .expect("failed to prune expired producers");

@@ -5249,6 +5249,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-defaults",
  "nexus-inventory",
+ "nexus-metrics-producer-gc",
  "nexus-networking",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",

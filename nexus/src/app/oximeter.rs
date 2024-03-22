@@ -28,6 +28,12 @@ use std::num::NonZeroU32;
 use std::time::Duration;
 use uuid::Uuid;
 
+/// How long a metrics producer remains registered to a collector.
+///
+/// Producers are expected to renew their registration lease periodically, at
+/// some interval of this overall duration.
+pub const PRODUCER_LEASE_DURATION: Duration = Duration::from_secs(10 * 60);
+
 /// A client which knows how to connect to Clickhouse, but does so
 /// only when a request is actually made.
 ///
