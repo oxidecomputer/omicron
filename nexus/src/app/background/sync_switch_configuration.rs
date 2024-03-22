@@ -900,6 +900,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 let rnc_differs = match (config.body.rack_network_config.clone(), desired_config.body.rack_network_config.clone()) {
                                     (Some(current_rnc), Some(desired_rnc)) => {
                                         !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
+                                        !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
                                         !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
                                         current_rnc.rack_subnet != desired_rnc.rack_subnet ||
                                         current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||
