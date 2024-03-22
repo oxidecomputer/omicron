@@ -5711,6 +5711,7 @@ dependencies = [
  "dropshot",
  "expectorate",
  "filetime",
+ "gethostname",
  "headers",
  "hex",
  "http 0.2.12",

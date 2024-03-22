@@ -37,6 +37,7 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+gethostname.workspace = true
 
 [features]
 seed-gen = ["dep:filetime"]

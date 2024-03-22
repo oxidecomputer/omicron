@@ -2,12 +2,20 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Mechanisms to launch and control propolis VMs via falcon
+//! Example test to run in a VM.
 
 #[cfg(test)]
 mod test {
+    use anyhow::anyhow;
+    use gethostname::gethostname;
+
     #[tokio::test]
-    async fn launch() {
-        eprintln!("hello falcon runner: I am inside the VM");
+    async fn launch() -> Result<(), anyhow::Error> {
+        if gethostname() == "launchpad_mcduck_test_vm" {
+            eprintln!("hello falcon runner: I am inside the VM");
+            Ok(())
+        } else {
+            Err(anyhow!("Test failed: Not running in a VM"))
+        }
     }
 }
