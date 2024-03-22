@@ -191,7 +191,7 @@ async fn test_nexus_boots_with_valid_schema() {
 
 #[tokio::test]
 async fn test_nexus_does_not_boot_without_valid_schema() {
-    let s = nexus_db_model::schema::SCHEMA_VERSION;
+    let s = nexus_db_model::SCHEMA_VERSION;
 
     let schemas_to_test = vec![
         semver::Version::new(s.0.major + 1, s.0.minor, s.0.patch),
@@ -240,7 +240,7 @@ async fn test_nexus_does_not_boot_without_valid_schema() {
 
 #[tokio::test]
 async fn test_nexus_does_not_boot_until_schema_updated() {
-    let good_schema = nexus_db_model::schema::SCHEMA_VERSION;
+    let good_schema = nexus_db_model::SCHEMA_VERSION;
     let bad_schema = semver::Version::new(
         good_schema.0.major + 1,
         good_schema.0.minor,

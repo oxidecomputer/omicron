@@ -16,10 +16,10 @@ use internal_dns::resolver::{ResolveError, Resolver as DnsResolver};
 use internal_dns::ServiceName;
 use ipnetwork::Ipv6Network;
 use mg_admin_client::types::{
-    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, StaticRoute4,
+    AddStaticRoute4Request, ApplyRequest, BgpPeerConfig, Prefix4, StaticRoute4,
     StaticRoute4List,
 };
-use mg_admin_client::{Client as MgdClient, Prefix4};
+use mg_admin_client::Client as MgdClient;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::{MGD_PORT, MGS_PORT};
 use omicron_common::api::internal::shared::{

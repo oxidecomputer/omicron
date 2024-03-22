@@ -198,7 +198,9 @@ pfexec route add 198.51.100.0/24 $customer_edge_addr
 # given sled.
 cp /input/a4x2/out/commtest .
 chmod +x commtest
-NO_COLOR=1 pfexec ./commtest http://198.51.100.23 run \
+NO_COLOR=1 pfexec ./commtest \
+    --api-timeout 30m \
+    http://198.51.100.23 run \
     --ip-pool-begin 198.51.100.40 \
     --ip-pool-end 198.51.100.70 \
     --icmp-loss-tolerance 500 \
