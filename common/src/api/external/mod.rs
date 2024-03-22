@@ -2821,6 +2821,25 @@ pub struct BgpImportedRouteIpv4 {
     pub switch: SwitchLocation,
 }
 
+/// BFD connection mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
+}
+
 /// A description of an uploaded TUF repository.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 pub struct TufRepoDescription {

@@ -660,6 +660,25 @@ impl ServiceInner {
                         originate: config.originate.clone(),
                     })
                     .collect(),
+                bfd: config
+                    .bfd
+                    .iter()
+                    .map(|spec| NexusTypes::BfdPeerConfig {
+                        detection_threshold: spec.detection_threshold,
+                        local: spec.local,
+                        mode: match spec.mode {
+                            omicron_common::api::external::BfdMode::SingleHop => {
+                                nexus_client::types::BfdMode::SingleHop
+                            }
+                            omicron_common::api::external::BfdMode::MultiHop => {
+                                nexus_client::types::BfdMode::MultiHop
+                            }
+                        },
+                        remote: spec.remote,
+                        required_rx: spec.required_rx,
+                        switch: spec.switch.into(),
+                    })
+                    .collect(),
             }
         };
 
