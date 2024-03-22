@@ -142,6 +142,10 @@ impl Client {
         result
     }
 
+    // TODO(ben): This is just wrong. We can only split queries into the parts
+    // applied to the fields and those on the timestamps in a few limited cases,
+    // when all the fields are logically conjoined. Disjunction, and probably
+    // many other cases, are NOT correct when implemented this way.
     fn rewrite_predicate_for_fields(
         schema: &TimeseriesSchema,
         preds: &filter::Filter,
@@ -565,9 +569,15 @@ impl Client {
             query.push(')');
         }
 
-        // Always order by timestamp. This is critical, and the basis for many
-        // of the operations downstream, which assume ordered timestamps.
-        query.push_str(" ORDER BY timestamp ");
+        // Always impose a strong order on these fields. The most important one
+        // is ordering by timestamp, since many downstream operations assume
+        // that (and assert it!). Also order by the prefix that is the
+        // sort-order of the table to make things the most efficient.
+        query.push_str(" ORDER BY timeseries_key");
+        if schema.datum_type.is_cumulative() {
+            query.push_str(", start_time");
+        }
+        query.push_str(", timestamp");
 
         // Push a limit clause, which restricts the number of records we could
         // return.
@@ -597,9 +607,9 @@ impl Client {
         datum_type: oximeter::DatumType,
     ) -> String {
         let value_columns = if datum_type.is_histogram() {
-            "timeseries_key, timestamp, start_time, bins, counts"
+            "timeseries_key, start_time, timestamp, bins, counts"
         } else if datum_type.is_cumulative() {
-            "timeseries_key, timestamp, start_time, datum"
+            "timeseries_key, start_time, timestamp, datum"
         } else {
             "timeseries_key, timestamp, datum"
         };
@@ -761,4 +771,376 @@ fn update_total_rows_and_check(
         "limit" => MAX_DATABASE_ROWS,
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{DateTime, Utc};
+    use dropshot::test_util::LogContext;
+    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::test_setup_log;
+    use oximeter::Sample;
+    use oximeter::{types::Cumulative, FieldValue};
+    use std::collections::BTreeMap;
+    use std::time::Duration;
+
+    use crate::{
+        oxql::{point::Points, Table, Timeseries},
+        Client, DbWrite,
+    };
+
+    #[derive(
+        Clone, Debug, Eq, PartialEq, PartialOrd, Ord, oximeter::Target,
+    )]
+    struct SomeTarget {
+        name: String,
+        index: u32,
+    }
+
+    #[derive(Clone, Debug, oximeter::Metric)]
+    struct SomeMetric {
+        foo: i32,
+        datum: Cumulative<u64>,
+    }
+
+    #[derive(Clone, Debug)]
+    #[allow(dead_code)]
+    struct TestData {
+        targets: Vec<SomeTarget>,
+        // Note that we really want all the samples per metric _field_, not the
+        // full metric. That would give us a 1-element sample array for each.
+        samples_by_timeseries: BTreeMap<(SomeTarget, i32), Vec<Sample>>,
+        first_timestamp: DateTime<Utc>,
+    }
+
+    struct TestContext {
+        logctx: LogContext,
+        clickhouse: ClickHouseInstance,
+        client: Client,
+        test_data: TestData,
+    }
+
+    impl TestContext {
+        async fn cleanup_successful(mut self) {
+            self.clickhouse
+                .cleanup()
+                .await
+                .expect("Failed to cleanup ClickHouse server");
+            self.logctx.cleanup_successful();
+        }
+    }
+
+    const N_SAMPLES_PER_TIMESERIES: usize = 16;
+    const SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
+    const SHIFT: Duration = Duration::from_secs(1);
+
+    fn format_timestamp(t: DateTime<Utc>) -> String {
+        format!("{}", t.format("%Y-%m-%dT%H:%M:%S.%f"))
+    }
+
+    fn generate_test_samples() -> TestData {
+        // We'll test with 4 different targets, each with two values for its
+        // fields.
+        let mut targets = Vec::with_capacity(4);
+        let names = &["first-target", "second-target"];
+        let indices = 1..3;
+        for (name, index) in itertools::iproduct!(names, indices) {
+            let target = SomeTarget { name: name.to_string(), index };
+            targets.push(target);
+        }
+
+        // Create a start time for all samples.
+        //
+        // IMPORTANT: There is a TTL of 30 days on all data currently. I would
+        // love this to be a fixed, well-known start time, to make tests easier,
+        // but that's in conflict with the TTL. Instead, we'll use midnight on
+        // the current day, and then store it in the test data context.
+        let first_timestamp =
+            Utc::now().date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+
+        // For simplicity, we'll also assume all the cumulative measurements
+        // start at the first timestamp as well.
+        let datum = Cumulative::with_start_time(first_timestamp, 0);
+
+        // We'll create two separate metrics, with 16 samples each.
+        let foos = [-1, 1];
+        let mut samples_by_timeseries = BTreeMap::new();
+        let mut timeseries_index = 0;
+        for target in targets.iter() {
+            for foo in foos.iter() {
+                // Shift this timeseries relative to the others, to ensure we
+                // have some different timestamps.
+                let timeseries_start =
+                    first_timestamp + timeseries_index * SHIFT;
+
+                // Create the first metric, starting from a count of 0.
+                let mut metric = SomeMetric { foo: *foo, datum };
+
+                // Create all the samples,, incrementing the datum and sample
+                // time.
+                for i in 0..N_SAMPLES_PER_TIMESERIES {
+                    let sample_time =
+                        timeseries_start + SAMPLE_INTERVAL * i as u32;
+                    let sample = Sample::new_with_timestamp(
+                        sample_time,
+                        target,
+                        &metric,
+                    )
+                    .unwrap();
+                    samples_by_timeseries
+                        .entry((target.clone(), *foo))
+                        .or_insert_with(|| {
+                            Vec::with_capacity(N_SAMPLES_PER_TIMESERIES)
+                        })
+                        .push(sample);
+                    metric.datum += 1;
+                }
+                timeseries_index += 1;
+            }
+        }
+        TestData { targets, samples_by_timeseries, first_timestamp }
+    }
+
+    async fn setup_oxql_test(name: &str) -> TestContext {
+        let logctx = test_setup_log(name);
+        let db = ClickHouseInstance::new_single_node(&logctx, 0)
+            .await
+            .expect("Failed to start ClickHouse");
+        let client = Client::new(db.address, &logctx.log);
+        client
+            .init_single_node_db()
+            .await
+            .expect("Failed to init single-node oximeter database");
+        let test_data = generate_test_samples();
+        let samples: Vec<_> = test_data
+            .samples_by_timeseries
+            .values()
+            .flatten()
+            .cloned()
+            .collect();
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Failed to insert test data");
+        TestContext { logctx, clickhouse: db, client, test_data }
+    }
+
+    #[tokio::test]
+    async fn test_get_entire_table() {
+        let ctx = setup_oxql_test("test_get_entire_table").await;
+        let query = "get some_target:some_metric";
+        let result = ctx
+            .client
+            .oxql_query(query)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
+        let table = result.tables.get(0).unwrap();
+        assert_eq!(
+            table.n_timeseries(),
+            ctx.test_data.samples_by_timeseries.len(),
+            "Should have fetched every timeseries"
+        );
+        assert!(
+            table.iter().all(|t| t.points.len() == N_SAMPLES_PER_TIMESERIES),
+            "Should have fetched all points for all timeseries"
+        );
+
+        // Let's build the expected point array, from each timeseries we
+        // inserted.
+        let mut matched_timeseries = 0;
+        for ((target, foo), samples) in
+            ctx.test_data.samples_by_timeseries.iter()
+        {
+            let measurements: Vec<_> =
+                samples.iter().map(|s| s.measurement.clone()).collect();
+            let expected_points = Points::delta_from_cumulative(&measurements)
+                .expect(
+                "failed to create expected points from inserted measurements",
+            );
+            let expected_timeseries =
+                find_timeseries_in_table(&table, target, foo)
+                    .expect("Table did not contain an expected timeseries");
+            assert_eq!(
+                expected_timeseries.points, expected_points,
+                "Did not reconstruct the correct points for this timeseries"
+            );
+            matched_timeseries += 1;
+        }
+        assert_eq!(matched_timeseries, table.len());
+        assert_eq!(
+            matched_timeseries,
+            ctx.test_data.samples_by_timeseries.len()
+        );
+
+        ctx.cleanup_successful().await;
+    }
+
+    #[tokio::test]
+    async fn test_get_one_timeseries() {
+        let ctx = setup_oxql_test("test_get_one_timeseries").await;
+
+        // Specify exactly one timeseries we _want_ to fetch, by picking the
+        // first timeseries we inserted.
+        let ((expected_target, expected_foo), expected_samples) =
+            ctx.test_data.samples_by_timeseries.first_key_value().unwrap();
+        let query = format!(
+            "get some_target:some_metric | filter {}",
+            exact_filter_for(expected_target, *expected_foo)
+        );
+        let result = ctx
+            .client
+            .oxql_query(&query)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
+        let table = result.tables.get(0).unwrap();
+        assert_eq!(
+            table.n_timeseries(),
+            1,
+            "Should have fetched exactly the target timeseries"
+        );
+        assert!(
+            table.iter().all(|t| t.points.len() == N_SAMPLES_PER_TIMESERIES),
+            "Should have fetched all points for all timeseries"
+        );
+
+        let expected_timeseries =
+            find_timeseries_in_table(&table, expected_target, expected_foo)
+                .expect("Table did not contain expected timeseries");
+        let measurements: Vec<_> =
+            expected_samples.iter().map(|s| s.measurement.clone()).collect();
+        let expected_points = Points::delta_from_cumulative(&measurements)
+            .expect("failed to build expected points from measurements");
+        assert_eq!(
+            expected_points, expected_timeseries.points,
+            "Did not reconstruct the correct points for the one \
+            timeseries the query fetched"
+        );
+
+        ctx.cleanup_successful().await;
+    }
+
+    // In this test, we'll fetch the entire history of one timeseries, and only
+    // the last few samples of another.
+    //
+    // This checks that we correctly do complex logical operations that require
+    // fetching different sets of fields at different times.
+    #[tokio::test]
+    async fn test_get_entire_timeseries_and_part_of_another() {
+        let ctx =
+            setup_oxql_test("test_get_entire_timeseries_and_part_of_another")
+                .await;
+
+        let mut it = ctx.test_data.samples_by_timeseries.iter();
+        let (entire, only_part) = (it.next().unwrap(), it.next().unwrap());
+
+        let entire_filter = exact_filter_for(&entire.0 .0, entire.0 .1);
+        let only_part_filter =
+            exact_filter_for(&only_part.0 .0, only_part.0 .1);
+        let start_timestamp = only_part.1[6].measurement.timestamp();
+        let only_part_timestamp_filter = format_timestamp(start_timestamp);
+
+        let query = format!(
+            "get some_target:some_metric | filter ({}) || (timestamp >= @{} && {})",
+            entire_filter,
+            only_part_timestamp_filter,
+            only_part_filter,
+        );
+        let result = ctx
+            .client
+            .oxql_query(&query)
+            .await
+            .expect("failed to run OxQL query");
+        assert_eq!(result.tables.len(), 1, "Should be exactly 1 table");
+        let table = result.tables.get(0).unwrap();
+        assert_eq!(
+            table.n_timeseries(),
+            2,
+            "Should have fetched exactly the two target timeseries"
+        );
+
+        // Check that we fetched the entire timeseries for the first one.
+        let expected_timeseries =
+            find_timeseries_in_table(table, &entire.0 .0, &entire.0 .1)
+                .expect("failed to fetch all of the first timeseries");
+        let measurements: Vec<_> =
+            entire.1.iter().map(|s| s.measurement.clone()).collect();
+        let expected_points = Points::delta_from_cumulative(&measurements)
+            .expect("failed to build expected points");
+        assert_eq!(
+            expected_timeseries.points, expected_points,
+            "Did not collect the entire set of points for the first timeseries",
+        );
+
+        // And that we only get the last portion of the second timeseries.
+        let expected_timeseries =
+            find_timeseries_in_table(table, &only_part.0 .0, &only_part.0 .1)
+                .expect("failed to fetch part of the second timeseries");
+        let measurements: Vec<_> = only_part
+            .1
+            .iter()
+            .filter_map(|sample| {
+                let meas = &sample.measurement;
+                if meas.timestamp() >= start_timestamp {
+                    Some(meas.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let expected_points = Points::delta_from_cumulative(&measurements)
+            .expect("failed to build expected points");
+        assert_eq!(
+            expected_timeseries.points, expected_points,
+            "Did not collect the last few points for the second timeseries",
+        );
+
+        ctx.cleanup_successful().await;
+    }
+
+    // Return an OxQL filter item that will exactly select the provided
+    // timeseries by its target / metric.
+    fn exact_filter_for(target: &SomeTarget, foo: i32) -> String {
+        format!(
+            "name == '{}' && index == {} && foo == {}",
+            target.name, target.index, foo,
+        )
+    }
+
+    // Given a table from an OxQL query, look up the timeseries for the inserted
+    // target / metric, if it exists
+    fn find_timeseries_in_table<'a>(
+        table: &'a Table,
+        target: &'a SomeTarget,
+        foo: &'a i32,
+    ) -> Option<&'a Timeseries> {
+        for timeseries in table.iter() {
+            let fields = &timeseries.fields;
+
+            // Look up each field in turn, and compare it.
+            let FieldValue::String(val) = fields.get("name")? else {
+                unreachable!();
+            };
+            if val != &target.name {
+                continue;
+            }
+            let FieldValue::U32(val) = fields.get("index")? else {
+                unreachable!();
+            };
+            if val != &target.index {
+                continue;
+            }
+            let FieldValue::I32(val) = fields.get("foo")? else {
+                unreachable!();
+            };
+            if val != foo {
+                continue;
+            }
+
+            // We done matched it.
+            return Some(timeseries);
+        }
+        None
+    }
 }

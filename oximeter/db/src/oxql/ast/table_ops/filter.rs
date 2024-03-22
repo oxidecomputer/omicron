@@ -732,6 +732,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::impossible_comparisons)]
     fn test_filter_field_logic() {
         for op in [LogicalOp::And, LogicalOp::Or, LogicalOp::Xor] {
             let s = format!("filter (x > 10) {op} (x < 0)");
