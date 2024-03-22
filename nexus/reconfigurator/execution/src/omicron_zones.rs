@@ -10,7 +10,7 @@ use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
-use nexus_types::deployment::BlueprintZoneState;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use slog::info;
 use slog::warn;
@@ -26,10 +26,10 @@ pub(crate) async fn deploy_zones(
 ) -> Result<(), Vec<anyhow::Error>> {
     // Make this code fail to compile if a new zone state is added.
     {
-        let zs = BlueprintZoneState::InService;
+        let zs = BlueprintZoneDisposition::InService;
         match zs {
-            BlueprintZoneState::InService => (),
-            BlueprintZoneState::Quiesced => (),
+            BlueprintZoneDisposition::InService => (),
+            BlueprintZoneDisposition::Quiesced => (),
         }
     }
 
@@ -95,8 +95,8 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, BlueprintZoneConfig, BlueprintZoneState,
-        BlueprintZonesConfig,
+        Blueprint, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZonesConfig,
     };
     use nexus_types::inventory::{
         OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
@@ -192,7 +192,7 @@ mod test {
                             http_address: "some-ipv6-address".into(),
                         },
                     },
-                    zone_state: BlueprintZoneState::InService,
+                    disposition: BlueprintZoneDisposition::InService,
                 }],
             }
         }
@@ -293,7 +293,7 @@ mod test {
                 },
                 // XXX: NotInService retains the previous test behavior -- we
                 // may wish to change this to InService.
-                zone_state: BlueprintZoneState::Quiesced,
+                disposition: BlueprintZoneDisposition::Quiesced,
             });
         }
 

@@ -120,8 +120,8 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, BlueprintZoneConfig, BlueprintZoneState,
-        BlueprintZonesConfig,
+        Blueprint, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZonesConfig,
     };
     use nexus_types::inventory::{
         OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
@@ -257,7 +257,7 @@ mod test {
                     },
                     // XXX: NotInService retains the previous test behavior --
                     // we may wish to change this to InService.
-                    zone_state: BlueprintZoneState::Quiesced,
+                    disposition: BlueprintZoneDisposition::Quiesced,
                 }],
             }
         }

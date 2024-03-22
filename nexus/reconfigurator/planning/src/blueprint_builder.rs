@@ -14,7 +14,7 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_inventory::now_db_precision;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZoneState;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
@@ -286,8 +286,8 @@ impl<'a> BlueprintBuilder<'a> {
         let mut used_external_ips: HashSet<IpAddr> = HashSet::new();
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
-        for (_, z) in parent_blueprint.all_blueprint_zones() {
-            let zone_type = &z.config.zone_type;
+        for (_, z) in parent_blueprint.all_omicron_zones() {
+            let zone_type = &z.zone_type;
             if let OmicronZoneType::Nexus { nic, .. } = zone_type {
                 match nic.ip {
                     IpAddr::V4(ip) => {
@@ -441,13 +441,10 @@ impl<'a> BlueprintBuilder<'a> {
         // currently exist.
         let ntp_servers = self
             .parent_blueprint
-            .all_blueprint_zones()
+            .all_omicron_zones()
             .filter_map(|(_, z)| {
-                if matches!(
-                    z.config.zone_type,
-                    OmicronZoneType::BoundaryNtp { .. }
-                ) {
-                    Some(Host::for_zone(z.config.id, ZoneVariant::Other).fqdn())
+                if matches!(z.zone_type, OmicronZoneType::BoundaryNtp { .. }) {
+                    Some(Host::for_zone(z.id, ZoneVariant::Other).fqdn())
                 } else {
                     None
                 }
@@ -466,7 +463,7 @@ impl<'a> BlueprintBuilder<'a> {
         };
         let zone = BlueprintZoneConfig {
             config: zone,
-            zone_state: BlueprintZoneState::InService,
+            disposition: BlueprintZoneDisposition::InService,
         };
 
         self.sled_add_zone(sled_id, zone)?;
@@ -515,7 +512,7 @@ impl<'a> BlueprintBuilder<'a> {
 
         let zone = BlueprintZoneConfig {
             config: zone,
-            zone_state: BlueprintZoneState::InService,
+            disposition: BlueprintZoneDisposition::InService,
         };
         self.sled_add_zone(sled_id, zone)?;
         Ok(Ensure::Added)
@@ -649,7 +646,7 @@ impl<'a> BlueprintBuilder<'a> {
             };
             let zone = BlueprintZoneConfig {
                 config: zone,
-                zone_state: BlueprintZoneState::InService,
+                disposition: BlueprintZoneDisposition::InService,
             };
             self.sled_add_zone(sled_id, zone)?;
         }
@@ -1245,9 +1242,8 @@ pub mod test {
             // Nexus with no remaining external IPs should fail.
             let mut policy = policy.clone();
             let mut used_ip_ranges = Vec::new();
-            for (_, z) in parent.all_blueprint_zones() {
+            for (_, z) in parent.all_omicron_zones() {
                 if let Some(ip) = z
-                    .config
                     .zone_type
                     .external_ip()
                     .expect("failed to check for external IP")

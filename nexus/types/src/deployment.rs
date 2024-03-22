@@ -31,6 +31,8 @@ use serde::Serialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use strum::EnumIter;
+use strum::IntoEnumIterator;
 use uuid::Uuid;
 
 /// Fleet-wide deployment policy
@@ -139,7 +141,7 @@ pub struct Blueprint {
     pub id: Uuid,
 
     /// A map of sled id -> zones deployed on each sled, along with the
-    /// [`BlueprintZoneState`] for each zone.
+    /// [`BlueprintZoneDisposition`] for each zone.
     ///
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
@@ -167,14 +169,17 @@ pub struct Blueprint {
 }
 
 impl Blueprint {
-    /// Iterate over all the [`BlueprintZoneConfig`] instances in the
-    /// blueprint, along with the associated sled id.
+    /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
+    /// that match the provided filter, along with the associated sled id.
     pub fn all_blueprint_zones(
         &self,
+        filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (Uuid, &BlueprintZoneConfig)> {
-        self.blueprint_zones
-            .iter()
-            .flat_map(|(sled_id, z)| z.zones.iter().map(|z| (*sled_id, z)))
+        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
+            z.zones.iter().filter_map(move |z| {
+                z.disposition.matches(filter).then_some((*sled_id, z))
+            })
+        })
     }
 
     /// Iterate over all the [`OmicronZoneConfig`] instances in the blueprint,
@@ -231,7 +236,7 @@ impl Blueprint {
                     .iter()
                     .map(|z| BlueprintZoneConfig {
                         config: z.clone(),
-                        zone_state: BlueprintZoneState::InService,
+                        disposition: BlueprintZoneDisposition::InService,
                     })
                     .collect();
                 let zones = BlueprintZonesConfig {
@@ -314,7 +319,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
 /// Information about an Omicron zone as recorded in a blueprint.
 ///
 /// Currently, this is similar to [`OmicronZonesConfig`], but also contains a
-/// per-zone [`BlueprintZoneState`].
+/// per-zone [`BlueprintZoneDisposition`].
 ///
 /// Part of [`Blueprint`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -340,7 +345,7 @@ impl BlueprintZonesConfig {
             .iter()
             .map(|z| BlueprintZoneConfig {
                 config: z.clone(),
-                zone_state: BlueprintZoneState::InService,
+                disposition: BlueprintZoneDisposition::InService,
             })
             .collect();
 
@@ -375,7 +380,7 @@ impl BlueprintZonesConfig {
 /// Describes one Omicron-managed zone in a blueprint.
 ///
 /// This is a wrapper around an [`OmicronZoneConfig`] that also includes a
-/// [`BlueprintZoneState`].
+/// [`BlueprintZoneDisposition`].
 ///
 /// Part of [`BlueprintZonesConfig`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -383,8 +388,8 @@ pub struct BlueprintZoneConfig {
     /// The underlying zone configuration.
     pub config: OmicronZoneConfig,
 
-    /// The state of this zone recorded in the blueprint.
-    pub zone_state: BlueprintZoneState,
+    /// The disposition (desired state) of this zone recorded in the blueprint.
+    pub disposition: BlueprintZoneDisposition,
 }
 
 impl BlueprintZoneConfig {
@@ -412,23 +417,33 @@ impl<'a> fmt::Display for BlueprintZoneConfigDisplay<'a> {
             f,
             "{} {:<width$} {} [underlay IP {}]",
             z.config.id,
-            z.zone_state,
+            z.disposition,
             z.config.zone_type.label(),
             z.config.underlay_address,
-            width = BlueprintZoneState::DISPLAY_WIDTH,
+            width = BlueprintZoneDisposition::DISPLAY_WIDTH,
         )
     }
 }
 
-/// The actual or desired Nexus-defined state of an Omicron-managed zone in a
-/// blueprint.
+/// The desired state of an Omicron-managed zone in a blueprint.
 ///
 /// Part of [`BlueprintZoneConfig`].
 #[derive(
-    Debug, Copy, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum BlueprintZoneState {
+pub enum BlueprintZoneDisposition {
     /// The zone is in-service.
     InService,
 
@@ -436,26 +451,78 @@ pub enum BlueprintZoneState {
     Quiesced,
 }
 
-impl BlueprintZoneState {
+impl BlueprintZoneDisposition {
     /// The maximum width of `Display` output.
     const DISPLAY_WIDTH: usize = 10;
 
-    /// Return the list of all zone policies corresponding to services that
-    /// are currently running.
-    pub fn all_alive() -> &'static [Self] {
-        &[Self::InService, Self::Quiesced]
+    /// Returns true if the zone disposition matches this filter.
+    pub fn matches(self, filter: BlueprintZoneFilter) -> bool {
+        // This code could be written in three ways:
+        //
+        // 1. match self { match filter { ... } }
+        // 2. match filter { match self { ... } }
+        // 3. match (self, filter) { ... }
+        //
+        // We choose 1 here because we expect many filters and just a few
+        // dispositions, and 1 is the easiest form to represent that.
+        match self {
+            Self::InService => match filter {
+                BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::InternalDns => true,
+                BlueprintZoneFilter::VpcFirewall => true,
+            },
+            Self::Quiesced => match filter {
+                BlueprintZoneFilter::All => true,
+
+                // Quiesced zones should not be exposed in DNS.
+                BlueprintZoneFilter::InternalDns => false,
+
+                // Quiesced zones should get firewall rules.
+                BlueprintZoneFilter::VpcFirewall => true,
+            },
+        }
+    }
+
+    /// Returns all zone dispositions that match the given filter.
+    pub fn all_matching(
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = Self> {
+        BlueprintZoneDisposition::iter().filter(move |&d| d.matches(filter))
     }
 }
 
-impl fmt::Display for BlueprintZoneState {
+impl fmt::Display for BlueprintZoneDisposition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
             // and alignment (used above), but this does.
-            BlueprintZoneState::InService => "in service".fmt(f),
-            BlueprintZoneState::Quiesced => "quiesced".fmt(f),
+            BlueprintZoneDisposition::InService => "in service".fmt(f),
+            BlueprintZoneDisposition::Quiesced => "quiesced".fmt(f),
         }
     }
+}
+
+/// Filters that apply to blueprint zones.
+///
+/// This logic lives here rather than within the individual components making
+/// decisions, so that this is easier to read.
+///
+/// The meaning of a particular filter should not be overloaded -- each time a
+/// new use case wants to make a decision based on the zone disposition, a new
+/// variant should be added to this enum.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BlueprintZoneFilter {
+    // ---
+    // Prefer to keep this list in alphabetical order.
+    // ---
+    /// All zones.
+    All,
+
+    /// Filter by zones that should be in internal DNS.
+    InternalDns,
+
+    /// Filter by zones that should be sent VPC firewall rules.
+    VpcFirewall,
 }
 
 /// Describe high-level metadata about a blueprint
@@ -572,23 +639,24 @@ impl<'a> DiffZoneCommon<'a> {
     /// Returns true if there are any differences between `zone_before` and
     /// `zone_after`.
     ///
-    /// This is equivalent to `config_changed() || state_changed()`.
+    /// This is equivalent to `config_changed() || disposition_changed()`.
     #[inline]
     pub fn is_changed(&self) -> bool {
         // state is smaller and easier to compare than config.
-        self.state_changed() || self.config_changed()
+        self.disposition_changed() || self.config_changed()
     }
 
-    /// Returns true if the zone configuration (excluding the state) changed.
+    /// Returns true if the zone configuration (excluding the disposition)
+    /// changed.
     #[inline]
     pub fn config_changed(&self) -> bool {
         self.zone_before.config != self.zone_after.config
     }
 
-    /// Returns true if the [`BlueprintZoneState`] for the zone changed.
+    /// Returns true if the [`BlueprintZoneDisposition`] for the zone changed.
     #[inline]
-    pub fn state_changed(&self) -> bool {
-        self.zone_before.zone_state != self.zone_after.zone_state
+    pub fn disposition_changed(&self) -> bool {
+        self.zone_before.disposition != self.zone_after.disposition
     }
 }
 
@@ -792,15 +860,15 @@ impl<'diff, 'a> fmt::Display for OmicronZonesDiffDisplay<'diff, 'a> {
                         "+         {} (changed)",
                         zone_changes.zone_after.display(),
                     )?;
-                } else if zone_changes.state_changed() {
+                } else if zone_changes.disposition_changed() {
                     writeln!(
                         f,
-                        "-         {} (state changed)",
+                        "-         {} (disposition changed)",
                         zone_changes.zone_before.display(),
                     )?;
                     writeln!(
                         f,
-                        "+         {} (state changed)",
+                        "+         {} (disposition changed)",
                         zone_changes.zone_after.display(),
                     )?;
                 } else {

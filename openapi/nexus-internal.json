@@ -2545,7 +2545,7 @@
         "type": "object",
         "properties": {
           "blueprint_zones": {
-            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneState`] for each zone.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
+            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
             "type": "object",
             "additionalProperties": {
               "$ref": "#/components/schemas/BlueprintZonesConfig"
@@ -2720,7 +2720,7 @@
         ]
       },
       "BlueprintZoneConfig": {
-        "description": "Describes one Omicron-managed zone in a blueprint.\n\nThis is a wrapper around an [`OmicronZoneConfig`] that also includes a [`BlueprintZoneState`].\n\nPart of [`BlueprintZonesConfig`].",
+        "description": "Describes one Omicron-managed zone in a blueprint.\n\nThis is a wrapper around an [`OmicronZoneConfig`] that also includes a [`BlueprintZoneDisposition`].\n\nPart of [`BlueprintZonesConfig`].",
         "type": "object",
         "properties": {
           "config": {
@@ -2731,22 +2731,22 @@
               }
             ]
           },
-          "zone_state": {
-            "description": "The state of this zone recorded in the blueprint.",
+          "disposition": {
+            "description": "The disposition (desired state) of this zone recorded in the blueprint.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/BlueprintZoneState"
+                "$ref": "#/components/schemas/BlueprintZoneDisposition"
               }
             ]
           }
         },
         "required": [
           "config",
-          "zone_state"
+          "disposition"
         ]
       },
-      "BlueprintZoneState": {
-        "description": "The actual or desired Nexus-defined state of an Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZoneConfig`].",
+      "BlueprintZoneDisposition": {
+        "description": "The desired state of an Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZoneConfig`].",
         "oneOf": [
           {
             "description": "The zone is in-service.",
@@ -2765,7 +2765,7 @@
         ]
       },
       "BlueprintZonesConfig": {
-        "description": "Information about an Omicron zone as recorded in a blueprint.\n\nCurrently, this is similar to [`OmicronZonesConfig`], but also contains a per-zone [`BlueprintZoneState`].\n\nPart of [`Blueprint`].",
+        "description": "Information about an Omicron zone as recorded in a blueprint.\n\nCurrently, this is similar to [`OmicronZonesConfig`], but also contains a per-zone [`BlueprintZoneDisposition`].\n\nPart of [`Blueprint`].",
         "type": "object",
         "properties": {
           "generation": {

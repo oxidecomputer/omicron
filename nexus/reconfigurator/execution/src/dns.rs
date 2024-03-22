@@ -18,7 +18,7 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneState;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -249,14 +249,9 @@ pub fn blueprint_internal_dns_config(
             .map(|addr| addr.port())
     }
 
-    for (_, zone) in blueprint.all_blueprint_zones() {
-        match zone.zone_state {
-            BlueprintZoneState::InService => {}
-            BlueprintZoneState::Quiesced => {
-                continue;
-            }
-        }
-
+    for (_, zone) in
+        blueprint.all_blueprint_zones(BlueprintZoneFilter::InternalDns)
+    {
         let context = || {
             format!(
                 "parsing {} zone with id {}",
@@ -475,7 +470,7 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZoneState;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
     use nexus_types::deployment::Policy;
@@ -630,7 +625,7 @@ mod test {
                         .to_string(),
                     },
                 },
-                zone_state: BlueprintZoneState::Quiesced,
+                disposition: BlueprintZoneDisposition::Quiesced,
             },
         );
 

@@ -92,7 +92,8 @@ use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
 use nexus_types::deployment::{
-    Blueprint, BlueprintZoneConfig, BlueprintZoneState, BlueprintZonesConfig,
+    Blueprint, BlueprintZoneConfig, BlueprintZoneDisposition,
+    BlueprintZonesConfig,
 };
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
@@ -1161,7 +1162,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                 .map(|z| BlueprintZoneConfig {
                     config: z.into(),
                     // All initial zones are in-service.
-                    zone_state: BlueprintZoneState::InService,
+                    disposition: BlueprintZoneDisposition::InService,
                 })
                 .collect(),
         };
