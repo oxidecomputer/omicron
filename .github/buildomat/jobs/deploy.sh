@@ -34,9 +34,6 @@ _exit_trap() {
 	local status=$?
 	[[ $status -eq 0 ]] && exit 0
 
-    # XXX paranoia
-    pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
-
 	set +o errexit
 	set -o xtrace
 	banner evidence
