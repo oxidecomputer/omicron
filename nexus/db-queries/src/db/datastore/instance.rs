@@ -18,6 +18,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::Name;
@@ -109,6 +110,12 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
         }
     }
 }
+
+/// A token representing the "updater lock" on an `Instance`.
+///
+/// This is returned by [`DataStore::instance_updater_try_lock`], and consumed
+/// by [`DataStore::instance_updater_unlock`].
+pub struct InstanceUpdaterLock(Generation);
 
 impl DataStore {
     /// Idempotently insert a database record for an Instance
@@ -320,6 +327,105 @@ impl DataStore {
             })?;
 
         Ok(updated)
+    }
+
+    /// Attempts to acquire the instance-updater lock for the saga with ID
+    /// `saga_id` at the current generation.
+    ///
+    /// # Arguments
+    ///
+    /// - `instance_id`: the UUID of the Instance to lock
+    /// - `current_gen`: the current generation of the instance's `updater_id`
+    /// - `saga_id`: the UUID of the saga that's attempting to lock this
+    ///   instance.
+    ///
+    /// # Returns
+    ///
+    /// - [`Ok`]`(`[`Some`]`(`[`InstanceUpdaterLock`]`))` if the lock was acquired.
+    /// - [`Ok`]`(`[`None`]`)` if the lock could not be acquired (i.e. the
+    ///   generation has advanced since `current_gen` was captured)
+    /// - [`Err`] if a database error occurred.
+    pub async fn instance_updater_try_lock(
+        &self,
+        instance_id: &Uuid,
+        current_gen: Generation,
+        saga_id: &Uuid,
+    ) -> Result<Option<Generation>, Error> {
+        use db::schema::instance::dsl;
+
+        // The generation to advance to.
+        let new_gen = Generation(current_gen.0.next());
+
+        let locked = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*instance_id))
+            // If the generation is the same as the captured generation, we can
+            // lock this instance.
+            .filter(dsl::updater_gen.eq(current_gen))
+            .set((
+                dsl::updater_gen.eq(new_gen),
+                dsl::updater_id.eq(Some(*saga_id)),
+            ))
+            .check_if_exists::<Instance>(*instance_id)
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => Some(new_gen),
+                UpdateStatus::NotUpdatedButExists => None,
+            })
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(*instance_id),
+                    ),
+                )
+            })?;
+
+        Ok(locked)
+    }
+
+    /// Release the instance-updater lock, consuming the [`InstanceUpdaterLock`]
+    /// returned by a call to [`DataStore::instance_updater_try_lock`].
+    pub async fn instance_updater_unlock(
+        &self,
+        instance_id: &Uuid,
+        InstanceUpdaterLock(gen): InstanceUpdaterLock,
+    ) -> Result<bool, Error> {
+        use db::schema::instance::dsl;
+
+        let new_gen = Generation(gen.0.next());
+
+        let unlocked = diesel::update(dsl::instance)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(*instance_id))
+            // If the generation is the same as the captured generation, we can
+            // lock this instance.
+            .filter(dsl::updater_gen.eq(gen))
+            .set((
+                dsl::updater_gen.eq(new_gen),
+                dsl::updater_id.eq(None::<Uuid>),
+            ))
+            .check_if_exists::<Instance>(*instance_id)
+            .execute_and_check(&*self.pool_connection_unauthorized().await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                // TODO(eliza): this should probably be an error...
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(*instance_id),
+                    ),
+                )
+            })?;
+
+        Ok(unlocked)
     }
 
     /// Updates an instance record and a VMM record with a single database
