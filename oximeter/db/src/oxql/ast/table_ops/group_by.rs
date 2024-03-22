@@ -446,9 +446,17 @@ mod tests {
     use oximeter::FieldValue;
     use std::{collections::BTreeMap, time::Duration};
 
+    // Which timeseries the second data point is missing from.
+    #[derive(Clone, Copy, Debug)]
+    enum MissingValue {
+        Neither,
+        First,
+        Both,
+    }
+
     #[derive(Clone, Copy, Debug)]
     struct TestConfig {
-        missing_value: bool,
+        missing_value: MissingValue,
         overlapping_times: bool,
         reducer: Reducer,
     }
@@ -491,7 +499,14 @@ mod tests {
             ts0.points.timestamps = timestamps.clone();
             *ts0.points.values_mut(0).unwrap() = ValueArray::Double(vec![
                 Some(1.0),
-                if cfg.missing_value { None } else { Some(2.0) },
+                if matches!(
+                    cfg.missing_value,
+                    MissingValue::First | MissingValue::Both
+                ) {
+                    None
+                } else {
+                    Some(2.0)
+                },
                 Some(3.0),
             ]);
 
@@ -531,8 +546,15 @@ mod tests {
                 timestamps.insert(0, new_timestamps[0]);
                 new_timestamps
             };
-            *ts1.points.values_mut(0).unwrap() =
-                ValueArray::Double(vec![Some(2.0), Some(3.0), Some(4.0)]);
+            *ts1.points.values_mut(0).unwrap() = ValueArray::Double(vec![
+                Some(2.0),
+                if matches!(cfg.missing_value, MissingValue::Both) {
+                    None
+                } else {
+                    Some(3.0)
+                },
+                Some(4.0),
+            ]);
 
             let mut table = Table::new("foo");
             table.insert(ts0).unwrap();
@@ -599,7 +621,7 @@ mod tests {
         const TEST_CASES: &[(TestConfig, &[Option<f64>])] = &[
             (
                 TestConfig {
-                    missing_value: false,
+                    missing_value: MissingValue::Neither,
                     overlapping_times: true,
                     reducer: Reducer::Mean,
                 },
@@ -609,7 +631,7 @@ mod tests {
             ),
             (
                 TestConfig {
-                    missing_value: false,
+                    missing_value: MissingValue::Neither,
                     overlapping_times: true,
                     reducer: Reducer::Sum,
                 },
@@ -619,7 +641,7 @@ mod tests {
             ),
             (
                 TestConfig {
-                    missing_value: false,
+                    missing_value: MissingValue::Neither,
                     overlapping_times: false,
                     reducer: Reducer::Mean,
                 },
@@ -632,7 +654,7 @@ mod tests {
             ),
             (
                 TestConfig {
-                    missing_value: false,
+                    missing_value: MissingValue::Neither,
                     overlapping_times: false,
                     reducer: Reducer::Sum,
                 },
@@ -645,7 +667,7 @@ mod tests {
             ),
             (
                 TestConfig {
-                    missing_value: true,
+                    missing_value: MissingValue::First,
                     overlapping_times: true,
                     reducer: Reducer::Mean,
                 },
@@ -658,7 +680,7 @@ mod tests {
             ),
             (
                 TestConfig {
-                    missing_value: true,
+                    missing_value: MissingValue::First,
                     overlapping_times: true,
                     reducer: Reducer::Sum,
                 },
@@ -667,7 +689,7 @@ mod tests {
             ),
             (
                 TestConfig {
-                    missing_value: true,
+                    missing_value: MissingValue::First,
                     overlapping_times: false,
                     reducer: Reducer::Mean,
                 },
@@ -680,12 +702,32 @@ mod tests {
             ),
             (
                 TestConfig {
-                    missing_value: true,
+                    missing_value: MissingValue::First,
                     overlapping_times: false,
                     reducer: Reducer::Sum,
                 },
                 // Same as above, but summing, instead of averaging.
                 &[Some(2.0), Some(1.0), Some(3.0), Some(7.0)],
+            ),
+            (
+                TestConfig {
+                    missing_value: MissingValue::Both,
+                    overlapping_times: true,
+                    reducer: Reducer::Mean,
+                },
+                // In this case, the 2nd timepoint is missing from both
+                // timeseries. We should preserve that as a missing value in the
+                // output.
+                &[Some(1.5), None, Some(3.5)],
+            ),
+            (
+                TestConfig {
+                    missing_value: MissingValue::Both,
+                    overlapping_times: true,
+                    reducer: Reducer::Sum,
+                },
+                // Same as above, but summing instead of averaging.
+                &[Some(3.0), None, Some(7.0)],
             ),
         ];
         for (test_config, expected_data) in TEST_CASES.iter() {
@@ -695,9 +737,9 @@ mod tests {
             let points = &grouped_timeseries.points;
             let values = points.values(0).unwrap().as_double().unwrap();
             assert_eq!(
-                values,
-                expected_data,
-                "Timeseries values were not grouped correctly, test_config = {test_config:?}"
+                values, expected_data,
+                "Timeseries values were not grouped correctly, \
+                test_config = {test_config:?}"
             );
         }
     }
