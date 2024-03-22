@@ -41,6 +41,7 @@ impl Filter {
     // Merge this filter with another one.
     pub(crate) fn merge(&self, other: &Filter) -> Self {
         Filter::Expr(FilterExpr {
+            negated: false,
             left: Box::new(self.clone()),
             op: LogicalOp::And,
             right: Box::new(other.clone()),
@@ -48,11 +49,18 @@ impl Filter {
     }
 
     // Apply the filter to the provided field.
+    //
+    // This returns `Ok(None)` if the filter doesn't apply. It returns `Ok(x)`
+    // if the filter does apply, where `x` is the logical application of the
+    // filter to the field.
+    //
+    // If the filter does apply, but is incompatible or incomparable, return an
+    // error.
     fn filter_field(
         &self,
         name: &str,
         value: &FieldValue,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<bool>, Error> {
         match self {
             Filter::Atom(atom) => atom.filter_field(name, value),
             Filter::Expr(expr) => expr.filter_field(name, value),
@@ -120,7 +128,7 @@ impl Filter {
                 // If the filter restricts any of the fields, remove this
                 // timeseries altogether.
                 for (name, value) in input.fields.iter() {
-                    if !self.filter_field(name, value)? {
+                    if let Some(false) = self.filter_field(name, value)? {
                         continue 'timeseries;
                     }
                 }
@@ -190,6 +198,7 @@ impl fmt::Display for Filter {
 // NOTE: This should really be extended to a generic binary op expression.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FilterExpr {
+    pub negated: bool,
     pub left: Box<Filter>,
     pub op: LogicalOp,
     pub right: Box<Filter>,
@@ -201,12 +210,17 @@ impl FilterExpr {
         &self,
         name: &str,
         value: &FieldValue,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<bool>, Error> {
         let left = self.left.filter_field(name, value)?;
         let right = self.right.filter_field(name, value)?;
-        match self.op {
-            LogicalOp::And => Ok(left && right),
-            LogicalOp::Or => Ok(left || right),
+        match (left, right) {
+            (None, None) => Ok(None),
+            (Some(x), None) | (None, Some(x)) => Ok(Some(x)),
+            (Some(left), Some(right)) => match self.op {
+                LogicalOp::And => Ok(Some(left && right)),
+                LogicalOp::Or => Ok(Some(left || right)),
+                LogicalOp::Xor => Ok(Some(left ^ right)),
+            },
         }
     }
 
@@ -227,6 +241,12 @@ impl FilterExpr {
                 }
                 Ok(left)
             }
+            LogicalOp::Xor => {
+                for i in 0..left.len() {
+                    left[i] ^= right[i];
+                }
+                Ok(left)
+            }
         }
     }
 
@@ -243,7 +263,14 @@ impl FilterExpr {
 
 impl fmt::Display for FilterExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "({} {} {})", self.left, self.op, self.right)
+        write!(
+            f,
+            "{}({} {} {})",
+            if self.negated { "!" } else { "" },
+            self.left,
+            self.op,
+            self.right
+        )
     }
 }
 
@@ -261,8 +288,8 @@ pub struct FilterAtom {
 impl FilterAtom {
     // Apply this filter to the provided field.
     //
-    // If the field name does not match the identifier in `self`, return `true`,
-    // since this filter does not apply to the provided field.
+    // If the field name does not match the identifier in `self`, return
+    // `Ok(None)`, since this filter does not apply to the provided field.
     //
     // If the name matches and the type of `self` is compatible, return `Ok(x)`
     // where `x` is the logical application of the filter to the field.
@@ -273,21 +300,25 @@ impl FilterAtom {
         &self,
         name: &str,
         value: &FieldValue,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<bool>, Error> {
         // If the name matches, this filter does _not_ apply, and so we do not
         // filter the field.
         if self.ident.as_str() != name {
-            return Ok(true);
+            return Ok(None);
         }
         self.expr
             .compare_field(value, self.cmp)
-            .map(|res| if self.negated { !res } else { res })
+            .map(|res| {
+                // `!expr` has the same truth table as `negated XOR expr`
+                Some(self.negated ^ res)
+            })
             .ok_or_else(|| {
                 anyhow::anyhow!(
-            "Filter matches the field named '{}', but the expression type \
-            is not compatible, or cannot be applied",
-            name,
-        )
+                    "Filter matches the field named '{}', but \
+                    the expression type  is not compatible, or \
+                    cannot be applied",
+                    name,
+                )
             })
     }
 
@@ -623,12 +654,15 @@ impl fmt::Display for FilterAtom {
 #[cfg(test)]
 mod tests {
     use crate::oxql::ast::grammar::query_parser;
+    use crate::oxql::ast::logical_op::LogicalOp;
     use crate::oxql::point::MetricType;
     use crate::oxql::point::Points;
     use crate::oxql::point::ValueArray;
     use crate::oxql::point::Values;
     use chrono::Utc;
+    use oximeter::FieldValue;
     use std::time::Duration;
+    use uuid::Uuid;
 
     #[test]
     fn test_atom_filter_double_points() {
@@ -695,5 +729,56 @@ mod tests {
         let idents = f.ident_names();
         assert_eq!(idents.len(), 1);
         assert_eq!(idents.iter().next().unwrap(), &"timestamp");
+    }
+
+    #[test]
+    fn test_filter_field_logic() {
+        for op in [LogicalOp::And, LogicalOp::Or, LogicalOp::Xor] {
+            let s = format!("filter (x > 10) {op} (x < 0)");
+            let filter = query_parser::filter(&s).unwrap();
+            let cases = &[11, 10, 5, 0, -1];
+            for &val in cases.iter() {
+                let pass = match op {
+                    LogicalOp::And => (val > 10) && (val < 0),
+                    LogicalOp::Or => (val > 10) || (val < 0),
+                    LogicalOp::Xor => (val > 10) ^ (val < 0),
+                };
+                let result = filter
+                    .filter_field("x", &FieldValue::I32(val))
+                    .expect("Filter should be considered comparable")
+                    .expect("Filter should apply to field of the same name");
+                assert_eq!(
+                    result,
+                    pass,
+                    "Filter '{}' should {} the value {}",
+                    filter,
+                    if pass { "pass" } else { "not pass" },
+                    val,
+                );
+            }
+
+            // This names a different field, so should not apply.
+            assert_eq!(
+                filter
+                    .filter_field("y", &FieldValue::I32(11))
+                    .expect("Filter should be considered comparable"),
+                None,
+                "Filter should not apply, since it names a different field"
+            );
+
+            // These values should not be comparable at all, so we'll return an
+            // error.
+            let incomparable = &[
+                FieldValue::String("foo".into()),
+                FieldValue::Uuid(Uuid::new_v4()),
+                FieldValue::IpAddr("127.0.0.1".parse().unwrap()),
+                FieldValue::Bool(false),
+            ];
+            for na in incomparable.iter() {
+                filter
+                    .filter_field("x", na)
+                    .expect_err("These should not be comparable at all");
+            }
+        }
     }
 }

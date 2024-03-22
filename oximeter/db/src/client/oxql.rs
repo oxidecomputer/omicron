@@ -176,8 +176,8 @@ impl Client {
                     Self::rewrite_predicate_for_fields(schema, &expr.right)?;
                 let out = match (left_pred, right_pred) {
                     (Some(left), Some(right)) => Some(format!(
-                        "({left} {} {right})",
-                        expr.op.as_db_safe_string()
+                        "{}({left}, {right})",
+                        expr.op.as_db_function_name()
                     )),
                     (Some(single), None) | (None, Some(single)) => Some(single),
                     (None, None) => None,
@@ -245,8 +245,8 @@ impl Client {
                 )?;
                 let out = match (left_pred, right_pred) {
                     (Some(left), Some(right)) => Some(format!(
-                        "({left} {} {right})",
-                        expr.op.as_db_safe_string()
+                        "{}({left}, {right})",
+                        expr.op.as_db_function_name()
                     )),
                     (Some(single), None) | (None, Some(single)) => Some(single),
                     (None, None) => None,

@@ -13,13 +13,15 @@ use std::fmt;
 pub enum LogicalOp {
     And,
     Or,
+    Xor,
 }
 
 impl LogicalOp {
-    pub(crate) fn as_db_safe_string(&self) -> &'static str {
+    pub(crate) fn as_db_function_name(&self) -> &'static str {
         match self {
-            LogicalOp::And => "AND",
-            LogicalOp::Or => "OR",
+            LogicalOp::And => "and",
+            LogicalOp::Or => "or",
+            LogicalOp::Xor => "xor",
         }
     }
 }
@@ -32,6 +34,7 @@ impl fmt::Display for LogicalOp {
             match self {
                 LogicalOp::And => "&&",
                 LogicalOp::Or => "||",
+                LogicalOp::Xor => "^",
             }
         )
     }
