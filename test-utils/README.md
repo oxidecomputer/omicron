@@ -88,6 +88,8 @@ on shared infrastructure.
 for i in `ls /dev/vmm`; do pfexec bhyvectl --vm=$i --destroy; done
 ```
 
+For more troubleshooting info, see the [falcon wiki](https://github.com/oxidecomputer/falcon/wiki/Reference)
+
 ## Current Limitations
 
 * Tests must be self-contained and not rely on dependencies. E2E tests will
