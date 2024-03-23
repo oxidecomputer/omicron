@@ -4024,6 +4024,7 @@ checksum = "b024e211b1b371da58cd69e4fb8fa4ed16915edcc0e2e1fb04ac4bad61959f25"
 [[package]]
 name = "libfalcon"
 version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/falcon?rev=e69694a1f7cc9fe31fab27f321017280531fb5f7#e69694a1f7cc9fe31fab27f321017280531fb5f7"
 dependencies = [
  "anstyle",
  "anyhow",
