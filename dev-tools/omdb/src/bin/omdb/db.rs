@@ -583,11 +583,18 @@ impl DbArgs {
 /// incompatible because in practice it may well not matter and it's very
 /// valuable for this tool to work if it possibly can.
 async fn check_schema_version(datastore: &DataStore) {
-    let expected_version = nexus_db_model::schema::SCHEMA_VERSION;
+    let expected_version = nexus_db_model::SCHEMA_VERSION;
     let version_check = datastore.database_schema_version().await;
 
     match version_check {
-        Ok(found_version) => {
+        Ok((found_version, found_target)) => {
+            if let Some(target) = found_target {
+                eprintln!(
+                    "note: database schema target exists (mid-upgrade?) ({})",
+                    target
+                );
+            }
+
             if found_version == expected_version {
                 eprintln!(
                     "note: database schema version matches expected ({})",
@@ -3215,7 +3222,7 @@ fn inv_collection_print_sleds(collection: &Collection) {
 
             println!("    ZONES FOUND");
             for z in &zones.zones.zones {
-                println!("      zone {} (type {})", z.id, z.zone_type.tag());
+                println!("      zone {} (type {})", z.id, z.zone_type.kind());
             }
         } else {
             println!("  warning: no zone information found");

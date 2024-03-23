@@ -6,15 +6,6 @@
 //!
 //! NOTE: Should be kept up-to-date with dbinit.sql.
 
-use omicron_common::api::external::SemverVersion;
-
-/// The version of the database schema this particular version of Nexus was
-/// built against.
-///
-/// This should be updated whenever the schema is changed. For more details,
-/// refer to: schema/crdb/README.adoc
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(44, 0, 0);
-
 table! {
     disk (id) {
         id -> Uuid,
@@ -232,6 +223,20 @@ table! {
         asn -> Int8,
         bgp_announce_set_id -> Uuid,
         vrf -> Nullable<Text>,
+    }
+}
+
+table! {
+    bgp_peer_view (switch_location, port_name) {
+        switch_location -> Text,
+        port_name -> Text,
+        addr -> Inet,
+        asn -> Int8,
+        connect_retry -> Int8,
+        delay_open -> Int8,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        keepalive -> Int8,
     }
 }
 
@@ -1526,6 +1531,16 @@ table! {
     bootstore_keys (key, generation) {
         key -> Text,
         generation -> Int8,
+    }
+}
+
+table! {
+    bootstore_config (key, generation) {
+        key -> Text,
+        generation -> Int8,
+        data -> Jsonb,
+        time_created -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
     }
 }
 

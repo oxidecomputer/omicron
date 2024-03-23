@@ -27,7 +27,7 @@ use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
-use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
@@ -808,8 +808,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                                     BlueprintZoneConfig {
                                         config: z.clone(),
                                         // All initial zones are in-service
-                                        zone_policy:
-                                            BlueprintZonePolicy::InService,
+                                        disposition:
+                                            BlueprintZoneDisposition::InService,
                                     }
                                 })
                                 .collect(),

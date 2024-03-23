@@ -28,9 +28,14 @@ use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use sled_agent_client::ZoneKind;
+use thiserror::Error;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::ops::Deref;
+use strum::EnumIter;
+use strum::IntoEnumIterator;
 use uuid::Uuid;
 
 /// Fleet-wide deployment policy
@@ -139,7 +144,7 @@ pub struct Blueprint {
     pub id: Uuid,
 
     /// A map of sled id -> zones deployed on each sled, along with the
-    /// [`BlueprintZonePolicy`] for each zone.
+    /// [`BlueprintZoneDisposition`] for each zone.
     ///
     /// A sled is considered part of the control plane cluster iff it has an
     /// entry in this map.
@@ -167,14 +172,17 @@ pub struct Blueprint {
 }
 
 impl Blueprint {
-    /// Iterate over all the [`BlueprintZoneConfig`] instances in the
-    /// blueprint, along with the associated sled id.
+    /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
+    /// that match the provided filter, along with the associated sled id.
     pub fn all_blueprint_zones(
         &self,
+        filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (Uuid, &BlueprintZoneConfig)> {
-        self.blueprint_zones
-            .iter()
-            .flat_map(|(sled_id, z)| z.zones.iter().map(|z| (*sled_id, z)))
+        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
+            z.zones.iter().filter_map(move |z| {
+                z.disposition.matches(filter).then_some((*sled_id, z))
+            })
+        })
     }
 
     /// Iterate over all the [`OmicronZoneConfig`] instances in the blueprint,
@@ -196,7 +204,7 @@ impl Blueprint {
     pub fn diff_sleds<'a>(
         &'a self,
         other: &'a Blueprint,
-    ) -> OmicronZonesDiff<'a> {
+    ) -> Result<OmicronZonesDiff<'a>, BlueprintDiffError> {
         OmicronZonesDiff {
             before_meta: DiffBeforeMetadata::Blueprint(self.diff_metadata()),
             before_zones: self.blueprint_zones.clone(),
@@ -231,7 +239,7 @@ impl Blueprint {
                     .iter()
                     .map(|z| BlueprintZoneConfig {
                         config: z.clone(),
-                        zone_policy: BlueprintZonePolicy::InService,
+                        disposition: BlueprintZoneDisposition::InService,
                     })
                     .collect();
                 let zones = BlueprintZonesConfig {
@@ -306,7 +314,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
         )?;
         writeln!(f, "internal DNS version: {}", b.internal_dns_version)?;
         writeln!(f, "comment: {}", b.comment)?;
-        writeln!(f, "zones:\n")?;
+        writeln!(f, "\n=====\nZONES\n=====\n")?;
 
         writeln!(f, "{}", self.make_zones_table())?;
 
@@ -317,7 +325,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
 /// Information about an Omicron zone as recorded in a blueprint.
 ///
 /// Currently, this is similar to [`OmicronZonesConfig`], but also contains a
-/// per-zone [`BlueprintZonePolicy`].
+/// per-zone [`BlueprintZoneDisposition`].
 ///
 /// Part of [`Blueprint`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -343,7 +351,7 @@ impl BlueprintZonesConfig {
             .iter()
             .map(|z| BlueprintZoneConfig {
                 config: z.clone(),
-                zone_policy: BlueprintZonePolicy::InService,
+                disposition: BlueprintZoneDisposition::InService,
             })
             .collect();
 
@@ -353,6 +361,7 @@ impl BlueprintZonesConfig {
             generation: collection.generation,
             zones,
         };
+        // For testing, it's helpful for zones to be in sorted order.
         ret.sort();
 
         ret
@@ -360,25 +369,44 @@ impl BlueprintZonesConfig {
 
     /// Sorts the list of zones stored in this configuration.
     ///
-    /// This is not strictly necessary. But for testing, it's helpful for
-    /// things to be in sorted order.
+    /// This is not strictly necessary. But for testing (particularly snapshot
+    /// testing), it's helpful for zones to be in sorted order.
     pub fn sort(&mut self) {
-        self.zones.sort_unstable_by_key(|z| z.config.id);
+        self.zones.sort_unstable_by_key(zone_sort_key);
     }
 
-    /// Converts self to an [`OmicronZonesConfig`].
-    pub fn to_omicron_zones_config(&self) -> OmicronZonesConfig {
+    /// Converts self to an [`OmicronZonesConfig`], applying the provided
+    /// [`BlueprintZoneFilter`].
+    ///
+    /// The filter controls which zones should be exported into the resulting
+    /// [`OmicronZonesConfig`].
+    pub fn to_omicron_zones_config(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> OmicronZonesConfig {
         OmicronZonesConfig {
             generation: self.generation,
-            zones: self.zones.iter().map(|z| z.config.clone()).collect(),
+            zones: self
+                .zones
+                .iter()
+                .filter_map(|z| {
+                    z.disposition.matches(filter).then(|| z.config.clone())
+                })
+                .collect(),
         }
     }
+}
+
+fn zone_sort_key(z: &BlueprintZoneConfig) -> impl Ord {
+    // First sort by kind, then by ID. This makes it so that zones of the same
+    // kind (e.g. Crucible zones) are grouped together.
+    (z.config.zone_type.kind(), z.config.id)
 }
 
 /// Describes one Omicron-managed zone in a blueprint.
 ///
 /// This is a wrapper around an [`OmicronZoneConfig`] that also includes a
-/// [`BlueprintZonePolicy`].
+/// [`BlueprintZoneDisposition`].
 ///
 /// Part of [`BlueprintZonesConfig`].
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -386,8 +414,8 @@ pub struct BlueprintZoneConfig {
     /// The underlying zone configuration.
     pub config: OmicronZoneConfig,
 
-    /// The policy for this zone.
-    pub zone_policy: BlueprintZonePolicy,
+    /// The disposition (desired state) of this zone recorded in the blueprint.
+    pub disposition: BlueprintZoneDisposition,
 }
 
 impl BlueprintZoneConfig {
@@ -415,40 +443,119 @@ impl<'a> fmt::Display for BlueprintZoneConfigDisplay<'a> {
             f,
             "{} {:<width$} {} [underlay IP {}]",
             z.config.id,
-            z.zone_policy,
-            z.config.zone_type.tag(),
+            z.disposition,
+            z.config.zone_type.kind(),
             z.config.underlay_address,
-            width = BlueprintZonePolicy::DISPLAY_WIDTH,
+            width = BlueprintZoneDisposition::DISPLAY_WIDTH,
         )
     }
 }
 
-/// The policy for an Omicron-managed zone in a blueprint.
+/// The desired state of an Omicron-managed zone in a blueprint.
 ///
 /// Part of [`BlueprintZoneConfig`].
 #[derive(
-    Debug, Copy, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    JsonSchema,
+    Deserialize,
+    Serialize,
+    EnumIter,
 )]
 #[serde(rename_all = "snake_case")]
-pub enum BlueprintZonePolicy {
+pub enum BlueprintZoneDisposition {
+    /// The zone is in-service.
     InService,
-    NotInService,
+
+    /// The zone is not in service.
+    Quiesced,
 }
 
-impl BlueprintZonePolicy {
+impl BlueprintZoneDisposition {
     /// The maximum width of `Display` output.
-    const DISPLAY_WIDTH: usize = 14;
+    const DISPLAY_WIDTH: usize = 10;
+
+    /// Returns true if the zone disposition matches this filter.
+    pub fn matches(self, filter: BlueprintZoneFilter) -> bool {
+        // This code could be written in three ways:
+        //
+        // 1. match self { match filter { ... } }
+        // 2. match filter { match self { ... } }
+        // 3. match (self, filter) { ... }
+        //
+        // We choose 1 here because we expect many filters and just a few
+        // dispositions, and 1 is the easiest form to represent that.
+        match self {
+            Self::InService => match filter {
+                BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::SledAgentPut => true,
+                BlueprintZoneFilter::InternalDns => true,
+                BlueprintZoneFilter::VpcFirewall => true,
+            },
+            Self::Quiesced => match filter {
+                BlueprintZoneFilter::All => true,
+
+                // Quiesced zones should not be exposed in DNS.
+                BlueprintZoneFilter::InternalDns => false,
+
+                // Quiesced zones are expected to be deployed by sled-agent.
+                BlueprintZoneFilter::SledAgentPut => true,
+
+                // Quiesced zones should get firewall rules.
+                BlueprintZoneFilter::VpcFirewall => true,
+            },
+        }
+    }
+
+    /// Returns all zone dispositions that match the given filter.
+    pub fn all_matching(
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = Self> {
+        BlueprintZoneDisposition::iter().filter(move |&d| d.matches(filter))
+    }
 }
 
-impl fmt::Display for BlueprintZonePolicy {
+impl fmt::Display for BlueprintZoneDisposition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             // Neither `write!(f, "...")` nor `f.write_str("...")` obey fill
             // and alignment (used above), but this does.
-            BlueprintZonePolicy::InService => "in service".fmt(f),
-            BlueprintZonePolicy::NotInService => "not in service".fmt(f),
+            BlueprintZoneDisposition::InService => "in service".fmt(f),
+            BlueprintZoneDisposition::Quiesced => "quiesced".fmt(f),
         }
     }
+}
+
+/// Filters that apply to blueprint zones.
+///
+/// This logic lives here rather than within the individual components making
+/// decisions, so that this is easier to read.
+///
+/// The meaning of a particular filter should not be overloaded -- each time a
+/// new use case wants to make a decision based on the zone disposition, a new
+/// variant should be added to this enum.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BlueprintZoneFilter {
+    // ---
+    // Prefer to keep this list in alphabetical order.
+    // ---
+    /// All zones.
+    All,
+
+    /// Filter by zones that should be in internal DNS.
+    InternalDns,
+
+    /// Filter by zones that we should tell sled-agent to deploy.
+    SledAgentPut,
+
+    /// Filter by zones that should be sent VPC firewall rules.
+    VpcFirewall,
 }
 
 /// Describe high-level metadata about a blueprint
@@ -500,25 +607,102 @@ pub struct BlueprintTargetSet {
 /// Summarizes the differences between two blueprints
 #[derive(Debug)]
 pub struct OmicronZonesDiff<'a> {
-    before_meta: DiffBeforeMetadata,
+    pub before_meta: DiffBeforeMetadata,
     // We store an owned copy of "before_zones" to make it easier to support
     // collections here, where we need to assemble this map ourselves.
-    before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
-    after_meta: BlueprintDiffMetadata,
-    after_zones: &'a BTreeMap<Uuid, BlueprintZonesConfig>,
+    pub before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+    pub after_meta: BlueprintDiffMetadata,
+    pub after_zones: &'a BTreeMap<Uuid, BlueprintZonesConfig>,
 }
 
-#[derive(Debug)]
-enum DiffBeforeMetadata {
+impl<'a> OmicronZonesDiff<'a> {
+    /// Build a diff with the provided contents, verifying that the provided
+    /// data is valid.
+    fn new(
+        before_meta: DiffBeforeMetadata,
+        before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
+        after_meta: BlueprintDiffMetadata,
+        after_zones: &'a BTreeMap<Uuid, BlueprintZonesConfig>,
+    ) -> Result<Self, BlueprintDiffError> {
+        let mut errors = Vec::new();
+    }
+}
+
+#[derive(Clone, Debug, Error)]
+pub struct BlueprintDiffError {
+    pub before_meta: DiffBeforeMetadata,
+    pub after_meta: BlueprintDiffMetadata,
+    pub errors: Vec<BlueprintDiffSingleError>,
+}
+
+impl fmt::Display for BlueprintDiffError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "errors in diff between {} and {}:", )?;
+        for e in &self.errors {
+            write!(f, "  {}\n", e)?;
+        }
+        Ok(())
+    }
+}
+
+/// An individual error within a [`BlueprintDiffError`].
+#[derive(Clone, Debug)]
+pub enum BlueprintDiffSingleError {
+    /// The [`OmicronZoneType`] of a particular zone changed.
+    /// 
+    /// For a particular zone, the type should never change.
+    ZoneTypeChanged {
+        sled_id: Uuid,
+        zone_id: Uuid,
+        before: ZoneKind,
+        after: ZoneKind,
+    },
+}
+
+impl fmt::Display for BlueprintDiffSingleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BlueprintDiffSingleError::ZoneTypeChanged {
+                sled_id,
+                zone_id,
+                before,
+                after,
+            } => write!(
+                f,
+                "on sled {}, zone {} changed type from {} to {}",
+                zone_id, sled_id, before, after
+            ),
+        }
+    }
+}
+
+
+/// Data about the "before" version within a [`OmicronZonesDiff`].
+#[derive(Clone, Debug)]
+pub enum DiffBeforeMetadata {
     Collection { id: Uuid },
     Blueprint(BlueprintDiffMetadata),
 }
 
-#[derive(Debug)]
+impl DiffBeforeMetadata {
+    pub fn display_id(&self) -> String {
+        match self {
+            DiffBeforeMetadata::Collection { id } => format!("collection {id}"),
+            DiffBeforeMetadata::Blueprint(b) => format!("blueprint {}", b.id),
+        }
+    }
+    
+}
+
+/// General metadata about a blueprint stored within a [`OmicronZonesDiff`].
+/// 
+/// This can either be [`OmicronZonesDiff::after_meta`], or the payload of the
+/// [`DiffBeforeMetadata::Blueprint`] variant.
+#[derive(Clone, Debug)]
 struct BlueprintDiffMetadata {
-    id: Uuid,
-    internal_dns_version: Generation,
-    external_dns_version: Generation,
+    pub id: Uuid,
+    pub internal_dns_version: Generation,
+    pub external_dns_version: Generation,
 }
 
 /// Describes a sled that appeared on both sides of a diff (possibly changed)
@@ -585,23 +769,24 @@ impl<'a> DiffZoneCommon<'a> {
     /// Returns true if there are any differences between `zone_before` and
     /// `zone_after`.
     ///
-    /// This is equivalent to `config_changed() || policy_changed()`.
+    /// This is equivalent to `config_changed() || disposition_changed()`.
     #[inline]
     pub fn is_changed(&self) -> bool {
-        // policy is smaller and easier to compare than config.
-        self.policy_changed() || self.config_changed()
+        // state is smaller and easier to compare than config.
+        self.disposition_changed() || self.config_changed()
     }
 
-    /// Returns true if the zone configuration (excluding the policy) changed.
+    /// Returns true if the zone configuration (excluding the disposition)
+    /// changed.
     #[inline]
     pub fn config_changed(&self) -> bool {
         self.zone_before.config != self.zone_after.config
     }
 
-    /// Returns true if the policy for the zone changed.
+    /// Returns true if the [`BlueprintZoneDisposition`] for the zone changed.
     #[inline]
-    pub fn policy_changed(&self) -> bool {
-        self.zone_before.zone_policy != self.zone_after.zone_policy
+    pub fn disposition_changed(&self) -> bool {
+        self.zone_before.disposition != self.zone_after.disposition
     }
 }
 
@@ -683,9 +868,16 @@ impl<'a> OmicronZonesDiff<'a> {
 
             // Since we removed common zones above, anything else exists only in
             // b2 and was therefore added.
-            let zones_added = b2_zones.into_values().collect();
+            let mut zones_added: Vec<_> = b2_zones.into_values().collect();
 
-            (
+            zones_added.sort_unstable_by_key(|z| zone_sort_key(z));
+            zones_removed.sort_unstable_by_key(|z| zone_sort_key(z));
+            zones_common.sort_unstable_by_key(|c| {
+                // The ID of the before and after is the same by definition,
+                // and in regular use we always expect the kind to be the same.
+                // It is however possible to pass in a blueprint, but we don't
+                // worry about that here and just use the before kind.
+            })(
                 sled_id,
                 DiffSledCommon {
                     sled_id,
@@ -775,7 +967,7 @@ impl<'diff, 'a> fmt::Display for OmicronZonesDiffDisplay<'diff, 'a> {
             }
         }
 
-        writeln!(f, "\nzones:\n{}", self.make_zones_diff_table())?;
+        writeln!(f, "\n=====\nZONES\n=====\n{}", self.make_zones_diff_table())?;
 
         Ok(())
     }
@@ -824,11 +1016,24 @@ mod table_display {
     const ARROW: &str = "->";
     const ARROW_UNCHANGED: &str = "  ";
     const ZONE_ID_HEADER: &str = "zone ID";
-    const POLICY_HEADER: &str = "policy";
     const ZONE_TYPE_HEADER: &str = "zone type";
+    const DISPOSITION_HEADER: &str = "disposition";
     const UNDERLAY_IP_HEADER: &str = "underlay IP";
+    const REMOVED_SLEDS_SUBHEADER: &str = "removed sleds";
+    const EXISTING_SLEDS_SUBHEADER: &str = "existing sleds";
+    const ADDED_SLEDS_SUBHEADER: &str = "added sleds";
+    const REMOVED_ZONES_SUBHEADER: &str = "removed zones";
+    const CHANGED_ZONES_SUBHEADER: &str = "changed zones";
+    const UNCHANGED_ZONES_SUBHEADER: &str = "unchanged zones";
+    const ADDED_ZONES_SUBHEADER: &str = "added zones";
     const UNCHANGED: &str = "(unchanged)";
     const CONFIG_CHANGED: &str = "(config changed)";
+
+    fn add_header_underline(header: &str) -> String {
+        // We just add a newline and the same number of dashes as the header.
+        // Header text is always ASCII, so using .len() is fine.
+        format!("{}\n{}", header, "-".repeat(header.len()))
+    }
 
     impl<'a> super::BlueprintDisplay<'a> {
         pub(super) fn make_zones_table(&self) -> Table {
@@ -838,7 +1043,7 @@ mod table_display {
             for (sled_id, sled_zones) in blueprint_zones {
                 // Add a heading row.
                 builder.push_heading(format!(
-                    "{SLED_INDENT}sled {sled_id}: zones at generation {}",
+                    "{SLED_INDENT}sled {sled_id}:\n{SLED_INDENT}  zones at generation {}",
                     sled_zones.generation
                 ));
 
@@ -895,7 +1100,7 @@ mod table_display {
                 for (i, zone) in sled_changes.zones_removed().enumerate() {
                     if i == 0 {
                         builder.push_subheading(format!(
-                            "{REMOVED_PREFIX}{SLED_SUBHEAD_INDENT}removed zones:"
+                            "{REMOVED_PREFIX}{SLED_SUBHEAD_INDENT}{REMOVED_ZONES_SUBHEADER}:"
                         ));
                     }
                     builder.push_zone_record(
@@ -910,7 +1115,7 @@ mod table_display {
                 {
                     if i == 0 {
                         builder.push_subheading(format!(
-                            "{CHANGED_PREFIX}{SLED_SUBHEAD_INDENT}changed zones:"
+                            "{CHANGED_PREFIX}{SLED_SUBHEAD_INDENT}{CHANGED_ZONES_SUBHEADER}:"
                         ));
                     }
                     builder.push_change_table(
@@ -925,7 +1130,7 @@ mod table_display {
                 {
                     if i == 0 {
                         builder.push_subheading(format!(
-                            "{UNCHANGED_PREFIX}{SLED_SUBHEAD_INDENT}unchanged zones:"
+                            "{UNCHANGED_PREFIX}{SLED_SUBHEAD_INDENT}{UNCHANGED_ZONES_SUBHEADER}:"
                         ));
                     }
                     builder.push_zone_record(
@@ -937,7 +1142,7 @@ mod table_display {
                 for (i, zone) in sled_changes.zones_added().enumerate() {
                     if i == 0 {
                         builder.push_subheading(format!(
-                            "{ADDED_PREFIX}{SLED_SUBHEAD_INDENT}added zones:"
+                            "{ADDED_PREFIX}{SLED_SUBHEAD_INDENT}{ADDED_ZONES_SUBHEADER}:"
                         ));
                     }
                     builder.push_zone_record(
@@ -1012,10 +1217,10 @@ mod table_display {
             let mut builder = Builder::new();
             builder.push_record(vec![
                 zone_indent,
-                ZONE_ID_HEADER.to_string(),
-                POLICY_HEADER.to_string(),
-                ZONE_TYPE_HEADER.to_string(),
-                UNDERLAY_IP_HEADER.to_string(),
+                add_header_underline(ZONE_ID_HEADER),
+                add_header_underline(ZONE_TYPE_HEADER),
+                add_header_underline(DISPOSITION_HEADER),
+                add_header_underline(UNDERLAY_IP_HEADER),
             ]);
 
             Self {
@@ -1055,8 +1260,8 @@ mod table_display {
             self.builder.push_record(vec![
                 first_column,
                 zone.config.id.to_string(),
-                zone.zone_policy.to_string(),
-                zone.config.zone_type.tag().to_string(),
+                zone.config.zone_type.kind().to_string(),
+                zone.disposition.to_string(),
                 zone.config.underlay_address.to_string(),
             ]);
         }
@@ -1096,17 +1301,17 @@ mod table_display {
     ) -> Table {
         let mut builder = Builder::new();
 
-        if before.zone_policy != after.zone_policy {
+        if before.disposition != after.disposition {
             builder.push_record(vec![
-                POLICY_HEADER.to_string(),
-                before.zone_policy.to_string(),
+                DISPOSITION_HEADER.to_string(),
+                before.disposition.to_string(),
                 ARROW.to_string(),
-                after.zone_policy.to_string(),
+                after.disposition.to_string(),
             ]);
         } else {
             builder.push_record(vec![
-                POLICY_HEADER.to_string(),
-                before.zone_policy.to_string(),
+                DISPOSITION_HEADER.to_string(),
+                before.disposition.to_string(),
                 ARROW_UNCHANGED.to_string(),
                 UNCHANGED.to_string(),
             ]);
@@ -1121,19 +1326,19 @@ mod table_display {
             //
             // TODO: also print out the exact bits of configuration that
             // changed.
-            if before.config.zone_type.tag() != after.config.zone_type.tag() {
+            if before.config.zone_type.kind() != after.config.zone_type.kind() {
                 // Case 1
                 builder.push_record(vec![
                     ZONE_TYPE_HEADER.to_string(),
-                    before.config.zone_type.tag().to_string(),
+                    before.config.zone_type.kind().to_string(),
                     ARROW.to_string(),
-                    after.config.zone_type.tag().to_string(),
+                    after.config.zone_type.kind().to_string(),
                 ]);
             } else {
                 // Case 2
                 builder.push_record(vec![
                     ZONE_TYPE_HEADER.to_string(),
-                    before.config.zone_type.tag().to_string(),
+                    before.config.zone_type.kind().to_string(),
                     ARROW_UNCHANGED.to_string(),
                     CONFIG_CHANGED.to_string(),
                 ]);
@@ -1141,7 +1346,7 @@ mod table_display {
         } else {
             builder.push_record(vec![
                 ZONE_TYPE_HEADER.to_string(),
-                before.config.zone_type.tag().to_string(),
+                before.config.zone_type.kind().to_string(),
                 ARROW_UNCHANGED.to_string(),
                 UNCHANGED.to_string(),
             ]);
@@ -1185,25 +1390,23 @@ mod table_display {
     fn apply_general_settings(table: &mut Table) {
         table
             .with(tabled::settings::Style::blank())
-            .with(Alignment::center())
-            // Column 0 is the indent and prefix column, and it should not
-            // have any padding.
+            .with(Alignment::left())
             .with(
+                // Column 0 is the indent and prefix column, and it should not
+                // have any padding.
                 Modify::new(Columns::first())
                     .with(Padding::zero())
                     .with(Border::empty()),
             )
             .with(
-                Modify::new(Columns::single(1))
-                    // Column 1 (sled ID) gets some extra padding to separate
-                    // it from the other columns (particularly relevant with
-                    // changed zones, where we use ':' as a border.
-                    .with(Padding::new(0, 2, 0, 0)),
+                Modify::new(Columns::single(1)).with(Padding::new(0, 1, 0, 0)),
             )
             .with(
-                // Column 2 gets extra padding on the left to be symmetrical to
-                // column 1.
-                Modify::new(Columns::single(2)).with(Padding::new(2, 0, 0, 0)),
+                Modify::new(Columns::single(2))
+                    // Column 2 (zone type) gets some extra padding to separate
+                    // it from the other columns (particularly relevant with
+                    // changed zones, where we use ':' as a border.
+                    .with(Padding::new(1, 2, 0, 0)),
             );
     }
 
@@ -1214,9 +1417,8 @@ mod table_display {
                     // Adjust each heading row to span the whole column.
                     .with(ColumnSpan::new(5))
                     .with(Alignment::left())
-                    // Add a row of padding at the top and bottom of each
-                    // heading.
-                    .with(Padding::new(0, 0, 1, 1)),
+                    // Add a row of padding at the of each heading.
+                    .with(Padding::new(0, 0, 1, 0)),
             );
         }
     }

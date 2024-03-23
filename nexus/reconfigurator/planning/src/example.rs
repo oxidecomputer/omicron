@@ -9,6 +9,7 @@ use crate::blueprint_builder::UuidRng;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::Policy;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
@@ -115,7 +116,9 @@ impl ExampleSystem {
                 .found_sled_omicron_zones(
                     "fake sled agent",
                     sled_id,
-                    zones.to_omicron_zones_config(),
+                    zones.to_omicron_zones_config(
+                        BlueprintZoneFilter::SledAgentPut,
+                    ),
                 )
                 .unwrap();
         }

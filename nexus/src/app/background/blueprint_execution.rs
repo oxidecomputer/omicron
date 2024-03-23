@@ -40,7 +40,10 @@ impl BlueprintExecutor {
     }
 
     /// Implementation for `BackgroundTask::activate` for `BlueprintExecutor`,
-    /// added here to produce better errors.
+    /// added here to produce better compile errors.
+    ///
+    /// The presence of `boxed()` in `BackgroundTask::activate` has caused some
+    /// confusion with errors in the past. So separate this method out.
     async fn activate_impl<'a>(
         &mut self,
         opctx: &OpContext,
@@ -117,8 +120,8 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
-        Blueprint, BlueprintTarget, BlueprintZoneConfig, BlueprintZonePolicy,
-        BlueprintZonesConfig,
+        Blueprint, BlueprintTarget, BlueprintZoneConfig,
+        BlueprintZoneDisposition, BlueprintZonesConfig,
     };
     use nexus_types::inventory::{
         OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType,
@@ -233,7 +236,9 @@ mod test {
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
         // reporting success.
-        fn make_zones() -> BlueprintZonesConfig {
+        fn make_zones(
+            disposition: BlueprintZoneDisposition,
+        ) -> BlueprintZonesConfig {
             BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![BlueprintZoneConfig {
@@ -252,18 +257,20 @@ mod test {
                             http_address: "some-ipv6-address".into(),
                         },
                     },
-                    // XXX: NotInService retains the previous test behavior --
-                    // we may wish to change this to InService.
-                    zone_policy: BlueprintZonePolicy::NotInService,
+                    disposition,
                 }],
             }
         }
 
         let generation = generation.next();
+
+        // Both in-service and quiesced zones should be deployed.
+        //
+        // TODO: add expunged zones to the test (should not be deployed).
         let mut blueprint = create_blueprint(
             BTreeMap::from([
-                (sled_id1, make_zones()),
-                (sled_id2, make_zones()),
+                (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
+                (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
             ]),
             generation,
         );

@@ -490,7 +490,7 @@ mod test {
                         &mut s,
                         "        zone {} type {}\n",
                         zone.id,
-                        zone.zone_type.tag(),
+                        zone.zone_type.kind(),
                     )
                     .unwrap();
                 }
