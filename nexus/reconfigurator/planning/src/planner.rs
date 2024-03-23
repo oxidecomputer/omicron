@@ -340,6 +340,7 @@ mod test {
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
+    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -483,7 +484,9 @@ mod test {
                         .blueprint_zones
                         .get(&new_sled_id)
                         .expect("blueprint should contain zones for new sled")
-                        .to_omicron_zones_config()
+                        .to_omicron_zones_config(
+                            BlueprintZoneFilter::SledAgentPut
+                        )
                 }
             )
             .is_none());

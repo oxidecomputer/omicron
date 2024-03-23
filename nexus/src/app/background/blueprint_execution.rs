@@ -236,7 +236,9 @@ mod test {
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
         // reporting success.
-        fn make_zones() -> BlueprintZonesConfig {
+        fn make_zones(
+            disposition: BlueprintZoneDisposition,
+        ) -> BlueprintZonesConfig {
             BlueprintZonesConfig {
                 generation: Generation::new(),
                 zones: vec![BlueprintZoneConfig {
@@ -255,18 +257,20 @@ mod test {
                             http_address: "some-ipv6-address".into(),
                         },
                     },
-                    // XXX: NotInService retains the previous test behavior --
-                    // we may wish to change this to InService.
-                    disposition: BlueprintZoneDisposition::Quiesced,
+                    disposition,
                 }],
             }
         }
 
         let generation = generation.next();
+
+        // Both in-service and quiesced zones should be deployed.
+        //
+        // TODO: add expunged zones to the test (should not be deployed).
         let mut blueprint = create_blueprint(
             BTreeMap::from([
-                (sled_id1, make_zones()),
-                (sled_id2, make_zones()),
+                (sled_id1, make_zones(BlueprintZoneDisposition::InService)),
+                (sled_id2, make_zones(BlueprintZoneDisposition::Quiesced)),
             ]),
             generation,
         );

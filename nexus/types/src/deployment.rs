@@ -355,6 +355,7 @@ impl BlueprintZonesConfig {
             generation: collection.generation,
             zones,
         };
+        // For testing, it's helpful for zones to be in sorted order.
         ret.sort();
 
         ret
@@ -363,16 +364,29 @@ impl BlueprintZonesConfig {
     /// Sorts the list of zones stored in this configuration.
     ///
     /// This is not strictly necessary. But for testing, it's helpful for
-    /// things to be in sorted order.
+    /// zones to be in sorted order.
     pub fn sort(&mut self) {
         self.zones.sort_unstable_by_key(|z| z.config.id);
     }
 
-    /// Converts self to an [`OmicronZonesConfig`].
-    pub fn to_omicron_zones_config(&self) -> OmicronZonesConfig {
+    /// Converts self to an [`OmicronZonesConfig`], applying the provided
+    /// [`BlueprintZoneFilter`].
+    ///
+    /// The filter controls which zones should be exported into the resulting
+    /// [`OmicronZonesConfig`].
+    pub fn to_omicron_zones_config(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> OmicronZonesConfig {
         OmicronZonesConfig {
             generation: self.generation,
-            zones: self.zones.iter().map(|z| z.config.clone()).collect(),
+            zones: self
+                .zones
+                .iter()
+                .filter_map(|z| {
+                    z.disposition.matches(filter).then(|| z.config.clone())
+                })
+                .collect(),
         }
     }
 }
@@ -468,6 +482,7 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
+                BlueprintZoneFilter::SledAgentPut => true,
                 BlueprintZoneFilter::InternalDns => true,
                 BlueprintZoneFilter::VpcFirewall => true,
             },
@@ -476,6 +491,9 @@ impl BlueprintZoneDisposition {
 
                 // Quiesced zones should not be exposed in DNS.
                 BlueprintZoneFilter::InternalDns => false,
+
+                // Quiesced zones are expected to be deployed by sled-agent.
+                BlueprintZoneFilter::SledAgentPut => true,
 
                 // Quiesced zones should get firewall rules.
                 BlueprintZoneFilter::VpcFirewall => true,
@@ -520,6 +538,9 @@ pub enum BlueprintZoneFilter {
 
     /// Filter by zones that should be in internal DNS.
     InternalDns,
+
+    /// Filter by zones that we should tell sled-agent to deploy.
+    SledAgentPut,
 
     /// Filter by zones that should be sent VPC firewall rules.
     VpcFirewall,

@@ -10,7 +10,7 @@ use anyhow::Context;
 use futures::stream;
 use futures::StreamExt;
 use nexus_db_queries::context::OpContext;
-use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use slog::info;
 use slog::warn;
@@ -24,15 +24,6 @@ pub(crate) async fn deploy_zones(
     sleds_by_id: &BTreeMap<Uuid, Sled>,
     zones: &BTreeMap<Uuid, BlueprintZonesConfig>,
 ) -> Result<(), Vec<anyhow::Error>> {
-    // Make this code fail to compile if a new zone state is added.
-    {
-        let zs = BlueprintZoneDisposition::InService;
-        match zs {
-            BlueprintZoneDisposition::InService => (),
-            BlueprintZoneDisposition::Quiesced => (),
-        }
-    }
-
     let errors: Vec<_> = stream::iter(zones)
         .filter_map(|(sled_id, config)| async move {
             let db_sled = match sleds_by_id.get(sled_id) {
@@ -49,7 +40,8 @@ pub(crate) async fn deploy_zones(
                 db_sled.sled_agent_address,
                 &opctx.log,
             );
-            let omicron_zones = config.to_omicron_zones_config();
+            let omicron_zones = config
+                .to_omicron_zones_config(BlueprintZoneFilter::SledAgentPut);
             let result = client
                 .omicron_zones_put(&omicron_zones)
                 .await
@@ -278,7 +270,10 @@ mod test {
         s2.verify_and_clear();
 
         // Add an `InternalNtp` zone for our next update
-        fn append_zone(zones: &mut BlueprintZonesConfig) {
+        fn append_zone(
+            zones: &mut BlueprintZonesConfig,
+            disposition: BlueprintZoneDisposition,
+        ) {
             zones.generation = zones.generation.next();
             zones.zones.push(BlueprintZoneConfig {
                 config: OmicronZoneConfig {
@@ -291,14 +286,15 @@ mod test {
                         ntp_servers: vec!["some-ntp-server-addr".into()],
                     },
                 },
-                // XXX: NotInService retains the previous test behavior -- we
-                // may wish to change this to InService.
-                disposition: BlueprintZoneDisposition::Quiesced,
+                disposition,
             });
         }
 
-        append_zone(&mut zones1);
-        append_zone(&mut zones2);
+        // Both in-service and quiesced zones should be deployed.
+        //
+        // TODO: add expunged zones to the test (should not be deployed).
+        append_zone(&mut zones1, BlueprintZoneDisposition::InService);
+        append_zone(&mut zones2, BlueprintZoneDisposition::Quiesced);
         let (_, blueprint) = create_blueprint(BTreeMap::from([
             (sled_id1, zones1),
             (sled_id2, zones2),
