@@ -557,6 +557,9 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         // BFD config
         for spec in &rack_network_config.bfd {
+            if spec.switch != switch_location {
+                continue;
+            }
             let cfg = BfdPeerConfig {
                 detection_threshold: spec.detection_threshold,
                 listen: spec.local.unwrap_or(Ipv4Addr::UNSPECIFIED.into()),

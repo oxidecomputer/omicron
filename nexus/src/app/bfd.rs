@@ -42,6 +42,10 @@ impl super::Nexus {
         self.background_tasks
             .driver
             .activate(&self.background_tasks.bfd_manager);
+        // for timely propagation to bootstore
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
     }
 
@@ -56,6 +60,10 @@ impl super::Nexus {
         self.background_tasks
             .driver
             .activate(&self.background_tasks.bfd_manager);
+        // for timely propagation to bootstore
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
     }
 
