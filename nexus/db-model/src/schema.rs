@@ -874,20 +874,6 @@ table! {
 }
 
 table! {
-    service (id) {
-        id -> Uuid,
-        time_created -> Timestamptz,
-        time_modified -> Timestamptz,
-
-        sled_id -> Uuid,
-        zone_id -> Nullable<Uuid>,
-        ip -> Inet,
-        port -> Int4,
-        kind -> crate::ServiceKindEnum,
-    }
-}
-
-table! {
     physical_disk (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1668,7 +1654,6 @@ allow_tables_to_appear_in_same_query!(
     silo,
     identity_provider,
     console_session,
-    service,
     sled,
     sled_resource,
     router_route,
@@ -1684,7 +1669,6 @@ allow_tables_to_appear_in_same_query!(
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
-allow_tables_to_appear_in_same_query!(external_ip, service);
 
 // used for query to check whether an IP pool association has any allocated IPs before deleting
 allow_tables_to_appear_in_same_query!(external_ip, instance);

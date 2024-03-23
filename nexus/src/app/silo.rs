@@ -100,7 +100,14 @@ impl super::Nexus {
             .blueprint_target_get_current_full(opctx)
             .await
             .internal_context("loading target blueprint")?;
-        let target = target_blueprint.as_ref().map(|(_, blueprint)| blueprint);
+        let target = target_blueprint
+            .as_ref()
+            .map(|(_, blueprint)| blueprint)
+            .ok_or_else(|| {
+                Error::internal_error(
+                    "cannot create silos with no target blueprint set",
+                )
+            })?;
         let (nexus_external_ips, nexus_external_dns_zones) =
             datastore.nexus_external_addresses(nexus_opctx, target).await?;
         let dns_records: Vec<DnsRecord> = nexus_external_ips
