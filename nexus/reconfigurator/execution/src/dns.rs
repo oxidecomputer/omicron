@@ -18,7 +18,7 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -249,14 +249,9 @@ pub fn blueprint_internal_dns_config(
             .map(|addr| addr.port())
     }
 
-    for (_, zone) in blueprint.all_blueprint_zones() {
-        match zone.zone_policy {
-            BlueprintZonePolicy::InService => {}
-            BlueprintZonePolicy::NotInService => {
-                continue;
-            }
-        }
-
+    for (_, zone) in
+        blueprint.all_blueprint_zones(BlueprintZoneFilter::InternalDns)
+    {
         let context = || {
             format!(
                 "parsing {} zone with id {}",
@@ -475,7 +470,7 @@ mod test {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZonePolicy;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
     use nexus_types::deployment::Policy;
@@ -630,12 +625,12 @@ mod test {
                         .to_string(),
                     },
                 },
-                zone_policy: BlueprintZonePolicy::NotInService,
+                disposition: BlueprintZoneDisposition::Quiesced,
             },
         );
 
         // To generate the blueprint's DNS config, we need to make up a
-        // different set of information about the sleds in our fake system.
+        // different set of information about the Quiesced fake system.
         let sleds_by_id = policy
             .sleds
             .iter()

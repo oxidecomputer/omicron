@@ -43,6 +43,8 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -694,6 +696,44 @@ impl DataStore {
 
         // ... and we also need to query for the current target blueprint to
         // support systems that _are_ under Reconfigurator control.
+
+        {
+            // Ideally this would do something like:
+            //
+            // .filter(bp_omicron_zone::disposition.eq_any(
+            //     BlueprintZoneDisposition::all_matching(
+            //         BlueprintZoneFilter::VpcFirewall,
+            //     ),
+            // )
+            //
+            // But that doesn't quite work today because we currently don't
+            // store the disposition enum next to each zone. Instead, this code
+            // makes its decision to select which sleds to return by just
+            // ignoring the zones_in_service table today.
+            //
+            // The purpose of this otherwise pointless block is to ensure that
+            // it is correct to ensure that the expressed logic by
+            // `BlueprintZoneFilter::VpcFirewall` matches the actual
+            // implementation. It will hopefully soon be replaced with storing
+            // the disposition in the bp_omicron_zone table and using the
+            // filter directly.
+
+            let mut matching = BlueprintZoneDisposition::all_matching(
+                BlueprintZoneFilter::VpcFirewall,
+            )
+            .collect::<Vec<_>>();
+            matching.sort();
+            let mut all = BlueprintZoneDisposition::all_matching(
+                BlueprintZoneFilter::All,
+            )
+            .collect::<Vec<_>>();
+            all.sort();
+            debug_assert_eq!(
+                matching, all,
+                "vpc firewall dispositions should match all dispositions"
+            );
+        }
+
         let reconfig_service_query = service_network_interface::table
             .inner_join(bp_omicron_zone::table.on(
                 bp_omicron_zone::id.eq(service_network_interface::service_id),
@@ -1253,7 +1293,7 @@ mod tests {
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
-    use nexus_types::deployment::BlueprintZonePolicy;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
@@ -1602,9 +1642,7 @@ mod tests {
                 };
                 let zone_config = BlueprintZoneConfig {
                     config,
-                    // XXX: NotInService retains the previous test behavior --
-                    // we may wish to change this to InService.
-                    zone_policy: BlueprintZonePolicy::NotInService,
+                    disposition: BlueprintZoneDisposition::InService,
                 };
                 (service.sled_id, zone_config)
             })

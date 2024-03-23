@@ -43,7 +43,8 @@ use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::BlueprintZonePolicy;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -119,12 +120,15 @@ impl DataStore {
         // This will soon be replaced with an extra column in the
         // `bp_omicron_zone` table, coupled with other data migrations.
         let omicron_zones_not_in_service = blueprint
-            .all_blueprint_zones()
+            .all_blueprint_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, zone)| {
-                // Exhaustive match so this fails if we add a new variant.
-                match zone.zone_policy {
-                    BlueprintZonePolicy::InService => None,
-                    BlueprintZonePolicy::NotInService => {
+                // This is going to go away soon when we change the database
+                // representation to store the zone disposition enum next to
+                // each zone. For now, do an exhaustive match so that this
+                // fails if we add a new variant.
+                match zone.disposition {
+                    BlueprintZoneDisposition::InService => None,
+                    BlueprintZoneDisposition::Quiesced => {
                         Some(BpOmicronZoneNotInService {
                             blueprint_id,
                             bp_omicron_zone_id: zone.config.id,
@@ -460,14 +464,14 @@ impl DataStore {
                             ))
                         })?;
                     let zone_id = z.id;
-                    let zone_policy =
+                    let disposition =
                         if omicron_zones_not_in_service.remove(&zone_id) {
-                            BlueprintZonePolicy::NotInService
+                            BlueprintZoneDisposition::Quiesced
                         } else {
-                            BlueprintZonePolicy::InService
+                            BlueprintZoneDisposition::InService
                         };
                     let zone = z
-                        .into_blueprint_zone_config(nic_row, zone_policy)
+                        .into_blueprint_zone_config(nic_row, disposition)
                         .with_context(|| {
                             format!("zone {:?}: parse from database", zone_id)
                         })
@@ -1417,7 +1421,7 @@ mod tests {
             collection.omicron_zones.len()
         );
         assert_eq!(
-            blueprint1.all_blueprint_zones().count(),
+            blueprint1.all_omicron_zones().count(),
             collection.all_omicron_zones().count()
         );
         // All zones should be in service.
@@ -1494,8 +1498,8 @@ mod tests {
             blueprint2.blueprint_zones.len()
         );
         assert_eq!(
-            blueprint1.all_blueprint_zones().count() + num_new_sled_zones,
-            blueprint2.all_blueprint_zones().count()
+            blueprint1.all_omicron_zones().count() + num_new_sled_zones,
+            blueprint2.all_omicron_zones().count()
         );
 
         // All zones should be in service.
@@ -1870,8 +1874,10 @@ mod tests {
 
     fn assert_all_zones_in_service(blueprint: &Blueprint) {
         let not_in_service = blueprint
-            .all_blueprint_zones()
-            .filter(|(_, z)| z.zone_policy != BlueprintZonePolicy::InService)
+            .all_blueprint_zones(BlueprintZoneFilter::All)
+            .filter(|(_, z)| {
+                z.disposition != BlueprintZoneDisposition::InService
+            })
             .collect::<Vec<_>>();
         assert!(
             not_in_service.is_empty(),

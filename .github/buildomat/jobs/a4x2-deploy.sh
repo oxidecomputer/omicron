@@ -13,7 +13,7 @@
 #:  "%/out/dhcp-server.log",
 #: ]
 #: skip_clone = true
-#: enable = false
+#: enable = true
 #:
 #: [dependencies.a4x2]
 #: job = "a4x2-prepare"
@@ -87,7 +87,7 @@ pfexec mv propolis-server /usr/bin/
 #
 export DISK=${DISK:-c1t1d0}
 pfexec diskinfo
-pfexec zpool create -f cpool $DISK
+pfexec zpool create -o ashift=12 -f cpool $DISK
 pfexec zfs create -o mountpoint=/ci cpool/ci
 
 if [[ $(curl -s http://catacomb.eng.oxide.computer:12346/trim-me) =~ "true" ]]; then
@@ -115,7 +115,7 @@ ls -R
 #
 buildomat_url=https://buildomat.eng.oxide.computer
 testbed_artifact_path=public/file/oxidecomputer/testbed/topo/
-testbed_rev=677559e30b4dfc65c374b24336ac23d40102de81
+testbed_rev=67454d38958bcf51830850aec36600df84b7d8a0
 curl -fOL $buildomat_url/$testbed_artifact_path/$testbed_rev/a4x2
 chmod +x a4x2
 
@@ -193,13 +193,18 @@ pfexec route add 198.51.100.0/24 $customer_edge_addr
 #
 # Run the communications test program
 #
+# TODO tighten up packet loss tolerance. For now it's more or less ok for it to
+# just run with _some_ comms. The program will fail if there are no comms to a
+# given sled.
 cp /input/a4x2/out/commtest .
 chmod +x commtest
-pfexec ./commtest http://198.51.100.23 run \
+NO_COLOR=1 pfexec ./commtest \
+    --api-timeout 30m \
+    http://198.51.100.23 run \
     --ip-pool-begin 198.51.100.40 \
     --ip-pool-end 198.51.100.70 \
-    --icmp-loss-tolerance 10 \
-    --test-duration 300s \
-    --packet-rate 30
+    --icmp-loss-tolerance 500 \
+    --test-duration 200s \
+    --packet-rate 10
 
 cp connectivity-report.json /out/

@@ -340,6 +340,7 @@ mod test {
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
+    use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
@@ -483,7 +484,9 @@ mod test {
                         .blueprint_zones
                         .get(&new_sled_id)
                         .expect("blueprint should contain zones for new sled")
-                        .to_omicron_zones_config()
+                        .to_omicron_zones_config(
+                            BlueprintZoneFilter::SledAgentPut
+                        )
                 }
             )
             .is_none());
@@ -524,9 +527,9 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), 10);
         for zone in &zones {
-            let OmicronZoneType::Crucible { .. } = zone.config.zone_type else {
+            if !zone.config.zone_type.is_crucible() {
                 panic!("unexpectedly added a non-Crucible zone: {zone:?}");
-            };
+            }
         }
         verify_blueprint(&blueprint5);
 
@@ -642,9 +645,9 @@ mod test {
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), policy.target_nexus_zone_count - 1);
         for zone in &zones {
-            let OmicronZoneType::Nexus { .. } = zone.config.zone_type else {
+            if !zone.config.zone_type.is_nexus() {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
-            };
+            }
         }
 
         logctx.cleanup_successful();
@@ -727,10 +730,9 @@ mod test {
                 }
             }
             for zone in &zones {
-                let OmicronZoneType::Nexus { .. } = zone.config.zone_type
-                else {
-                    panic!("unexpectedly added a non-Crucible zone: {zone:?}");
-                };
+                if !zone.config.zone_type.is_nexus() {
+                    panic!("unexpectedly added a non-Nexus zone: {zone:?}");
+                }
             }
         }
         assert_eq!(total_new_nexus_zones, 11);
