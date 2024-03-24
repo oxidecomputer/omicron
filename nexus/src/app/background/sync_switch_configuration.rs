@@ -39,7 +39,10 @@ use nexus_types::{external_api::params, identity::Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{get_sled_address, Ipv6Subnet},
-    api::external::{DataPageParams, SwitchLocation},
+    api::{
+        external::{DataPageParams, SwitchLocation},
+        internal::shared::ParseSwitchLocationError,
+    },
 };
 use serde_json::json;
 use sled_agent_client::types::{
@@ -209,6 +212,56 @@ impl SwitchPortSettingsManager {
         }
 
         Ok(set)
+    }
+
+    async fn bfd_peer_configs_from_db<'a>(
+        &'a mut self,
+        opctx: &OpContext,
+    ) -> Result<
+        Vec<sled_agent_client::types::BfdPeerConfig>,
+        omicron_common::api::external::Error,
+    > {
+        let db_data = self
+            .datastore
+            .bfd_session_list(opctx, &DataPageParams::max_page())
+            .await?;
+
+        let mut result = Vec::new();
+        for spec in db_data.into_iter() {
+            let config = sled_agent_client::types::BfdPeerConfig {
+                local: spec.local.map(|x| x.ip()),
+                remote: spec.remote.ip(),
+                detection_threshold: spec.detection_threshold.0.try_into().map_err(|_| {
+                    omicron_common::api::external::Error::InternalError {
+                        internal_message: format!(
+                            "db_bfd_peer_configs: detection threshold overflow: {}",
+                            spec.detection_threshold.0,
+                        ),
+                    }
+                })?,
+                required_rx: spec.required_rx.0.into(),
+                mode: match spec.mode {
+                    nexus_db_model::BfdMode::SingleHop => {
+                        sled_agent_client::types::BfdMode::SingleHop
+                    }
+                    nexus_db_model::BfdMode::MultiHop => {
+                        sled_agent_client::types::BfdMode::MultiHop
+                    }
+                },
+                switch: spec.switch.parse().map_err(|e: ParseSwitchLocationError| {
+                    omicron_common::api::external::Error::InternalError {
+                        internal_message: format!(
+                            "db_bfd_peer_configs: failed to parse switch name: {}: {:?}",
+                            spec.switch,
+                            e,
+                        ),
+                    }
+                })?,
+            };
+            result.push(config);
+        }
+
+        Ok(result)
     }
 }
 
@@ -799,6 +852,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 ;
 
 
+                let bfd = match self.bfd_peer_configs_from_db(opctx).await {
+                    Ok(bfd) => bfd,
+                    Err(e) => {
+                        error!(log, "error fetching bfd config from db"; "error" => %e);
+                        continue;
+                    }
+                };
+
                 let mut desired_config = EarlyNetworkConfig {
                     generation: 0,
                     schema_version: 1,
@@ -810,6 +871,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             infra_ip_last,
                             ports,
                             bgp,
+                            bfd,
                         }),
                     },
                 };
@@ -838,6 +900,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 let rnc_differs = match (config.body.rack_network_config.clone(), desired_config.body.rack_network_config.clone()) {
                                     (Some(current_rnc), Some(desired_rnc)) => {
                                         !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
+                                        !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
                                         !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
                                         current_rnc.rack_subnet != desired_rnc.rack_subnet ||
                                         current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||

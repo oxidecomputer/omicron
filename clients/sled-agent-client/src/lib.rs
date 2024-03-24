@@ -11,7 +11,9 @@ use std::convert::TryFrom;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::SocketAddr;
-use types::{BgpConfig, BgpPeerConfig, PortConfigV1, RouteConfig};
+use types::{
+    BfdPeerConfig, BgpConfig, BgpPeerConfig, PortConfigV1, RouteConfig,
+};
 use uuid::Uuid;
 
 progenitor::generate_api!(
@@ -667,5 +669,18 @@ impl Hash for PortConfigV1 {
         self.switch.hash(state);
         self.uplink_port_fec.hash(state);
         self.uplink_port_speed.hash(state);
+    }
+}
+
+impl Eq for BfdPeerConfig {}
+
+impl Hash for BfdPeerConfig {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.local.hash(state);
+        self.remote.hash(state);
+        self.detection_threshold.hash(state);
+        self.required_rx.hash(state);
+        self.mode.hash(state);
+        self.switch.hash(state);
     }
 }
