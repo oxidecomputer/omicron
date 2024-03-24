@@ -12,8 +12,12 @@ peg::parser! {
         use crate::oxql::ast::table_ops::align::Align;
         use crate::oxql::ast::table_ops::align::AlignmentMethod;
         use crate::oxql::ast::table_ops::filter::FilterAtom;
+        use crate::oxql::ast::table_ops::filter::SimpleFilter;
         use crate::oxql::ast::table_ops::filter::FilterExpr;
+        use crate::oxql::ast::table_ops::filter::FilterExpr2;
         use crate::oxql::ast::table_ops::filter::Filter;
+        use crate::oxql::ast::table_ops::filter::Filter2;
+        use crate::oxql::ast::table_ops::filter::CompoundFilter;
         use crate::oxql::ast::table_ops::get::Get;
         use crate::oxql::ast::table_ops::group_by::GroupBy;
         use crate::oxql::ast::ident::Ident;
@@ -332,6 +336,70 @@ peg::parser! {
             / "&&" { LogicalOp::And }
             / "^" { LogicalOp::Xor }
 
+
+        // Right logic, fill in types.
+        pub rule not() = "!"
+        pub rule factor() -> Filter2
+            = not() _? factor:factor()
+        {
+            Filter2 {
+                negated: !factor.negated,
+                expr: factor.expr
+            }
+        }
+        / p:primary() { p }
+
+        pub rule primary() -> Filter2
+            = atom:comparison_atom()
+        {
+            Filter2 { negated: false, expr: FilterExpr2::Simple(atom) }
+        }
+            / "(" _? or:logical_or_expr() _? ")" { or }
+
+        // A single filtering atom, comparing an identifier to a value
+        pub rule comparison_atom() -> SimpleFilter
+            = ident:ident() _? cmp:comparison() _? value:literal()
+        {
+            SimpleFilter { ident, cmp, value }
+        }
+
+        // Two filtering expressions combined with a logical OR.
+        pub rule logical_or_expr() -> Filter2
+            = left:logical_and_expr() _? "||" _? right:logical_or_expr()
+        {
+            let compound = CompoundFilter {
+                left: Box::new(left),
+                op: LogicalOp::Or,
+                right: Box::new(right),
+            };
+            Filter2 { negated: false, expr: FilterExpr2::Compound(compound) }
+        }
+            / logical_and_expr()
+
+        pub rule logical_and_expr() -> Filter2
+            = left:logical_xor_expr() _? "&&" _? right:logical_and_expr()
+        {
+            let compound = CompoundFilter {
+                left: Box::new(left),
+                op: LogicalOp::And,
+                right: Box::new(right),
+            };
+            Filter2 { negated: false, expr: FilterExpr2::Compound(compound) }
+        }
+            / logical_xor_expr()
+
+        pub rule logical_xor_expr() -> Filter2
+            = left:factor() _? "^" _? right:logical_xor_expr()
+        {
+            let compound = CompoundFilter {
+                left: Box::new(left),
+                op: LogicalOp::Xor,
+                right: Box::new(right),
+            };
+            Filter2 { negated: false, expr: FilterExpr2::Compound(compound) }
+        }
+            / factor:factor() { factor }
+
         // A filter expression, built out of multiple other filter expressions.
         pub(super) rule unnegated_filter_expr() -> Filter = precedence! {
             // Note: We need to separate the logical operations into different
@@ -416,8 +484,7 @@ peg::parser! {
         //
         // E.g., for a table operation like `filter (x == 0) && (y > 'yes')`,
         // this parses out `(x == 0) && (y > 'yes')`
-        #[cache_left_rec]
-        pub(super) rule filter_item() -> Filter
+        pub(crate) rule filter_item() -> Filter
             = expr:filter_expr() { expr }
             / atom:filter_atom() { Filter::Atom(atom) }
 
@@ -1215,5 +1282,12 @@ mod tests {
 
         assert!(query_parser::align("align whatever(100s)").is_err());
         assert!(query_parser::align("align interpolate('foo')").is_err());
+    }
+
+    #[test]
+    fn test_logical_combinations() {
+        let parsed = query_parser::logical_or_expr("a == 'b' ^ !(c == 0) && d == false").unwrap();
+        println!("{parsed}");
+        assert!(false);
     }
 }
