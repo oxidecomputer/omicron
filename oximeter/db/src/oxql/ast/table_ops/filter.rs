@@ -24,6 +24,76 @@ use regex::Regex;
 use std::collections::BTreeSet;
 use std::fmt;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Filter2 {
+    pub negated: bool,
+    pub expr: FilterExpr2,
+}
+
+impl fmt::Display for Filter2 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}({})",
+            if self.negated { "!" } else { "" },
+            self.expr,
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum FilterExpr2 {
+    Simple(SimpleFilter),
+    Compound(CompoundFilter),
+}
+
+impl fmt::Display for FilterExpr2 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FilterExpr2::Simple(inner) => write!(f, "{inner}"),
+            FilterExpr2::Compound(inner) => write!(f, "{inner}"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimpleFilter {
+    pub ident: Ident,
+    pub cmp: Comparison,
+    pub value: Literal,
+}
+
+impl fmt::Display for SimpleFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} {}",
+            self.ident,
+            self.cmp,
+            self.value,
+        )
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompoundFilter {
+    pub left: Box<Filter2>,
+    pub op: LogicalOp,
+    pub right: Box<Filter2>,
+}
+
+impl fmt::Display for CompoundFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{} {} {}",
+            self.left,
+            self.op,
+            self.right,
+        )
+    }
+}
+
 /// An AST node for the `filter` table operation.
 ///
 /// This can be a simple operation like `foo == "bar"` or a more complex
@@ -38,6 +108,34 @@ pub enum Filter {
 }
 
 impl Filter {
+    // Simplify this expression, if possible, by applying de Morgan's laws.
+    //
+    // This may return a clone of self.
+    fn simplify(&self) -> Filter {
+        match self {
+            Filter::Atom(_) => self.clone(),
+            Filter::Expr(expr) => expr.simplify(),
+        }
+    }
+
+    // Return the negation of this filter.
+    fn negate(&self) -> Filter {
+        match self {
+            Filter::Atom(atom) => {
+                Filter::Atom(FilterAtom {
+                    negated: !atom.negated,
+                    ..atom.clone()
+                })
+            }
+            Filter::Expr(expr) => {
+                Filter::Expr(FilterExpr {
+                    negated: !expr.negated,
+                    ..expr.clone()
+                })
+            }
+        }
+    }
+
     // Merge this filter with another one.
     pub(crate) fn merge(&self, other: &Filter) -> Self {
         Filter::Expr(FilterExpr {
@@ -258,6 +356,28 @@ impl FilterExpr {
             (Some(single), None) | (None, Some(single)) => Some(single),
             (Some(left), Some(right)) => Some(left.max(right)),
         }
+    }
+
+    fn simplify(&self) -> Filter {
+        // Negation of conjunction
+        if self.negated && matches!(self.op, LogicalOp::And) {
+            return Filter::Expr(FilterExpr {
+                negated: false,
+                left: Box::new(self.left.negate().simplify()),
+                op: LogicalOp::Or,
+                right: Box::new(self.right.negate().simplify()),
+            });
+        }
+        // Negation of disjunction
+        if self.negated && matches!(self.op, LogicalOp::Or) {
+            return Filter::Expr(FilterExpr {
+                negated: false,
+                left: Box::new(self.left.negate().simplify()),
+                op: LogicalOp::And,
+                right: Box::new(self.right.negate().simplify()),
+            });
+        }
+        Filter::Expr(self.clone())
     }
 }
 
@@ -781,5 +901,36 @@ mod tests {
                     .expect_err("These should not be comparable at all");
             }
         }
+    }
+
+    #[test]
+    fn test_simplify_single_expr() {
+        let original = query_parser::filter_item("!(a == 0 || b == 0)").unwrap();
+        let simplified = original.simplify();
+
+        // TODO(ben) This does not parse
+        assert_eq!(
+            simplified,
+            query_parser::filter_item("!(a == 0) && !(b == 0)").unwrap(),
+        );
+
+        // TODO(ben) But this does
+        assert_eq!(
+            simplified,
+            query_parser::filter_item("(a == 0) && (b == 0)").unwrap(),
+        );
+
+        // I think I understand why. The precedence rules are only defined for
+        // the unnegated filter expression parser. So the lower version gets
+        // parsed in that recursive manner, parsing an item && another item
+        //
+        // The negated version does not, because it just parses the prefix as a
+        // negated_atom and then expects EOF, which of course isn't there. What
+        // I _want_ to do is make the same set of precedence rules for the
+        // negated version of everything, but that doesn't compile because the
+        // macro bails.
+        //
+        // I think this suggests that we need to use the recursive rules rather
+        // than precedence-climbing.
     }
 }
