@@ -114,6 +114,24 @@ impl types::OmicronZoneType {
         }
     }
 
+    /// Identifies whether this a Crucible (not Crucible pantry) zone
+    pub fn is_crucible(&self) -> bool {
+        match self {
+            types::OmicronZoneType::Crucible { .. } => true,
+
+            types::OmicronZoneType::BoundaryNtp { .. }
+            | types::OmicronZoneType::InternalNtp { .. }
+            | types::OmicronZoneType::Clickhouse { .. }
+            | types::OmicronZoneType::ClickhouseKeeper { .. }
+            | types::OmicronZoneType::CockroachDb { .. }
+            | types::OmicronZoneType::CruciblePantry { .. }
+            | types::OmicronZoneType::ExternalDns { .. }
+            | types::OmicronZoneType::InternalDns { .. }
+            | types::OmicronZoneType::Nexus { .. }
+            | types::OmicronZoneType::Oximeter { .. } => false,
+        }
+    }
+
     /// This zone's external IP
     pub fn external_ip(&self) -> anyhow::Result<Option<IpAddr>> {
         match self {
