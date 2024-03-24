@@ -382,3 +382,30 @@ impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
         }
     }
 }
+
+impl From<types::ProducerKind>
+    for omicron_common::api::internal::nexus::ProducerKind
+{
+    fn from(kind: types::ProducerKind) -> Self {
+        use omicron_common::api::internal::nexus::ProducerKind;
+        match kind {
+            types::ProducerKind::SledAgent => ProducerKind::SledAgent,
+            types::ProducerKind::Instance => ProducerKind::Instance,
+            types::ProducerKind::Service => ProducerKind::Service,
+        }
+    }
+}
+
+impl From<types::ProducerEndpoint>
+    for omicron_common::api::internal::nexus::ProducerEndpoint
+{
+    fn from(ep: types::ProducerEndpoint) -> Self {
+        Self {
+            id: ep.id,
+            kind: ep.kind.into(),
+            address: ep.address.parse().unwrap(),
+            base_route: ep.base_route,
+            interval: ep.interval.into(),
+        }
+    }
+}

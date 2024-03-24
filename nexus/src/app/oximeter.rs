@@ -12,10 +12,10 @@ use internal_dns::ServiceName;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Asset;
 use omicron_common::address::CLICKHOUSE_PORT;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::internal::nexus;
+use omicron_common::api::external::{DataPageParams, ListResultVec};
+use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use omicron_common::backoff;
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
@@ -144,6 +144,18 @@ impl super::Nexus {
                     .map_err(Error::from)?;
             }
         }
+    }
+
+    /// List the producers assigned to an oximeter collector.
+    pub(crate) async fn list_assigned_producers(
+        &self,
+        collector_id: Uuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<ProducerEndpoint> {
+        self.db_datastore
+            .producers_list_by_oximeter_id(collector_id, pagparams)
+            .await
+            .map(|list| list.into_iter().map(ProducerEndpoint::from).collect())
     }
 
     /// Register as a metric producer with the oximeter metric collection server.
