@@ -657,7 +657,7 @@ async fn test_instance_start_creates_networking_state(
         .unwrap();
 
     let instance_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .instance_fetch_with_active_vmm(&opctx, &authz_instance)
         .await
         .unwrap();
 
@@ -4536,7 +4536,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
 
     let instance_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .instance_fetch_with_active_vmm(&opctx, &authz_instance)
         .await
         .unwrap();
 

@@ -111,6 +111,15 @@ impl From<InstanceAndActiveVmm> for omicron_common::api::external::Instance {
     }
 }
 
+/// Wraps a record of an `Instance` along with its active `Vmm` and migration
+/// target VMMs, if it has any.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct InstanceAndVmms {
+    pub instance: Instance,
+    pub active_vmm: Option<Vmm>,
+    pub target_vmm: Option<Vmm>,
+}
+
 /// A token representing the "updater lock" on an `Instance`.
 ///
 /// This is returned by [`DataStore::instance_updater_try_lock`], and consumed
@@ -249,7 +258,7 @@ impl DataStore {
         Ok(db_instance)
     }
 
-    pub async fn instance_fetch_with_vmm(
+    pub async fn instance_fetch_with_active_vmm(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
@@ -284,6 +293,48 @@ impl DataStore {
             })?;
 
         Ok(InstanceAndActiveVmm { instance, vmm })
+    }
+
+    pub async fn instance_fetch_with_vmms(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> LookupResult<InstanceAndVmms> {
+        opctx.authorize(authz::Action::Read, authz_instance).await?;
+
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        let (instance, active_vmm, target_vmm) = instance_dsl::instance
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .left_join(
+                vmm_dsl::vmm.on((vmm_dsl::id
+                    .nullable()
+                    .eq(instance_dsl::active_propolis_id))
+                .or(vmm_dsl::id.nullable().eq(instance_dsl::target_propolis_id))
+                .and(vmm_dsl::time_deleted.is_null())),
+            )
+            .select((
+                Instance::as_select(),
+                Option::<Vmm>::as_select(),
+                Option::<Vmm>::as_select(),
+            ))
+            .get_result_async::<(Instance, Option<Vmm>, Option<Vmm>)>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(authz_instance.id()),
+                    ),
+                )
+            })?;
+
+        Ok(InstanceAndVmms { instance, active_vmm, target_vmm })
     }
 
     // TODO-design It's tempting to return the updated state of the Instance
@@ -347,27 +398,30 @@ impl DataStore {
     /// - [`Err`] if a database error occurred.
     pub async fn instance_updater_try_lock(
         &self,
-        instance_id: &Uuid,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
         current_gen: Generation,
-        saga_id: &Uuid,
+        saga_lock_id: &Uuid,
     ) -> Result<Option<Generation>, Error> {
         use db::schema::instance::dsl;
 
         // The generation to advance to.
         let new_gen = Generation(current_gen.0.next());
 
+        let instance_id = authz_instance.id();
+
         let locked = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*instance_id))
+            .filter(dsl::id.eq(instance_id))
             // If the generation is the same as the captured generation, we can
             // lock this instance.
             .filter(dsl::updater_gen.eq(current_gen))
             .set((
                 dsl::updater_gen.eq(new_gen),
-                dsl::updater_id.eq(Some(*saga_id)),
+                dsl::updater_id.eq(Some(*saga_lock_id)),
             ))
-            .check_if_exists::<Instance>(*instance_id)
-            .execute_and_check(&*self.pool_connection_unauthorized().await?)
+            .check_if_exists::<Instance>(instance_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => Some(new_gen),
@@ -378,7 +432,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
-                        LookupType::ById(*instance_id),
+                        LookupType::ById(instance_id),
                     ),
                 )
             })?;
@@ -386,33 +440,33 @@ impl DataStore {
         Ok(locked)
     }
 
-    /// Release the instance-updater lock, consuming the [`InstanceUpdaterLock`]
-    /// returned by a call to [`DataStore::instance_updater_try_lock`].
+    /// Release the instance-updater lock.
     pub async fn instance_updater_unlock(
         &self,
-        instance_id: &Uuid,
-        InstanceUpdaterLock(gen): InstanceUpdaterLock,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        saga_lock_id: &Uuid,
     ) -> Result<bool, Error> {
         use db::schema::instance::dsl;
 
-        let new_gen = Generation(gen.0.next());
+        let instance_id = authz_instance.id();
 
         let unlocked = diesel::update(dsl::instance)
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(*instance_id))
-            // If the generation is the same as the captured generation, we can
-            // lock this instance.
-            .filter(dsl::updater_gen.eq(gen))
+            .filter(dsl::id.eq(authz_instance.id()))
+            // Only unlock the instance if the provided updater ID matches that
+            // of the saga that has currently locked this instance.
+            .filter(dsl::updater_id.eq(Some(*saga_lock_id)))
             .set((
-                dsl::updater_gen.eq(new_gen),
+                dsl::updater_gen.eq(dsl::updater_gen + 1),
                 dsl::updater_id.eq(None::<Uuid>),
             ))
-            .check_if_exists::<Instance>(*instance_id)
-            .execute_and_check(&*self.pool_connection_unauthorized().await?)
+            .check_if_exists::<Instance>(instance_id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map(|r| match r.status {
                 UpdateStatus::Updated => true,
-                // TODO(eliza): this should probably be an error...
+                // TODO(eliza): should this be an error?
                 UpdateStatus::NotUpdatedButExists => false,
             })
             .map_err(|e| {
@@ -420,7 +474,7 @@ impl DataStore {
                     e,
                     ErrorHandler::NotFoundByLookup(
                         ResourceType::Instance,
-                        LookupType::ById(*instance_id),
+                        LookupType::ById(instance_id),
                     ),
                 )
             })?;

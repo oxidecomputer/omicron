@@ -104,7 +104,7 @@ impl super::Nexus {
 
             let instance_state = self
                 .datastore()
-                .instance_fetch_with_vmm(&opctx, &authz_instance)
+                .instance_fetch_with_active_vmm(&opctx, &authz_instance)
                 .await?;
 
             match instance_state.vmm().as_ref() {
