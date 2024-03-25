@@ -67,7 +67,9 @@ async fn main() -> Result<(), anyhow::Error> {
     if exit_code == 0u8 {
         // We destroy here so that our tempdir doesn't get dropped first and
         // give us an error.
-        let _ = d.destroy();
+        //
+        // `drop` calls `d.destroy()` and also makes sure it doesn't run twice.
+        drop(d);
         Ok(())
     } else {
         // Leave the VM running
