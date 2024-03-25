@@ -227,6 +227,20 @@ table! {
 }
 
 table! {
+    bgp_peer_view (switch_location, port_name) {
+        switch_location -> Text,
+        port_name -> Text,
+        addr -> Inet,
+        asn -> Int8,
+        connect_retry -> Int8,
+        delay_open -> Int8,
+        hold_time -> Int8,
+        idle_hold_time -> Int8,
+        keepalive -> Int8,
+    }
+}
+
+table! {
     bgp_announce_set (id) {
         id -> Uuid,
         name -> Text,

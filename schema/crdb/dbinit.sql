@@ -3673,6 +3673,28 @@ CREATE TABLE IF NOT EXISTS omicron.public.bootstore_config (
 
 CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name);
 
+CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
+AS
+SELECT
+ sp.switch_location,
+ sp.port_name,
+ bpc.addr,
+ bpc.hold_time,
+ bpc.idle_hold_time,
+ bpc.delay_open,
+ bpc.connect_retry,
+ bpc.keepalive,
+ bc.asn
+FROM omicron.public.switch_port sp
+JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
+ON sp.port_settings_id = bpc.port_settings_id
+JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
+
+CREATE INDEX IF NOT EXISTS switch_port_id_and_name
+ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
+
+CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
+
 /*
  * Metadata for the schema itself. This version number isn't great, as there's
  * nothing to ensure it gets bumped when it should be, but it's a start.
@@ -3707,7 +3729,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '46.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '47.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

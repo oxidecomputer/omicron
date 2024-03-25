@@ -16,6 +16,7 @@ omicron-common.workspace = true
 sled-hardware-types.workspace = true
 omicron-workspace-hack.workspace = true
 ddm-admin-client.workspace = true
+uuid.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true
