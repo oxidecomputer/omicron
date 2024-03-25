@@ -123,7 +123,7 @@ impl StorageManagerTestHarness {
     /// Creates a new StorageManagerTestHarness with no associated disks.
     pub async fn new(log: &Logger) -> Self {
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
-        let tmp = camino_tempfile::tempdir()
+        let tmp = camino_tempfile::tempdir_in("/var/tmp")
             .expect("Failed to make temporary directory");
         info!(log, "Using tmp: {}", tmp.path());
         Self::new_with_tmp_dir(log, tmp).await
@@ -280,6 +280,33 @@ impl StorageManagerTestHarness {
             added.push(raw_disk);
         }
         added
+    }
+
+    // Removes a vdev from the set of "tracked" devices.
+    //
+    // This is equivalent to having the hardware monitor unplug a device.
+    //
+    // If this device has an associated zpool, it must be either re-attached
+    // to the harness or manually destroyed before the test completes.
+    // Otherwise, removing the temporary directory containing that zpool
+    // will likely fail with a "device busy" error.
+    pub async fn remove_vdev(&mut self, raw: &RawDisk) {
+        assert!(self.vdevs.remove(&raw), "Vdev does not exist");
+        self.handle
+            .detected_raw_disk_removal(raw.clone())
+            .await
+            .await
+            .expect("Failed to remove vdev");
+    }
+
+    // Adds a vdev to the set of "tracked" devices.
+    pub async fn add_vdev_as(&mut self, raw_disk: RawDisk) {
+        self.handle
+            .detected_raw_disk(raw_disk.clone())
+            .await // Notify StorageManager
+            .await // Wait for it to finish processing
+            .unwrap();
+        self.vdevs.insert(raw_disk.clone());
     }
 
     pub fn make_config(

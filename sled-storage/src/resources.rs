@@ -316,7 +316,7 @@ impl StorageResources {
             .collect();
     }
 
-    pub async fn get_config(
+    pub fn get_config(
         &self,
     ) -> &BTreeMap<DiskIdentity, OmicronPhysicalDiskConfig> {
         &self.control_plane_disks
