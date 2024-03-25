@@ -55,7 +55,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let out = d.exec(vm, &run_test).await?;
 
     // The last line of our output contains the exit code
-    let exit_code_index = out.rfind("\n").unwrap();
+    let exit_code_index = out.rfind('\n').unwrap();
     let exit_code: u8 = (&out[exit_code_index + 1..]).parse().unwrap_or(255);
 
     eprintln!("{}", &out[..=exit_code_index]);
