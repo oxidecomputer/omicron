@@ -59,7 +59,7 @@ impl From<ProducerEndpoint> for internal::nexus::ProducerEndpoint {
     }
 }
 
-/// Informa fromtion announced by a metric server, used so that clients can contact it and collect
+/// Information announced by a metric server, used so that clients can contact it and collect
 /// available metric data from it.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = metric_producer)]

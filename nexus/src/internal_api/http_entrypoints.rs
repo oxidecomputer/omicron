@@ -455,10 +455,12 @@ async fn cpapi_producers_post(
     producer_info: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
-    let nexus = &context.nexus;
-    let producer_info = producer_info.into_inner();
     let handler = async {
-        nexus.assign_producer(producer_info).await?;
+        let nexus = &context.nexus;
+        let producer_info = producer_info.into_inner();
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        nexus.assign_producer(&opctx, producer_info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     context
@@ -496,8 +498,11 @@ async fn cpapi_assigned_producers_list(
         let collector_id = path_params.into_inner().collector_id;
         let query = query_params.into_inner();
         let pagparams = data_page_params_for(&request_context, &query)?;
-        let producers =
-            nexus.list_assigned_producers(collector_id, &pagparams).await?;
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        let producers = nexus
+            .list_assigned_producers(&opctx, collector_id, &pagparams)
+            .await?;
         Ok(HttpResponseOk(ScanById::results_page(
             &query,
             producers,
@@ -520,10 +525,12 @@ async fn cpapi_collectors_post(
     oximeter_info: TypedBody<OximeterInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
-    let nexus = &context.nexus;
-    let oximeter_info = oximeter_info.into_inner();
     let handler = async {
-        nexus.upsert_oximeter_collector(&oximeter_info).await?;
+        let nexus = &context.nexus;
+        let oximeter_info = oximeter_info.into_inner();
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        nexus.upsert_oximeter_collector(&opctx, &oximeter_info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     context

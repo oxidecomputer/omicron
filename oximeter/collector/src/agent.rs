@@ -767,16 +767,33 @@ async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
                     );
                 }
                 Ok(Some(p)) => {
-                    let endpoint = ProducerEndpoint::from(p);
+                    let endpoint = match ProducerEndpoint::try_from(p) {
+                        Ok(ep) => ep,
+                        Err(e) => {
+                            error!(
+                                agent.log,
+                                "failed to convert producer description \
+                                from Nexus, skipping producer";
+                                "err" => e
+                            );
+                            continue;
+                        }
+                    };
                     let old = expected_producers.insert(endpoint.id, endpoint);
-                    assert!(old.is_none());
+                    if let Some(ProducerEndpoint { id, .. }) = old {
+                        error!(
+                            agent.log,
+                            "Nexus appears to have sent duplicate producer info";
+                            "producer_id" => %id,
+                        );
+                    }
                 }
                 Ok(None) => break,
             }
         }
         let n_current_tasks = expected_producers.len();
         let n_pruned_tasks = agent.ensure_producers(expected_producers).await;
-        let _ = agent.last_refresh_time.lock().unwrap().insert(Utc::now());
+        *agent.last_refresh_time.lock().unwrap() = Some(Utc::now());
         info!(
             agent.log,
             "refreshed list of producers from Nexus";

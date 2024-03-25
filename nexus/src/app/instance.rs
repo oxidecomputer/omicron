@@ -1562,7 +1562,7 @@ impl super::Nexus {
             // an instance's state changes.
             //
             // Tracked in https://github.com/oxidecomputer/omicron/issues/3742.
-            self.unassign_producer(instance_id).await?;
+            self.unassign_producer(opctx, instance_id).await?;
         }
 
         // Write the new instance and VMM states back to CRDB. This needs to be

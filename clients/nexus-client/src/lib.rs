@@ -396,16 +396,21 @@ impl From<types::ProducerKind>
     }
 }
 
-impl From<types::ProducerEndpoint>
+impl TryFrom<types::ProducerEndpoint>
     for omicron_common::api::internal::nexus::ProducerEndpoint
 {
-    fn from(ep: types::ProducerEndpoint) -> Self {
-        Self {
+    type Error = String;
+
+    fn try_from(ep: types::ProducerEndpoint) -> Result<Self, String> {
+        let Ok(address) = ep.address.parse() else {
+            return Err(format!("Invalid IP address: {}", ep.address));
+        };
+        Ok(Self {
             id: ep.id,
             kind: ep.kind.into(),
-            address: ep.address.parse().unwrap(),
+            address,
             base_route: ep.base_route,
             interval: ep.interval.into(),
-        }
+        })
     }
 }
