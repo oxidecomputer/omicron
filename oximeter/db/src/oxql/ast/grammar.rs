@@ -11,12 +11,9 @@ peg::parser! {
         use crate::oxql::ast::cmp::Comparison;
         use crate::oxql::ast::table_ops::align::Align;
         use crate::oxql::ast::table_ops::align::AlignmentMethod;
-        use crate::oxql::ast::table_ops::filter::FilterAtom;
         use crate::oxql::ast::table_ops::filter::SimpleFilter;
         use crate::oxql::ast::table_ops::filter::FilterExpr;
-        use crate::oxql::ast::table_ops::filter::FilterExpr2;
         use crate::oxql::ast::table_ops::filter::Filter;
-        use crate::oxql::ast::table_ops::filter::Filter2;
         use crate::oxql::ast::table_ops::filter::CompoundFilter;
         use crate::oxql::ast::table_ops::get::Get;
         use crate::oxql::ast::table_ops::group_by::GroupBy;
@@ -331,40 +328,77 @@ peg::parser! {
             lit
         }
 
+        /// Parse a logical operator.
         pub(super) rule logical_op_impl() -> LogicalOp
             = "||" { LogicalOp::Or}
             / "&&" { LogicalOp::And }
             / "^" { LogicalOp::Xor }
 
 
-        // Right logic, fill in types.
+        // NOTES:
+        //
+        // The rules below are all used to parse a filtering expression. This
+        // turns out to be surprisingly complicated to express succinctly in
+        // `peg`, but there are a few tricks. First, it's important that we do
+        // not try to parse negation ("!") inside the filtering atoms -- it's a
+        // higher-level concept, and not part of the atom itself.
+        //
+        // Second, it's not clear how to use `peg`'s precendence macro to
+        // correctly describe the precedence. Things are recursive, but we
+        // choose to define that in the rules themselves, rather than explicitly
+        // with precedence levels. This is common in PEG definitions, and the
+        // main trick is force things _not_ to be left-recursive, and use two
+        // rules tried in sequence. The `factor` rule is a good example of this.
+        //
+        // Another example is the logical OR / AND / XOR parsing. We start with
+        // OR, which is the lowest precedence, and move to the others in
+        // sequence. Each is defined as parsing either the "thing itself", e.g.,
+        // `foo || bar` for the OR rule; or the rule with next-higher
+        // precedence.
+
+        /// Parse a logical negation
         pub rule not() = "!"
-        pub rule factor() -> Filter2
+
+        /// A factor is a logically negated expression, or a primary expression.
+        pub rule factor() -> Filter
             = not() _? factor:factor()
         {
-            Filter2 {
+            Filter {
                 negated: !factor.negated,
                 expr: factor.expr
             }
         }
-        / p:primary() { p }
+            / p:primary() { p }
 
-        pub rule primary() -> Filter2
+        /// A primary expression is either a comparison "atom", e.g., `foo ==
+        /// "bar"`, or a grouping around a sequence of such things.
+        pub rule primary() -> Filter
             = atom:comparison_atom()
-        {
-            Filter2 { negated: false, expr: FilterExpr2::Simple(atom) }
+        {?
+            if matches!(atom.cmp, Comparison::Like) && !matches!(atom.value, Literal::String(_)) {
+                Err("~= comparison is only supported for string literals")
+            } else {
+                Ok(Filter { negated: false, expr: FilterExpr::Simple(atom) })
+            }
         }
             / "(" _? or:logical_or_expr() _? ")" { or }
 
-        // A single filtering atom, comparing an identifier to a value
+        /// A comparison atom is a base-case for all this recursion.
+        ///
+        /// It specifies a single comparison between an identifier and a value,
+        /// using a specific comparison operator. For example, this parses `foo
+        /// == "bar"`.
         pub rule comparison_atom() -> SimpleFilter
             = ident:ident() _? cmp:comparison() _? value:literal()
         {
             SimpleFilter { ident, cmp, value }
         }
 
-        // Two filtering expressions combined with a logical OR.
-        pub rule logical_or_expr() -> Filter2
+        /// Two filtering expressions combined with a logical OR.
+        ///
+        /// An OR expression is two logical ANDs joined with "||", or just a
+        /// bare logical AND expression.
+        pub rule logical_or_expr() -> Filter
             = left:logical_and_expr() _? "||" _? right:logical_or_expr()
         {
             let compound = CompoundFilter {
@@ -372,11 +406,15 @@ peg::parser! {
                 op: LogicalOp::Or,
                 right: Box::new(right),
             };
-            Filter2 { negated: false, expr: FilterExpr2::Compound(compound) }
+            Filter { negated: false, expr: FilterExpr::Compound(compound) }
         }
             / logical_and_expr()
 
-        pub rule logical_and_expr() -> Filter2
+        /// Two filtering expressions combined with a logical AND.
+        ///
+        /// A logical AND expression is two logical XORs joined with "&&", or
+        /// just a bare logical XOR expression.
+        pub rule logical_and_expr() -> Filter
             = left:logical_xor_expr() _? "&&" _? right:logical_and_expr()
         {
             let compound = CompoundFilter {
@@ -384,11 +422,19 @@ peg::parser! {
                 op: LogicalOp::And,
                 right: Box::new(right),
             };
-            Filter2 { negated: false, expr: FilterExpr2::Compound(compound) }
+            Filter { negated: false, expr: FilterExpr::Compound(compound) }
         }
             / logical_xor_expr()
 
-        pub rule logical_xor_expr() -> Filter2
+        /// Two filtering expressions combined with a logical XOR.
+        ///
+        /// A logical XOR expression is two logical XORs joined with "^ or
+        /// just a bare factor. Note that this either hits the base case, if
+        /// `factor` is actually an atom, or recurses again if its a logical OR
+        /// expression.
+        ///
+        /// Note that this is the highest-precedence logical operator.
+        pub rule logical_xor_expr() -> Filter
             = left:factor() _? "^" _? right:logical_xor_expr()
         {
             let compound = CompoundFilter {
@@ -396,103 +442,18 @@ peg::parser! {
                 op: LogicalOp::Xor,
                 right: Box::new(right),
             };
-            Filter2 { negated: false, expr: FilterExpr2::Compound(compound) }
+            Filter { negated: false, expr: FilterExpr::Compound(compound) }
         }
             / factor:factor() { factor }
 
-        // A filter expression, built out of multiple other filter expressions.
-        pub(super) rule unnegated_filter_expr() -> Filter = precedence! {
-            // Note: We need to separate the logical operations into different
-            // levels of precedence.
-            left:(@) _? "||" _? right:@ {
-                Filter::Expr(FilterExpr {
-                    negated: false,
-                    left: Box::new(left),
-                    op: LogicalOp::Or,
-                    right: Box::new(right),
-                })
-            }
-            --
-            left:(@) _? "&&" _? right:@ {
-                Filter::Expr(FilterExpr {
-                    negated: false,
-                    left: Box::new(left),
-                    op: LogicalOp::And,
-                    right: Box::new(right),
-                })
-            }
-            --
-            left:(@) _? "^" _? right:@ {
-                Filter::Expr(FilterExpr {
-                    negated: false,
-                    left: Box::new(left),
-                    op: LogicalOp::Xor,
-                    right: Box::new(right),
-                })
-            }
-            --
-            a:filter_atom() { Filter::Atom(a) }
-            --
-            "(" e:filter_item() ")" { e }
-        }
-
-        // A negated form of a filter expression
-        pub(super) rule negated_filter_expr() -> Filter
-            = "!(" _? e:unnegated_filter_expr() _? ")"
-        {
-            match e {
-                Filter::Atom(atom) => Filter::Atom(FilterAtom { negated: true, ..atom }),
-                Filter::Expr(expr) => Filter::Expr(FilterExpr { negated: true, ..expr }),
-            }
-        }
-
-        // Any filter expression, negated or otherwise.
-        pub(super) rule filter_expr() -> Filter
-            = e:(negated_filter_expr() / unnegated_filter_expr())
-        {
-            e
-        }
-
-        rule filter_atom() -> FilterAtom
-            = atom:(negated_filter_atom() / unnegated_filter_atom())
-        {
-            atom
-        }
-
-        rule unnegated_filter_atom() -> FilterAtom
-            = ident:ident() _? cmp:comparison() _? expr:literal()
-        {?
-            if matches!(cmp, Comparison::Like) && !matches!(expr, Literal::String(_)) {
-                Err("~= comparison is only supported for string literals")
-            } else {
-                Ok(FilterAtom { negated: false, ident, cmp, expr })
-            }
-        }
-
-        rule negated_filter_atom() -> FilterAtom
-            = "!(" _? ident:ident() _? cmp:comparison() _? expr:literal() _? ")"
-        {?
-            if matches!(cmp, Comparison::Like) && !matches!(expr, Literal::String(_)) {
-                Err("~= comparison is only supported for string literals")
-            } else {
-                Ok(FilterAtom { negated: true, ident, cmp, expr })
-            }
-        }
-
-        // Parse a filter item, which is the "data" for a `filter` table
-        // operation.
-        //
-        // E.g., for a table operation like `filter (x == 0) && (y > 'yes')`,
-        // this parses out `(x == 0) && (y > 'yes')`
-        pub(crate) rule filter_item() -> Filter
-            = expr:filter_expr() { expr }
-            / atom:filter_atom() { Filter::Atom(atom) }
+        /// Parse the _logical expression_ part of a `filter` table operation.
+        pub rule filter_expr() -> Filter = logical_or_expr()
 
         /// Parse a "filter" table operation.
         pub rule filter() -> Filter
-            = "filter" _ item:filter_item() _?
+            = "filter" _ expr:filter_expr() _?
         {
-            item
+            expr
         }
 
         pub(super) rule ident_impl() -> &'input str
@@ -675,9 +636,10 @@ mod tests {
     use crate::oxql::ast::logical_op::LogicalOp;
     use crate::oxql::ast::table_ops::align::Align;
     use crate::oxql::ast::table_ops::align::AlignmentMethod;
+    use crate::oxql::ast::table_ops::filter::CompoundFilter;
     use crate::oxql::ast::table_ops::filter::Filter;
-    use crate::oxql::ast::table_ops::filter::FilterAtom;
     use crate::oxql::ast::table_ops::filter::FilterExpr;
+    use crate::oxql::ast::table_ops::filter::SimpleFilter;
     use crate::oxql::ast::table_ops::group_by::Reducer;
     use chrono::DateTime;
     use chrono::NaiveDate;
@@ -889,75 +851,74 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_item_single_atom() {
-        let atom = Filter::Atom(FilterAtom {
+    fn test_filter_expr_single_simple_expression() {
+        let expr = Filter {
             negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(true),
-        });
-        assert_eq!(query_parser::filter_item("a == true").unwrap(), atom);
-        assert_eq!(query_parser::filter_item("(a == true)").unwrap(), atom);
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(true),
+            }),
+        };
+        assert_eq!(query_parser::filter_expr("a == true").unwrap(), expr);
+        assert_eq!(query_parser::filter_expr("(a == true)").unwrap(), expr);
 
-        assert!(query_parser::filter_item("(a == true").is_err());
+        assert!(query_parser::filter_expr("(a == true").is_err());
     }
 
     #[test]
-    fn test_filter_item_single_negated_atom() {
-        assert_eq!(
-            query_parser::filter_item("!(a > 1.)").unwrap(),
-            Filter::Atom(FilterAtom {
-                negated: true,
+    fn test_filter_expr_single_negated_simple_expression() {
+        let expr = Filter {
+            negated: true,
+            expr: FilterExpr::Simple(SimpleFilter {
                 ident: Ident("a".to_string()),
                 cmp: Comparison::Gt,
-                expr: Literal::Double(1.0)
-            })
-        );
+                value: Literal::Double(1.0),
+            }),
+        };
+        assert_eq!(query_parser::filter_expr("!(a > 1.)").unwrap(), expr,);
 
-        assert!(query_parser::filter_item("!(a > 1.0").is_err());
+        assert!(query_parser::filter_expr("!(a > 1.0").is_err());
     }
 
     #[test]
-    fn test_filter_item_two_atoms() {
-        let left = Filter::Atom(FilterAtom {
+    fn test_filter_expr_two_simple_filter_expressions() {
+        let left = Filter {
             negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(true),
-        });
-        let right = Filter::Atom(FilterAtom {
-            negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(true),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(true),
+            }),
+        };
 
         for op in [LogicalOp::And, LogicalOp::Or] {
-            let expected = Filter::Expr(FilterExpr {
-                negated: false,
-                left: Box::new(left.clone()),
-                op,
-                right: Box::new(right.clone()),
-            });
+            let expected = left.merge(&left, op);
             // Match with either parenthesized.
             let as_str = format!("a == true {op} (a == true)");
-            assert_eq!(query_parser::filter_item(&as_str).unwrap(), expected);
+            assert_eq!(query_parser::filter_expr(&as_str).unwrap(), expected);
             let as_str = format!("(a == true) {op} a == true");
-            assert_eq!(query_parser::filter_item(&as_str).unwrap(), expected);
+            assert_eq!(query_parser::filter_expr(&as_str).unwrap(), expected);
+            let as_str = format!("(a == true) {op} (a == true)");
+            assert_eq!(query_parser::filter_expr(&as_str).unwrap(), expected);
         }
     }
 
     #[test]
-    fn test_filter_atom_precedence() {
-        let atom = Filter::Atom(FilterAtom {
+    fn test_filter_expr_operator_precedence() {
+        // We'll combine the following simple expression in a number of
+        // different sequences, to check that we correctly group by operator
+        // precedence.
+        let atom = Filter {
             negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(true),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(true),
+            }),
+        };
         let as_str = "a == true || a == true && a == true ^ a == true";
-        let parsed = query_parser::filter_item(as_str).unwrap();
-
+        let parsed = query_parser::filter_expr(as_str).unwrap();
         assert_eq!(
             parsed.to_string(),
             "((a == true) || ((a == true) && ((a == true) ^ (a == true))))"
@@ -968,61 +929,78 @@ mod tests {
         // opposite order, weakest to strongest, or left to right.
         //
         // Start with OR, which should bind the most weakly.
-        let Filter::Expr(FilterExpr { negated, left, op, right }) = parsed
+        assert!(!parsed.negated);
+        let FilterExpr::Compound(CompoundFilter { left, op, right }) =
+            parsed.expr
         else {
             unreachable!();
         };
-        assert!(!negated);
+        assert!(!left.negated);
+        assert!(!right.negated);
         assert_eq!(op, LogicalOp::Or);
         assert_eq!(atom, *left);
 
         // && should bind next-most tightly
-        let Filter::Expr(FilterExpr { negated, left, op, right }) = *right
+        let FilterExpr::Compound(CompoundFilter { left, op, right }) =
+            right.expr
         else {
             unreachable!();
         };
-        assert!(!negated);
+        assert!(!left.negated);
+        assert!(!right.negated);
         assert_eq!(op, LogicalOp::And);
         assert_eq!(atom, *left);
 
         // Followed by XOR, the tightest binding operator.
-        let Filter::Expr(FilterExpr { negated, left, op, right }) = *right
+        let FilterExpr::Compound(CompoundFilter { left, op, right }) =
+            right.expr
         else {
             unreachable!();
         };
-        assert!(!negated);
+        assert!(!left.negated);
+        assert!(!right.negated);
         assert_eq!(op, LogicalOp::Xor);
         assert_eq!(atom, *left);
         assert_eq!(atom, *right);
     }
 
     #[test]
-    fn test_filter_atom_overridden_precedence() {
-        let atom = Filter::Atom(FilterAtom {
+    fn test_filter_expr_overridden_precedence() {
+        // Similar to above, we'll test with a single atom, and group in a
+        // number of ways.
+        let atom = Filter {
             negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(true),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(true),
+            }),
+        };
         let as_str = "(a == true || a == true) && a == true";
-        let parsed = query_parser::filter_item(as_str).unwrap();
+        let parsed = query_parser::filter_expr(as_str).unwrap();
 
         // Now, || should bind more tightly, so we should have (a && b) at the
-        // top-level, where b is the test atom.
-        let Filter::Expr(FilterExpr { negated, left, op, right }) = parsed
+        // top-level, where b is the test atom. We're comparing the atom at the
+        // _right_ now with the original expressions.
+        assert!(!parsed.negated);
+        let FilterExpr::Compound(CompoundFilter { left, op, right }) =
+            parsed.expr
         else {
             unreachable!();
         };
-        assert!(!negated);
+        assert!(!left.negated);
+        assert!(!right.negated);
         assert_eq!(op, LogicalOp::And);
         assert_eq!(atom, *right);
 
         // Destructure the LHS and check it.
-        let Filter::Expr(FilterExpr { negated, left, op, right }) = *left
+        let FilterExpr::Compound(CompoundFilter { left, op, right }) =
+            left.expr
         else {
             unreachable!();
         };
-        assert!(!negated);
+        assert!(!left.negated);
+        assert!(!right.negated);
         assert_eq!(op, LogicalOp::Or);
         assert_eq!(atom, *left);
         assert_eq!(atom, *right);
@@ -1030,22 +1008,19 @@ mod tests {
 
     #[test]
     fn test_negated_filter_expr() {
-        let left = FilterAtom {
+        let left = Filter {
             negated: false,
-            ident: Ident("a".into()),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(true),
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".into()),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(true),
+            }),
         };
-        let right = FilterAtom { negated: true, ..left.clone() };
-        let expr = Filter::Expr(FilterExpr {
-            negated: true,
-            left: Box::new(Filter::Atom(left)),
-            op: LogicalOp::Xor,
-            right: Box::new(Filter::Atom(right)),
-        });
+        let right = left.negate();
+        let top = left.merge(&right, LogicalOp::Xor).negate();
         let as_str = "!(a == true ^ !(a == true))";
-        let parsed = query_parser::filter_item(as_str).unwrap();
-        assert_eq!(expr, parsed);
+        let parsed = query_parser::filter_expr(as_str).unwrap();
+        assert_eq!(top, parsed);
     }
 
     #[test]
@@ -1259,8 +1234,8 @@ mod tests {
 
     #[test]
     fn test_like_only_available_for_strings() {
-        assert!(query_parser::filter_item("foo ~= 0").is_err());
-        assert!(query_parser::filter_item("foo ~= \"something\"").is_ok());
+        assert!(query_parser::filter_expr("foo ~= 0").is_err());
+        assert!(query_parser::filter_expr("foo ~= \"something\"").is_ok());
     }
 
     #[test]
@@ -1285,9 +1260,56 @@ mod tests {
     }
 
     #[test]
-    fn test_logical_combinations() {
-        let parsed = query_parser::logical_or_expr("a == 'b' ^ !(c == 0) && d == false").unwrap();
-        println!("{parsed}");
-        assert!(false);
+    fn test_complicated_logical_combinations() {
+        let parsed =
+            query_parser::logical_or_expr("a == 'b' ^ !(c == 0) && d == false")
+                .unwrap();
+
+        // Build up this expected expression from its components.
+        let left = Filter {
+            negated: false,
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::String("b".into()),
+            }),
+        };
+        let middle = Filter {
+            negated: true,
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("c".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Integer(0),
+            }),
+        };
+        let right = Filter {
+            negated: false,
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("d".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(false),
+            }),
+        };
+
+        // The left and right are bound most tightly, by the XOR operator.
+        let xor = Filter {
+            negated: false,
+            expr: FilterExpr::Compound(CompoundFilter {
+                left: Box::new(left),
+                op: LogicalOp::Xor,
+                right: Box::new(middle),
+            }),
+        };
+
+        // And then those two together are joined with the AND.
+        let expected = Filter {
+            negated: false,
+            expr: FilterExpr::Compound(CompoundFilter {
+                left: Box::new(xor),
+                op: LogicalOp::And,
+                right: Box::new(right),
+            }),
+        };
+        assert_eq!(parsed, expected);
     }
 }

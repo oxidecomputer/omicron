@@ -7,6 +7,8 @@
 // Copyright 2024 Oxide Computer Company
 
 use super::ast::ident::Ident;
+use super::ast::logical_op::LogicalOp;
+use super::ast::table_ops::filter::CompoundFilter;
 use super::ast::table_ops::filter::FilterExpr;
 use super::ast::table_ops::group_by::GroupBy;
 use super::ast::table_ops::BasicTableOp;
@@ -283,7 +285,7 @@ impl Query {
                     BasicTableOp::Filter(filter) => {
                         // Merge with any existing filter.
                         if let Some(left) = maybe_filter {
-                            Some(left.merge(&filter))
+                            Some(left.merge(&filter, LogicalOp::And))
                         } else {
                             Some(filter.clone())
                         }
@@ -298,7 +300,9 @@ impl Query {
         match (outer, maybe_filter) {
             (None, any) => any,
             (Some(outer), None) => Some(outer),
-            (Some(outer), Some(inner)) => Some(outer.merge(&inner)),
+            (Some(outer), Some(inner)) => {
+                Some(outer.merge(&inner, LogicalOp::And))
+            }
         }
     }
 
@@ -315,9 +319,9 @@ fn restrict_filter_idents(
     current_filter: &Filter,
     identifiers: &[Ident],
 ) -> Option<Filter> {
-    match current_filter {
-        Filter::Atom(atom) => {
-            let ident = atom.ident.as_str();
+    match &current_filter.expr {
+        FilterExpr::Simple(inner) => {
+            let ident = inner.ident.as_str();
             if ident == "timestamp"
                 || identifiers.iter().map(Ident::as_str).any(|id| id == ident)
             {
@@ -326,16 +330,18 @@ fn restrict_filter_idents(
                 None
             }
         }
-        Filter::Expr(FilterExpr { negated, left, op, right }) => {
+        FilterExpr::Compound(CompoundFilter { left, op, right }) => {
             let maybe_left = restrict_filter_idents(left, identifiers);
             let maybe_right = restrict_filter_idents(right, identifiers);
             match (maybe_left, maybe_right) {
-                (Some(left), Some(right)) => Some(Filter::Expr(FilterExpr {
-                    negated: *negated,
-                    left: Box::new(left),
-                    op: *op,
-                    right: Box::new(right),
-                })),
+                (Some(left), Some(right)) => Some(Filter {
+                    negated: current_filter.negated,
+                    expr: FilterExpr::Compound(CompoundFilter {
+                        left: Box::new(left),
+                        op: *op,
+                        right: Box::new(right),
+                    }),
+                }),
                 (Some(single), None) | (None, Some(single)) => Some(single),
                 (None, None) => None,
             }
@@ -360,8 +366,9 @@ mod tests {
     use crate::oxql::ast::cmp::Comparison;
     use crate::oxql::ast::literal::Literal;
     use crate::oxql::ast::logical_op::LogicalOp;
-    use crate::oxql::ast::table_ops::filter::FilterAtom;
+    use crate::oxql::ast::table_ops::filter::CompoundFilter;
     use crate::oxql::ast::table_ops::filter::FilterExpr;
+    use crate::oxql::ast::table_ops::filter::SimpleFilter;
     use crate::oxql::ast::table_ops::join::Join;
     use crate::oxql::ast::table_ops::BasicTableOp;
     use crate::oxql::ast::table_ops::TableOp;
@@ -374,12 +381,14 @@ mod tests {
     #[test]
     fn test_restrict_filter_idents_single_atom() {
         let ident = Ident("foo".into());
-        let filter = Filter::Atom(FilterAtom {
+        let filter = Filter {
             negated: false,
-            ident: ident.clone(),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(false),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: ident.clone(),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(false),
+            }),
+        };
         assert_eq!(
             restrict_filter_idents(&filter, &[ident.clone()]).unwrap(),
             filter
@@ -389,36 +398,44 @@ mod tests {
 
     #[test]
     fn test_restrict_filter_idents_single_atom_with_timestamp() {
-        let filter = Filter::Atom(FilterAtom {
+        let filter = Filter {
             negated: false,
-            ident: Ident("timestamp".into()),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(false),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("timestamp".into()),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(false),
+            }),
+        };
         assert_eq!(restrict_filter_idents(&filter, &[]).unwrap(), filter);
     }
 
     #[test]
     fn test_restrict_filter_idents_expr() {
         let idents = [Ident("foo".into()), Ident("bar".into())];
-        let left = Filter::Atom(FilterAtom {
+        let left = Filter {
             negated: false,
-            ident: idents[0].clone(),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(false),
-        });
-        let right = Filter::Atom(FilterAtom {
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: idents[0].clone(),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(false),
+            }),
+        };
+        let right = Filter {
             negated: false,
-            ident: idents[1].clone(),
-            cmp: Comparison::Eq,
-            expr: Literal::Boolean(false),
-        });
-        let filter = Filter::Expr(FilterExpr {
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: idents[1].clone(),
+                cmp: Comparison::Eq,
+                value: Literal::Boolean(false),
+            }),
+        };
+        let filter = Filter {
             negated: false,
-            left: Box::new(left.clone()),
-            op: LogicalOp::And,
-            right: Box::new(right.clone()),
-        });
+            expr: FilterExpr::Compound(CompoundFilter {
+                left: Box::new(left.clone()),
+                op: LogicalOp::And,
+                right: Box::new(right.clone()),
+            }),
+        };
         assert_eq!(restrict_filter_idents(&filter, &idents).unwrap(), filter);
 
         // This should remove the right filter.
@@ -503,12 +520,14 @@ mod tests {
     fn test_coalesce_predicates() {
         // Passed through group-by unchanged.
         let q = Query::new("get a:b | group_by [a] | filter a == 0").unwrap();
-        let preds = Filter::Atom(FilterAtom {
+        let preds = Filter {
             negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Integer(0),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Integer(0),
+            }),
+        };
         assert_eq!(q.coalesced_predicates(None), Some(preds));
 
         // Merge the first two, then pass through group by.
@@ -516,18 +535,22 @@ mod tests {
             "get a:b | group_by [a] | filter a == 0 | filter a == 0",
         )
         .unwrap();
-        let atom = Filter::Atom(FilterAtom {
+        let atom = Filter {
             negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Integer(0),
-        });
-        let preds = Filter::Expr(FilterExpr {
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Integer(0),
+            }),
+        };
+        let preds = Filter {
             negated: false,
-            left: Box::new(atom.clone()),
-            op: LogicalOp::And,
-            right: Box::new(atom.clone()),
-        });
+            expr: FilterExpr::Compound(CompoundFilter {
+                left: Box::new(atom.clone()),
+                op: LogicalOp::And,
+                right: Box::new(atom.clone()),
+            }),
+        };
         assert_eq!(q.coalesced_predicates(None), Some(preds));
 
         // These are also merged, even though they're on different sides of the
@@ -536,18 +559,22 @@ mod tests {
             "get a:b | filter a == 0 | group_by [a] | filter a == 0",
         )
         .unwrap();
-        let atom = Filter::Atom(FilterAtom {
+        let atom = Filter {
             negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Integer(0),
-        });
-        let preds = Filter::Expr(FilterExpr {
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Integer(0),
+            }),
+        };
+        let preds = Filter {
             negated: false,
-            left: Box::new(atom.clone()),
-            op: LogicalOp::And,
-            right: Box::new(atom.clone()),
-        });
+            expr: FilterExpr::Compound(CompoundFilter {
+                left: Box::new(atom.clone()),
+                op: LogicalOp::And,
+                right: Box::new(atom.clone()),
+            }),
+        };
         assert_eq!(q.coalesced_predicates(None), Some(preds));
 
         // Second filter is _not_ passed through, because it refers to columns
@@ -556,12 +583,14 @@ mod tests {
             "get a:b | filter a == 0 | group_by [a] | filter b == 0",
         )
         .unwrap();
-        let preds = Filter::Atom(FilterAtom {
+        let preds = Filter {
             negated: false,
-            ident: Ident("a".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Integer(0),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("a".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Integer(0),
+            }),
+        };
         assert_eq!(q.coalesced_predicates(None), Some(preds));
     }
 
@@ -570,12 +599,14 @@ mod tests {
         let q = "{ get a:b; get a:b } | join | filter foo == 'bar'";
         let query = Query::new(q).unwrap();
         let preds = query.coalesced_predicates(None).unwrap();
-        let expected_predicate = Filter::Atom(FilterAtom {
+        let expected_predicate = Filter {
             negated: false,
-            ident: Ident("foo".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::String("bar".into()),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("foo".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::String("bar".into()),
+            }),
+        };
         assert_eq!(preds, expected_predicate);
 
         // Split the query, which should give us a list of two subqueries,
@@ -600,12 +631,14 @@ mod tests {
                  join | filter foo == 'bar'";
         let query = Query::new(q).unwrap();
         let preds = query.coalesced_predicates(None).unwrap();
-        let expected_predicate = Filter::Atom(FilterAtom {
+        let expected_predicate = Filter {
             negated: false,
-            ident: Ident("foo".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::String("bar".into()),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("foo".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::String("bar".into()),
+            }),
+        };
         assert_eq!(preds, expected_predicate);
 
         // Split the query, which should give us a list of two subqueries,
@@ -646,19 +679,23 @@ mod tests {
                  | join | filter foo == 'bar'";
         let query = Query::new(q).unwrap();
         let preds = query.coalesced_predicates(None).unwrap();
-        let expected_predicate = Filter::Atom(FilterAtom {
+        let expected_predicate = Filter {
             negated: false,
-            ident: Ident("foo".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::String("bar".into()),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("foo".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::String("bar".into()),
+            }),
+        };
         assert_eq!(preds, expected_predicate);
-        let expected_inner_predicate = Filter::Atom(FilterAtom {
+        let expected_inner_predicate = Filter {
             negated: false,
-            ident: Ident("baz".to_string()),
-            cmp: Comparison::Eq,
-            expr: Literal::Integer(0),
-        });
+            expr: FilterExpr::Simple(SimpleFilter {
+                ident: Ident("baz".to_string()),
+                cmp: Comparison::Eq,
+                value: Literal::Integer(0),
+            }),
+        };
 
         // Split the query, which should give us a list of two subqueries,
         // followed by the join and filter.
@@ -671,7 +708,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 inner,
-                expected_predicate.merge(&expected_inner_predicate),
+                expected_predicate.merge(&expected_inner_predicate, LogicalOp::And),
                 "Predicates passed into an inner subquery should be preserved, \
                 and merged with any subquery predicates",
             );

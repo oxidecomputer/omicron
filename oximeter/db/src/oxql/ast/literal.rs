@@ -90,15 +90,16 @@ impl Literal {
         }
     }
 
-    // Apply the comparison op between self and the provided field.
-    //
-    // Return None if the comparison cannot be applied, either because the type
-    // is not compatible or the comparison doesn't make sense.
+    /// Apply the comparison op between self and the provided field.
+    ///
+    /// Return None if the comparison cannot be applied, either because the type
+    /// is not compatible or the comparison doesn't make sense.
     pub(crate) fn compare_field(
         &self,
         value: &FieldValue,
         cmp: Comparison,
     ) -> Option<bool> {
+        // TODO(ben): Return an error here, not None.
         if !self.is_compatible_with_field(value.field_type()) {
             return None;
         }

@@ -151,17 +151,17 @@ impl Client {
         preds: &filter::Filter,
     ) -> Result<Option<String>, Error> {
         // Walk the set of predicates, keeping those which apply to this schema.
-        match preds {
-            filter::Filter::Atom(atom) => {
+        match &preds.expr {
+            filter::FilterExpr::Simple(inner) => {
                 // If the predicate names a field in this timeseries schema,
                 // return that predicate printed as a string. If not, we return
                 // None.
                 let Some(field_schema) =
-                    schema.schema_for_field(atom.ident.as_str())
+                    schema.schema_for_field(inner.ident.as_str())
                 else {
                     return Ok(None);
                 };
-                if !atom
+                if !inner
                     .expr_type_is_compatible_with_field(field_schema.field_type)
                 {
                     return Err(Error::from(anyhow::anyhow!(
@@ -171,17 +171,17 @@ impl Client {
                         field_schema.field_type,
                     )));
                 }
-                Ok(Some(atom.as_db_safe_string()))
+                Ok(Some(inner.as_db_safe_string()))
             }
-            filter::Filter::Expr(expr) => {
+            filter::FilterExpr::Compound(inner) => {
                 let left_pred =
-                    Self::rewrite_predicate_for_fields(schema, &expr.left)?;
+                    Self::rewrite_predicate_for_fields(schema, &inner.left)?;
                 let right_pred =
-                    Self::rewrite_predicate_for_fields(schema, &expr.right)?;
+                    Self::rewrite_predicate_for_fields(schema, &inner.right)?;
                 let out = match (left_pred, right_pred) {
                     (Some(left), Some(right)) => Some(format!(
                         "{}({left}, {right})",
-                        expr.op.as_db_function_name()
+                        inner.op.as_db_function_name()
                     )),
                     (Some(single), None) | (None, Some(single)) => Some(single),
                     (None, None) => None,
@@ -196,17 +196,17 @@ impl Client {
         preds: &oxql::ast::table_ops::filter::Filter,
     ) -> Result<Option<String>, Error> {
         // Walk the set of predicates, keeping those which apply to this schema.
-        match preds {
-            oxql::ast::table_ops::filter::Filter::Atom(atom) => {
+        match &preds.expr {
+            filter::FilterExpr::Simple(inner) => {
                 // The relevant columns on which we filter depend on the datum
                 // type of the timeseries. All timeseries support "timestamp".
-                let ident = atom.ident.as_str();
+                let ident = inner.ident.as_str();
                 if ident == "timestamp" {
                     if matches!(
-                        atom.expr,
+                        inner.value,
                         oxql::ast::literal::Literal::Timestamp(_)
                     ) {
-                        return Ok(Some(atom.as_db_safe_string()));
+                        return Ok(Some(inner.as_db_safe_string()));
                     }
                     return Err(Error::from(anyhow::anyhow!(
                         "Literal cannot be compared with a timestamp"
@@ -225,10 +225,10 @@ impl Client {
                         )));
                     }
                     if matches!(
-                        atom.expr,
+                        inner.value,
                         oxql::ast::literal::Literal::Timestamp(_)
                     ) {
-                        return Ok(Some(atom.as_db_safe_string()));
+                        return Ok(Some(inner.as_db_safe_string()));
                     }
                     return Err(Error::from(anyhow::anyhow!(
                         "Literal cannot be compared with a timestamp"
@@ -239,18 +239,19 @@ impl Client {
                 // data columns.
                 Ok(None)
             }
-            oxql::ast::table_ops::filter::Filter::Expr(expr) => {
+            filter::FilterExpr::Compound(inner) => {
                 let left_pred = Self::rewrite_predicate_for_measurements(
-                    schema, &expr.left,
+                    schema,
+                    &inner.left,
                 )?;
                 let right_pred = Self::rewrite_predicate_for_measurements(
                     schema,
-                    &expr.right,
+                    &inner.right,
                 )?;
                 let out = match (left_pred, right_pred) {
                     (Some(left), Some(right)) => Some(format!(
                         "{}({left}, {right})",
-                        expr.op.as_db_function_name()
+                        inner.op.as_db_function_name()
                     )),
                     (Some(single), None) | (None, Some(single)) => Some(single),
                     (None, None) => None,
