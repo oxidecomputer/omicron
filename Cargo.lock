@@ -1939,6 +1939,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "expectorate",
  "http 0.2.12",
  "omicron-workspace-hack",
  "progenitor",

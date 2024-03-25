@@ -1,0 +1,9 @@
+~ DNS zone: "dummy": generation 4
+  WARNING: DNS contents changed but generation number did not change.
+  - name: ex1                                                (records: 1)
+  -     A    127.0.0.1
+  ~ name: ex2                                                (records: 1 -> 1)
+  -     A    192.168.1.3
+  +     A    192.168.1.4
+  + name: ex3                                                (records: 1)
+  +     A    127.0.0.1

@@ -4,15 +4,28 @@
 
 use crate::types::DnsConfigParams;
 use crate::types::DnsRecord;
+use crate::types::Srv;
 use crate::DnsRecords;
 use anyhow::ensure;
 use anyhow::Context;
+use std::collections::BTreeSet;
+
+#[derive(Debug)]
+enum NameDiff<'a> {
+    Added(&'a str, &'a [DnsRecord]),
+    Removed(&'a str, &'a [DnsRecord]),
+    Changed(&'a str, &'a [DnsRecord], &'a [DnsRecord]),
+    Unchanged(&'a str, &'a [DnsRecord]),
+}
 
 /// Compare the DNS records contained in two sets of DNS configuration
 #[derive(Debug)]
 pub struct DnsDiff<'a> {
     left: &'a DnsRecords,
     right: &'a DnsRecords,
+    zone_name: &'a str,
+    left_generation: u64,
+    right_generation: u64,
 }
 
 impl<'a> DnsDiff<'a> {
@@ -33,50 +46,204 @@ impl<'a> DnsDiff<'a> {
             {:?} vs. {:?}", left_zone.zone_name, right_zone.zone_name,
         );
 
-        Ok(DnsDiff { left: &left_zone.records, right: &right_zone.records })
+        Ok(DnsDiff {
+            left: &left_zone.records,
+            right: &right_zone.records,
+            zone_name: &left_zone.zone_name,
+            left_generation: left.generation,
+            right_generation: right.generation,
+        })
+    }
+
+    fn iter_names(&self) -> impl Iterator<Item = NameDiff<'_>> {
+        let all_names: BTreeSet<_> =
+            self.left.keys().chain(self.right.keys()).collect();
+        all_names.into_iter().map(|k| {
+            let name = k.as_str();
+            let v1 = self.left.get(k);
+            let v2 = self.right.get(k);
+            match (v1, v2) {
+                (None, Some(v2)) => NameDiff::Added(name, v2.as_ref()),
+                (Some(v1), None) => NameDiff::Removed(name, v1.as_ref()),
+                (Some(v1), Some(v2)) => {
+                    let mut v1_sorted = v1.clone();
+                    let mut v2_sorted = v2.clone();
+                    v1_sorted.sort();
+                    v2_sorted.sort();
+                    if v1_sorted == v2_sorted {
+                        NameDiff::Unchanged(name, v1.as_ref())
+                    } else {
+                        NameDiff::Changed(name, v1.as_ref(), v2.as_ref())
+                    }
+                }
+                (None, None) => unreachable!(),
+            }
+        })
     }
 
     /// Iterate over the names that are present in the `right` config but
     /// absent in the `left` one (i.e., added between `left` and `right`)
     pub fn names_added(&self) -> impl Iterator<Item = (&str, &[DnsRecord])> {
-        self.right
-            .iter()
-            .filter(|(k, _)| !self.left.contains_key(*k))
-            .map(|(k, v)| (k.as_ref(), v.as_ref()))
+        self.iter_names().filter_map(|nd| {
+            if let NameDiff::Added(k, v) = nd {
+                Some((k, v))
+            } else {
+                None
+            }
+        })
     }
 
     /// Iterate over the names that are present in the `left` config but
     /// absent in the `right` one (i.e., removed between `left` and `right`)
     pub fn names_removed(&self) -> impl Iterator<Item = (&str, &[DnsRecord])> {
-        self.left
-            .iter()
-            .filter(|(k, _)| !self.right.contains_key(*k))
-            .map(|(k, v)| (k.as_ref(), v.as_ref()))
+        self.iter_names().filter_map(|nd| {
+            if let NameDiff::Removed(k, v) = nd {
+                Some((k, v))
+            } else {
+                None
+            }
+        })
     }
 
     /// Iterate over the names whose records changed between `left` and `right`.
     pub fn names_changed(
         &self,
     ) -> impl Iterator<Item = (&str, &[DnsRecord], &[DnsRecord])> {
-        self.left.iter().filter_map(|(k, v1)| match self.right.get(k) {
-            Some(v2) => {
-                let mut v1_sorted = v1.clone();
-                let mut v2_sorted = v2.clone();
-                v1_sorted.sort();
-                v2_sorted.sort();
-                (v1_sorted != v2_sorted)
-                    .then(|| (k.as_ref(), v1.as_ref(), v2.as_ref()))
+        self.iter_names().filter_map(|nd| {
+            if let NameDiff::Changed(k, v1, v2) = nd {
+                Some((k, v1, v2))
+            } else {
+                None
             }
-            _ => None,
+        })
+    }
+
+    /// Iterate over the names whose records were unchanged between `left` and
+    /// `right`
+    pub fn names_unchanged(
+        &self,
+    ) -> impl Iterator<Item = (&str, &[DnsRecord])> {
+        self.iter_names().filter_map(|nd| {
+            if let NameDiff::Unchanged(k, v) = nd {
+                Some((k, v))
+            } else {
+                None
+            }
         })
     }
 
     /// Returns true iff there are no differences in the DNS names and records
     /// described by the given configurations
     pub fn is_empty(&self) -> bool {
-        self.names_added().next().is_none()
-            && self.names_removed().next().is_none()
-            && self.names_changed().next().is_none()
+        self.iter_names().all(|nd| matches!(nd, NameDiff::Unchanged(_, _)))
+    }
+}
+
+// XXX-dap TODO-coverage
+// XXX-dap rewrite omdb version in terms of this?
+impl<'a> std::fmt::Display for DnsDiff<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let names_changed = !self.is_empty();
+        let generation_changed = self.left_generation != self.right_generation;
+        let zone_name = &self.zone_name;
+
+        if !names_changed && !generation_changed {
+            writeln!(
+                f,
+                "  DNS zone: {:?}: generation {} (unchanged)",
+                zone_name, self.left_generation,
+            )?;
+            return Ok(());
+        }
+
+        // Either the DNS contents (names) changed or the generation number
+        // changed.  First print a header line showing the DNS zone and any
+        // change in the generation number.
+        write!(f, "~ DNS zone: {:?}: ", zone_name)?;
+
+        if !generation_changed {
+            writeln!(f, "generation {}", self.left_generation)?;
+            writeln!(
+                f,
+                "  WARNING: DNS contents changed but generation number \
+                did not change."
+            )?;
+        } else {
+            writeln!(
+                f,
+                "generation {} -> {}",
+                self.left_generation, self.right_generation,
+            )?;
+        }
+
+        // Now iterate over the names in order and print what happened with each
+        // one.
+        let print_records = |f: &mut std::fmt::Formatter<'_>,
+                             prefix,
+                             records: &[DnsRecord]|
+         -> std::fmt::Result {
+            for r in records.iter() {
+                writeln!(
+                    f,
+                    "  {}     {}",
+                    prefix,
+                    match r {
+                        DnsRecord::A(addr) => format!("A    {}", addr),
+                        DnsRecord::Aaaa(addr) => format!("AAAA {}", addr),
+                        DnsRecord::Srv(Srv { port, target, .. }) => {
+                            format!("SRV  port {:5} {}", port, target)
+                        }
+                    }
+                )?;
+            }
+
+            Ok(())
+        };
+
+        for name_diff in self.iter_names() {
+            match name_diff {
+                NameDiff::Added(name, records) => {
+                    writeln!(
+                        f,
+                        "  + name: {:50} (records: {})",
+                        name,
+                        records.len()
+                    )?;
+                    print_records(f, "+", records)?;
+                }
+                NameDiff::Removed(name, records) => {
+                    writeln!(
+                        f,
+                        "  - name: {:50} (records: {})",
+                        name,
+                        records.len()
+                    )?;
+                    print_records(f, "-", records)?;
+                }
+                NameDiff::Unchanged(name, records) => {
+                    writeln!(
+                        f,
+                        "    name: {:50} (records: {})",
+                        name,
+                        records.len()
+                    )?;
+                    print_records(f, " ", records)?;
+                }
+                NameDiff::Changed(name, records1, records2) => {
+                    writeln!(
+                        f,
+                        "  ~ name: {:50} (records: {} -> {})",
+                        name,
+                        records1.len(),
+                        records2.len(),
+                    )?;
+                    print_records(f, "-", records1)?;
+                    print_records(f, "+", records2)?;
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -184,13 +351,17 @@ mod test {
         assert_eq!(diff.names_removed().count(), 0);
         assert_eq!(diff.names_added().count(), 0);
         assert_eq!(diff.names_changed().count(), 0);
+        expectorate::assert_contents(
+            "tests/output/diff_example_empty.out",
+            &diff.to_string(),
+        );
     }
 
     #[test]
     fn diff_different() {
         let example = example();
         let example2 = DnsConfigParams {
-            generation: 4,
+            generation: example.generation,
             time_created: Utc::now(),
             zones: vec![DnsConfigZone {
                 zone_name: ZONE_NAME.to_string(),
@@ -230,6 +401,22 @@ mod test {
         assert_eq!(
             changed[0].2,
             vec![DnsRecord::A("192.168.1.4".parse().unwrap())]
+        );
+
+        expectorate::assert_contents(
+            "tests/output/diff_example_different.out",
+            &diff.to_string(),
+        );
+
+        // Diff'ing the reverse direction exercises different cases (e.g., what
+        // was added now appears as removed).  Also, the generation number
+        // should really be different.
+        let example2 =
+            DnsConfigParams { generation: example.generation + 1, ..example2 };
+        let diff = DnsDiff::new(&example2, &example).unwrap();
+        expectorate::assert_contents(
+            "tests/output/diff_example_different_reversed.out",
+            &diff.to_string(),
         );
     }
 }
