@@ -346,7 +346,7 @@ mod tests {
                 "DELETE",
                 format!("/producers/{}", producer.id()),
             ))
-            .respond_with(status_code(404)),
+            .respond_with(status_code(204)),
         );
 
         let pruned = prune_expired_producers(

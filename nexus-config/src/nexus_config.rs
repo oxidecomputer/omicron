@@ -353,7 +353,7 @@ pub struct BackgroundTaskConfig {
     pub dns_internal: DnsTasksConfig,
     /// configuration for external DNS background tasks
     pub dns_external: DnsTasksConfig,
-    /// configuration for metrics producer GC background task
+    /// configuration for metrics producer garbage collection background task
     pub metrics_producer_gc: MetricsProducerGcConfig,
     /// configuration for external endpoint list watcher
     pub external_endpoints: ExternalEndpointsConfig,
@@ -401,7 +401,7 @@ pub struct DnsTasksConfig {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct MetricsProducerGcConfig {
     /// period (in seconds) for periodic activations of the background task that
-    /// reads garbage collects metrics producers whose leases have expired
+    /// garbage collects metrics producers whose leases have expired
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
 }

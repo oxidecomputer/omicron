@@ -181,15 +181,7 @@ impl DataStore {
             .select(ProducerEndpoint::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::MetricProducer,
-                        "By Oximeter ID",
-                    ),
-                )
-            })
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// List all producer endpoint records with a `time_modified` date older
@@ -278,7 +270,7 @@ mod tests {
     #[tokio::test]
     async fn test_producers_list_expired() {
         // Setup
-        let logctx = dev::test_setup_log("test_prune_expired_producers");
+        let logctx = dev::test_setup_log("test_producers_list_expired");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
             datastore_test(&logctx, &db, Uuid::new_v4()).await;
