@@ -17,8 +17,7 @@ use strum::EnumIter;
 use uuid::Uuid;
 
 pub use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
-
-use super::params::BfdMode;
+pub use omicron_common::api::external::BfdMode;
 
 /// Maximum number of role assignments allowed on any one resource
 // Today's implementation assumes a relatively small number of role assignments

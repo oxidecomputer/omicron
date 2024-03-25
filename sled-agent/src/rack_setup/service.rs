@@ -91,7 +91,10 @@ use internal_dns::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
-use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::{
+    Blueprint, BlueprintZoneConfig, BlueprintZoneDisposition,
+    BlueprintZonesConfig,
+};
 use omicron_common::address::get_sled_address;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
@@ -660,6 +663,25 @@ impl ServiceInner {
                         originate: config.originate.clone(),
                     })
                     .collect(),
+                bfd: config
+                    .bfd
+                    .iter()
+                    .map(|spec| NexusTypes::BfdPeerConfig {
+                        detection_threshold: spec.detection_threshold,
+                        local: spec.local,
+                        mode: match spec.mode {
+                            omicron_common::api::external::BfdMode::SingleHop => {
+                                nexus_client::types::BfdMode::SingleHop
+                            }
+                            omicron_common::api::external::BfdMode::MultiHop => {
+                                nexus_client::types::BfdMode::MultiHop
+                            }
+                        },
+                        remote: spec.remote,
+                        required_rx: spec.required_rx,
+                        switch: spec.switch.into(),
+                    })
+                    .collect(),
             }
         };
 
@@ -1139,35 +1161,37 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
     sled_configs: BTreeMap<Uuid, SledConfig>,
     internal_dns_version: Generation,
 ) -> Blueprint {
-    let mut omicron_zones = BTreeMap::new();
-    let mut zones_in_service = BTreeSet::new();
+    let mut blueprint_zones = BTreeMap::new();
     for (sled_id, sled_config) in sled_configs {
-        for zone in &sled_config.zones {
-            zones_in_service.insert(zone.id);
-        }
-        let zones_config = sled_agent_client::types::OmicronZonesConfig::from(
-            OmicronZonesConfig {
-                // This is a bit of a hack. We only construct a blueprint after
-                // completing RSS, so we need to know the final generation value
-                // sent to all sleds. Arguably, we should record this in the
-                // serialized RSS plan; however, we have already deployed
-                // systems that did not. We know that every such system used
-                // `V5_EVERYTHING` as the final generation count, so we can just
-                // use that value here. If we ever change this, in particular in
-                // a way where newly-deployed systems will have a different
-                // value, we will need to revisit storing this in the serialized
-                // RSS plan.
-                generation: DeployStepVersion::V5_EVERYTHING,
-                zones: sled_config.zones,
-            },
-        );
-        omicron_zones.insert(sled_id, zones_config);
+        let zones_config = BlueprintZonesConfig {
+            // This is a bit of a hack. We only construct a blueprint after
+            // completing RSS, so we need to know the final generation value
+            // sent to all sleds. Arguably, we should record this in the
+            // serialized RSS plan; however, we have already deployed
+            // systems that did not. We know that every such system used
+            // `V5_EVERYTHING` as the final generation count, so we can just
+            // use that value here. If we ever change this, in particular in
+            // a way where newly-deployed systems will have a different
+            // value, we will need to revisit storing this in the serialized
+            // RSS plan.
+            generation: DeployStepVersion::V5_EVERYTHING,
+            zones: sled_config
+                .zones
+                .into_iter()
+                .map(|z| BlueprintZoneConfig {
+                    config: z.into(),
+                    // All initial zones are in-service.
+                    disposition: BlueprintZoneDisposition::InService,
+                })
+                .collect(),
+        };
+
+        blueprint_zones.insert(sled_id, zones_config);
     }
 
     Blueprint {
         id: Uuid::new_v4(),
-        omicron_zones,
-        zones_in_service,
+        blueprint_zones,
         parent_blueprint_id: None,
         internal_dns_version,
         // We don't configure external DNS during RSS, so set it to an initial
