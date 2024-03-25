@@ -2755,16 +2755,13 @@ impl ServiceManager {
                         SwitchService::Mgd => {
                             info!(self.inner.log, "Setting up mgd service");
                             smfh.delpropvalue("config/dns_servers", "*")?;
-                            let info = self
-                                .inner
-                                .sled_info
-                                .get()
-                                .ok_or(Error::SledAgentNotReady)?;
-                            smfh.setprop("config/rack_uuid", info.rack_id)?;
-                            smfh.setprop(
-                                "config/sled_uuid",
-                                info.config.sled_id,
-                            )?;
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_uuid", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_uuid",
+                                    info.config.sled_id,
+                                )?;
+                            }
                             for address in &request.zone.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
                                     let az_prefix =
@@ -2785,16 +2782,13 @@ impl ServiceManager {
                         SwitchService::MgDdm { mode } => {
                             info!(self.inner.log, "Setting up mg-ddm service");
                             smfh.setprop("config/mode", &mode)?;
-                            let info = self
-                                .inner
-                                .sled_info
-                                .get()
-                                .ok_or(Error::SledAgentNotReady)?;
-                            smfh.setprop("config/rack_uuid", info.rack_id)?;
-                            smfh.setprop(
-                                "config/sled_uuid",
-                                info.config.sled_id,
-                            )?;
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_uuid", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_uuid",
+                                    info.config.sled_id,
+                                )?;
+                            }
                             smfh.delpropvalue("config/dns_servers", "*")?;
                             for address in &request.zone.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
