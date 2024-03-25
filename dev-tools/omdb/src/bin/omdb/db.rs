@@ -3366,33 +3366,38 @@ async fn cmd_db_reconfigurator_save(
 
     // It's also useful to include information about any DNS generations
     // mentioned in any blueprints.
-    let internal_dns_generations_needed: BTreeSet<_> =
-        blueprints.iter().map(|b| b.internal_dns_version).collect();
-    let mut internal_dns = BTreeMap::new();
-    for gen in internal_dns_generations_needed {
-        let dns_group = DnsGroup::Internal;
-        let config = datastore
-            .dns_config_read_version(&opctx, DnsGroup::Internal, gen)
+    let blueprints_list = &blueprints;
+    let fetch_dns_group = |dns_group: DnsGroup| async move {
+        let latest_version = datastore
+            .dns_group_latest_version(&opctx, dns_group)
             .await
             .with_context(|| {
-                format!("reading {:?} DNS version {}", dns_group, gen)
+                format!("reading latest {:?} version", dns_group)
             })?;
-        internal_dns.insert(gen, config);
-    }
+        let dns_generations_needed: BTreeSet<_> = blueprints_list
+            .iter()
+            .map(|blueprint| match dns_group {
+                DnsGroup::Internal => blueprint.internal_dns_version,
+                DnsGroup::External => blueprint.external_dns_version,
+            })
+            .chain(std::iter::once(*latest_version.version))
+            .collect();
+        let mut rv = BTreeMap::new();
+        for gen in dns_generations_needed {
+            let config = datastore
+                .dns_config_read_version(&opctx, dns_group, gen)
+                .await
+                .with_context(|| {
+                    format!("reading {:?} DNS version {}", dns_group, gen)
+                })?;
+            rv.insert(gen, config);
+        }
 
-    let external_dns_generations_needed: BTreeSet<_> =
-        blueprints.iter().map(|b| b.external_dns_version).collect();
-    let mut external_dns = BTreeMap::new();
-    for gen in external_dns_generations_needed {
-        let dns_group = DnsGroup::External;
-        let config = datastore
-            .dns_config_read_version(&opctx, DnsGroup::External, gen)
-            .await
-            .with_context(|| {
-                format!("reading {:?} DNS version {}", dns_group, gen)
-            })?;
-        external_dns.insert(gen, config);
-    }
+        Ok::<BTreeMap<_, _>, anyhow::Error>(rv)
+    };
+
+    let internal_dns = fetch_dns_group(DnsGroup::Internal).await?;
+    let external_dns = fetch_dns_group(DnsGroup::External).await?;
 
     let state = UnstableReconfiguratorState {
         policy: policy,
