@@ -155,6 +155,10 @@ if [[ "${HOST_OS}" == "SunOS" ]]; then
     #
     # create_virtual_hardware.sh will use those to setup the softnpu zone
     retry ./tools/ci_download_softnpu_machinery
+
+    # Create the omicron project
+    projects -l omicron >/dev/null 2>&1 || \
+        pfexec projadd -c 'The Oxide Control Plane' omicron
 fi
 
 echo "All runner prerequisites installed successfully"

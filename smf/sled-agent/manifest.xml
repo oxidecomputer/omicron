@@ -37,7 +37,7 @@
         <service_fmri value='svc:/system/t6init' />
   </dependency>
 
-  <method_context>
+  <method_context project='omicron'>
     <method_environment>
       <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
     </method_environment>
