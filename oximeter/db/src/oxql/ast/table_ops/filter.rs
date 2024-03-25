@@ -24,76 +24,79 @@ use regex::Regex;
 use std::collections::BTreeSet;
 use std::fmt;
 
+/// An AST node for the `filter` table operation.
+///
+/// This can be a simple operation like `foo == "bar"` or a more complex
+/// expression, such as: `filter hostname == "foo" || (hostname == "bar"
+/// && id == "baz")`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Filter2 {
+pub struct Filter {
+    /// True if the whole expression is negated.
     pub negated: bool,
-    pub expr: FilterExpr2,
+    /// The contained filtering expression, which may contain many expressions
+    /// joined by logical operators.
+    pub expr: FilterExpr,
 }
 
-impl fmt::Display for Filter2 {
+impl fmt::Display for Filter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}({})",
-            if self.negated { "!" } else { "" },
-            self.expr,
-        )
+        write!(f, "{}({})", if self.negated { "!" } else { "" }, self.expr,)
     }
 }
 
+/// A filtering expression, used in the `filter` table operation.
 #[derive(Clone, Debug, PartialEq)]
-pub enum FilterExpr2 {
+pub enum FilterExpr {
+    /// A single logical expression, e.g., `foo == "bar"`.
     Simple(SimpleFilter),
+    /// Two logical expressions, e.g., `foo == "bar" || yes == false`
     Compound(CompoundFilter),
 }
 
-impl fmt::Display for FilterExpr2 {
+impl fmt::Display for FilterExpr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FilterExpr2::Simple(inner) => write!(f, "{inner}"),
-            FilterExpr2::Compound(inner) => write!(f, "{inner}"),
+            FilterExpr::Simple(inner) => write!(f, "{inner}"),
+            FilterExpr::Compound(inner) => write!(f, "{inner}"),
         }
     }
 }
 
+/// A simple filter expression, comparing an identifier to a value.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SimpleFilter {
+    /// The identifier being compared.
     pub ident: Ident,
+    /// The comparison operator.
     pub cmp: Comparison,
+    /// The value to compare the identifier against.
     pub value: Literal,
 }
 
 impl fmt::Display for SimpleFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} {} {}",
-            self.ident,
-            self.cmp,
-            self.value,
-        )
+        write!(f, "{} {} {}", self.ident, self.cmp, self.value,)
     }
 }
 
+/// Two filter expressions joined by a logical operator.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompoundFilter {
-    pub left: Box<Filter2>,
+    /// The left subexpression.
+    pub left: Box<Filter>,
+    /// The logical operator joining the two expressions.
     pub op: LogicalOp,
-    pub right: Box<Filter2>,
+    /// The right subexpression.
+    pub right: Box<Filter>,
 }
 
 impl fmt::Display for CompoundFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} {} {}",
-            self.left,
-            self.op,
-            self.right,
-        )
+        write!(f, "{} {} {}", self.left, self.op, self.right,)
     }
 }
 
+/*
 /// An AST node for the `filter` table operation.
 ///
 /// This can be a simple operation like `foo == "bar"` or a more complex
@@ -106,51 +109,32 @@ pub enum Filter {
     /// A filtering expression combining multiple filters.
     Expr(FilterExpr),
 }
+*/
 
 impl Filter {
-    // Simplify this expression, if possible, by applying de Morgan's laws.
-    //
-    // This may return a clone of self.
-    fn simplify(&self) -> Filter {
-        match self {
-            Filter::Atom(_) => self.clone(),
-            Filter::Expr(expr) => expr.simplify(),
-        }
+    /// Return the negation of this filter.
+    pub fn negate(&self) -> Filter {
+        Self { negated: !self.negated, ..self.clone() }
     }
 
-    // Return the negation of this filter.
-    fn negate(&self) -> Filter {
-        match self {
-            Filter::Atom(atom) => {
-                Filter::Atom(FilterAtom {
-                    negated: !atom.negated,
-                    ..atom.clone()
-                })
-            }
-            Filter::Expr(expr) => {
-                Filter::Expr(FilterExpr {
-                    negated: !expr.negated,
-                    ..expr.clone()
-                })
-            }
-        }
-    }
-
-    // Merge this filter with another one.
-    pub(crate) fn merge(&self, other: &Filter) -> Self {
-        Filter::Expr(FilterExpr {
+    // Merge this filter with another one, using the provided operator.
+    pub(crate) fn merge(&self, other: &Filter, op: LogicalOp) -> Self {
+        Self {
             negated: false,
-            left: Box::new(self.clone()),
-            op: LogicalOp::And,
-            right: Box::new(other.clone()),
-        })
+            expr: FilterExpr::Compound(CompoundFilter {
+                left: Box::new(self.clone()),
+                op,
+                right: Box::new(other.clone()),
+            }),
+        }
     }
 
     // Apply the filter to the provided field.
     //
     // This returns `Ok(None)` if the filter doesn't apply. It returns `Ok(x)`
     // if the filter does apply, where `x` is the logical application of the
-    // filter to the field.
+    // filter to the field. `true` means "keep this field", which is analogous
+    // to the `Iterator::filter()` method's signature.
     //
     // If the filter does apply, but is incompatible or incomparable, return an
     // error.
@@ -159,10 +143,11 @@ impl Filter {
         name: &str,
         value: &FieldValue,
     ) -> Result<Option<bool>, Error> {
-        match self {
-            Filter::Atom(atom) => atom.filter_field(name, value),
-            Filter::Expr(expr) => expr.filter_field(name, value),
-        }
+        let result = match &self.expr {
+            FilterExpr::Simple(inner) => inner.filter_field(name, value),
+            FilterExpr::Compound(inner) => inner.filter_field(name, value),
+        };
+        result.map(|maybe_keep| maybe_keep.map(|keep| self.negated ^ keep))
     }
 
     // Apply the filter to the provided points.
@@ -175,9 +160,13 @@ impl Filter {
     //
     // Returns an array of bools, where true indicates the point should be kept.
     fn filter_points_inner(&self, points: &Points) -> Result<Vec<bool>, Error> {
-        match self {
-            Filter::Atom(atom) => atom.filter_points(points),
-            Filter::Expr(expr) => expr.filter_points(points),
+        match &self.expr {
+            FilterExpr::Simple(inner) => {
+                inner.filter_points(self.negated, points)
+            }
+            FilterExpr::Compound(inner) => {
+                inner.filter_points(self.negated, points)
+            }
         }
     }
 
@@ -258,38 +247,30 @@ impl Filter {
     // This is the maximum timestamp, before which any filtered point must lie.
     // This is used to determine the query end time.
     pub(crate) fn last_timestamp(&self) -> Option<DateTime<Utc>> {
-        match self {
-            Filter::Atom(atom) => atom.last_timestamp(),
-            Filter::Expr(expr) => expr.last_timestamp(),
+        match &self.expr {
+            FilterExpr::Simple(inner) => inner.last_timestamp(),
+            FilterExpr::Compound(inner) => inner.last_timestamp(),
         }
     }
 
     // Return the name of all identifiers listed in this filter.
     fn ident_names(&self) -> BTreeSet<&str> {
-        match self {
-            Filter::Atom(atom) => {
+        match &self.expr {
+            FilterExpr::Simple(inner) => {
                 let mut out = BTreeSet::new();
-                out.insert(atom.ident.as_str());
+                out.insert(inner.ident.as_str());
                 out
             }
-            Filter::Expr(expr) => {
-                let mut all = expr.left.ident_names();
-                all.extend(expr.right.ident_names());
+            FilterExpr::Compound(inner) => {
+                let mut all = inner.left.ident_names();
+                all.extend(inner.right.ident_names());
                 all
             }
         }
     }
 }
 
-impl fmt::Display for Filter {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Filter::Atom(inner) => write!(f, "{}", inner),
-            Filter::Expr(inner) => write!(f, "{}", inner),
-        }
-    }
-}
-
+/*
 /// A more complicated expression as part of a filtering operation.
 ///
 /// E.g., the `hostname == "bar" && id == "baz"` in the below.
@@ -301,8 +282,9 @@ pub struct FilterExpr {
     pub op: LogicalOp,
     pub right: Box<Filter>,
 }
+*/
 
-impl FilterExpr {
+impl CompoundFilter {
     // Apply the filter to the provided field.
     fn filter_field(
         &self,
@@ -323,29 +305,31 @@ impl FilterExpr {
     }
 
     // Apply the filter to the provided points.
-    fn filter_points(&self, points: &Points) -> Result<Vec<bool>, Error> {
+    fn filter_points(
+        &self,
+        negated: bool,
+        points: &Points,
+    ) -> Result<Vec<bool>, Error> {
         let mut left = self.left.filter_points_inner(points)?;
         let right = self.right.filter_points_inner(points)?;
         match self.op {
             LogicalOp::And => {
                 for i in 0..left.len() {
-                    left[i] &= right[i];
+                    left[i] = negated ^ (left[i] & right[i]);
                 }
-                Ok(left)
             }
             LogicalOp::Or => {
                 for i in 0..left.len() {
-                    left[i] |= right[i];
+                    left[i] = negated ^ (left[i] | right[i]);
                 }
-                Ok(left)
             }
             LogicalOp::Xor => {
                 for i in 0..left.len() {
-                    left[i] ^= right[i];
+                    left[i] = negated ^ (left[i] ^ right[i]);
                 }
-                Ok(left)
             }
         }
+        Ok(left)
     }
 
     fn last_timestamp(&self) -> Option<DateTime<Utc>> {
@@ -357,43 +341,9 @@ impl FilterExpr {
             (Some(left), Some(right)) => Some(left.max(right)),
         }
     }
-
-    fn simplify(&self) -> Filter {
-        // Negation of conjunction
-        if self.negated && matches!(self.op, LogicalOp::And) {
-            return Filter::Expr(FilterExpr {
-                negated: false,
-                left: Box::new(self.left.negate().simplify()),
-                op: LogicalOp::Or,
-                right: Box::new(self.right.negate().simplify()),
-            });
-        }
-        // Negation of disjunction
-        if self.negated && matches!(self.op, LogicalOp::Or) {
-            return Filter::Expr(FilterExpr {
-                negated: false,
-                left: Box::new(self.left.negate().simplify()),
-                op: LogicalOp::And,
-                right: Box::new(self.right.negate().simplify()),
-            });
-        }
-        Filter::Expr(self.clone())
-    }
 }
 
-impl fmt::Display for FilterExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}({} {} {})",
-            if self.negated { "!" } else { "" },
-            self.left,
-            self.op,
-            self.right
-        )
-    }
-}
-
+/*
 /// An atom of a filtering expression.
 ///
 /// E.g, the `hostname == "foo"` in the below.
@@ -404,8 +354,9 @@ pub struct FilterAtom {
     pub cmp: Comparison,
     pub expr: Literal,
 }
+*/
 
-impl FilterAtom {
+impl SimpleFilter {
     // Apply this filter to the provided field.
     //
     // If the field name does not match the identifier in `self`, return
@@ -426,96 +377,106 @@ impl FilterAtom {
         if self.ident.as_str() != name {
             return Ok(None);
         }
-        self.expr
-            .compare_field(value, self.cmp)
-            .map(|res| {
-                // `!expr` has the same truth table as `negated XOR expr`
-                Some(self.negated ^ res)
-            })
-            .ok_or_else(|| {
+        self.value.compare_field(value, self.cmp).map(Option::Some).ok_or_else(
+            || {
                 anyhow::anyhow!(
                     "Filter matches the field named '{}', but \
                     the expression type  is not compatible, or \
                     cannot be applied",
                     name,
                 )
-            })
+            },
+        )
     }
 
     pub(crate) fn expr_type_is_compatible_with_field(
         &self,
         field_type: FieldType,
     ) -> bool {
-        self.expr.is_compatible_with_field(field_type)
+        self.value.is_compatible_with_field(field_type)
     }
 
+    /// Return the expression as a string that can be applied safely in the
+    /// database.
     pub(crate) fn as_db_safe_string(&self) -> String {
-        let not = if self.negated { " NOT " } else { "" };
-        let expr = self.expr.as_db_safe_string();
+        let expr = self.value.as_db_safe_string();
         let fn_name = self.cmp.as_db_function_name();
-        format!("{}{}({}, {})", not, fn_name, self.ident, expr)
+        format!("{}({}, {})", fn_name, self.ident, expr)
     }
 
     // Returns an array of bools, where true indicates the point should be kept.
-    fn filter_points(&self, points: &Points) -> Result<Vec<bool>, Error> {
+    fn filter_points(
+        &self,
+        negated: bool,
+        points: &Points,
+    ) -> Result<Vec<bool>, Error> {
         let ident = self.ident.as_str();
         if ident == "timestamp" {
-            self.filter_points_by_timestamp(&points.timestamps)
+            self.filter_points_by_timestamp(negated, &points.timestamps)
         } else if ident == "datum" {
             anyhow::ensure!(
                 points.dimensionality() == 1,
                 "Filtering multidimensional values by datum is not yet supported"
             );
-            self.filter_points_by_datum(points.values(0).unwrap())
+            self.filter_points_by_datum(negated, points.values(0).unwrap())
         } else {
-            Ok(vec![true; points.len()])
+            let out = if negated { false } else { true };
+            Ok(vec![out; points.len()])
         }
     }
 
     fn filter_points_by_timestamp(
         &self,
+        negated: bool,
         timestamps: &[DateTime<Utc>],
     ) -> Result<Vec<bool>, Error> {
-        let Literal::Timestamp(timestamp) = &self.expr else {
+        let Literal::Timestamp(timestamp) = &self.value else {
             anyhow::bail!(
                 "Cannot compare non-timestamp filter against a timestamp"
             );
         };
         match self.cmp {
-            Comparison::Eq => {
-                Ok(timestamps.iter().map(|t| t == timestamp).collect())
-            }
-            Comparison::Ne => {
-                Ok(timestamps.iter().map(|t| t != timestamp).collect())
-            }
-            Comparison::Gt => {
-                Ok(timestamps.iter().map(|t| t > timestamp).collect())
-            }
-            Comparison::Ge => {
-                Ok(timestamps.iter().map(|t| t >= timestamp).collect())
-            }
-            Comparison::Lt => {
-                Ok(timestamps.iter().map(|t| t < timestamp).collect())
-            }
-            Comparison::Le => {
-                Ok(timestamps.iter().map(|t| t <= timestamp).collect())
-            }
+            Comparison::Eq => Ok(timestamps
+                .iter()
+                .map(|t| negated ^ (t == timestamp))
+                .collect()),
+            Comparison::Ne => Ok(timestamps
+                .iter()
+                .map(|t| negated ^ (t != timestamp))
+                .collect()),
+            Comparison::Gt => Ok(timestamps
+                .iter()
+                .map(|t| negated ^ (t > timestamp))
+                .collect()),
+            Comparison::Ge => Ok(timestamps
+                .iter()
+                .map(|t| negated ^ (t >= timestamp))
+                .collect()),
+            Comparison::Lt => Ok(timestamps
+                .iter()
+                .map(|t| negated ^ (t < timestamp))
+                .collect()),
+            Comparison::Le => Ok(timestamps
+                .iter()
+                .map(|t| negated ^ (t <= timestamp))
+                .collect()),
             Comparison::Like => unreachable!(),
         }
     }
 
     fn filter_points_by_datum(
         &self,
+        negated: bool,
         values: &ValueArray,
     ) -> Result<Vec<bool>, Error> {
-        match (&self.expr, values) {
+        match (&self.value, values) {
             (Literal::Integer(int), ValueArray::Integer(ints)) => {
                 match self.cmp {
                     Comparison::Eq => Ok(ints
                         .iter()
                         .map(|maybe_int| {
                             maybe_int
-                                .map(|i| i128::from(i) == *int)
+                                .map(|i| negated ^ (i128::from(i) == *int))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -523,7 +484,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_int| {
                             maybe_int
-                                .map(|i| i128::from(i) != *int)
+                                .map(|i| negated ^ (i128::from(i) != *int))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -531,7 +492,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_int| {
                             maybe_int
-                                .map(|i| i128::from(i) > *int)
+                                .map(|i| negated ^ (i128::from(i) > *int))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -539,7 +500,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_int| {
                             maybe_int
-                                .map(|i| i128::from(i) >= *int)
+                                .map(|i| negated ^ (i128::from(i) >= *int))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -547,7 +508,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_int| {
                             maybe_int
-                                .map(|i| i128::from(i) < *int)
+                                .map(|i| negated ^ (i128::from(i) < *int))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -555,7 +516,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_int| {
                             maybe_int
-                                .map(|i| i128::from(i) <= *int)
+                                .map(|i| negated ^ (i128::from(i) <= *int))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -567,37 +528,49 @@ impl FilterAtom {
                     Comparison::Eq => Ok(doubles
                         .iter()
                         .map(|maybe_double| {
-                            maybe_double.map(|d| d == *double).unwrap_or(false)
+                            maybe_double
+                                .map(|d| negated ^ (d == *double))
+                                .unwrap_or(false)
                         })
                         .collect()),
                     Comparison::Ne => Ok(doubles
                         .iter()
                         .map(|maybe_double| {
-                            maybe_double.map(|d| d != *double).unwrap_or(false)
+                            maybe_double
+                                .map(|d| negated ^ (d != *double))
+                                .unwrap_or(false)
                         })
                         .collect()),
                     Comparison::Gt => Ok(doubles
                         .iter()
                         .map(|maybe_double| {
-                            maybe_double.map(|d| d > *double).unwrap_or(false)
+                            maybe_double
+                                .map(|d| negated ^ (d > *double))
+                                .unwrap_or(false)
                         })
                         .collect()),
                     Comparison::Ge => Ok(doubles
                         .iter()
                         .map(|maybe_double| {
-                            maybe_double.map(|d| d >= *double).unwrap_or(false)
+                            maybe_double
+                                .map(|d| negated ^ (d >= *double))
+                                .unwrap_or(false)
                         })
                         .collect()),
                     Comparison::Lt => Ok(doubles
                         .iter()
                         .map(|maybe_double| {
-                            maybe_double.map(|d| d < *double).unwrap_or(false)
+                            maybe_double
+                                .map(|d| negated ^ (d < *double))
+                                .unwrap_or(false)
                         })
                         .collect()),
                     Comparison::Le => Ok(doubles
                         .iter()
                         .map(|maybe_double| {
-                            maybe_double.map(|d| d <= *double).unwrap_or(false)
+                            maybe_double
+                                .map(|d| negated ^ (d <= *double))
+                                .unwrap_or(false)
                         })
                         .collect()),
                     Comparison::Like => unreachable!(),
@@ -611,7 +584,7 @@ impl FilterAtom {
                         .map(|maybe_string| {
                             maybe_string
                                 .as_deref()
-                                .map(|s| s == string)
+                                .map(|s| negated ^ (s == string))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -620,7 +593,7 @@ impl FilterAtom {
                         .map(|maybe_string| {
                             maybe_string
                                 .as_deref()
-                                .map(|s| s != string)
+                                .map(|s| negated ^ (s != string))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -629,7 +602,7 @@ impl FilterAtom {
                         .map(|maybe_string| {
                             maybe_string
                                 .as_deref()
-                                .map(|s| s > string)
+                                .map(|s| negated ^ (s > string))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -638,7 +611,7 @@ impl FilterAtom {
                         .map(|maybe_string| {
                             maybe_string
                                 .as_deref()
-                                .map(|s| s >= string)
+                                .map(|s| negated ^ (s >= string))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -647,7 +620,7 @@ impl FilterAtom {
                         .map(|maybe_string| {
                             maybe_string
                                 .as_deref()
-                                .map(|s| s < string)
+                                .map(|s| negated ^ (s < string))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -656,7 +629,7 @@ impl FilterAtom {
                         .map(|maybe_string| {
                             maybe_string
                                 .as_deref()
-                                .map(|s| s <= string)
+                                .map(|s| negated ^ (s <= string))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -667,7 +640,7 @@ impl FilterAtom {
                             .map(|maybe_string| {
                                 maybe_string
                                     .as_deref()
-                                    .map(|s| re.is_match(s))
+                                    .map(|s| negated ^ re.is_match(s))
                                     .unwrap_or(false)
                             })
                             .collect())
@@ -680,7 +653,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_boolean| {
                             maybe_boolean
-                                .map(|b| b == *boolean)
+                                .map(|b| negated ^ (b == *boolean))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -688,7 +661,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_boolean| {
                             maybe_boolean
-                                .map(|b| b != *boolean)
+                                .map(|b| negated ^ (b != *boolean))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -696,7 +669,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_boolean| {
                             maybe_boolean
-                                .map(|b| b & !(*boolean))
+                                .map(|b| negated ^ (b & !(*boolean)))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -704,7 +677,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_boolean| {
                             maybe_boolean
-                                .map(|b| b >= *boolean)
+                                .map(|b| negated ^ (b >= *boolean))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -712,7 +685,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_boolean| {
                             maybe_boolean
-                                .map(|b| !b & *boolean)
+                                .map(|b| negated ^ (!b & *boolean))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -720,7 +693,7 @@ impl FilterAtom {
                         .iter()
                         .map(|maybe_boolean| {
                             maybe_boolean
-                                .map(|b| b <= *boolean)
+                                .map(|b| negated ^ (b <= *boolean))
                                 .unwrap_or(false)
                         })
                         .collect()),
@@ -728,7 +701,7 @@ impl FilterAtom {
                 }
             }
             (_, _) => {
-                let lit_type = match &self.expr {
+                let lit_type = match &self.value {
                     Literal::Uuid(_) => "UUID",
                     Literal::Duration(_) => "duration",
                     Literal::Timestamp(_) => "timestamp",
@@ -754,20 +727,13 @@ impl FilterAtom {
                 Comparison::Lt | Comparison::Le | Comparison::Eq
             )
         {
-            let Literal::Timestamp(t) = self.expr else {
+            let Literal::Timestamp(t) = self.value else {
                 return None;
             };
             Some(t)
         } else {
             None
         }
-    }
-}
-
-impl fmt::Display for FilterAtom {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let bang = if self.negated { "!" } else { "" };
-        write!(f, "{}({} {} {})", bang, self.ident, self.cmp, self.expr,)
     }
 }
 
@@ -903,6 +869,7 @@ mod tests {
         }
     }
 
+    /*
     #[test]
     fn test_simplify_single_expr() {
         let original = query_parser::filter_item("!(a == 0 || b == 0)").unwrap();
@@ -933,4 +900,5 @@ mod tests {
         // I think this suggests that we need to use the recursive rules rather
         // than precedence-climbing.
     }
+    */
 }
