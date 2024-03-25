@@ -2020,7 +2020,7 @@ mod test {
 
         let instance_state = nexus
             .datastore()
-            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(&opctx, &authz_instance)
             .await
             .unwrap();
 
@@ -2032,7 +2032,7 @@ mod test {
         sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus
             .datastore()
-            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(&opctx, &authz_instance)
             .await
             .unwrap();
 

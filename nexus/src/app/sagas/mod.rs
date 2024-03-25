@@ -31,6 +31,7 @@ pub mod instance_ip_attach;
 pub mod instance_ip_detach;
 pub mod instance_migrate;
 pub mod instance_start;
+pub mod instance_update;
 pub mod project_create;
 pub mod region_replacement_start;
 pub mod snapshot_create;

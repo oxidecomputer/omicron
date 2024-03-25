@@ -133,7 +133,7 @@ impl TestInterfaces for super::Nexus {
 
         Ok(self
             .datastore()
-            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
             .await?
             .sled_id())
     }

@@ -227,7 +227,7 @@ pub async fn instance_ip_get_instance_state(
         crate::context::op_context_for_saga_action(&sagactx, serialized_authn);
 
     let inst_and_vmm = datastore
-        .instance_fetch_with_vmm(&opctx, authz_instance)
+        .instance_fetch_with_active_vmm(&opctx, authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
 

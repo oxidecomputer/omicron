@@ -103,7 +103,7 @@ impl super::Nexus {
 
             let instance_state = self
                 .datastore()
-                .instance_fetch_with_vmm(&opctx, &authz_instance)
+                .instance_fetch_with_active_vmm(&opctx, &authz_instance)
                 .await?;
 
             // If a Propolis _may_ exist, send the snapshot request there,

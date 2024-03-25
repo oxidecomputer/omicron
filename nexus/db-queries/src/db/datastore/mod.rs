@@ -107,7 +107,7 @@ mod zpool;
 pub use address_lot::AddressLotCreateResult;
 pub use dns::DataStoreDnsTest;
 pub use dns::DnsVersionUpdateBuilder;
-pub use instance::InstanceAndActiveVmm;
+pub use instance::{InstanceAndActiveVmm, InstanceAndVmms};
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
 pub use probe::ProbeInfo;

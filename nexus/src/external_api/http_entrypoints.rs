@@ -2825,7 +2825,7 @@ async fn instance_view(
             instance_lookup.lookup_for(authz::Action::Read).await?;
         let instance_and_vmm = nexus
             .datastore()
-            .instance_fetch_with_vmm(&opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(&opctx, &authz_instance)
             .await?;
         Ok(HttpResponseOk(instance_and_vmm.into()))
     };

@@ -414,7 +414,9 @@ impl super::Nexus {
             .lookup_for(authz::Action::Read)
             .await?;
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.db_datastore
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
+            .await
     }
 
     pub(crate) async fn instance_list(
@@ -474,7 +476,7 @@ impl super::Nexus {
 
         let state = self
             .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
             .await?;
         let (instance, vmm) = (state.instance(), state.vmm());
 
@@ -512,7 +514,9 @@ impl super::Nexus {
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?
         // See comment in project_create_instance.
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.db_datastore
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
+            .await
     }
 
     /// Attempts to set the migration IDs for the supplied instance via the
@@ -662,7 +666,7 @@ impl super::Nexus {
 
         let state = self
             .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
             .await?;
 
         if let Err(e) = self
@@ -690,7 +694,9 @@ impl super::Nexus {
             return Err(e.into());
         }
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.db_datastore
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
+            .await
     }
 
     /// Attempts to start an instance if it is currently stopped.
@@ -704,7 +710,7 @@ impl super::Nexus {
 
         let state = self
             .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
             .await?;
         let (instance, vmm) = (state.instance(), state.vmm());
 
@@ -752,7 +758,9 @@ impl super::Nexus {
         )
         .await?;
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.db_datastore
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
+            .await
     }
 
     /// Make sure the given Instance is stopped.
@@ -766,7 +774,7 @@ impl super::Nexus {
 
         let state = self
             .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
             .await?;
 
         if let Err(e) = self
@@ -794,7 +802,9 @@ impl super::Nexus {
             return Err(e.into());
         }
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.db_datastore
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
+            .await
     }
 
     /// Idempotently ensures that the sled specified in `db_instance` does not
@@ -1644,7 +1654,7 @@ impl super::Nexus {
 
         let state = self
             .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .instance_fetch_with_active_vmm(opctx, &authz_instance)
             .await?;
 
         let (instance, vmm) = (state.instance(), state.vmm());

@@ -177,7 +177,7 @@ pub async fn instance_fetch(
         .expect("test instance should be present in datastore");
 
     let db_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .instance_fetch_with_active_vmm(&opctx, &authz_instance)
         .await
         .expect("test instance's info should be fetchable");
 
