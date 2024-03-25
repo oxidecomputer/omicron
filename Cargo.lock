@@ -7158,6 +7158,7 @@ dependencies = [
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-workspace-hack",
+ "pq-sys",
  "reedline",
  "regex",
  "serde_json",

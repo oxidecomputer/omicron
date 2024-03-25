@@ -11,7 +11,6 @@ use dns_service_client::DnsDiff;
 use internal_dns::DnsConfigBuilder;
 use internal_dns::ServiceName;
 use nexus_db_model::DnsGroup;
-use nexus_db_model::Silo;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
@@ -27,6 +26,7 @@ use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
+use omicron_common::api::external::Name;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -73,12 +73,16 @@ pub(crate) async fn deploy_dns(
         .internal_context("listing Silos (for configuring external DNS)")?
         .into_iter()
         // We do not generate a DNS name for the "default" Silo.
-        .filter(|silo| silo.id() != *DEFAULT_SILO_ID)
+        .filter_map(|silo| {
+            (silo.id() != *DEFAULT_SILO_ID).then(|| silo.name().clone())
+        })
         .collect::<Vec<_>>();
 
-    let (nexus_external_ips, nexus_external_dns_zones) =
-        datastore.nexus_external_addresses(opctx, Some(blueprint)).await?;
-    let nexus_external_dns_zone_names = nexus_external_dns_zones
+    let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
+    let nexus_external_dns_zone_names = datastore
+        .dns_zones_list_all(opctx, DnsGroup::External)
+        .await
+        .internal_context("listing DNS zones")?
         .into_iter()
         .map(|z| z.zone_name)
         .collect::<Vec<_>>();
@@ -346,7 +350,7 @@ pub fn blueprint_internal_dns_config(
 pub fn blueprint_external_dns_config(
     blueprint: &Blueprint,
     nexus_external_ips: &[IpAddr],
-    silos: &[Silo],
+    silos: &[Name],
     external_dns_zone_names: &[String],
 ) -> DnsConfigParams {
     let dns_records: Vec<DnsRecord> = nexus_external_ips
@@ -359,7 +363,7 @@ pub fn blueprint_external_dns_config(
 
     let records = silos
         .into_iter()
-        .map(|silo| (silo_dns_name(&silo.name()), dns_records.clone()))
+        .map(|silo_name| (silo_dns_name(&silo_name), dns_records.clone()))
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 
     let zones = external_dns_zone_names
@@ -444,6 +448,17 @@ pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
     // strings, which is why it's safe to directly put the name of the
     // resource into the DNS name rather than doing any kind of escaping.
     format!("{}.sys", name)
+}
+
+/// Return the Nexus external addresses according to the given blueprint
+pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
+    blueprint
+        .all_omicron_zones()
+        .filter_map(|(_, z)| match z.zone_type {
+            OmicronZoneType::Nexus { external_ip, .. } => Some(external_ip),
+            _ => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -888,7 +903,7 @@ mod test {
         let external_dns_config = blueprint_external_dns_config(
             &blueprint,
             &nexus_external_ips,
-            std::slice::from_ref(&my_silo),
+            std::slice::from_ref(my_silo.name()),
             &[],
         );
         assert_eq!(
@@ -901,7 +916,7 @@ mod test {
         let external_dns_config = blueprint_external_dns_config(
             &blueprint,
             &[],
-            std::slice::from_ref(&my_silo),
+            std::slice::from_ref(my_silo.name()),
             &[String::from("oxide.test")],
         );
         assert_eq!(
@@ -915,7 +930,7 @@ mod test {
         let external_dns_config = blueprint_external_dns_config(
             &blueprint,
             &nexus_external_ips,
-            std::slice::from_ref(&my_silo),
+            std::slice::from_ref(my_silo.name()),
             &[String::from("oxide1.test"), String::from("oxide2.test")],
         );
         assert_eq!(

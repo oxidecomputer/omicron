@@ -11,7 +11,9 @@ use clap::FromArgMatches;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
+use nexus_reconfigurator_execution::blueprint_external_dns_config;
 use nexus_reconfigurator_execution::blueprint_internal_dns_config;
+use nexus_reconfigurator_execution::blueprint_nexus_external_ips;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
@@ -23,6 +25,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::Name;
 use reedline::{Reedline, Signal};
 use std::collections::BTreeMap;
 use std::io::BufRead;
@@ -51,6 +54,11 @@ struct ReconfiguratorSim {
     /// external DNS configurations
     external_dns: BTreeMap<Generation, DnsConfigParams>,
 
+    // XXX-dap TODO-doc
+    // XXX-dap add to omdb
+    silo_names: Vec<Name>,
+    external_dns_zone_name: String,
+
     log: slog::Logger,
 }
 
@@ -78,6 +86,8 @@ fn main() -> anyhow::Result<()> {
         internal_dns: BTreeMap::new(),
         external_dns: BTreeMap::new(),
         log,
+        silo_names: vec!["example-silo".parse().unwrap()],
+        external_dns_zone_name: String::from("oxide.example"),
     };
 
     if let Some(input_file) = cmd.input_file {
@@ -493,14 +503,65 @@ fn cmd_blueprint_plan(
         .collections
         .get(&collection_id)
         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
-    let dns_version = Generation::new();
     let policy = sim.system.to_policy().context("generating policy")?;
     let creator = "reconfigurator-sim";
+
+    let sleds_by_id = make_sleds_by_id(&sim)?;
+    let parent_internal_dns_version = blueprint_internal_dns_config(
+        &parent_blueprint,
+        &sleds_by_id,
+        &Default::default(),
+    )?
+    .generation;
+    let parent_external_dns_version = blueprint_external_dns_config(
+        &parent_blueprint,
+        &blueprint_nexus_external_ips(&parent_blueprint),
+        &sim.silo_names,
+        &[sim.external_dns_zone_name.clone()],
+    )
+    .generation;
+
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
-        dns_version,
-        dns_version,
+        // The internal and external DNS numbers that go here are supposed to be
+        // the _current_ internal and external DNS generations at the point
+        // when planning happened.  This is racy (these generations can change
+        // immediately after they're fetched from the database) but correctness
+        // only requires that the values here be *no newer* than the real
+        // values so it's okay if the real values get changed.
+        //
+        // The problem is we have no real system here to fetch these values
+        // from.  What should the value be?
+        //
+        // - If we assume that the parent blueprint here was successfully
+        //   executed immediately before generating this plan, then the values
+        //   here should come from the generation number produced by executing
+        //   the parent blueprint.
+        //
+        // - If the parent blueprint was never executed, or execution is still
+        //   in progress, or if other blueprints have been executed in the
+        //   meantime that changed DNS, then the values here could be different
+        //   (older if the blueprint was never executed or is currently
+        //   executing and newer if other blueprints have changed DNS in the
+        //   meantime).
+        //
+        // But in this CLI, there's no execution at all.  As a result, there's
+        // no way to really choose between these -- and it doesn't really
+        // matter, either.
+        //
+        // We assume here that the parent blueprint was the last thing that was
+        // executed because that's usually what people are trying to simulate
+        // when they use this tool.  Note that this is only safe because we're
+        // faking all this up and not actually executing anything.
+        Generation::from(
+            u32::try_from(parent_internal_dns_version)
+                .context("internal DNS version got too big")?,
+        ),
+        Generation::from(
+            u32::try_from(parent_external_dns_version)
+                .context("external DNS version got too big")?,
+        ),
         &policy,
         creator,
         collection,
@@ -530,6 +591,7 @@ fn cmd_blueprint_diff(
     sim: &mut ReconfiguratorSim,
     args: BlueprintDiffArgs,
 ) -> anyhow::Result<Option<String>> {
+    let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
     let blueprint2_id = args.blueprint2_id;
     let blueprint1 = sim
@@ -542,10 +604,49 @@ fn cmd_blueprint_diff(
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
 
     let sled_diff = blueprint1.diff_sleds(&blueprint2).display().to_string();
+    swriteln!(rv, "{}", sled_diff);
 
     // Diff'ing DNS is a little trickier.  First, compute what DNS should be for
     // each blueprint.  To do that we need to construct a list of sleds suitable
     // for the executor.
+    let sleds_by_id = make_sleds_by_id(&sim)?;
+    let internal_dns_config1 = blueprint_internal_dns_config(
+        &blueprint1,
+        &sleds_by_id,
+        &Default::default(),
+    )?;
+    let internal_dns_config2 = blueprint_internal_dns_config(
+        &blueprint2,
+        &sleds_by_id,
+        &Default::default(),
+    )?;
+    let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
+        .context("failed to assemble DNS diff")?;
+    swriteln!(rv, "internal DNS:\n{}", dns_diff);
+
+    let external_dns_config1 = blueprint_external_dns_config(
+        &blueprint1,
+        &blueprint_nexus_external_ips(&blueprint1),
+        &sim.silo_names,
+        &[sim.external_dns_zone_name.clone()],
+    );
+    let external_dns_config2 = blueprint_external_dns_config(
+        &blueprint2,
+        &blueprint_nexus_external_ips(&blueprint2),
+        &sim.silo_names,
+        &[sim.external_dns_zone_name.clone()],
+    );
+    let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
+        .context("failed to assemble external DNS diff")?;
+    swriteln!(rv, "external DNS:\n{}", dns_diff);
+
+    Ok(Some(rv))
+}
+
+fn make_sleds_by_id(
+    sim: &ReconfiguratorSim,
+) -> Result<BTreeMap<Uuid, nexus_reconfigurator_execution::Sled>, anyhow::Error>
+{
     let collection = sim
         .system
         .to_collection_builder()
@@ -565,22 +666,7 @@ fn cmd_blueprint_diff(
             (*sled_id, sled)
         })
         .collect();
-    let dns_config1 = blueprint_internal_dns_config(
-        &blueprint1,
-        &sleds_by_id,
-        &Default::default(),
-    )?;
-    let dns_config2 = blueprint_internal_dns_config(
-        &blueprint2,
-        &sleds_by_id,
-        &Default::default(),
-    )?;
-    let dns_diff = DnsDiff::new(&dns_config1, &dns_config2)
-        .context("failed to assemble DNS diff")?;
-    // XXX-dap add external DNS diff too
-
-    // XXX-dap should not be Debug, that's just to get it to build for now
-    Ok(Some(format!("{}\n{:?}", sled_diff, dns_diff)))
+    Ok(sleds_by_id)
 }
 
 fn cmd_blueprint_diff_inventory(

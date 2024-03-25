@@ -20,8 +20,6 @@ use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
-pub use dns::silo_dns_name;
-
 mod datasets;
 mod dns;
 mod omicron_zones;
@@ -30,6 +28,8 @@ mod resource_allocation;
 
 pub use dns::blueprint_external_dns_config;
 pub use dns::blueprint_internal_dns_config;
+pub use dns::blueprint_nexus_external_ips;
+pub use dns::silo_dns_name;
 
 pub struct Sled {
     id: Uuid,
