@@ -2759,10 +2759,10 @@ pub struct BgpPeerStatus {
 /// Opaque object representing BGP message history for a given BGP peer. The
 /// contents of this object are not yet stable.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BgpMessageHistory(mg_admin_client::MessageHistory);
+pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
 
 impl BgpMessageHistory {
-    pub fn new(arg: mg_admin_client::MessageHistory) -> Self {
+    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
         Self(arg)
     }
 }
@@ -2820,6 +2820,25 @@ pub struct BgpImportedRouteIpv4 {
 
     /// Switch the route is imported into.
     pub switch: SwitchLocation,
+}
+
+/// BFD connection mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
 }
 
 /// A description of an uploaded TUF repository.

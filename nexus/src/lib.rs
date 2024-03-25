@@ -310,6 +310,7 @@ impl nexus_test_interface::NexusServer for Server {
                         infra_ip_last: Ipv4Addr::UNSPECIFIED,
                         ports: Vec::new(),
                         bgp: Vec::new(),
+                        bfd: Vec::new(),
                     },
                 },
             )

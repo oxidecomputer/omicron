@@ -991,7 +991,7 @@ mod test {
     };
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
-    use std::collections::{BTreeMap, BTreeSet, HashMap};
+    use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -1004,8 +1004,7 @@ mod test {
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
                     id: Uuid::new_v4(),
-                    omicron_zones: BTreeMap::new(),
-                    zones_in_service: BTreeSet::new(),
+                    blueprint_zones: BTreeMap::new(),
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),

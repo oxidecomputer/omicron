@@ -18,8 +18,7 @@ use internal_dns::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, LoopbackAddress,
-    SwitchLinkFec, SwitchLinkSpeed, SwitchPortBgpPeerConfig, INFRA_LOT,
-    NETWORK_KEY,
+    SwitchLinkFec, SwitchLinkSpeed, INFRA_LOT, NETWORK_KEY,
 };
 use uuid::Uuid;
 
@@ -29,9 +28,8 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use mg_admin_client::types::{
     AddStaticRoute4Request, ApplyRequest, BgpPeerConfig,
-    DeleteStaticRoute4Request, StaticRoute4, StaticRoute4List,
+    DeleteStaticRoute4Request, Prefix4, StaticRoute4, StaticRoute4List,
 };
-use mg_admin_client::Prefix4;
 use nexus_db_queries::{
     context::OpContext,
     db::{datastore::SwitchPortSettingsCombinedResult, DataStore},
@@ -41,7 +39,10 @@ use nexus_types::{external_api::params, identity::Resource};
 use omicron_common::OMICRON_DPD_TAG;
 use omicron_common::{
     address::{get_sled_address, Ipv6Subnet},
-    api::external::{DataPageParams, SwitchLocation},
+    api::{
+        external::{DataPageParams, SwitchLocation},
+        internal::shared::ParseSwitchLocationError,
+    },
 };
 use serde_json::json;
 use sled_agent_client::types::{
@@ -212,6 +213,56 @@ impl SwitchPortSettingsManager {
 
         Ok(set)
     }
+
+    async fn bfd_peer_configs_from_db<'a>(
+        &'a mut self,
+        opctx: &OpContext,
+    ) -> Result<
+        Vec<sled_agent_client::types::BfdPeerConfig>,
+        omicron_common::api::external::Error,
+    > {
+        let db_data = self
+            .datastore
+            .bfd_session_list(opctx, &DataPageParams::max_page())
+            .await?;
+
+        let mut result = Vec::new();
+        for spec in db_data.into_iter() {
+            let config = sled_agent_client::types::BfdPeerConfig {
+                local: spec.local.map(|x| x.ip()),
+                remote: spec.remote.ip(),
+                detection_threshold: spec.detection_threshold.0.try_into().map_err(|_| {
+                    omicron_common::api::external::Error::InternalError {
+                        internal_message: format!(
+                            "db_bfd_peer_configs: detection threshold overflow: {}",
+                            spec.detection_threshold.0,
+                        ),
+                    }
+                })?,
+                required_rx: spec.required_rx.0.into(),
+                mode: match spec.mode {
+                    nexus_db_model::BfdMode::SingleHop => {
+                        sled_agent_client::types::BfdMode::SingleHop
+                    }
+                    nexus_db_model::BfdMode::MultiHop => {
+                        sled_agent_client::types::BfdMode::MultiHop
+                    }
+                },
+                switch: spec.switch.parse().map_err(|e: ParseSwitchLocationError| {
+                    omicron_common::api::external::Error::InternalError {
+                        internal_message: format!(
+                            "db_bfd_peer_configs: failed to parse switch name: {}: {:?}",
+                            spec.switch,
+                            e,
+                        ),
+                    }
+                })?,
+            };
+            result.push(config);
+        }
+
+        Ok(result)
+    }
 }
 
 #[derive(Debug)]
@@ -301,7 +352,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     },
                 };
 
-                info!(&log, "applying switch port config changes"; "changes" => ?changes);
                 apply_switch_port_changes(&dpd_clients, &changes, &log).await;
 
                 //
@@ -436,8 +486,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 // Prefixes are associated to BgpConfig via the config id
                 let mut bgp_announce_prefixes: HashMap<Uuid, Vec<Prefix4>> = HashMap::new();
 
-                let mut bootstore_bgp_peer_info: Vec<(SwitchPortBgpPeerConfig, u32, Ipv4Addr)> = vec![];
-
                 for (location, port, change) in &changes {
                     let PortSettingsChange::Apply(settings) = change else {
                         continue;
@@ -550,15 +598,6 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             keepalive: peer.keepalive.0.into(),
                             resolution: BGP_SESSION_RESOLUTION,
                             passive: false,
-                        };
-
-                        // add it to data for the bootstore
-                        // only ipv4 is supported now
-                        match peer.addr {
-                            ipnetwork::IpNetwork::V4(addr) => {
-                                bootstore_bgp_peer_info.push((peer.clone(), bgp_config.asn.0, addr.ip()));
-                            },
-                            ipnetwork::IpNetwork::V6(_) => continue, //TODO v6
                         };
 
                         // update the stored vec if it exists, create a new on if it doesn't exist
@@ -690,7 +729,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 };
 
                 // TODO: @rcgoodfellow is this correct? Do we place the BgpConfig for both switches in a single Vec to send to the bootstore?
-                let bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
+                let mut bgp: Vec<SledBgpConfig> = switch_bgp_config.iter().map(|(_location, (_id, config))| {
                     let announcements: Vec<Ipv4Network> = bgp_announce_prefixes
                         .get(&config.bgp_announce_set_id)
                         .expect("bgp config is present but announce set is not populated")
@@ -707,11 +746,27 @@ impl BackgroundTask for SwitchPortSettingsManager {
                     }
                 }).collect();
 
+                bgp.dedup();
+
                 let mut ports: Vec<PortConfigV1> = vec![];
 
                 for (location, port, change) in &changes {
                     let PortSettingsChange::Apply(info) = change else {
                         continue;
+                    };
+
+                    let peer_configs = match self.datastore.bgp_peer_configs(opctx, *location, port.port_name.clone()).await {
+                        Ok(v) => v,
+                        Err(e) => {
+                            error!(
+                                log,
+                                "failed to fetch bgp peer config for switch port";
+                                "switch_location" => ?location,
+                                "port" => &port.port_name,
+                                "error" => %e,
+                            );
+                            continue;
+                        },
                     };
 
                     let port_config = PortConfigV1 {
@@ -721,19 +776,24 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .get(0) //TODO breakout support
                             .map(|l| l.autoneg)
                             .unwrap_or(false),
-                        bgp_peers: bootstore_bgp_peer_info
-                            .iter()
-                            .map(|(p, asn, addr)| SledBgpPeerConfig {
-                                addr: *addr,
-                                asn: *asn,
-                                port: port.port_name.clone(),
-                                hold_time: Some(p.hold_time.0.into()),
-                                connect_retry: Some(p.connect_retry.0.into()),
-                                delay_open: Some(p.delay_open.0.into()),
-                                idle_hold_time: Some(p.idle_hold_time.0.into()),
-                                keepalive: Some(p.keepalive.0.into()),
+                        bgp_peers: peer_configs.into_iter()
+                            // filter maps are cool
+                            .filter_map(|c| match c.addr.ip() {
+                                IpAddr::V4(addr) => Some((c, addr)),
+                                IpAddr::V6(_) => None,
                             })
-                            .collect(),
+                            .map(|(c, addr)| {
+                                SledBgpPeerConfig {
+                                    asn: *c.asn,
+                                    port: c.port_name,
+                                    addr,
+                                    hold_time: Some(c.hold_time.0.into()),
+                                    idle_hold_time: Some(c.idle_hold_time.0.into()),
+                                    delay_open: Some(c.delay_open.0.into()),
+                                    connect_retry: Some(c.connect_retry.0.into()),
+                                    keepalive: Some(c.keepalive.0.into()),
+                                }
+                        }).collect(),
                         port: port.port_name.clone(),
                         routes: info
                             .routes
@@ -792,6 +852,14 @@ impl BackgroundTask for SwitchPortSettingsManager {
                 ;
 
 
+                let bfd = match self.bfd_peer_configs_from_db(opctx).await {
+                    Ok(bfd) => bfd,
+                    Err(e) => {
+                        error!(log, "error fetching bfd config from db"; "error" => %e);
+                        continue;
+                    }
+                };
+
                 let mut desired_config = EarlyNetworkConfig {
                     generation: 0,
                     schema_version: 1,
@@ -803,6 +871,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             infra_ip_last,
                             ports,
                             bgp,
+                            bfd,
                         }),
                     },
                 };
@@ -831,6 +900,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 let rnc_differs = match (config.body.rack_network_config.clone(), desired_config.body.rack_network_config.clone()) {
                                     (Some(current_rnc), Some(desired_rnc)) => {
                                         !hashset_eq(current_rnc.bgp.clone(), desired_rnc.bgp.clone()) ||
+                                        !hashset_eq(current_rnc.bfd.clone(), desired_rnc.bfd.clone()) ||
                                         !hashset_eq(current_rnc.ports.clone(), desired_rnc.ports.clone()) ||
                                         current_rnc.rack_subnet != desired_rnc.rack_subnet ||
                                         current_rnc.infra_ip_first != desired_rnc.infra_ip_first ||

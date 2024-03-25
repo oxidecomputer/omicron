@@ -1389,6 +1389,51 @@
           "serial"
         ]
       },
+      "BfdMode": {
+        "description": "BFD connection mode.",
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdPeerConfig": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "remote": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "$ref": "#/components/schemas/SwitchLocation"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
+        ]
+      },
       "BgpConfig": {
         "type": "object",
         "properties": {
@@ -2431,6 +2476,13 @@
         "description": "Describes a complete set of software and configuration for the system",
         "type": "object",
         "properties": {
+          "blueprint_zones": {
+            "description": "A map of sled id -> zones deployed on each sled, along with the [`BlueprintZoneDisposition`] for each zone.\n\nA sled is considered part of the control plane cluster iff it has an entry in this map.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BlueprintZonesConfig"
+            }
+          },
           "comment": {
             "description": "human-readable string describing why this blueprint was created (for debugging)",
             "type": "string"
@@ -2460,13 +2512,6 @@
               }
             ]
           },
-          "omicron_zones": {
-            "description": "mapping: sled id -> zones deployed on each sled A sled is considered part of the control plane cluster iff it has an entry in this map.",
-            "type": "object",
-            "additionalProperties": {
-              "$ref": "#/components/schemas/OmicronZonesConfig"
-            }
-          },
           "parent_blueprint_id": {
             "nullable": true,
             "description": "which blueprint this blueprint is based on",
@@ -2477,26 +2522,16 @@
             "description": "when this blueprint was generated (for debugging)",
             "type": "string",
             "format": "date-time"
-          },
-          "zones_in_service": {
-            "description": "Omicron zones considered in-service (which generally means that they should appear in DNS)",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "uniqueItems": true
           }
         },
         "required": [
+          "blueprint_zones",
           "comment",
           "creator",
           "external_dns_version",
           "id",
           "internal_dns_version",
-          "omicron_zones",
-          "time_created",
-          "zones_in_service"
+          "time_created"
         ]
       },
       "BlueprintMetadata": {
@@ -2614,6 +2649,76 @@
         "required": [
           "enabled",
           "target_id"
+        ]
+      },
+      "BlueprintZoneConfig": {
+        "description": "Describes one Omicron-managed zone in a blueprint.\n\nThis is a wrapper around an [`OmicronZoneConfig`] that also includes a [`BlueprintZoneDisposition`].\n\nPart of [`BlueprintZonesConfig`].",
+        "type": "object",
+        "properties": {
+          "config": {
+            "description": "The underlying zone configuration.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/OmicronZoneConfig"
+              }
+            ]
+          },
+          "disposition": {
+            "description": "The disposition (desired state) of this zone recorded in the blueprint.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BlueprintZoneDisposition"
+              }
+            ]
+          }
+        },
+        "required": [
+          "config",
+          "disposition"
+        ]
+      },
+      "BlueprintZoneDisposition": {
+        "description": "The desired state of an Omicron-managed zone in a blueprint.\n\nPart of [`BlueprintZoneConfig`].",
+        "oneOf": [
+          {
+            "description": "The zone is in-service.",
+            "type": "string",
+            "enum": [
+              "in_service"
+            ]
+          },
+          {
+            "description": "The zone is not in service.",
+            "type": "string",
+            "enum": [
+              "quiesced"
+            ]
+          }
+        ]
+      },
+      "BlueprintZonesConfig": {
+        "description": "Information about an Omicron zone as recorded in a blueprint.\n\nCurrently, this is similar to [`OmicronZonesConfig`], but also contains a per-zone [`BlueprintZoneDisposition`].\n\nPart of [`Blueprint`].",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "Generation number of this configuration.\n\nThis generation number is owned by the control plane. See [`OmicronZonesConfig::generation`] for more details.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "zones": {
+            "description": "The list of running zones.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BlueprintZoneConfig"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "zones"
         ]
       },
       "ByteCount": {
@@ -5677,31 +5782,6 @@
           }
         ]
       },
-      "OmicronZonesConfig": {
-        "description": "Describes the set of Omicron-managed zones running on a sled\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes the set of Omicron-managed zones running on a sled\", \"type\": \"object\", \"required\": [ \"generation\", \"zones\" ], \"properties\": { \"generation\": { \"description\": \"generation number of this configuration\\n\\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\\n\\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\", \"allOf\": [ { \"$ref\": \"#/components/schemas/Generation\" } ] }, \"zones\": { \"description\": \"list of running zones\", \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/OmicronZoneConfig\" } } } } ``` </details>",
-        "type": "object",
-        "properties": {
-          "generation": {
-            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "zones": {
-            "description": "list of running zones",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/OmicronZoneConfig"
-            }
-          }
-        },
-        "required": [
-          "generation",
-          "zones"
-        ]
-      },
       "OximeterInfo": {
         "description": "Message used to notify Nexus that this oximeter instance is up and running.",
         "type": "object",
@@ -6223,6 +6303,14 @@
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
+          "bfd": {
+            "description": "BFD configuration for connecting the rack to external networks",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeerConfig"
+            }
+          },
           "bgp": {
             "description": "BGP configurations for connecting the rack to external networks",
             "type": "array",

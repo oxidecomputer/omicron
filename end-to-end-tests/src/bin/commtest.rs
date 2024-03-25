@@ -102,7 +102,8 @@ async fn wait_until_oxide_api_is_available(cli: &Cli) -> Result<()> {
             > Into::<Duration>::into(cli.api_timeout)
         {
             return Err(anyhow!(
-                "One hour deadline for system startup exceeded"
+                "{} deadline for system startup exceeded",
+                cli.api_timeout
             ));
         }
         println!("no api response yet, wating 3s ...");

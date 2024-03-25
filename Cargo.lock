@@ -467,26 +467,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bgp"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
-dependencies = [
- "anyhow",
- "chrono",
- "mg-common",
- "nom",
- "num_enum 0.7.2",
- "rdb",
- "schemars",
- "serde",
- "sled",
- "slog",
- "slog-async",
- "slog-bunyan",
- "thiserror",
-]
-
-[[package]]
 name = "bhyve_api"
 version = "0.0.0"
 source = "git+https://github.com/oxidecomputer/propolis?rev=fdf0585c6a227a7cfbee4a61a36938c3d77e4712#fdf0585c6a227a7cfbee4a61a36938c3d77e4712"
@@ -1608,15 +1588,15 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=de065a84831e66c829603d9a098e237e8f5faaa1#de065a84831e66c829603d9a098e237e8f5faaa1"
 dependencies = [
- "mg-common",
  "percent-encoding",
  "progenitor",
  "reqwest",
  "serde",
  "serde_json",
  "slog",
+ "uuid 1.7.0",
 ]
 
 [[package]]
@@ -1909,7 +1889,7 @@ source = "git+https://github.com/oxidecomputer/dlpi-sys#1d587ea98cf2d36f1b1624b0
 dependencies = [
  "libc",
  "libdlpi-sys",
- "num_enum 0.5.11",
+ "num_enum",
  "pretty-hex 0.2.1",
  "thiserror",
  "tokio",
@@ -3430,7 +3410,7 @@ source = "git+https://github.com/oxidecomputer/illumos-devinfo?branch=main#4323b
 dependencies = [
  "anyhow",
  "libc",
- "num_enum 0.5.11",
+ "num_enum",
 ]
 
 [[package]]
@@ -3954,7 +3934,7 @@ dependencies = [
  "colored",
  "dlpi",
  "libc",
- "num_enum 0.5.11",
+ "num_enum",
  "nvpair",
  "nvpair-sys",
  "rusty-doors",
@@ -4187,31 +4167,17 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=de065a84831e66c829603d9a098e237e8f5faaa1#de065a84831e66c829603d9a098e237e8f5faaa1"
 dependencies = [
  "anyhow",
- "bgp",
  "chrono",
  "percent-encoding",
  "progenitor",
- "rdb",
  "reqwest",
  "schemars",
  "serde",
  "serde_json",
  "slog",
-]
-
-[[package]]
-name = "mg-common"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
-dependencies = [
- "anstyle",
- "clap 4.5.1",
- "schemars",
- "serde",
- "thiserror",
 ]
 
 [[package]]
@@ -4526,6 +4492,7 @@ dependencies = [
  "rustls 0.22.2",
  "samael",
  "schemars",
+ "semver 1.0.22",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -4967,16 +4934,7 @@ version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f646caf906c20226733ed5b1374287eb97e3c2a5c227ce668c1f2ce20ae57c9"
 dependencies = [
- "num_enum_derive 0.5.11",
-]
-
-[[package]]
-name = "num_enum"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "02339744ee7253741199f897151b38e72257d13802d4ee837285cc2990a90845"
-dependencies = [
- "num_enum_derive 0.7.2",
+ "num_enum_derive",
 ]
 
 [[package]]
@@ -4989,18 +4947,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
-]
-
-[[package]]
-name = "num_enum_derive"
-version = "0.7.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "681030a937600a36906c185595136d26abfebb4aa9c65701cefcaf8578bb982b"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.52",
 ]
 
 [[package]]
@@ -5148,6 +5094,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.10",
+ "uuid 1.7.0",
 ]
 
 [[package]]
@@ -5539,6 +5486,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-dtrace",
+ "slog-error-chain",
  "slog-term",
  "smf",
  "static_assertions",
@@ -5590,6 +5538,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "usdt 0.5.0",
+ "uuid 1.7.0",
  "walkdir",
 ]
 
@@ -7178,22 +7127,6 @@ dependencies = [
  "ring 0.17.8",
  "time",
  "yasna",
-]
-
-[[package]]
-name = "rdb"
-version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=1d8b818b0fd000bc6d2739575c8868b0781dfe41#1d8b818b0fd000bc6d2739575c8868b0781dfe41"
-dependencies = [
- "anyhow",
- "ciborium",
- "mg-common",
- "schemars",
- "serde",
- "serde_json",
- "sled",
- "slog",
- "thiserror",
 ]
 
 [[package]]
@@ -11046,6 +10979,10 @@ dependencies = [
  "cargo_metadata",
  "cargo_toml",
  "clap 4.5.1",
+ "fs-err",
+ "serde",
+ "swrite",
+ "toml 0.8.10",
 ]
 
 [[package]]

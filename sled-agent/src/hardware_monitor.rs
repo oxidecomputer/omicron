@@ -225,7 +225,7 @@ impl HardwareMonitor {
                     )
                     .await
                 {
-                    warn!(self.log, "Failed to activate switch: {e}");
+                    error!(self.log, "Failed to activate switch"; e);
                 }
             }
             TofinoManager::NotReady { tofino_loaded } => {

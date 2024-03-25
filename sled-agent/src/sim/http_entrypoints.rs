@@ -410,6 +410,7 @@ async fn read_network_bootstore_config(
                 infra_ip_last: Ipv4Addr::UNSPECIFIED,
                 ports: Vec::new(),
                 bgp: Vec::new(),
+                bfd: Vec::new(),
             }),
         },
     };
