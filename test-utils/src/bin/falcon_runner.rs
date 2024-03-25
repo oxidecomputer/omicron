@@ -11,6 +11,7 @@ use omicron_test_utils::dev::test_setup_log;
 use slog::info;
 use std::env;
 
+#[cfg(target_os = "illumos")]
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let args: Vec<_> = env::args().collect();
