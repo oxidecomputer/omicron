@@ -1413,6 +1413,7 @@ pub async fn start_oximeter(
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),
         db,
+        refresh_interval: oximeter_collector::default_refresh_interval(),
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
     };
     let args = oximeter_collector::OximeterArguments {

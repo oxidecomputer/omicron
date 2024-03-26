@@ -77,6 +77,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(cpapi_volume_remove_read_only_parent)?;
         api.register(cpapi_disk_remove_read_only_parent)?;
         api.register(cpapi_producers_post)?;
+        api.register(cpapi_assigned_producers_list)?;
         api.register(cpapi_collectors_post)?;
         api.register(cpapi_metrics_collect)?;
         api.register(cpapi_artifact_download)?;
@@ -377,11 +378,59 @@ async fn cpapi_producers_post(
     producer_info: TypedBody<ProducerEndpoint>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
-    let nexus = &context.nexus;
-    let producer_info = producer_info.into_inner();
     let handler = async {
-        nexus.assign_producer(producer_info).await?;
+        let nexus = &context.nexus;
+        let producer_info = producer_info.into_inner();
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        nexus.assign_producer(&opctx, producer_info).await?;
         Ok(HttpResponseUpdatedNoContent())
+    };
+    context
+        .internal_latencies
+        .instrument_dropshot_handler(&request_context, handler)
+        .await
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    serde::Deserialize,
+    schemars::JsonSchema,
+    serde::Serialize,
+)]
+pub struct CollectorIdPathParams {
+    /// The ID of the oximeter collector.
+    pub collector_id: Uuid,
+}
+
+/// List all metric producers assigned to an oximeter collector.
+#[endpoint {
+     method = GET,
+     path = "/metrics/collectors/{collector_id}/producers",
+ }]
+async fn cpapi_assigned_producers_list(
+    request_context: RequestContext<Arc<ServerContext>>,
+    path_params: Path<CollectorIdPathParams>,
+    query_params: Query<PaginatedById>,
+) -> Result<HttpResponseOk<ResultsPage<ProducerEndpoint>>, HttpError> {
+    let context = request_context.context();
+    let handler = async {
+        let nexus = &context.nexus;
+        let collector_id = path_params.into_inner().collector_id;
+        let query = query_params.into_inner();
+        let pagparams = data_page_params_for(&request_context, &query)?;
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        let producers = nexus
+            .list_assigned_producers(&opctx, collector_id, &pagparams)
+            .await?;
+        Ok(HttpResponseOk(ScanById::results_page(
+            &query,
+            producers,
+            &|_, producer: &ProducerEndpoint| producer.id,
+        )?))
     };
     context
         .internal_latencies
@@ -399,10 +448,12 @@ async fn cpapi_collectors_post(
     oximeter_info: TypedBody<OximeterInfo>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let context = request_context.context();
-    let nexus = &context.nexus;
-    let oximeter_info = oximeter_info.into_inner();
     let handler = async {
-        nexus.upsert_oximeter_collector(&oximeter_info).await?;
+        let nexus = &context.nexus;
+        let oximeter_info = oximeter_info.into_inner();
+        let opctx =
+            crate::context::op_context_for_internal_api(&request_context).await;
+        nexus.upsert_oximeter_collector(&opctx, &oximeter_info).await?;
         Ok(HttpResponseUpdatedNoContent())
     };
     context
