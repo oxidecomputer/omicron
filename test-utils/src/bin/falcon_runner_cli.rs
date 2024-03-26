@@ -4,13 +4,21 @@
 
 // Copyright 2022 Oxide Computer Company
 
-use libfalcon::{cli::run, error::Error, unit::gb, Runner};
+#[cfg(target_os = "illumos")]
+mod illumos {
+    pub use libfalcon::{cli::run, error::Error, unit::gb, Runner};
+}
 
+#[cfg(target_os = "illumos")]
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> Result<(), illumos::Error> {
+    use illumos::*;
     let mut d = Runner::new("launchpad_mcduck_runner");
 
     d.node("launchpad_mcduck_test_vm", "helios-2.0", 2, gb(2));
     run(&mut d).await?;
     Ok(())
 }
+
+#[cfg(not(target_os = "illumos"))]
+async fn main() {}
