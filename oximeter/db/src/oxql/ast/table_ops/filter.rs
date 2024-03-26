@@ -44,55 +44,11 @@ impl fmt::Display for Filter {
     }
 }
 
-/// A filtering expression, used in the `filter` table operation.
-#[derive(Clone, Debug, PartialEq)]
-pub enum FilterExpr {
-    /// A single logical expression, e.g., `foo == "bar"`.
-    Simple(SimpleFilter),
-    /// Two logical expressions, e.g., `foo == "bar" || yes == false`
-    Compound(CompoundFilter),
-}
-
-impl fmt::Display for FilterExpr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            FilterExpr::Simple(inner) => write!(f, "{inner}"),
-            FilterExpr::Compound(inner) => write!(f, "{inner}"),
-        }
-    }
-}
-
-/// A simple filter expression, comparing an identifier to a value.
-#[derive(Clone, Debug, PartialEq)]
-pub struct SimpleFilter {
-    /// The identifier being compared.
-    pub ident: Ident,
-    /// The comparison operator.
-    pub cmp: Comparison,
-    /// The value to compare the identifier against.
-    pub value: Literal,
-}
-
-impl fmt::Display for SimpleFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} {}", self.ident, self.cmp, self.value,)
-    }
-}
-
-/// Two filter expressions joined by a logical operator.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CompoundFilter {
-    /// The left subexpression.
-    pub left: Box<Filter>,
-    /// The logical operator joining the two expressions.
-    pub op: LogicalOp,
-    /// The right subexpression.
-    pub right: Box<Filter>,
-}
-
-impl fmt::Display for CompoundFilter {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {} {}", self.left, self.op, self.right,)
+impl core::str::FromStr for Filter {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        crate::oxql::ast::grammar::query_parser::filter_expr(s)
+            .context("Invalid filter expression")
     }
 }
 
@@ -100,6 +56,114 @@ impl Filter {
     /// Return the negation of this filter.
     pub fn negate(&self) -> Filter {
         Self { negated: !self.negated, ..self.clone() }
+    }
+
+    /// Simplfy a filter expression to disjunctive normal form (DNF).
+    ///
+    /// Disjunctive normal form is one of a few canonical ways of writing a
+    /// boolean expression. It simplifies it to a disjunction of conjunctions,
+    /// i.e., only has terms like `(a && b) || (c && d) || ...`.
+    ///
+    /// This method exists for the purposes of creating _independent_ pieces of
+    /// a filtering expression, each of which can be used to generate a new SQL
+    /// query run against ClickHouse. This is critical to support complicated
+    /// OxQL queries. Consider:
+    ///
+    /// ```ignore
+    /// get some_timeseries
+    ///     | filter (foo == "bar") || (timestamp > @now() - 1m && foo == "baz")
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// There is a huge academic literature on this topic, part of the study of
+    /// formal languages and other areas theoretical computer science. These
+    /// references are mostly pretty dense and formal, though a few are really
+    /// useful. This paper [1] is a good and accessible survey to the idea of
+    /// translation systems -- it's mostly focused on programming languages and
+    /// compilers, but Figures 7-9 in particular are about DNF.
+    ///
+    /// As usual, the Wikipedia page is a reasonable overview as well, here [2].
+    /// We're using the "syntactic" DNF conversion algorithm, essentially. This
+    /// involves a recursive application of de Morgan's rules [3], involution /
+    /// double-negation [4], distributivity of Boolean operators [5], etc.
+    ///
+    /// [1] https://www.researchgate.net/publication/220154187_A_Survey_of_Strategies_in_Program_Transformation_Systems
+    /// [2] https://en.wikipedia.org/wiki/Disjunctive_normal_form
+    /// [3] https://en.wikipedia.org/wiki/De_Morgan%27s_laws
+    /// [4] https://en.wikipedia.org/wiki/Involution_(mathematics)
+    /// [5] https://en.wikipedia.org/wiki/Boolean_algebra#Monotone_laws
+    pub fn simplify_to_dnf(&self) -> Result<Self, Error> {
+        let mut out = self.simplify_to_dnf_inner()?;
+        if &out == self {
+            return Ok(out);
+        }
+        // Continually apply simplifications as long as able.
+        //
+        // This makes me really nervous, so I'm adding an escape hatch that we
+        // only allow a few iterations. If we've not simplified within that,
+        // we'll just declare the expression too complicated to handle.
+        for _ in 0..8 {
+            let out_ = out.simplify_to_dnf_inner()?;
+            if out_ == out {
+                return Ok(out_);
+            }
+            out = out_;
+        }
+        anyhow::bail!("Logical expression is too complicated to simplify")
+    }
+
+    fn simplify_to_dnf_inner(&self) -> Result<Self, Error> {
+        let new = self.expr.simplify_to_dnf()?;
+
+        // This matches the rule:
+        //
+        // !!x -> x
+        if self.negated && new.negated && new.is_simple() {
+            return Ok(new.negate());
+        }
+
+        // These two blocks match de Morgan's rules, which distribute a negation
+        // down and swap the logical operator.
+        if self.negated {
+            // This matches one of de Morgan's rules:
+            //
+            // !(x && y) -> !x || !y
+            if let FilterExpr::Compound(CompoundFilter {
+                left: x,
+                op: LogicalOp::And,
+                right: y,
+            }) = &new.expr
+            {
+                let expr = FilterExpr::Compound(CompoundFilter {
+                    left: Box::new(x.negate()),
+                    op: LogicalOp::Or,
+                    right: Box::new(y.negate()),
+                });
+                return Ok(Filter { negated: false, expr });
+            }
+
+            // This matches the other of de Morgan's rules:
+            //
+            // !(x || y) -> !x && !y
+            if let FilterExpr::Compound(CompoundFilter {
+                left: x,
+                op: LogicalOp::And,
+                right: y,
+            }) = &new.expr
+            {
+                let expr = FilterExpr::Compound(CompoundFilter {
+                    left: Box::new(x.negate()),
+                    op: LogicalOp::Or,
+                    right: Box::new(y.negate()),
+                });
+                return Ok(Filter { negated: false, expr });
+            }
+        }
+
+        // Nothing else to do, just return ourself, though we do need to make
+        // sure we copy the negation from self as well.
+        Ok(Self { negated: self.negated, ..new })
     }
 
     // Merge this filter with another one, using the provided operator.
@@ -253,9 +317,203 @@ impl Filter {
             }
         }
     }
+
+    fn is_xor(&self) -> bool {
+        self.is_op(LogicalOp::Xor)
+    }
+
+    fn is_op(&self, expected_op: LogicalOp) -> bool {
+        let FilterExpr::Compound(CompoundFilter { op, .. }) = &self.expr else {
+            return false;
+        };
+        op == &expected_op
+    }
+
+    // If this is an XOR, rewrite it to a disjunction of conjunctions.
+    //
+    // If it is not, return a clone of self.
+    fn rewrite_xor_to_disjunction(&self) -> Self {
+        let self_ = self.clone();
+        if !self.is_xor() {
+            return self_;
+        }
+        let Filter {
+            negated,
+            expr: FilterExpr::Compound(CompoundFilter { left, right, .. }),
+        } = self_
+        else {
+            unreachable!();
+        };
+        let left_ = CompoundFilter {
+            left: left.clone(),
+            op: LogicalOp::And,
+            right: Box::new(right.negate()),
+        };
+        let right_ = CompoundFilter {
+            left: Box::new(left.negate()),
+            op: LogicalOp::And,
+            right,
+        };
+        let expr = CompoundFilter {
+            left: Box::new(left_.to_filter()),
+            op: LogicalOp::Or,
+            right: Box::new(right_.to_filter()),
+        };
+        Filter { negated, expr: FilterExpr::Compound(expr) }
+    }
+
+    fn is_simple(&self) -> bool {
+        matches!(self.expr, FilterExpr::Simple(_))
+    }
+}
+
+/// A filtering expression, used in the `filter` table operation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FilterExpr {
+    /// A single logical expression, e.g., `foo == "bar"`.
+    Simple(SimpleFilter),
+    /// Two logical expressions, e.g., `foo == "bar" || yes == false`
+    Compound(CompoundFilter),
+}
+
+impl FilterExpr {
+    fn to_filter(&self) -> Filter {
+        Filter { negated: false, expr: self.clone() }
+    }
+
+    fn simplify_to_dnf(&self) -> Result<Filter, Error> {
+        match self {
+            FilterExpr::Simple(_) => Ok(self.to_filter()),
+            FilterExpr::Compound(CompoundFilter { left, op, right }) => {
+                // Apply recursively first.
+                let left = left.simplify_to_dnf()?;
+                let right = right.simplify_to_dnf()?;
+
+                // This matches the rule:
+                //
+                // (x || y) && z -> (x && z) || (y && z)
+                if let (
+                    FilterExpr::Compound(CompoundFilter {
+                        left: x,
+                        op: LogicalOp::Or,
+                        right: y,
+                    }),
+                    LogicalOp::And,
+                    FilterExpr::Simple(z),
+                ) = (&left.expr, op, &right.expr)
+                {
+                    let left_ = Filter {
+                        negated: false,
+                        expr: FilterExpr::Compound(CompoundFilter {
+                            left: x.clone(),
+                            op: LogicalOp::And,
+                            right: Box::new(z.to_filter()),
+                        }),
+                    };
+                    let right_ = Filter {
+                        negated: false,
+                        expr: FilterExpr::Compound(CompoundFilter {
+                            left: y.clone(),
+                            op: LogicalOp::And,
+                            right: Box::new(z.to_filter()),
+                        }),
+                    };
+                    return Ok(Filter {
+                        negated: false,
+                        expr: FilterExpr::Compound(CompoundFilter {
+                            left: Box::new(left_),
+                            op: LogicalOp::Or,
+                            right: Box::new(right_),
+                        }),
+                    });
+                }
+
+                // This matches the rule:
+                //
+                // z && (x || y) -> (z && x) || (z && y)
+                if let (
+                    FilterExpr::Simple(z),
+                    LogicalOp::And,
+                    FilterExpr::Compound(CompoundFilter {
+                        left: x,
+                        op: LogicalOp::Or,
+                        right: y,
+                    }),
+                ) = (&left.expr, op, &right.expr)
+                {
+                    let left_ = Filter {
+                        negated: false,
+                        expr: FilterExpr::Compound(CompoundFilter {
+                            left: Box::new(z.to_filter()),
+                            op: LogicalOp::And,
+                            right: x.clone(),
+                        }),
+                    };
+                    let right_ = Filter {
+                        negated: false,
+                        expr: FilterExpr::Compound(CompoundFilter {
+                            left: Box::new(z.to_filter()),
+                            op: LogicalOp::And,
+                            right: y.clone(),
+                        }),
+                    };
+                    return Ok(Filter {
+                        negated: false,
+                        expr: FilterExpr::Compound(CompoundFilter {
+                            left: Box::new(left_),
+                            op: LogicalOp::Or,
+                            right: Box::new(right_),
+                        }),
+                    });
+                }
+
+                // Lastly, simplify an XOR to its logical equivalent, which is
+                // in DNF.
+                let out = Filter {
+                    negated: false,
+                    expr: FilterExpr::Compound(CompoundFilter {
+                        left: Box::new(left),
+                        op: *op,
+                        right: Box::new(right),
+                    }),
+                };
+                Ok(out.rewrite_xor_to_disjunction())
+            }
+        }
+    }
+}
+
+impl fmt::Display for FilterExpr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FilterExpr::Simple(inner) => write!(f, "{inner}"),
+            FilterExpr::Compound(inner) => write!(f, "{inner}"),
+        }
+    }
+}
+
+/// Two filter expressions joined by a logical operator.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CompoundFilter {
+    /// The left subexpression.
+    pub left: Box<Filter>,
+    /// The logical operator joining the two expressions.
+    pub op: LogicalOp,
+    /// The right subexpression.
+    pub right: Box<Filter>,
+}
+
+impl fmt::Display for CompoundFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} {}", self.left, self.op, self.right,)
+    }
 }
 
 impl CompoundFilter {
+    fn to_filter(&self) -> Filter {
+        Filter { negated: false, expr: FilterExpr::Compound(self.clone()) }
+    }
+
     // Apply the filter to the provided field.
     fn filter_field(
         &self,
@@ -314,7 +572,28 @@ impl CompoundFilter {
     }
 }
 
+/// A simple filter expression, comparing an identifier to a value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SimpleFilter {
+    /// The identifier being compared.
+    pub ident: Ident,
+    /// The comparison operator.
+    pub cmp: Comparison,
+    /// The value to compare the identifier against.
+    pub value: Literal,
+}
+
+impl fmt::Display for SimpleFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {} {}", self.ident, self.cmp, self.value,)
+    }
+}
+
 impl SimpleFilter {
+    fn to_filter(&self) -> Filter {
+        Filter { negated: false, expr: FilterExpr::Simple(self.clone()) }
+    }
+
     // Apply this filter to the provided field.
     //
     // If the field name does not match the identifier in `self`, return
@@ -814,6 +1093,41 @@ mod tests {
                     .filter_field("x", na)
                     .expect_err("These should not be comparable at all");
             }
+        }
+    }
+
+    #[test]
+    fn test_simplify_to_dnf() {
+        let cases = &[
+            // Simple cases that should not be changed
+            ("a == 0", "a == 0"),
+            ("!(a == 0)", "!(a == 0)"),
+            ("a == 0 || b == 1", "a == 0 || b == 1"),
+            ("a == 0 && b == 1", "a == 0 && b == 1"),
+
+            // Rewrite of XOR
+            ("a == 0 ^ b == 1", "(a == 0 && !(b == 1)) || (!(a == 0) && (b == 1))"),
+
+            // Simple applications of distribution rules.
+            //
+            // Distribute conjunction over disjunction.
+            ("a == 0 && (b == 1 || c == 2)", "(a == 0 && b == 1) || (a == 0 && c == 2)"),
+            ("a == 0 && (b == 1 || c == 2 || d == 3)", "(a == 0 && b == 1) || (a == 0 && c == 2) || (a == 0 && d == 3)"),
+            ("a == 0 && (b == 1 || c == 2 || d == 3 || e == 4)", "(a == 0 && b == 1) || (a == 0 && c == 2) || (a == 0 && d == 3) || (a == 0 && e == 4)"),
+        ];
+        for (input, expected) in cases.iter() {
+            let parsed_input = query_parser::filter_expr(input).unwrap();
+            let simplified = parsed_input.simplify_to_dnf().unwrap();
+            let parsed_expected = query_parser::filter_expr(expected).unwrap();
+            assert_eq!(
+                simplified,
+                parsed_expected,
+                "\ninput expression: {}\nparsed to: {}\nsimplifed to: {}\nexpected: {}\n",
+                input,
+                parsed_input,
+                simplified,
+                expected,
+            );
         }
     }
 }

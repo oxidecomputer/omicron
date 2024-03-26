@@ -1312,4 +1312,15 @@ mod tests {
         };
         assert_eq!(parsed, expected);
     }
+
+    #[test]
+    fn test_multiple_negation() {
+        let negated =
+            query_parser::filter_expr("(a == 0) || !!!(a == 0 && a == 0)")
+                .unwrap();
+        let expected =
+            query_parser::filter_expr("(a == 0) || !(a == 0 && a == 0)")
+                .unwrap();
+        assert_eq!(negated, expected, "Failed to handle multiple negations");
+    }
 }
