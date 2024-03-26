@@ -235,6 +235,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(sled_instance_list)?;
         api.register(sled_physical_disk_list)?;
         api.register(physical_disk_list)?;
+        api.register(physical_disk_view)?;
         api.register(switch_list)?;
         api.register(switch_view)?;
         api.register(sled_list_uninitialized)?;
@@ -5385,6 +5386,29 @@ async fn physical_disk_list(
             disks,
             &|_, disk: &PhysicalDisk| disk.identity.id,
         )?))
+    };
+    apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Get a physical disk
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/disks/{disk_id}",
+    tags = ["system/hardware"],
+}]
+async fn physical_disk_view(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::PhysicalDiskPath>,
+) -> Result<HttpResponseOk<PhysicalDisk>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.nexus;
+        let path = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let (.., physical_disk) =
+            nexus.physical_disk_lookup(&opctx, &path).await?.fetch().await?;
+        Ok(HttpResponseOk(physical_disk.into()))
     };
     apictx.external_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

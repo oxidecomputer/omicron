@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Generation, PhysicalDiskKind};
+use super::{
+    Generation, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
+};
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{physical_disk, zpool};
 use chrono::{DateTime, Utc};
@@ -24,10 +26,13 @@ pub struct PhysicalDisk {
     pub model: String,
 
     pub variant: PhysicalDiskKind,
+    pub disk_policy: PhysicalDiskPolicy,
+    pub disk_state: PhysicalDiskState,
     pub sled_id: Uuid,
 }
 
 impl PhysicalDisk {
+    /// Creates a new in-service, active disk
     pub fn new(
         id: Uuid,
         vendor: String,
@@ -44,6 +49,8 @@ impl PhysicalDisk {
             serial,
             model,
             variant,
+            disk_policy: PhysicalDiskPolicy::InService,
+            disk_state: PhysicalDiskState::Active,
             sled_id,
         }
     }
@@ -61,6 +68,8 @@ impl From<PhysicalDisk> for views::PhysicalDisk {
     fn from(disk: PhysicalDisk) -> Self {
         Self {
             identity: disk.identity(),
+            policy: disk.disk_policy.into(),
+            state: disk.disk_state.into(),
             sled_id: Some(disk.sled_id),
             vendor: disk.vendor,
             serial: disk.serial,
