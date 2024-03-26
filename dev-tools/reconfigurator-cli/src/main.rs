@@ -197,6 +197,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::BlueprintDiffInventory(args) => {
             cmd_blueprint_diff_inventory(sim, args)
         }
+        Commands::DnsShow => cmd_dns_show(sim),
         Commands::Load(args) => cmd_load(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
@@ -248,6 +249,9 @@ enum Commands {
     BlueprintDiffDns(BlueprintDiffDnsArgs),
     /// show differences between a blueprint and an inventory collection
     BlueprintDiffInventory(BlueprintDiffInventoryArgs),
+
+    /// show information about DNS configurations
+    DnsShow,
 
     /// save state to a file
     Save(SaveArgs),
@@ -784,6 +788,47 @@ fn cmd_save(
     )))
 }
 
+fn cmd_dns_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    let mut s = String::new();
+    do_print_dns(&mut s, sim);
+    Ok(Some(s))
+}
+
+fn do_print_dns(s: &mut String, sim: &ReconfiguratorSim) {
+    swriteln!(
+        s,
+        "configured external DNS zone names: {}",
+        sim.external_dns_zone_names.join(", ")
+    );
+    swriteln!(
+        s,
+        "configured silo names: {}",
+        sim.silo_names
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+    swriteln!(
+        s,
+        "internal DNS generations: {}",
+        sim.internal_dns
+            .keys()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    swriteln!(
+        s,
+        "external DNS generations: {}",
+        sim.external_dns
+            .keys()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+}
+
 fn read_file(
     input_path: &camino::Utf8Path,
 ) -> anyhow::Result<UnstableReconfiguratorState> {
@@ -934,27 +979,10 @@ fn cmd_load(
     }
 
     sim.internal_dns = loaded.internal_dns;
-    swriteln!(
-        s,
-        "internal DNS generations loaded: {:?}",
-        sim.internal_dns.keys(),
-    );
-
     sim.external_dns = loaded.external_dns;
-    swriteln!(
-        s,
-        "external DNS generations loaded: {:?}",
-        sim.external_dns.keys()
-    );
-
     sim.silo_names = loaded.silo_names;
-    swriteln!(s, "silo names loaded: {:?}", sim.silo_names);
     sim.external_dns_zone_names = loaded.external_dns_zone_names;
-    swriteln!(
-        s,
-        "external DNS names loaded: {}",
-        sim.external_dns_zone_names.join(", ")
-    );
+    do_print_dns(&mut s, sim);
 
     swriteln!(s, "loaded data from {:?}", input_path);
     Ok(Some(s))
