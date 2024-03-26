@@ -3987,12 +3987,65 @@ impl ServiceManager {
                             // Only configured in
                             // `ensure_switch_zone_uplinks_configured`
                         }
-                        SwitchService::MgDdm { mode } => {
-                            smfh.delpropvalue("config/mode", "*")?;
-                            smfh.addpropvalue("config/mode", &mode)?;
+                        SwitchService::SpSim => {
+                            // nothing to configure
+                        }
+                        SwitchService::Mgd => {
+                            info!(self.inner.log, "configuring mgd service");
+                            smfh.delpropvalue("config/dns_servers", "*")?;
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_uuid", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_uuid",
+                                    info.config.sled_id,
+                                )?;
+                            }
+                            for address in &request.addresses {
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        smfh.addpropvalue(
+                                            "config/dns_servers",
+                                            &format!("{addr}"),
+                                        )?;
+                                    }
+                                    break;
+                                }
+                            }
                             smfh.refresh()?;
                         }
-                        _ => (),
+                        SwitchService::MgDdm { mode } => {
+                            info!(self.inner.log, "configuring mg-ddm service");
+                            smfh.delpropvalue("config/mode", "*")?;
+                            smfh.addpropvalue("config/mode", &mode)?;
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop("config/rack_uuid", info.rack_id)?;
+                                smfh.setprop(
+                                    "config/sled_uuid",
+                                    info.config.sled_id,
+                                )?;
+                            }
+                            smfh.delpropvalue("config/dns_servers", "*")?;
+                            for address in &request.addresses {
+                                if *address != Ipv6Addr::LOCALHOST {
+                                    let az_prefix =
+                                        Ipv6Subnet::<AZ_PREFIX>::new(*address);
+                                    for addr in
+                                        Resolver::servers_from_subnet(az_prefix)
+                                    {
+                                        smfh.addpropvalue(
+                                            "config/dns_servers",
+                                            &format!("{addr}"),
+                                        )?;
+                                    }
+                                    break;
+                                }
+                            }
+                            smfh.refresh()?;
+                        }
                     }
                 }
             }
