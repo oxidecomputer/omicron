@@ -381,7 +381,7 @@ impl ServiceInner {
             warn!(
                 log,
                 "failed to initialize Omicron storage";
-                "error" => ?error,
+                "error" => #%error,
                 "retry_after" => ?delay,
             );
         };
@@ -464,7 +464,7 @@ impl ServiceInner {
             warn!(
                 log,
                 "failed to initialize Omicron zones";
-                "error" => ?error,
+                "error" => #%error,
                 "retry_after" => ?delay,
             );
         };
@@ -943,7 +943,7 @@ impl ServiceInner {
             warn!(
                 self.log,
                 "Failed to initialize CockroachDB";
-                "error" => ?error,
+                "error" => #%error,
                 "retry_after" => ?delay
             );
         };

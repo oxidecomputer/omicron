@@ -365,7 +365,7 @@ impl Plan {
                 .disks
                 .disks
                 .iter()
-                .map(|disk| ZpoolName::new_external(disk.id))
+                .map(|disk| ZpoolName::new_external(disk.pool_id))
                 .collect();
         }
 
