@@ -243,11 +243,12 @@ pub fn allocation_query(
     //
     // Selecting two datasets on the same zpool will not initially be
     // possible, as at the time of writing each zpool only has one dataset.
-    // Additionally, we intend to modify the allocation strategy to select
-    // from 3 distinct sleds, removing the possibility entirely. But, if we
-    // introduce a change that adds another crucible dataset to zpools
-    // before we improve the allocation strategy, this check will make sure
-    // we don't violate drive redundancy, and generate an error instead.
+    // Additionally, provide a configuration option ("distinct_sleds") to modify
+    // the allocation strategy to select from 3 distinct sleds, removing the
+    // possibility entirely. But, if we introduce a change that adds another
+    // crucible dataset to zpools before we improve the allocation strategy,
+    // this check will make sure we don't violate drive redundancy, and generate
+    // an error instead.
     .sql("
   do_insert AS (
     SELECT (((

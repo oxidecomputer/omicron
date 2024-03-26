@@ -159,7 +159,7 @@ impl QueryBuilder {
 }
 
 /// Diesel's [diesel::query_builder::BoxedSqlQuery] has a few drawbacks that
-/// make wrapper more palatable:
+/// make this wrapper more palatable:
 ///
 /// - It always implements "Query" with SqlType = Untyped, so a caller could try to
 /// execute this query and get back any type.
