@@ -55,9 +55,8 @@ struct ReconfiguratorSim {
     external_dns: BTreeMap<Generation, DnsConfigParams>,
 
     // XXX-dap TODO-doc
-    // XXX-dap add to omdb
     silo_names: Vec<Name>,
-    external_dns_zone_name: String,
+    external_dns_zone_names: Vec<String>,
 
     log: slog::Logger,
 }
@@ -87,7 +86,7 @@ fn main() -> anyhow::Result<()> {
         external_dns: BTreeMap::new(),
         log,
         silo_names: vec!["example-silo".parse().unwrap()],
-        external_dns_zone_name: String::from("oxide.example"),
+        external_dns_zone_names: vec![String::from("oxide.example")],
     };
 
     if let Some(input_file) = cmd.input_file {
@@ -517,7 +516,7 @@ fn cmd_blueprint_plan(
         &parent_blueprint,
         &blueprint_nexus_external_ips(&parent_blueprint),
         &sim.silo_names,
-        &[sim.external_dns_zone_name.clone()],
+        &sim.external_dns_zone_names,
     )
     .generation;
 
@@ -628,13 +627,13 @@ fn cmd_blueprint_diff(
         &blueprint1,
         &blueprint_nexus_external_ips(&blueprint1),
         &sim.silo_names,
-        &[sim.external_dns_zone_name.clone()],
+        &sim.external_dns_zone_names,
     );
     let external_dns_config2 = blueprint_external_dns_config(
         &blueprint2,
         &blueprint_nexus_external_ips(&blueprint2),
         &sim.silo_names,
-        &[sim.external_dns_zone_name.clone()],
+        &sim.external_dns_zone_names,
     );
     let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
         .context("failed to assemble external DNS diff")?;
@@ -698,6 +697,8 @@ fn cmd_save(
         blueprints: sim.blueprints.values().cloned().collect(),
         internal_dns: sim.internal_dns.clone(),
         external_dns: sim.external_dns.clone(),
+        silo_names: sim.silo_names.clone(),
+        external_dns_zone_names: sim.external_dns_zone_names.clone(),
     };
 
     let output_path = &args.filename;
@@ -864,6 +865,29 @@ fn cmd_load(
         }
     }
 
+    sim.internal_dns = loaded.internal_dns;
+    swriteln!(
+        s,
+        "internal DNS generations loaded: {:?}",
+        sim.internal_dns.keys(),
+    );
+
+    sim.external_dns = loaded.external_dns;
+    swriteln!(
+        s,
+        "external DNS generations loaded: {:?}",
+        sim.external_dns.keys()
+    );
+
+    sim.silo_names = loaded.silo_names;
+    swriteln!(s, "silo names loaded: {:?}", sim.silo_names);
+    sim.external_dns_zone_names = loaded.external_dns_zone_names;
+    swriteln!(
+        s,
+        "external DNS names loaded: {}",
+        sim.external_dns_zone_names.join(", ")
+    );
+
     swriteln!(s, "loaded data from {:?}", input_path);
     Ok(Some(s))
 }
@@ -902,6 +926,18 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
             blueprint.time_created
         );
     }
+
+    swriteln!(s, "internal DNS generations: {:?}", loaded.internal_dns.keys(),);
+
+    swriteln!(s, "external DNS generations: {:?}", loaded.external_dns.keys(),);
+
+    swriteln!(s, "silo names: {:?}", loaded.silo_names);
+
+    swriteln!(
+        s,
+        "external DNS zone names: {}",
+        loaded.external_dns_zone_names.join(", ")
+    );
 
     Ok(Some(s))
 }

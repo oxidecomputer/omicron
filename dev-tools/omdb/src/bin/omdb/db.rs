@@ -74,6 +74,7 @@ use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
 use nexus_db_queries::db::datastore::DataStoreInventoryTest;
+use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -3398,13 +3399,28 @@ async fn cmd_db_reconfigurator_save(
 
     let internal_dns = fetch_dns_group(DnsGroup::Internal).await?;
     let external_dns = fetch_dns_group(DnsGroup::External).await?;
-
+    let silo_names = datastore
+        .silo_list_all_batched(&opctx, Discoverability::All)
+        .await
+        .context("listing all Silos")?
+        .into_iter()
+        .map(|s| s.name().clone())
+        .collect();
+    let external_dns_zone_names = datastore
+        .dns_zones_list_all(&opctx, DnsGroup::External)
+        .await
+        .context("listing external DNS zone names")?
+        .into_iter()
+        .map(|dns_zone| dns_zone.zone_name)
+        .collect();
     let state = UnstableReconfiguratorState {
         policy: policy,
         collections,
         blueprints,
         internal_dns,
         external_dns,
+        silo_names,
+        external_dns_zone_names,
     };
 
     let output_path = &reconfig_save_args.output_file;

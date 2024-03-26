@@ -929,4 +929,6 @@ pub struct UnstableReconfiguratorState {
     pub blueprints: Vec<Blueprint>,
     pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
     pub external_dns: BTreeMap<Generation, DnsConfigParams>,
+    pub silo_names: Vec<omicron_common::api::external::Name>,
+    pub external_dns_zone_names: Vec<String>,
 }
