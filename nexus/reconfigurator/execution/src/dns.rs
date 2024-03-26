@@ -18,6 +18,7 @@ use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
@@ -248,19 +249,18 @@ pub fn blueprint_internal_dns_config(
             .map(|addr| addr.port())
     }
 
-    for (_, omicron_zone) in blueprint.all_omicron_zones() {
-        if !blueprint.zones_in_service.contains(&omicron_zone.id) {
-            continue;
-        }
-
+    for (_, zone) in
+        blueprint.all_blueprint_zones(BlueprintZoneFilter::InternalDns)
+    {
         let context = || {
             format!(
                 "parsing {} zone with id {}",
-                omicron_zone.zone_type.label(),
-                omicron_zone.id
+                zone.config.zone_type.label(),
+                zone.config.id
             )
         };
-        let (service_name, port) = match &omicron_zone.zone_type {
+
+        let (service_name, port) = match &zone.config.zone_type {
             OmicronZoneType::BoundaryNtp { address, .. } => {
                 let port = parse_port(&address).with_context(context)?;
                 (ServiceName::BoundaryNtp, port)
@@ -288,7 +288,7 @@ pub fn blueprint_internal_dns_config(
             }
             OmicronZoneType::Crucible { address, .. } => {
                 let port = parse_port(address).with_context(context)?;
-                (ServiceName::Crucible(omicron_zone.id), port)
+                (ServiceName::Crucible(zone.config.id), port)
             }
             OmicronZoneType::CruciblePantry { address } => {
                 let port = parse_port(address).with_context(context)?;
@@ -312,8 +312,8 @@ pub fn blueprint_internal_dns_config(
         // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
-                omicron_zone.id,
-                omicron_zone.underlay_address,
+                zone.config.id,
+                zone.config.underlay_address,
                 service_name,
                 port,
             )
@@ -469,6 +469,8 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
     use nexus_types::deployment::Policy;
@@ -608,24 +610,27 @@ mod test {
         // not currently in service.
         let out_of_service_id = Uuid::new_v4();
         let out_of_service_addr = Ipv6Addr::LOCALHOST;
-        blueprint.omicron_zones.values_mut().next().unwrap().zones.push(
-            OmicronZoneConfig {
-                id: out_of_service_id,
-                underlay_address: out_of_service_addr,
-                zone_type: OmicronZoneType::Oximeter {
-                    address: SocketAddrV6::new(
-                        out_of_service_addr,
-                        12345,
-                        0,
-                        0,
-                    )
-                    .to_string(),
+        blueprint.blueprint_zones.values_mut().next().unwrap().zones.push(
+            BlueprintZoneConfig {
+                config: OmicronZoneConfig {
+                    id: out_of_service_id,
+                    underlay_address: out_of_service_addr,
+                    zone_type: OmicronZoneType::Oximeter {
+                        address: SocketAddrV6::new(
+                            out_of_service_addr,
+                            12345,
+                            0,
+                            0,
+                        )
+                        .to_string(),
+                    },
                 },
+                disposition: BlueprintZoneDisposition::Quiesced,
             },
         );
 
         // To generate the blueprint's DNS config, we need to make up a
-        // different set of information about the sleds in our fake system.
+        // different set of information about the Quiesced fake system.
         let sleds_by_id = policy
             .sleds
             .iter()

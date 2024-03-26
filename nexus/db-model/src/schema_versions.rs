@@ -29,7 +29,8 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(47, "add-lookup-disk-by-volume-id-index"),
+        KnownVersion::new(48, "add-lookup-disk-by-volume-id-index"),
+        KnownVersion::new(47, "add-view-for-bgp-peer-configs"),
         KnownVersion::new(46, "first-named-migration"),
         // The first many schema versions only vary by major or patch number and
         // their path is predictable based on the version number.  (This was

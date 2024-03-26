@@ -210,7 +210,7 @@ impl DataStore {
                 {
                     Ok(()) => return Ok(()),
                     Err(e) => {
-                        warn!(log, "Failed to ensure schema version: {e}");
+                        warn!(log, "Failed to ensure schema version"; "error" => #%e);
                     }
                 };
                 return Err(BackoffError::transient(()));

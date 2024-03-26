@@ -138,14 +138,31 @@ async fn apply_update(
             .expect("Failed to bump version number");
     }
 
-    for _ in 0..times_to_apply {
-        for step in version.upgrade_steps() {
-            info!(
-                log,
-                "Applying sql schema upgrade step";
-                "file" => step.label()
-            );
+    // Each step is applied `times_to_apply` times, but once we start applying
+    // a step within an upgrade, we will not attempt to apply prior steps.
+    for step in version.upgrade_steps() {
+        info!(
+            log,
+            "Applying sql schema upgrade step";
+            "file" => step.label()
+        );
+
+        for _ in 0..times_to_apply {
             apply_update_as_transaction(&log, &client, step.sql()).await;
+
+            // The following is a set of "versions exempt from being
+            // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
+            const NOT_IDEMPOTENT_VERSIONS: [semver::Version; 1] = [
+                // Why: This calls "ALTER TYPE ... DROP VALUE", which does not
+                // support the "IF EXISTS" syntax in CockroachDB.
+                //
+                // https://github.com/cockroachdb/cockroach/issues/120801
+                semver::Version::new(10, 0, 0),
+            ];
+
+            if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver().0) {
+                break;
+            }
         }
     }
 

@@ -82,13 +82,14 @@ async fn main() -> anyhow::Result<()> {
 
     match args.cmd {
         Cmd::List => {
-            let current_version = datastore
+            let (current_version, target_version) = datastore
                 .database_schema_version()
                 .await
-                .map(|v| v.to_string())
-                .unwrap_or_else(|_| "Unknown".to_string());
+                .map(|(v, t)| (v.to_string(), t.map(|t| t.to_string())))
+                .unwrap_or_else(|_| ("Unknown".to_string(), None));
 
             println!("Current Version in database: {current_version}");
+            println!("Target Version in database: {target_version:?}");
             println!("Known Versions:");
             for version in all_versions.iter_versions() {
                 let mut extra = String::new();
