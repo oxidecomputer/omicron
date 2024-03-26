@@ -43,7 +43,8 @@ impl BlueprintExecutor {
     /// added here to produce better compile errors.
     ///
     /// The presence of `boxed()` in `BackgroundTask::activate` has caused some
-    /// confusion with errors in the past. So separate this method out.
+    /// confusion with compilation errors in the past. So separate this method
+    /// out.
     async fn activate_impl<'a>(
         &mut self,
         opctx: &OpContext,
@@ -254,7 +255,7 @@ mod test {
                             dns_address: "oh-hello-internal-dns".into(),
                             gz_address: "::1".parse().unwrap(),
                             gz_address_index: 0,
-                            http_address: "some-ipv6-address".into(),
+                            http_address: "[::1]:12345".into(),
                         },
                     },
                     disposition,

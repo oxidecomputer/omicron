@@ -1515,7 +1515,10 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        println!("diff: {}", blueprint2.diff_sleds(&blueprint_read).display());
+        let diff = blueprint2
+            .diff_sleds(&blueprint_read)
+            .expect("failed to diff blueprints");
+        println!("diff: {}", diff.display());
         assert_eq!(blueprint2, blueprint_read);
         assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
         assert_eq!(blueprint2.external_dns_version, new_external_dns_version);

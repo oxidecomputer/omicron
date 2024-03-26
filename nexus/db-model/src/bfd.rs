@@ -45,13 +45,13 @@ pub struct BfdSession {
     pub time_deleted: Option<DateTime<Utc>>,
 }
 
-impl From<nexus_types::external_api::params::BfdMode> for BfdMode {
-    fn from(value: nexus_types::external_api::params::BfdMode) -> Self {
+impl From<omicron_common::api::external::BfdMode> for BfdMode {
+    fn from(value: omicron_common::api::external::BfdMode) -> Self {
         match value {
-            nexus_types::external_api::params::BfdMode::SingleHop => {
+            omicron_common::api::external::BfdMode::SingleHop => {
                 BfdMode::SingleHop
             }
-            nexus_types::external_api::params::BfdMode::MultiHop => {
+            omicron_common::api::external::BfdMode::MultiHop => {
                 BfdMode::MultiHop
             }
         }

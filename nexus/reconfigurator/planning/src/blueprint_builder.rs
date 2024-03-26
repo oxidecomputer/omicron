@@ -937,14 +937,15 @@ pub mod test {
             .expect("failed to create initial blueprint");
         verify_blueprint(&blueprint_initial);
 
-        let diff = blueprint_initial.diff_sleds_from_collection(&collection);
+        let diff =
+            blueprint_initial.diff_sleds_from_collection(&collection).unwrap();
         println!(
             "collection -> initial blueprint (expected no changes):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_changed().count(), 0);
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
 
         // Test a no-op blueprint.
         let builder = BlueprintBuilder::new_based_on(
@@ -958,14 +959,14 @@ pub mod test {
         .expect("failed to create builder");
         let blueprint = builder.build();
         verify_blueprint(&blueprint);
-        let diff = blueprint_initial.diff_sleds(&blueprint);
+        let diff = blueprint_initial.diff_sleds(&blueprint).unwrap();
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_changed().count(), 0);
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
 
         logctx.cleanup_successful();
     }
@@ -1003,14 +1004,14 @@ pub mod test {
 
         let blueprint2 = builder.build();
         verify_blueprint(&blueprint2);
-        let diff = blueprint1.diff_sleds(&blueprint2);
+        let diff = blueprint1.diff_sleds(&blueprint2).unwrap();
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             diff.display()
         );
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_changed().count(), 0);
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
 
         // The next step is adding these zones to a new sled.
         let new_sled_id = example.sled_rng.next_uuid();
@@ -1036,12 +1037,12 @@ pub mod test {
 
         let blueprint3 = builder.build();
         verify_blueprint(&blueprint3);
-        let diff = blueprint2.diff_sleds(&blueprint3);
+        let diff = blueprint2.diff_sleds(&blueprint3).unwrap();
         println!("expecting new NTP and Crucible zones:\n{}", diff.display());
 
         // No sleds were changed or removed.
-        assert_eq!(diff.sleds_changed().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
 
         // One sled was added.
         let sleds: Vec<_> = diff.sleds_added().collect();
