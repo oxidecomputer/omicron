@@ -4,16 +4,20 @@
 
 //! Mechanisms to launch and control propolis VMs via falcon
 
-use anyhow::anyhow;
-use camino_tempfile::tempdir;
-use libfalcon::{unit::gb, Runner};
-use omicron_test_utils::dev::test_setup_log;
-use slog::info;
-use std::env;
+#[cfg(target_os = "illumos")]
+mod illumos {
+    pub use anyhow::anyhow;
+    pub use camino_tempfile::tempdir;
+    pub use libfalcon::{unit::gb, Runner};
+    pub use omicron_test_utils::dev::test_setup_log;
+    pub use slog::info;
+    pub use std::env;
+}
 
 #[cfg(target_os = "illumos")]
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    use illumos::*;
     let args: Vec<_> = env::args().collect();
     let logctx = test_setup_log("falcon_test_runner");
     let log = logctx.log;
@@ -93,3 +97,6 @@ async fn main() -> Result<(), anyhow::Error> {
         Err(anyhow!("Test failed: exit code = {exit_code}"))
     }
 }
+
+#[cfg(not(target_os = "illumos"))]
+async fn main() {}
