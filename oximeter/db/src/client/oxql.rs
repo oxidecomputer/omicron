@@ -161,9 +161,9 @@ impl Client {
                 else {
                     return Ok(None);
                 };
-                if !inner
-                    .expr_type_is_compatible_with_field(field_schema.field_type)
-                {
+                if !inner.value_type_is_compatible_with_field(
+                    field_schema.field_type,
+                ) {
                     return Err(Error::from(anyhow::anyhow!(
                         "Expression for field {} is not compatible with \
                         its type {}",

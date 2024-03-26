@@ -96,21 +96,6 @@ impl fmt::Display for CompoundFilter {
     }
 }
 
-/*
-/// An AST node for the `filter` table operation.
-///
-/// This can be a simple operation like `foo == "bar"` or a more complex
-/// expression, such as: `filter hostname == "foo" || (hostname == "bar"
-/// && id == "baz")`.
-#[derive(Clone, Debug, PartialEq)]
-pub enum Filter {
-    /// An individual filter atom, like `foo == "bar"`.
-    Atom(FilterAtom),
-    /// A filtering expression combining multiple filters.
-    Expr(FilterExpr),
-}
-*/
-
 impl Filter {
     /// Return the negation of this filter.
     pub fn negate(&self) -> Filter {
@@ -270,20 +255,6 @@ impl Filter {
     }
 }
 
-/*
-/// A more complicated expression as part of a filtering operation.
-///
-/// E.g., the `hostname == "bar" && id == "baz"` in the below.
-// NOTE: This should really be extended to a generic binary op expression.
-#[derive(Clone, Debug, PartialEq)]
-pub struct FilterExpr {
-    pub negated: bool,
-    pub left: Box<Filter>,
-    pub op: LogicalOp,
-    pub right: Box<Filter>,
-}
-*/
-
 impl CompoundFilter {
     // Apply the filter to the provided field.
     fn filter_field(
@@ -343,19 +314,6 @@ impl CompoundFilter {
     }
 }
 
-/*
-/// An atom of a filtering expression.
-///
-/// E.g, the `hostname == "foo"` in the below.
-#[derive(Clone, Debug, PartialEq)]
-pub struct FilterAtom {
-    pub negated: bool,
-    pub ident: Ident,
-    pub cmp: Comparison,
-    pub expr: Literal,
-}
-*/
-
 impl SimpleFilter {
     // Apply this filter to the provided field.
     //
@@ -372,24 +330,15 @@ impl SimpleFilter {
         name: &str,
         value: &FieldValue,
     ) -> Result<Option<bool>, Error> {
-        // If the name matches, this filter does _not_ apply, and so we do not
+        // If the name does not match, this filter does not apply, and so we do not
         // filter the field.
         if self.ident.as_str() != name {
             return Ok(None);
         }
-        self.value.compare_field(value, self.cmp).map(Option::Some).ok_or_else(
-            || {
-                anyhow::anyhow!(
-                    "Filter matches the field named '{}', but \
-                    the expression type  is not compatible, or \
-                    cannot be applied",
-                    name,
-                )
-            },
-        )
+        self.value.compare_field(value, self.cmp)
     }
 
-    pub(crate) fn expr_type_is_compatible_with_field(
+    pub(crate) fn value_type_is_compatible_with_field(
         &self,
         field_type: FieldType,
     ) -> bool {
@@ -420,8 +369,7 @@ impl SimpleFilter {
             );
             self.filter_points_by_datum(negated, points.values(0).unwrap())
         } else {
-            let out = if negated { false } else { true };
-            Ok(vec![out; points.len()])
+            Ok(vec![!negated; points.len()])
         }
     }
 
@@ -868,37 +816,4 @@ mod tests {
             }
         }
     }
-
-    /*
-    #[test]
-    fn test_simplify_single_expr() {
-        let original = query_parser::filter_item("!(a == 0 || b == 0)").unwrap();
-        let simplified = original.simplify();
-
-        // TODO(ben) This does not parse
-        assert_eq!(
-            simplified,
-            query_parser::filter_item("!(a == 0) && !(b == 0)").unwrap(),
-        );
-
-        // TODO(ben) But this does
-        assert_eq!(
-            simplified,
-            query_parser::filter_item("(a == 0) && (b == 0)").unwrap(),
-        );
-
-        // I think I understand why. The precedence rules are only defined for
-        // the unnegated filter expression parser. So the lower version gets
-        // parsed in that recursive manner, parsing an item && another item
-        //
-        // The negated version does not, because it just parses the prefix as a
-        // negated_atom and then expects EOF, which of course isn't there. What
-        // I _want_ to do is make the same set of precedence rules for the
-        // negated version of everything, but that doesn't compile because the
-        // macro bails.
-        //
-        // I think this suggests that we need to use the recursive rules rather
-        // than precedence-climbing.
-    }
-    */
 }

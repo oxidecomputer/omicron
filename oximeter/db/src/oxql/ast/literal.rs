@@ -7,6 +7,8 @@
 // Copyright 2024 Oxide Computer Company
 
 use crate::oxql::ast::cmp::Comparison;
+use crate::oxql::Error;
+use anyhow::Context;
 use chrono::DateTime;
 use chrono::Utc;
 use oximeter::FieldType;
@@ -98,21 +100,23 @@ impl Literal {
         &self,
         value: &FieldValue,
         cmp: Comparison,
-    ) -> Option<bool> {
-        // TODO(ben): Return an error here, not None.
-        if !self.is_compatible_with_field(value.field_type()) {
-            return None;
-        }
+    ) -> Result<Option<bool>, Error> {
+        anyhow::ensure!(
+            self.is_compatible_with_field(value.field_type()),
+            "Field value of type {} is cannot be compared to \
+            the value in this filter",
+            value.field_type(),
+        );
         macro_rules! generate_cmp_match {
             ($lhs:ident, $rhs:ident) => {
                 match cmp {
-                    Comparison::Eq => Some($lhs == $rhs),
-                    Comparison::Ne => Some($lhs != $rhs),
-                    Comparison::Gt => Some($lhs > $rhs),
-                    Comparison::Ge => Some($lhs >= $rhs),
-                    Comparison::Lt => Some($lhs < $rhs),
-                    Comparison::Le => Some($lhs <= $rhs),
-                    Comparison::Like => None,
+                    Comparison::Eq => Ok(Some($lhs == $rhs)),
+                    Comparison::Ne => Ok(Some($lhs != $rhs)),
+                    Comparison::Gt => Ok(Some($lhs > $rhs)),
+                    Comparison::Ge => Ok(Some($lhs >= $rhs)),
+                    Comparison::Lt => Ok(Some($lhs < $rhs)),
+                    Comparison::Le => Ok(Some($lhs <= $rhs)),
+                    Comparison::Like => Ok(None),
                 }
             };
         }
@@ -124,15 +128,17 @@ impl Literal {
                 generate_cmp_match!(rhs, lhs)
             }
             (FieldValue::String(lhs), Literal::String(rhs)) => match cmp {
-                Comparison::Eq => Some(lhs == rhs),
-                Comparison::Ne => Some(lhs != rhs),
-                Comparison::Gt => Some(lhs > rhs),
-                Comparison::Ge => Some(lhs >= rhs),
-                Comparison::Lt => Some(lhs < rhs),
-                Comparison::Le => Some(lhs <= rhs),
+                Comparison::Eq => Ok(Some(lhs == rhs)),
+                Comparison::Ne => Ok(Some(lhs != rhs)),
+                Comparison::Gt => Ok(Some(lhs > rhs)),
+                Comparison::Ge => Ok(Some(lhs >= rhs)),
+                Comparison::Lt => Ok(Some(lhs < rhs)),
+                Comparison::Le => Ok(Some(lhs <= rhs)),
                 Comparison::Like => {
-                    let re = Regex::new(rhs).ok()?;
-                    Some(re.is_match(lhs))
+                    let re = Regex::new(rhs).context(
+                        "failed to create regex for string matching",
+                    )?;
+                    Ok(Some(re.is_match(lhs)))
                 }
             },
             (FieldValue::IpAddr(lhs), Literal::IpAddr(rhs)) => {
@@ -347,20 +353,32 @@ mod tests {
 
         // The literal comparison would be written like: `field >= 4` where
         // `field` has a value of 3 here. So the comparison is false.
-        assert_eq!(lit.compare_field(&value, Comparison::Ge).unwrap(), false);
+        assert_eq!(
+            lit.compare_field(&value, Comparison::Ge).unwrap(),
+            Some(false)
+        );
 
         // Reversing this, we should have true.
-        assert_eq!(lit.compare_field(&value, Comparison::Lt).unwrap(), true);
+        assert_eq!(
+            lit.compare_field(&value, Comparison::Lt).unwrap(),
+            Some(true)
+        );
 
         // It should not be equal.
-        assert_eq!(lit.compare_field(&value, Comparison::Eq).unwrap(), false);
-        assert_eq!(lit.compare_field(&value, Comparison::Ne).unwrap(), true);
+        assert_eq!(
+            lit.compare_field(&value, Comparison::Eq).unwrap(),
+            Some(false)
+        );
+        assert_eq!(
+            lit.compare_field(&value, Comparison::Ne).unwrap(),
+            Some(true)
+        );
     }
 
     #[test]
     fn test_literal_compare_field_wrong_type() {
         let value = FieldValue::String(String::from("foo"));
         let lit = Literal::Integer(4);
-        assert!(lit.compare_field(&value, Comparison::Eq).is_none());
+        assert!(lit.compare_field(&value, Comparison::Eq).is_err());
     }
 }
