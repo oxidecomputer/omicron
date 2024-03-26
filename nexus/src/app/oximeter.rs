@@ -9,13 +9,12 @@ use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
 use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::Asset;
 use omicron_common::address::CLICKHOUSE_PORT;
-use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::PaginationOrder;
-use omicron_common::api::internal::nexus;
+use omicron_common::api::external::{DataPageParams, ListResultVec};
+use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use omicron_common::backoff;
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
@@ -73,77 +72,34 @@ impl super::Nexus {
     /// Insert a new record of an Oximeter collector server.
     pub(crate) async fn upsert_oximeter_collector(
         &self,
+        opctx: &OpContext,
         oximeter_info: &OximeterInfo,
     ) -> Result<(), Error> {
         // Insert the Oximeter instance into the DB. Note that this _updates_ the record,
         // specifically, the time_modified, ip, and port columns, if the instance has already been
         // registered.
         let db_info = db::model::OximeterInfo::new(&oximeter_info);
-        self.db_datastore.oximeter_create(&db_info).await?;
+        self.db_datastore.oximeter_create(opctx, &db_info).await?;
         info!(
             self.log,
             "registered new oximeter metric collection server";
             "collector_id" => ?oximeter_info.collector_id,
             "address" => oximeter_info.address,
         );
+        Ok(())
+    }
 
-        // Regardless, notify the collector of any assigned metric producers.
-        //
-        // This should be empty if this Oximeter collector is registering for
-        // the first time, but may not be if the service is re-registering after
-        // failure.
-        let client = self.build_oximeter_client(
-            &oximeter_info.collector_id,
-            oximeter_info.address,
-        );
-        let mut last_producer_id = None;
-        loop {
-            let pagparams = DataPageParams {
-                marker: last_producer_id.as_ref(),
-                direction: PaginationOrder::Ascending,
-                limit: std::num::NonZeroU32::new(100).unwrap(),
-            };
-            let producers = self
-                .db_datastore
-                .producers_list_by_oximeter_id(
-                    oximeter_info.collector_id,
-                    &pagparams,
-                )
-                .await?;
-            if producers.is_empty() {
-                return Ok(());
-            }
-            debug!(
-                self.log,
-                "re-assigning existing metric producers to a collector";
-                "n_producers" => producers.len(),
-                "collector_id" => ?oximeter_info.collector_id,
-            );
-            // Be sure to continue paginating from the last producer.
-            //
-            // Safety: We check just above if the list is empty, so there is a
-            // last element.
-            last_producer_id.replace(producers.last().unwrap().id());
-            for producer in producers.into_iter() {
-                let producer_info = oximeter_client::types::ProducerEndpoint {
-                    id: producer.id(),
-                    kind: nexus::ProducerKind::from(producer.kind).into(),
-                    address: SocketAddr::new(
-                        producer.ip.ip(),
-                        producer.port.try_into().unwrap(),
-                    )
-                    .to_string(),
-                    base_route: producer.base_route,
-                    interval: oximeter_client::types::Duration::from(
-                        Duration::from_secs_f64(producer.interval),
-                    ),
-                };
-                client
-                    .producers_post(&producer_info)
-                    .await
-                    .map_err(Error::from)?;
-            }
-        }
+    /// List the producers assigned to an oximeter collector.
+    pub(crate) async fn list_assigned_producers(
+        &self,
+        opctx: &OpContext,
+        collector_id: Uuid,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<ProducerEndpoint> {
+        self.db_datastore
+            .producers_list_by_oximeter_id(opctx, collector_id, pagparams)
+            .await
+            .map(|list| list.into_iter().map(ProducerEndpoint::from).collect())
     }
 
     /// Register as a metric producer with the oximeter metric collection server.
@@ -179,11 +135,12 @@ impl super::Nexus {
     /// Assign a newly-registered metric producer to an oximeter collector server.
     pub(crate) async fn assign_producer(
         &self,
+        opctx: &OpContext,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let (collector, id) = self.next_collector().await?;
+        let (collector, id) = self.next_collector(opctx).await?;
         let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
-        self.db_datastore.producer_endpoint_create(&db_info).await?;
+        self.db_datastore.producer_endpoint_create(opctx, &db_info).await?;
         collector
             .producers_post(&oximeter_client::types::ProducerEndpoint::from(
                 &producer_info,
@@ -202,10 +159,11 @@ impl super::Nexus {
     /// Idempotently un-assign a producer from an oximeter collector.
     pub(crate) async fn unassign_producer(
         &self,
+        opctx: &OpContext,
         id: &Uuid,
     ) -> Result<(), Error> {
         if let Some(collector_id) =
-            self.db_datastore.producer_endpoint_delete(id).await?
+            self.db_datastore.producer_endpoint_delete(opctx, id).await?
         {
             debug!(
                 self.log,
@@ -214,7 +172,7 @@ impl super::Nexus {
                 "collector_id" => %collector_id,
             );
             let oximeter_info =
-                self.db_datastore.oximeter_lookup(&collector_id).await?;
+                self.db_datastore.oximeter_lookup(opctx, &collector_id).await?;
             let address =
                 SocketAddr::new(oximeter_info.ip.ip(), *oximeter_info.port);
             let client = self.build_oximeter_client(&id, address);
@@ -380,14 +338,17 @@ impl super::Nexus {
     }
 
     // Return an oximeter collector to assign a newly-registered producer
-    async fn next_collector(&self) -> Result<(OximeterClient, Uuid), Error> {
+    async fn next_collector(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<(OximeterClient, Uuid), Error> {
         // TODO-robustness Replace with a real load-balancing strategy.
         let page_params = DataPageParams {
             marker: None,
             direction: dropshot::PaginationOrder::Ascending,
             limit: std::num::NonZeroU32::new(1).unwrap(),
         };
-        let oxs = self.db_datastore.oximeter_list(&page_params).await?;
+        let oxs = self.db_datastore.oximeter_list(opctx, &page_params).await?;
         let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
             internal_message: String::from("no oximeter collectors available"),
         })?;
