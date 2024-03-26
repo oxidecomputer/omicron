@@ -886,10 +886,19 @@ mod test {
         // Also poke at some of the config by hand; we'll use this to test out
         // diff output. This isn't a real blueprint, just one that we're
         // creating to test diff output.
+        //
+        // Some of the things we're testing here:
+        //
+        // * modifying zones
+        // * removing zones
+        // * removing sleds
+        // * for modified sleds' zone config generation, both a bump and the
+        //   generation staying the same (the latter should produce a warning)
         let mut blueprint2a = blueprint2.clone();
 
         let mut changed_crucible_zone = false;
 
+        // Leave the non-provisionable sled's generation alone.
         for zone in &mut blueprint2a
             .blueprint_zones
             .get_mut(&nonprovisionable_sled_id)
@@ -922,12 +931,10 @@ mod test {
             }
         }
 
-        blueprint2a
-            .blueprint_zones
-            .get_mut(&expunged_sled_id)
-            .unwrap()
-            .zones
-            .clear();
+        let expunged_zones =
+            blueprint2a.blueprint_zones.get_mut(&expunged_sled_id).unwrap();
+        expunged_zones.zones.clear();
+        expunged_zones.generation = expunged_zones.generation.next();
 
         blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
 

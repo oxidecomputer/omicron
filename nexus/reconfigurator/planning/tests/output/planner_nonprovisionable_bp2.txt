@@ -3,6 +3,7 @@ parent:    55502b1b-e255-438b-a16a-2680a4b5f962
 created by add more Nexus
 created at 1970-01-01T00:00:00.000Z
 internal DNS version: 1
+external DNS version: 1
 comment: 
 
 ZONES

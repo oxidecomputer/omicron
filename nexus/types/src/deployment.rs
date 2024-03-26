@@ -314,6 +314,7 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
             humantime::format_rfc3339_millis(b.time_created.into(),)
         )?;
         writeln!(f, "internal DNS version: {}", b.internal_dns_version)?;
+        writeln!(f, "external DNS version: {}", b.external_dns_version)?;
         writeln!(f, "comment: {}", b.comment)?;
         writeln!(f, "\n{}\n", table_display::double_underline("ZONES"))?;
 
@@ -1082,6 +1083,7 @@ mod table_display {
     const REMOVED_PREFIX: char = '-';
     const MODIFIED_PREFIX: char = '~';
     const UNCHANGED_PREFIX: char = ' ';
+    const WARNING_PREFIX: char = '!';
     const ARROW: &str = "->";
     const ARROW_UNCHANGED: &str = "  ";
     const ZONE_TYPE_HEADER: &str = "zone type";
@@ -1253,19 +1255,22 @@ mod table_display {
             format!("{MODIFIED_PREFIX}{SLED_INDENT}sled {sled_id}:");
 
         section.make_subsection(SectionSpacing::Always, sled_heading, |s2| {
-            let generation_heading = if modified.generation_before
-                != modified.generation_after
-            {
-                format!(
-                    "{MODIFIED_PREFIX}{ZONE_HEAD_INDENT}zones at generation: {} -> {}",
-                    modified.generation_before, modified.generation_after,
-                )
-            } else {
-                format!(
-                    "{UNCHANGED_PREFIX}{ZONE_HEAD_INDENT}zones at generation: {}",
-                    modified.generation_before,
-                )
-            };
+            let generation_heading =
+                if modified.generation_before != modified.generation_after {
+                    format!(
+                        "{MODIFIED_PREFIX}{ZONE_HEAD_INDENT}\
+                         zones at generation: {} -> {}",
+                        modified.generation_before, modified.generation_after,
+                    )
+                } else {
+                    // Modified sleds should always see a generation bump.
+                    format!(
+                        "{WARNING_PREFIX}{ZONE_HEAD_INDENT}\
+                         zones at generation: {} \
+                         (warning: generation should have changed)",
+                        modified.generation_before,
+                    )
+                };
 
             s2.push_nested_heading(
                 SectionSpacing::IfNotFirst,
