@@ -646,3 +646,71 @@ impl Query for VirtualProvisioningCollectionUpdate {
 }
 
 impl RunQueryDsl<DbConnection> for VirtualProvisioningCollectionUpdate {}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::db::raw_query_builder::expectorate_query_contents;
+    use uuid::Uuid;
+
+    // This test is a bit of a "change detector", but it's here to help with
+    // debugging too. If you change this query, it can be useful to see exactly
+    // how the output SQL has been altered.
+    #[tokio::test]
+    async fn expectorate_query() {
+        let id = Uuid::nil();
+        let project_id = Uuid::nil();
+        let disk_byte_diff = 2048.try_into().unwrap();
+        let storage_type = crate::db::datastore::StorageType::Disk;
+
+        let query = VirtualProvisioningCollectionUpdate::new_insert_storage(
+            id,
+            disk_byte_diff,
+            project_id,
+            storage_type,
+        );
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_insert_storage.sql",
+        ).await;
+
+        let query = VirtualProvisioningCollectionUpdate::new_delete_storage(
+            id,
+            disk_byte_diff,
+            project_id,
+        );
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_delete_storage.sql",
+        ).await;
+
+        let cpus_diff = 4;
+        let ram_diff = 2048.try_into().unwrap();
+
+        let query = VirtualProvisioningCollectionUpdate::new_insert_instance(
+            id, cpus_diff, ram_diff, project_id,
+        );
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_insert_instance.sql",
+        ).await;
+
+        let max_instance_gen = 0;
+
+        let query = VirtualProvisioningCollectionUpdate::new_delete_instance(
+            id,
+            max_instance_gen,
+            cpus_diff,
+            ram_diff,
+            project_id,
+        );
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/virtual_provisioning_collection_update_delete_instance.sql",
+        ).await;
+    }
+}
