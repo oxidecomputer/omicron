@@ -55,8 +55,12 @@ struct ReconfiguratorSim {
     /// external DNS configurations
     external_dns: BTreeMap<Generation, DnsConfigParams>,
 
-    // XXX-dap TODO-doc
+    /// Set of silo names configured
+    ///
+    /// These are used to determine the contents of external DNS.
     silo_names: Vec<Name>,
+
+    /// External DNS zone names configured
     external_dns_zone_names: Vec<String>,
 
     log: slog::Logger,
@@ -184,6 +188,9 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::SledList => cmd_sled_list(sim),
         Commands::SledAdd(args) => cmd_sled_add(sim, args),
         Commands::SledShow(args) => cmd_sled_show(sim, args),
+        Commands::SiloList => cmd_silo_list(sim),
+        Commands::SiloAdd(args) => cmd_silo_add(sim, args),
+        Commands::SiloRemove(args) => cmd_silo_remove(sim, args),
         Commands::InventoryList => cmd_inventory_list(sim),
         Commands::InventoryGenerate => cmd_inventory_generate(sim),
         Commands::BlueprintList => cmd_blueprint_list(sim),
@@ -230,6 +237,13 @@ enum Commands {
     /// show details about one sled
     SledShow(SledArgs),
 
+    /// list silos
+    SiloList,
+    /// add a silo
+    SiloAdd(SiloAddRemoveArgs),
+    /// remove a silo
+    SiloRemove(SiloAddRemoveArgs),
+
     /// list all inventory collections
     InventoryList,
     /// generates an inventory collection from the configured sleds
@@ -271,6 +285,12 @@ struct SledAddArgs {
 struct SledArgs {
     /// id of the sled
     sled_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct SiloAddRemoveArgs {
+    /// name of the silo
+    silo_name: Name,
 }
 
 #[derive(Debug, Args)]
@@ -348,6 +368,40 @@ struct SaveArgs {
 }
 
 // Command handlers
+
+fn cmd_silo_list(
+    sim: &mut ReconfiguratorSim,
+) -> anyhow::Result<Option<String>> {
+    let mut s = String::new();
+    for silo_name in &sim.silo_names {
+        swriteln!(s, "{}", silo_name);
+    }
+    Ok(Some(s))
+}
+
+fn cmd_silo_add(
+    sim: &mut ReconfiguratorSim,
+    args: SiloAddRemoveArgs,
+) -> anyhow::Result<Option<String>> {
+    if sim.silo_names.contains(&args.silo_name) {
+        bail!("silo already exists: {:?}", &args.silo_name);
+    }
+
+    sim.silo_names.push(args.silo_name);
+    Ok(None)
+}
+
+fn cmd_silo_remove(
+    sim: &mut ReconfiguratorSim,
+    args: SiloAddRemoveArgs,
+) -> anyhow::Result<Option<String>> {
+    let size_before = sim.silo_names.len();
+    sim.silo_names.retain(|n| *n != args.silo_name);
+    if sim.silo_names.len() == size_before {
+        bail!("no such silo: {:?}", &args.silo_name);
+    }
+    Ok(None)
+}
 
 fn cmd_sled_list(
     sim: &mut ReconfiguratorSim,
@@ -1024,11 +1078,8 @@ fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {
     }
 
     swriteln!(s, "internal DNS generations: {:?}", loaded.internal_dns.keys(),);
-
     swriteln!(s, "external DNS generations: {:?}", loaded.external_dns.keys(),);
-
     swriteln!(s, "silo names: {:?}", loaded.silo_names);
-
     swriteln!(
         s,
         "external DNS zone names: {}",
