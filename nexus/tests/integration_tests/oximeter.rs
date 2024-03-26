@@ -4,18 +4,11 @@
 
 //! Integration tests for oximeter collectors and producers.
 
-use dropshot::Method;
-use http::StatusCode;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oximeter_db::DbWrite;
-use std::collections::BTreeSet;
 use std::net;
-use std::net::Ipv6Addr;
-use std::net::SocketAddr;
 use std::time::Duration;
 use uuid::Uuid;
 
