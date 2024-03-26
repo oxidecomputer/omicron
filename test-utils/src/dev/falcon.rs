@@ -4,11 +4,12 @@
 
 //! Example test to run in a VM.
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "illumos"))]
 mod test {
     use anyhow::anyhow;
     use gethostname::gethostname;
 
+    #[ignore]
     #[tokio::test]
     async fn launch() -> Result<(), anyhow::Error> {
         if gethostname() == "launchpad_mcduck_test_vm" {
