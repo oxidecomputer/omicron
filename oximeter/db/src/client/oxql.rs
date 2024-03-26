@@ -142,6 +142,144 @@ impl Client {
         result
     }
 
+    // NOTE:
+    //
+    // A few ideas.
+    //
+    // First, we really need to make separate queries for the different
+    // expressions which refer to different time ranges. It's tempting to use a
+    // UNION or similar, but we need to be able to match up the consistent keys
+    // with the right time range.
+    //
+    // So for the test query at the end of this file, we need two field queries
+    // -- one for the timeseries we're fetching a part of and one for the
+    // timeseries we're fetching all of.
+    //
+    // But good news: we can use a single measurement query!
+    //
+    //
+    // --
+    //
+    // For a query with no ORs, this doesn't matter.
+    //
+    // --
+    //
+    // I think we might be able to break the queries into those that we can
+    // prove have the same time range. OR queries can't be proven like that. AND
+    // can. What about XOR?
+    //
+    // filter (exactly_choose_one) ^ (timestamp > @now() - 5m && exactly_choose_another)
+    //
+    // The logic is trickier, but it's the same at the end of the day: we need
+    // to do two field queries, one for each time range in play.
+    //
+    // --
+    //
+    // What about nesting? This is where it gets pretty tricky.
+    //
+    // filter (exactly_choose_one)
+    //  || (timestamp > @now() - 5m && exactly_choose_another)
+    //  || (timestamp > @now() - 10m && exactly_choose_a_third)
+    //
+    //  This is the same actually
+    //
+    // filter (choose_some_subset)
+    //  && ((timestamp > @now() - 5m && restrict_further)
+    //      || (timestamp > @now() - 10m && restrict_another_way))
+    //
+    // This is different. Ideally I'd do it like this:
+    //
+    // query 1: timestamp > @now() - 5m: choose_some_subset && restrict_further
+    // query 2: timestamp > @now() - 10m: choose_some_subset && restrict_another_way
+    //
+    // Note that there is no query just picking `choose_some_subset`. That's
+    // because it is conjoined with the others, which means the timestamp
+    // expressions actually apply to it.
+    //
+    // It really seems like I want to break things into as few _disjunctions_ as
+    // possible, and run each separately. Does that work for XOR?
+    //
+    // filter (choose_some_subset)
+    //  && ((timestamp > @now() - 5m && restrict_further)
+    //      ^ (timestamp > @now() - 10m && restrict_another_way))
+    //
+    // Rewrite as disjunction of possibilites:
+    //
+    //
+    // filter (choose_some_subset)
+    //  && (
+    //      ((timestamp > @now() - 5m && restrict_further)
+    //      && !(timestamp > @now() - 10m && restrict_another_way))
+    //    ||
+    //      !(timestamp > @now() - 5m && restrict_further)
+    //      && (timestamp > @now() - 10m && restrict_another_way)
+    //    )
+    //
+    // And then rewrite it like the above, distributing the `choose_some_subset`
+    // over the others.
+    //
+    // So we'll need some operations:
+    //
+    // - rewrite XOR as disjunction
+    // - merge two timestamp filters (e.g., `t > 1` merge `t > 2` -> `t > 2`
+    //      or `t > 1` merge `t < 10` -> `t > 1 && t < 10). Ugh, really hope I
+    //      don't need to implement an interval tree.
+    // - distribute AND over OR
+    // - push down negation with de Morgan's laws?
+    // - collapse multiple negations, when count is even: !!x -> x
+    //
+    //
+    // ---
+    // From wikipedia page on "Disjunctive normal form"
+    //
+    // A disjunction of conjunections: sum of products, etc. Not sure if we want
+    // _full_ DNF, which can actually be more complicated. But I think we want
+    // the smallest number of OR expressions.
+    //
+    // There are syntactic transformations that can be used to write things in
+    // DNF:
+    //
+    // - involution (!!x -> x)
+    // - de Morgan 1: !(x | y) -> !x & !y
+    // - de Morgan 2: !(x & y) -> !x | !y
+    // - distribute and: x & (y | z) -> (x & y) | (x & z) (Note NOT the other
+    // way, since that introduces more ANDs)
+    // - distribute left: (x | y) & z -> (x & z) | (y & z)
+    //
+    // ---
+    //
+    // I'm not sure how to determine how many different subqueries we need to
+    // run. The glib answer is "as many as there are distinct time ranges in
+    // the query". Distinct means different ranges contained in two disjoint
+    // predicates. The tricky part is that I have a tree, and I'm not sure you
+    // can just inspect a node in the tree to know whether it can be combined in
+    // the same time-range query.
+    //
+    // a && b && c || d
+    //
+    // So for all these, the ands are associative, so we can do:
+    //
+    // (a && b && c) || d
+    //
+    // I wonder if we can flatten things. For example, distribute and over or
+    // and or over and as much as possible; rewrite disjunction; push down
+    // negation, etc.
+    //
+    // And the build a _list_ (flat structure) that merges together as many
+    // operations as are associative with one another. E.g.:
+    //
+    // - start at the beginning, take the first node and op
+    // - If it's simple, we're done (base case)
+    // - if not:
+    //   - if the op in this is the same as the last one in the list, push both
+    //   sides
+    //   - if it is a new op, complete the list and start a new one taking both
+    //   sides and the op. Goto 1.
+    //
+    //
+    // https://web.eecs.umich.edu/~jag/eecs584/papers/qopt.pdf
+    // https://www.researchgate.net/publication/220154187_A_Survey_of_Strategies_in_Program_Transformation_Systems
+
     // TODO(ben): This is just wrong. We can only split queries into the parts
     // applied to the fields and those on the timestamps in a few limited cases,
     // when all the fields are logically conjoined. Disjunction, and probably
