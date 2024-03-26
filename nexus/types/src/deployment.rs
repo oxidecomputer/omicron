@@ -633,6 +633,16 @@ impl OmicronZonesDiff {
         }
     }
 
+    /// Returns metadata about the source of the "before" data.
+    pub fn before_meta(&self) -> &DiffBeforeMetadata {
+        &self.before_meta
+    }
+
+    /// Returns metadata about the source of the "after" data.
+    pub fn after_meta(&self) -> &BlueprintDiffMetadata {
+        &self.after_meta
+    }
+
     /// Iterate over sleds only present in the second blueprint of a diff
     pub fn sleds_added(
         &self,
@@ -845,7 +855,9 @@ impl fmt::Display for BlueprintDiffSingleError {
 /// Data about the "before" version within a [`OmicronZonesDiff`].
 #[derive(Clone, Debug)]
 pub enum DiffBeforeMetadata {
+    /// The diff was made from a collection.
     Collection { id: Uuid },
+    /// The diff was made from a blueprint.
     Blueprint(BlueprintDiffMetadata),
 }
 
@@ -1359,7 +1371,7 @@ mod table_display {
             "{MODIFIED_PREFIX}{ZONE_INDENT} {} {}:",
             // The zone type for before and after is always the same --
             // this is verified at diff construction time.
-            common.zone_before.config.zone_type.kind().to_string(),
+            common.zone_before.config.zone_type.kind(),
             common.zone_before.config.id,
         );
 
