@@ -217,7 +217,7 @@ VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 tar xf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
 
 # Update the vdevs to point to where we've created them
-sed -i "s/\(m2\|u2\)\(.*\.vdev\)/\/scratch\/\1\2/g"
+sed -i "s/\(m2\|u2\)\(.*\.vdev\)/\/scratch\/\1\2/g" pkg/config.toml
 
 SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
