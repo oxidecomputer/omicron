@@ -60,8 +60,14 @@ async fn main() -> Result<(), anyhow::Error> {
     let out = d.exec(vm, &run_test).await?;
 
     // The last line of our output contains the exit code
-    let exit_code_index = out.rfind('\n').unwrap();
-    let exit_code: u8 = (&out[exit_code_index + 1..]).parse().unwrap_or(255);
+    let exit_code_index = out.rfind('\n').expect("No newline found in output");
+
+    // Ensure there is enough data left for an exit code
+    let exit_code: u8 = if exit_code_index + 1 < out.len() {
+        (&out[exit_code_index + 1..]).parse().expect("Invalid exit code")
+    } else {
+        panic!("No exit code available");
+    };
 
     info!(log, "{}", &out[..=exit_code_index]);
 

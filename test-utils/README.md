@@ -97,9 +97,10 @@ not  currently work. We can easily install pre-reqs via our scripts, but this
 will delay each test run. We may instead want to build falcon base images with
 the pre-reqs included. There's a tradeoff here of test run time, vs getting the
 latest bits.
-* The name of the test `Runner` and `VM` is currently hardcoded. Therefore,
-tests can only be run serially for now. This is an easy limitation to lift, we
-just need to figure out a naming convention and do it.
+* The names of the test runner, and VM are currently hardcoded, and start with
+`launchpad_mcduck`. Therefore, tests can only be run serially for now. This is
+an easy limitation to lift, we just need to figure out a naming convention and
+do it.
 * The commands to run tests are quite verbose. We should really have a wrapper
 script.
 
