@@ -21,4 +21,5 @@ async fn main() -> Result<(), illumos::Error> {
 }
 
 #[cfg(not(target_os = "illumos"))]
+#[tokio::main]
 async fn main() {}
