@@ -11,10 +11,8 @@ use internal_dns::resolver::{ResolveError, Resolver};
 use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::identity::Asset;
 use omicron_common::address::CLICKHOUSE_PORT;
 use omicron_common::api::external::Error;
-use omicron_common::api::external::PaginationOrder;
 use omicron_common::api::external::{DataPageParams, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use omicron_common::backoff;
@@ -88,65 +86,7 @@ impl super::Nexus {
             "collector_id" => ?oximeter_info.collector_id,
             "address" => oximeter_info.address,
         );
-
-        // Regardless, notify the collector of any assigned metric producers.
-        //
-        // This should be empty if this Oximeter collector is registering for
-        // the first time, but may not be if the service is re-registering after
-        // failure.
-        let client = self.build_oximeter_client(
-            &oximeter_info.collector_id,
-            oximeter_info.address,
-        );
-        let mut last_producer_id = None;
-        loop {
-            let pagparams = DataPageParams {
-                marker: last_producer_id.as_ref(),
-                direction: PaginationOrder::Ascending,
-                limit: std::num::NonZeroU32::new(100).unwrap(),
-            };
-            let producers = self
-                .db_datastore
-                .producers_list_by_oximeter_id(
-                    opctx,
-                    oximeter_info.collector_id,
-                    &pagparams,
-                )
-                .await?;
-            if producers.is_empty() {
-                return Ok(());
-            }
-            debug!(
-                self.log,
-                "re-assigning existing metric producers to a collector";
-                "n_producers" => producers.len(),
-                "collector_id" => ?oximeter_info.collector_id,
-            );
-            // Be sure to continue paginating from the last producer.
-            //
-            // Safety: We check just above if the list is empty, so there is a
-            // last element.
-            last_producer_id.replace(producers.last().unwrap().id());
-            for producer in producers.into_iter() {
-                let producer_info = oximeter_client::types::ProducerEndpoint {
-                    id: producer.id(),
-                    kind: nexus::ProducerKind::from(producer.kind).into(),
-                    address: SocketAddr::new(
-                        producer.ip.ip(),
-                        producer.port.try_into().unwrap(),
-                    )
-                    .to_string(),
-                    base_route: producer.base_route,
-                    interval: oximeter_client::types::Duration::from(
-                        Duration::from_secs_f64(producer.interval),
-                    ),
-                };
-                client
-                    .producers_post(&producer_info)
-                    .await
-                    .map_err(Error::from)?;
-            }
-        }
+        Ok(())
     }
 
     /// List the producers assigned to an oximeter collector.

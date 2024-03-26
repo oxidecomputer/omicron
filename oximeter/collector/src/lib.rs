@@ -304,6 +304,10 @@ impl Oximeter {
         .await
         .expect("Expected an infinite retry loop contacting Nexus");
 
+        // Now that we've successfully registered, we'll start periodically
+        // polling for our list of producers from Nexus.
+        agent.ensure_producer_refresh_task(resolver);
+
         info!(log, "oximeter registered with nexus"; "id" => ?agent.id);
         Ok(Self { agent, server })
     }

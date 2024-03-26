@@ -367,6 +367,8 @@ pub struct OximeterAgent {
         Arc<Mutex<BTreeMap<Uuid, (ProducerEndpoint, CollectionTask)>>>,
     // The interval on which we refresh our list of producers from Nexus
     refresh_interval: Duration,
+    // Handle to the task used to periodically refresh the list of producers.
+    refresh_task: Arc<StdMutex<Option<tokio::task::JoinHandle<()>>>>,
     /// The last time we've refreshed our list of producers from Nexus.
     pub last_refresh_time: Arc<StdMutex<Option<DateTime<Utc>>>>,
 }
@@ -458,21 +460,22 @@ impl OximeterAgent {
             result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
+            refresh_task: Arc::new(StdMutex::new(None)),
             last_refresh_time: Arc::new(StdMutex::new(None)),
         };
 
-        // And spawn our task for periodically updating our list of producers
-        // from Nexus.
-        //
-        // This is part of a coordination mechansim between Nexus, the
-        // producers, and us, to ensure that we have a reasonably up-to-date
-        // list of producers. Producers are required to re-register periodically
-        // with Nexus as a deadman -- if they fail to do so, Nexus will remove
-        // them. We fetch the list every so often to make sure that gets to us
-        // too.
-        tokio::spawn(refresh_producer_list(self_.clone(), resolver.clone()));
-
         Ok(self_)
+    }
+
+    /// Ensure the backgrouund task that polls Nexus periodically for our list of
+    /// assigned producers is running.
+    pub(crate) fn ensure_producer_refresh_task(&self, resolver: Resolver) {
+        let mut task = self.refresh_task.lock().unwrap();
+        if task.is_none() {
+            let refresh_task =
+                tokio::spawn(refresh_producer_list(self.clone(), resolver));
+            *task = Some(refresh_task);
+        }
     }
 
     /// Construct a new standalone `oximeter` collector.
@@ -548,6 +551,7 @@ impl OximeterAgent {
             result_sender,
             collection_tasks: Arc::new(Mutex::new(BTreeMap::new())),
             refresh_interval,
+            refresh_task: Arc::new(StdMutex::new(None)),
             last_refresh_time,
         })
     }
@@ -742,7 +746,6 @@ impl OximeterAgent {
 // A task which periodically updates our list of producers from Nexus.
 async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
     let mut interval = tokio::time::interval(agent.refresh_interval);
-    interval.tick().await; // Completes immediately.
     let page_size = Some(NonZeroU32::new(100).unwrap());
     loop {
         interval.tick().await;
