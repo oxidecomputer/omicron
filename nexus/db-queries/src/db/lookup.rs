@@ -21,6 +21,8 @@ use nexus_db_model::Name;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::{LookupResult, LookupType, ResourceType};
+use omicron_uuid_kinds::TufRepoKind;
+use omicron_uuid_kinds::TypedUuid;
 use uuid::Uuid;
 
 /// Look up an API resource in the database
@@ -356,11 +358,6 @@ impl<'a> LookupPath<'a> {
         Zpool::PrimaryKey(Root { lookup_root: self }, id)
     }
 
-    /// Select a resource of type Service, identified by its id
-    pub fn service_id(self, id: Uuid) -> Service<'a> {
-        Service::PrimaryKey(Root { lookup_root: self }, id)
-    }
-
     /// Select a resource of type Switch, identified by its id
     pub fn switch_id(self, id: Uuid) -> Switch<'a> {
         Switch::PrimaryKey(Root { lookup_root: self }, id)
@@ -431,7 +428,7 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type TufRepo, identified by its UUID.
-    pub fn tuf_repo_id(self, id: Uuid) -> TufRepo<'a> {
+    pub fn tuf_repo_id(self, id: TypedUuid<TufRepoKind>) -> TufRepo<'a> {
         TufRepo::PrimaryKey(Root { lookup_root: self }, id)
     }
 
@@ -825,15 +822,6 @@ lookup_resource! {
 }
 
 lookup_resource! {
-    name = "Service",
-    ancestors = [],
-    children = [],
-    lookup_by_name = false,
-    soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
-}
-
-lookup_resource! {
     name = "Switch",
     ancestors = [],
     children = [],
@@ -863,7 +851,7 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = false,
-    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+    primary_key_columns = [ { column_name = "id", uuid_kind = TufRepoKind } ]
 }
 
 lookup_resource! {
@@ -948,7 +936,8 @@ mod test {
         let logctx = dev::test_setup_log("test_lookup");
         let mut db = test_setup_database(&logctx.log).await;
         let (_, datastore) =
-            crate::db::datastore::datastore_test(&logctx, &db).await;
+            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                .await;
         let opctx =
             OpContext::for_tests(logctx.log.new(o!()), Arc::clone(&datastore));
         let project_name: Name = Name("my-project".parse().unwrap());

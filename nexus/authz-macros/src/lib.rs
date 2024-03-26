@@ -6,9 +6,11 @@
 
 extern crate proc_macro;
 
+use nexus_macros_common::PrimaryKeyType;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
+use syn::parse_quote;
 
 /// Defines a structure and helpers for describing an API resource for authz
 ///
@@ -81,6 +83,24 @@ use serde_tokenstream::ParseWrapper;
 /// }
 /// ```
 ///
+/// ## Resources with typed UUID primary keys
+///
+/// Some resources use a [newtype_uuid](https://crates.io/crates/newtype_uuid)
+/// `TypedUuid` as their primary key (and resources should generally move over
+/// to that model).
+///
+/// This can be specified with `primary_key = { uuid_kind = MyKind }`:
+///
+/// ```ignore
+/// authz_resource! {
+///     name = "LoopbackAddress",
+///     parent = "Fleet",
+///     primary_key = { uuid_kind = LoopbackAddressKind },
+///     roles_allowed = false,
+///     polar_snippet = FleetChild,
+/// }
+/// ```
+///
 /// ## Resources with non-id primary keys
 ///
 /// Most API resources use "id" (a Uuid) as an immutable, unique identifier.
@@ -137,7 +157,7 @@ pub fn authz_resource(
 }
 
 /// Arguments for [`authz_resource!`]
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 struct Input {
     /// Name of the resource
     ///
@@ -146,8 +166,10 @@ struct Input {
     name: String,
     /// Name of the parent `authz` resource
     parent: String,
-    /// Rust type for the primary key for this resource
-    primary_key: ParseWrapper<syn::Type>,
+    /// Rust type for the primary key for this resource.
+    primary_key: InputPrimaryKeyType,
+    /// The `TypedUuidKind` for this resource. Must be exclusive
+    ///
     /// Rust type for the input key for this resource (the key users specify
     /// for this resource, convertible to `primary_key`).
     ///
@@ -160,8 +182,77 @@ struct Input {
     polar_snippet: PolarSnippet,
 }
 
+#[derive(Debug)]
+struct InputPrimaryKeyType(PrimaryKeyType);
+
+impl<'de> serde::Deserialize<'de> for InputPrimaryKeyType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Attempt to parse as either a string or a map.
+        struct PrimaryKeyVisitor;
+
+        impl<'de2> serde::de::Visitor<'de2> for PrimaryKeyVisitor {
+            type Value = PrimaryKeyType;
+
+            fn expecting(
+                &self,
+                formatter: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                formatter.write_str(
+                    "a Rust type, or a map with a single key `uuid_kind`",
+                )
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                syn::parse_str(value)
+                    .map(PrimaryKeyType::Standard)
+                    .map_err(|e| E::custom(e.to_string()))
+            }
+
+            // seq represents a tuple type
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de2>,
+            {
+                let mut elements = vec![];
+                while let Some(element) =
+                    seq.next_element::<ParseWrapper<syn::Type>>()?
+                {
+                    elements.push(element.into_inner());
+                }
+                Ok(PrimaryKeyType::Standard(parse_quote!((#(#elements,)*))))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de2>,
+            {
+                let key: String = map.next_key()?.ok_or_else(|| {
+                    serde::de::Error::custom("expected a single key")
+                })?;
+                if key == "uuid_kind" {
+                    // uuid kinds must be plain identifiers
+                    let value: ParseWrapper<syn::Ident> = map.next_value()?;
+                    Ok(PrimaryKeyType::new_typed_uuid(&value))
+                } else {
+                    Err(serde::de::Error::custom(
+                        "expected a single key `uuid_kind`",
+                    ))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(PrimaryKeyVisitor).map(InputPrimaryKeyType)
+    }
+}
+
 /// How to generate the Polar snippet for this resource
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 enum PolarSnippet {
     /// Don't generate it at all -- it's generated elsewhere
     Custom,
@@ -185,9 +276,8 @@ fn do_authz_resource(
     let resource_name = format_ident!("{}", input.name);
     let parent_resource_name = format_ident!("{}", input.parent);
     let parent_as_snake = heck::AsSnakeCase(&input.parent).to_string();
-    let primary_key_type = &*input.primary_key;
-    let input_key_type =
-        &**input.input_key.as_ref().unwrap_or(&input.primary_key);
+    let primary_key_type = input.primary_key.0.external();
+    let input_key_type = input.input_key.as_deref().unwrap_or(primary_key_type);
 
     let (has_role_body, as_roles_body, api_resource_roles_trait) =
         if input.roles_allowed {
@@ -493,6 +583,16 @@ mod tests {
         })
         .unwrap();
         assert_contents("outputs/instance.txt", &pretty_format(output));
+
+        let output = do_authz_resource(quote! {
+            name = "Rack",
+            parent = "Fleet",
+            primary_key = { uuid_kind = RackKind },
+            roles_allowed = false,
+            polar_snippet = FleetChild,
+        })
+        .unwrap();
+        assert_contents("outputs/rack.txt", &pretty_format(output));
     }
 
     fn pretty_format(input: TokenStream) -> String {

@@ -9,32 +9,28 @@
 #![allow(clippy::match_single_binding)]
 #![allow(clippy::clone_on_copy)]
 
-#[allow(dead_code)]
-mod inner {
-    include!(concat!(env!("OUT_DIR"), "/ddm-admin-client.rs"));
+pub use ddm_admin_client::types;
+pub use ddm_admin_client::Error;
 
-    impl Copy for types::Ipv6Prefix {}
-}
-
-pub use inner::types;
-pub use inner::Error;
-
+use ddm_admin_client::types::{Ipv6Prefix, TunnelOrigin};
+use ddm_admin_client::Client as InnerClient;
 use either::Either;
-use inner::types::{Ipv6Prefix, TunnelOrigin};
-use inner::Client as InnerClient;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_internal_service_aggressive;
-use sled_hardware::underlay::BootstrapInterface;
-use sled_hardware::underlay::BOOTSTRAP_MASK;
-use sled_hardware::underlay::BOOTSTRAP_PREFIX;
+use sled_hardware_types::underlay::BootstrapInterface;
+use sled_hardware_types::underlay::BOOTSTRAP_MASK;
+use sled_hardware_types::underlay::BOOTSTRAP_PREFIX;
 use slog::info;
 use slog::Logger;
+use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
+
+use crate::types::EnableStatsRequest;
 
 // TODO-cleanup Is it okay to hardcode this port number here?
 const DDMD_PORT: u16 = 8000;
@@ -151,5 +147,40 @@ impl Client {
                 }
             })
         }))
+    }
+
+    /// Spawns a background task to instruct ddmd to advertise the given prefix
+    /// to peer sleds.
+    pub fn enable_stats(
+        &self,
+        addr: IpAddr,
+        dns_servers: Vec<SocketAddr>,
+        rack_id: uuid::Uuid,
+        sled_id: uuid::Uuid,
+    ) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            retry_notify(retry_policy_internal_service_aggressive(), || async {
+                info!(
+                    me.log, "Enabling ddm stats";
+                    "addr" => ?addr,
+                    "dns_servers" => ?dns_servers
+                );
+
+                me.inner.enable_stats(&EnableStatsRequest{
+                    addr,
+                    dns_servers: dns_servers.iter().map(|x| x.to_string()).collect(),
+                    rack_id,
+                    sled_id,
+                }).await?;
+                Ok(())
+            }, |err, duration| {
+                info!(
+                    me.log,
+                    "Failed enable ddm stats (will retry after {duration:?}";
+                    "err" => %err,
+                );
+            }).await.unwrap();
+        });
     }
 }

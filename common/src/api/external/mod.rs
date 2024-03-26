@@ -9,9 +9,6 @@
 
 mod error;
 pub mod http_pagination;
-use dropshot::HttpError;
-pub use error::*;
-
 pub use crate::api::internal::shared::SwitchLocation;
 use crate::update::ArtifactHash;
 use crate::update::ArtifactId;
@@ -20,7 +17,9 @@ use anyhow::Context;
 use api_identity::ObjectIdentity;
 use chrono::DateTime;
 use chrono::Utc;
+use dropshot::HttpError;
 pub use dropshot::PaginationOrder;
+pub use error::*;
 use futures::stream::BoxStream;
 use parse_display::Display;
 use parse_display::FromStr;
@@ -31,6 +30,7 @@ use semver;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -650,16 +650,28 @@ impl From<ByteCount> for i64 {
 pub struct Generation(u64);
 
 impl Generation {
-    pub fn new() -> Generation {
+    pub const fn new() -> Generation {
         Generation(1)
     }
 
-    pub fn next(&self) -> Generation {
+    pub const fn from_u32(value: u32) -> Generation {
+        // `as` is a little distasteful because it allows lossy conversion, but
+        // (a) we know converting `u32` to `u64` will always succeed
+        // losslessly, and (b) it allows to make this function `const`, unlike
+        // if we were to use `u64::from(value)`.
+        Generation(value as u64)
+    }
+
+    pub const fn next(&self) -> Generation {
         // It should technically be an operational error if this wraps or even
         // exceeds the value allowed by an i64.  But it seems unlikely enough to
         // happen in practice that we can probably feel safe with this.
         let next_gen = self.0 + 1;
-        assert!(next_gen <= u64::try_from(i64::MAX).unwrap());
+        // `as` is a little distasteful because it allows lossy conversion, but
+        // (a) we know converting `i64::MAX` to `u64` will always succeed
+        // losslessly, and (b) it allows to make this function `const`, unlike
+        // if we were to use `u64::try_from(i64::MAX).unwrap()`.
+        assert!(next_gen <= i64::MAX as u64);
         Generation(next_gen)
     }
 }
@@ -679,6 +691,12 @@ impl From<&Generation> for i64 {
     }
 }
 
+impl From<Generation> for u64 {
+    fn from(g: Generation) -> Self {
+        g.0
+    }
+}
+
 impl From<u32> for Generation {
     fn from(value: u32) -> Self {
         Generation(u64::from(value))
@@ -691,8 +709,18 @@ impl TryFrom<i64> for Generation {
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         Ok(Generation(
             u64::try_from(value)
-                .map_err(|_| anyhow!("generation number too large"))?,
+                .map_err(|_| anyhow!("negative generation number"))?,
         ))
+    }
+}
+
+impl TryFrom<u64> for Generation {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        i64::try_from(value)
+            .map_err(|_| anyhow!("generation number too large"))?;
+        Ok(Generation(value))
     }
 }
 
@@ -873,6 +901,8 @@ pub enum ResourceType {
     Vmm,
     Ipv4NatEntry,
     FloatingIp,
+    Probe,
+    ProbeNetworkInterface,
 }
 
 // IDENTITY METADATA
@@ -2688,6 +2718,21 @@ pub enum BgpPeerState {
     Established,
 }
 
+impl From<mg_admin_client::types::FsmStateKind> for BgpPeerState {
+    fn from(s: mg_admin_client::types::FsmStateKind) -> BgpPeerState {
+        use mg_admin_client::types::FsmStateKind;
+        match s {
+            FsmStateKind::Idle => BgpPeerState::Idle,
+            FsmStateKind::Connect => BgpPeerState::Connect,
+            FsmStateKind::Active => BgpPeerState::Active,
+            FsmStateKind::OpenSent => BgpPeerState::OpenSent,
+            FsmStateKind::OpenConfirm => BgpPeerState::OpenConfirm,
+            FsmStateKind::SessionSetup => BgpPeerState::SessionSetup,
+            FsmStateKind::Established => BgpPeerState::Established,
+        }
+    }
+}
+
 /// The current status of a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpPeerStatus {
@@ -2710,6 +2755,56 @@ pub struct BgpPeerStatus {
     pub switch: SwitchLocation,
 }
 
+/// Opaque object representing BGP message history for a given BGP peer. The
+/// contents of this object are not yet stable.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BgpMessageHistory(mg_admin_client::types::MessageHistory);
+
+impl BgpMessageHistory {
+    pub fn new(arg: mg_admin_client::types::MessageHistory) -> Self {
+        Self(arg)
+    }
+}
+
+impl JsonSchema for BgpMessageHistory {
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        let obj = schemars::schema::Schema::Object(
+            schemars::schema::SchemaObject::default(),
+        );
+        gen.definitions_mut().insert(Self::schema_name(), obj.clone());
+        obj
+    }
+
+    fn schema_name() -> String {
+        "BgpMessageHistory".to_owned()
+    }
+}
+
+/// BGP message history for a particular switch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct SwitchBgpHistory {
+    /// Switch this message history is associated with.
+    pub switch: SwitchLocation,
+
+    /// Message history indexed by peer address.
+    pub history: HashMap<String, BgpMessageHistory>,
+}
+
+/// BGP message history for rack switches.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct AggregateBgpMessageHistory {
+    /// BGP history organized by switch.
+    switch_histories: Vec<SwitchBgpHistory>,
+}
+
+impl AggregateBgpMessageHistory {
+    pub fn new(switch_histories: Vec<SwitchBgpHistory>) -> Self {
+        Self { switch_histories }
+    }
+}
+
 /// A route imported from a BGP peer.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
 pub struct BgpImportedRouteIpv4 {
@@ -2724,6 +2819,25 @@ pub struct BgpImportedRouteIpv4 {
 
     /// Switch the route is imported into.
     pub switch: SwitchLocation,
+}
+
+/// BFD connection mode.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Ord,
+    PartialOrd,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum BfdMode {
+    SingleHop,
+    MultiHop,
 }
 
 /// A description of an uploaded TUF repository.
@@ -2819,6 +2933,15 @@ pub enum TufRepoInsertStatus {
 pub struct TufRepoGetResponse {
     /// The description of the repository.
     pub description: TufRepoDescription,
+}
+
+#[derive(
+    Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq, ObjectIdentity,
+)]
+pub struct Probe {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    pub sled: Uuid,
 }
 
 #[cfg(test)]

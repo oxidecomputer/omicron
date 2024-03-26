@@ -14,8 +14,15 @@ use db_macros::Resource;
 use diesel::AsChangeset;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
+use omicron_common::api::{external, internal};
 use uuid::Uuid;
+
+/// The max number of interfaces that may be associated with a resource,
+/// e.g., instance or service.
+///
+/// RFD 135 caps instances at 8 interfaces and we use the same limit for
+/// all types of interfaces for simplicity.
+pub const MAX_NICS_PER_INSTANCE: usize = 8;
 
 impl_enum_type! {
     #[derive(SqlType, QueryId, Debug, Clone, Copy)]
@@ -28,6 +35,7 @@ impl_enum_type! {
 
     Instance => b"instance"
     Service => b"service"
+    Probe => b"probe"
 }
 
 /// Generic Network Interface DB model.
@@ -54,6 +62,41 @@ pub struct NetworkInterface {
     pub slot: i16,
     #[diesel(column_name = is_primary)]
     pub primary: bool,
+}
+
+impl NetworkInterface {
+    pub fn into_internal(
+        self,
+        subnet: external::IpNet,
+    ) -> internal::shared::NetworkInterface {
+        internal::shared::NetworkInterface {
+            id: self.id(),
+            kind: match self.kind {
+                NetworkInterfaceKind::Instance => {
+                    internal::shared::NetworkInterfaceKind::Instance {
+                        id: self.parent_id,
+                    }
+                }
+                NetworkInterfaceKind::Service => {
+                    internal::shared::NetworkInterfaceKind::Service {
+                        id: self.parent_id,
+                    }
+                }
+                NetworkInterfaceKind::Probe => {
+                    internal::shared::NetworkInterfaceKind::Probe {
+                        id: self.parent_id,
+                    }
+                }
+            },
+            name: self.name().clone(),
+            ip: self.ip.ip(),
+            mac: self.mac.into(),
+            subnet: subnet,
+            vni: external::Vni::try_from(0).unwrap(),
+            primary: self.primary,
+            slot: self.slot.try_into().unwrap(),
+        }
+    }
 }
 
 /// Instance Network Interface DB model.
@@ -84,7 +127,7 @@ pub struct InstanceNetworkInterface {
 /// The underlying "table" (`service_network_interface`) is actually a view
 /// over the `network_interface` table, that contains only rows with
 /// `kind = 'service'`.
-#[derive(Selectable, Queryable, Clone, Debug, Resource)]
+#[derive(Selectable, Queryable, Clone, Debug, PartialEq, Eq, Resource)]
 #[diesel(table_name = service_network_interface)]
 pub struct ServiceNetworkInterface {
     #[diesel(embed)]
@@ -210,9 +253,11 @@ pub struct IncompleteNetworkInterface {
     pub subnet: VpcSubnet,
     pub ip: Option<std::net::IpAddr>,
     pub mac: Option<external::MacAddr>,
+    pub slot: Option<u8>,
 }
 
 impl IncompleteNetworkInterface {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         interface_id: Uuid,
         kind: NetworkInterfaceKind,
@@ -221,24 +266,43 @@ impl IncompleteNetworkInterface {
         identity: external::IdentityMetadataCreateParams,
         ip: Option<std::net::IpAddr>,
         mac: Option<external::MacAddr>,
+        slot: Option<u8>,
     ) -> Result<Self, external::Error> {
         if let Some(ip) = ip {
             subnet.check_requestable_addr(ip)?;
         };
-        match (mac, kind) {
-            (Some(mac), NetworkInterfaceKind::Instance) if !mac.is_guest() => {
-                return Err(external::Error::invalid_request(&format!(
-                    "invalid MAC address {} for guest NIC",
-                    mac
+        if let Some(mac) = mac {
+            match kind {
+                NetworkInterfaceKind::Instance => {
+                    if !mac.is_guest() {
+                        return Err(external::Error::invalid_request(format!(
+                            "invalid MAC address {mac} for guest NIC",
+                        )));
+                    }
+                }
+                NetworkInterfaceKind::Probe => {
+                    if !mac.is_guest() {
+                        return Err(external::Error::invalid_request(format!(
+                            "invalid MAC address {mac} for probe NIC",
+                        )));
+                    }
+                }
+                NetworkInterfaceKind::Service => {
+                    if !mac.is_system() {
+                        return Err(external::Error::invalid_request(format!(
+                            "invalid MAC address {mac} for service NIC",
+                        )));
+                    }
+                }
+            }
+        }
+        if let Some(slot) = slot {
+            if usize::from(slot) >= MAX_NICS_PER_INSTANCE {
+                return Err(external::Error::invalid_request(format!(
+                    "invalid slot {slot} for NIC (max slot = {})",
+                    MAX_NICS_PER_INSTANCE - 1,
                 )));
             }
-            (Some(mac), NetworkInterfaceKind::Service) if !mac.is_system() => {
-                return Err(external::Error::invalid_request(&format!(
-                    "invalid MAC address {} for service NIC",
-                    mac
-                )));
-            }
-            _ => {}
         }
         let identity = NetworkInterfaceIdentity::new(interface_id, identity);
         Ok(IncompleteNetworkInterface {
@@ -248,6 +312,7 @@ impl IncompleteNetworkInterface {
             subnet,
             ip,
             mac,
+            slot,
         })
     }
 
@@ -266,6 +331,7 @@ impl IncompleteNetworkInterface {
             identity,
             ip,
             None,
+            None,
         )
     }
 
@@ -274,8 +340,9 @@ impl IncompleteNetworkInterface {
         service_id: Uuid,
         subnet: VpcSubnet,
         identity: external::IdentityMetadataCreateParams,
-        ip: Option<std::net::IpAddr>,
-        mac: Option<external::MacAddr>,
+        ip: std::net::IpAddr,
+        mac: external::MacAddr,
+        slot: u8,
     ) -> Result<Self, external::Error> {
         Self::new(
             interface_id,
@@ -283,8 +350,29 @@ impl IncompleteNetworkInterface {
             service_id,
             subnet,
             identity,
+            Some(ip),
+            Some(mac),
+            Some(slot),
+        )
+    }
+
+    pub fn new_probe(
+        interface_id: Uuid,
+        probe_id: Uuid,
+        subnet: VpcSubnet,
+        identity: external::IdentityMetadataCreateParams,
+        ip: Option<std::net::IpAddr>,
+        mac: Option<external::MacAddr>,
+    ) -> Result<Self, external::Error> {
+        Self::new(
+            interface_id,
+            NetworkInterfaceKind::Probe,
+            probe_id,
+            subnet,
+            identity,
             ip,
             mac,
+            None,
         )
     }
 }

@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+# NOTE:
+#
+# This crate is depended on by several other workspaces! Be careful of adding
+# new regular or build dependencies here, as they will be added to those crates
+# as well. (Dev-dependencies are fine.)
+
 [dependencies]
 anyhow.workspace = true
 api_identity.workspace = true
@@ -17,6 +23,8 @@ hex.workspace = true
 http.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
+mg-admin-client.workspace = true
+omicron-uuid-kinds.workspace = true
 proptest = { workspace = true, optional = true }
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
@@ -27,15 +35,15 @@ serde_human_bytes.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 strum.workspace = true
 test-strategy = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
-tokio-postgres.workspace = true
-toml.workspace = true
 uuid.workspace = true
 parse-display.workspace = true
 progenitor.workspace = true
+progenitor-client.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true
 regress.workspace = true

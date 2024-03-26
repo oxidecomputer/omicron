@@ -18,6 +18,7 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::params::PhysicalDiskKind;
 use nexus_types::external_api::params::UserId;
 use nexus_types::external_api::shared;
+use nexus_types::external_api::shared::Baseboard;
 use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::views;
@@ -29,16 +30,20 @@ use nexus_types::external_api::views::User;
 use nexus_types::external_api::views::{Project, Silo, Vpc, VpcRouter};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params as internal_params;
-use nexus_types::internal_api::params::Baseboard;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::NameOrId;
 use omicron_sled_agent::sim::SledAgent;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_test_utils::dev::poll::CondCheckError;
+use slog::debug;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 pub async fn objects_list_page_authz<ItemType>(
@@ -267,7 +272,7 @@ pub async fn create_floating_ip(
     client: &ClientTestContext,
     fip_name: &str,
     project: &str,
-    address: Option<IpAddr>,
+    ip: Option<IpAddr>,
     parent_pool_name: Option<&str>,
 ) -> FloatingIp {
     object_create(
@@ -278,7 +283,7 @@ pub async fn create_floating_ip(
                 name: fip_name.parse().unwrap(),
                 description: String::from("a floating ip"),
             },
-            address,
+            ip,
             pool: parent_pool_name.map(|v| NameOrId::Name(v.parse().unwrap())),
         },
     )
@@ -325,8 +330,8 @@ pub async fn create_switch(
         "/switches",
         &internal_params::SwitchPutRequest {
             baseboard: Baseboard {
-                serial_number: serial.to_string(),
-                part_number: part.to_string(),
+                serial: serial.to_string(),
+                part: part.to_string(),
                 revision,
             },
             rack_id,
@@ -626,6 +631,38 @@ pub async fn create_router(
     .unwrap()
 }
 
+pub async fn assert_ip_pool_utilization(
+    client: &ClientTestContext,
+    pool_name: &str,
+    ipv4_allocated: u32,
+    ipv4_capacity: u32,
+    ipv6_allocated: u128,
+    ipv6_capacity: u128,
+) {
+    let url = format!("/v1/system/ip-pools/{}/utilization", pool_name);
+    let utilization: views::IpPoolUtilization = object_get(client, &url).await;
+    assert_eq!(
+        utilization.ipv4.allocated, ipv4_allocated,
+        "IP pool '{}': expected {} IPv4 allocated, got {:?}",
+        pool_name, ipv4_allocated, utilization.ipv4.allocated
+    );
+    assert_eq!(
+        utilization.ipv4.capacity, ipv4_capacity,
+        "IP pool '{}': expected {} IPv4 capacity, got {:?}",
+        pool_name, ipv4_capacity, utilization.ipv4.capacity
+    );
+    assert_eq!(
+        utilization.ipv6.allocated, ipv6_allocated,
+        "IP pool '{}': expected {} IPv6 allocated, got {:?}",
+        pool_name, ipv6_allocated, utilization.ipv6.allocated
+    );
+    assert_eq!(
+        utilization.ipv6.capacity, ipv6_capacity,
+        "IP pool '{}': expected {} IPv6 capacity, got {:?}",
+        pool_name, ipv6_capacity, utilization.ipv6.capacity
+    );
+}
+
 /// Grant a role on a resource to a user
 ///
 /// * `grant_resource_url`: URL of the resource we're granting the role on
@@ -792,6 +829,56 @@ impl DiskTest {
                 .upsert_crucible_dataset(dataset.id, zpool.id, address)
                 .await;
         }
+
+        let log = &cptestctx.logctx.log;
+
+        // Wait until Nexus has successfully completed an inventory collection
+        // which includes this zpool
+        wait_for_condition(
+            || async {
+                let result = cptestctx
+                    .server
+                    .inventory_collect_and_get_latest_collection()
+                    .await;
+                let log_result = match &result {
+                    Ok(Some(_)) => Ok("found"),
+                    Ok(None) => Ok("not found"),
+                    Err(error) => Err(error),
+                };
+                debug!(
+                    log,
+                    "attempt to fetch latest inventory collection";
+                    "result" => ?log_result,
+                );
+
+                match result {
+                    Ok(None) => Err(CondCheckError::NotYet),
+                    Ok(Some(c)) => {
+                        let all_zpools = c
+                            .sled_agents
+                            .values()
+                            .flat_map(|sled_agent| {
+                                sled_agent.zpools.iter().map(|z| z.id)
+                            })
+                            .collect::<std::collections::HashSet<Uuid>>();
+
+                        if all_zpools.contains(&zpool.id) {
+                            Ok(())
+                        } else {
+                            Err(CondCheckError::NotYet)
+                        }
+                    }
+                    Err(Error::ServiceUnavailable { .. }) => {
+                        Err(CondCheckError::NotYet)
+                    }
+                    Err(error) => Err(CondCheckError::Failed(error)),
+                }
+            },
+            &Duration::from_millis(50),
+            &Duration::from_secs(30),
+        )
+        .await
+        .expect("expected to find inventory collection");
 
         self.zpools.push(zpool);
     }

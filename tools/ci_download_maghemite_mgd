@@ -29,6 +29,8 @@ PACKAGE_BASE_URL="$ARTIFACT_URL/$REPO/image/$COMMIT"
 
 function main
 {
+    rm -rf $DOWNLOAD_DIR/root
+
 	#
 	# Process command-line arguments. We generally don't expect any, but
 	# we allow callers to specify a value to override OSTYPE, just for

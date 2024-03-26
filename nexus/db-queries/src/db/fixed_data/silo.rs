@@ -7,7 +7,7 @@ use nexus_types::external_api::{params, shared};
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use once_cell::sync::Lazy;
 
-pub static SILO_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+pub static DEFAULT_SILO_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
     "001de000-5110-4000-8000-000000000000"
         .parse()
         .expect("invalid uuid for builtin silo id")
@@ -19,7 +19,7 @@ pub static SILO_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
 /// remove it per omicron#2305.
 pub static DEFAULT_SILO: Lazy<db::model::Silo> = Lazy::new(|| {
     db::model::Silo::new_with_id(
-        *SILO_ID,
+        *DEFAULT_SILO_ID,
         params::SiloCreate {
             identity: IdentityMetadataCreateParams {
                 name: "default-silo".parse().unwrap(),

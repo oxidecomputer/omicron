@@ -30,6 +30,7 @@ mod long_running_tasks;
 mod metrics;
 mod nexus;
 pub mod params;
+mod probe_manager;
 mod profile;
 pub mod rack_setup;
 pub mod server;
@@ -40,6 +41,7 @@ mod smf_helper;
 mod storage_monitor;
 mod swap_device;
 mod updates;
+mod vmm_reservoir;
 mod zone_bundle;
 
 #[cfg(test)]

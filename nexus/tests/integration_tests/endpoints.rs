@@ -22,6 +22,7 @@ use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::AddressLotKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -45,14 +46,12 @@ pub const HARDWARE_UNINITIALIZED_SLEDS: &'static str =
     "/v1/system/hardware/sleds-uninitialized";
 pub static HARDWARE_SLED_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/hardware/sleds/{}", SLED_AGENT_UUID));
-pub static HARDWARE_SLED_PROVISION_STATE_URL: Lazy<String> = Lazy::new(|| {
-    format!("/v1/system/hardware/sleds/{}/provision-state", SLED_AGENT_UUID)
+pub static HARDWARE_SLED_PROVISION_POLICY_URL: Lazy<String> = Lazy::new(|| {
+    format!("/v1/system/hardware/sleds/{}/provision-policy", SLED_AGENT_UUID)
 });
-pub static DEMO_SLED_PROVISION_STATE: Lazy<params::SledProvisionStateParams> =
-    Lazy::new(|| {
-        params::SledProvisionStateParams {
-            state: nexus_types::external_api::views::SledProvisionState::NonProvisionable,
-        }
+pub static DEMO_SLED_PROVISION_POLICY: Lazy<params::SledProvisionPolicyParams> =
+    Lazy::new(|| params::SledProvisionPolicyParams {
+        state: SledProvisionPolicy::NonProvisionable,
     });
 
 pub static HARDWARE_SWITCH_URL: Lazy<String> =
@@ -577,6 +576,8 @@ pub const DEMO_BGP_STATUS_URL: &'static str =
     "/v1/system/networking/bgp-status";
 pub const DEMO_BGP_ROUTES_IPV4_URL: &'static str =
     "/v1/system/networking/bgp-routes-ipv4?asn=47";
+pub const DEMO_BGP_MESSAGE_HISTORY_URL: &'static str =
+    "/v1/system/networking/bgp-message-history?asn=47";
 
 pub const DEMO_BFD_STATUS_URL: &'static str =
     "/v1/system/networking/bfd-status";
@@ -594,7 +595,7 @@ pub static DEMO_BFD_ENABLE: Lazy<params::BfdSessionEnable> =
         detection_threshold: 3,
         required_rx: 1000000,
         switch: "switch0".parse().unwrap(),
-        mode: params::BfdMode::MultiHop,
+        mode: omicron_common::api::external::BfdMode::MultiHop,
     });
 
 pub static DEMO_BFD_DISABLE: Lazy<params::BfdSessionDisable> =
@@ -657,6 +658,8 @@ pub static DEMO_IP_POOL_PROJ_URL: Lazy<String> = Lazy::new(|| {
 });
 pub static DEMO_IP_POOL_URL: Lazy<String> =
     Lazy::new(|| format!("/v1/system/ip-pools/{}", *DEMO_IP_POOL_NAME));
+pub static DEMO_IP_POOL_UTILIZATION_URL: Lazy<String> =
+    Lazy::new(|| format!("{}/utilization", *DEMO_IP_POOL_URL));
 pub static DEMO_IP_POOL_UPDATE: Lazy<params::IpPoolUpdate> =
     Lazy::new(|| params::IpPoolUpdate {
         identity: IdentityMetadataUpdateParams {
@@ -769,8 +772,16 @@ pub static DEMO_FLOAT_IP_CREATE: Lazy<params::FloatingIpCreate> =
             name: DEMO_FLOAT_IP_NAME.clone(),
             description: String::from("a new IP pool"),
         },
-        address: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
+        ip: Some(std::net::Ipv4Addr::new(10, 0, 0, 141).into()),
         pool: None,
+    });
+
+pub static DEMO_FLOAT_IP_UPDATE: Lazy<params::FloatingIpUpdate> =
+    Lazy::new(|| params::FloatingIpUpdate {
+        identity: IdentityMetadataUpdateParams {
+            name: None,
+            description: Some(String::from("an updated Floating IP")),
+        },
     });
 
 pub static DEMO_FLOAT_IP_ATTACH: Lazy<params::FloatingIpAttach> =
@@ -1094,6 +1105,16 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                 AllowedMethod::Post(
                     serde_json::to_value(&*DEMO_IP_POOL_RANGE).unwrap()
                 ),
+            ],
+        },
+
+        // IP pool utilization
+        VerifyEndpoint {
+            url: &DEMO_IP_POOL_UTILIZATION_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
             ],
         },
 
@@ -1911,11 +1932,11 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
-            url: &HARDWARE_SLED_PROVISION_STATE_URL,
+            url: &HARDWARE_SLED_PROVISION_POLICY_URL,
             visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Put(
-                serde_json::to_value(&*DEMO_SLED_PROVISION_STATE).unwrap()
+                serde_json::to_value(&*DEMO_SLED_PROVISION_POLICY).unwrap()
             )],
         },
 
@@ -2229,6 +2250,15 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
         },
 
         VerifyEndpoint {
+            url: &DEMO_BGP_MESSAGE_HISTORY_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+            ],
+        },
+
+        VerifyEndpoint {
             url: &DEMO_BFD_STATUS_URL,
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
@@ -2278,6 +2308,9 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
                 AllowedMethod::Get,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_FLOAT_IP_UPDATE).unwrap()
+                  ),
                 AllowedMethod::Delete,
             ],
         },

@@ -5,10 +5,15 @@
 //! Background task for detecting changes to service zone locations and
 //! updating the NAT rpw table accordingly
 
+use crate::app::map_switch_zone_addrs;
+
 use super::common::BackgroundTask;
+use super::networking::build_dpd_clients;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns::resolver::Resolver;
+use internal_dns::ServiceName;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -36,15 +41,12 @@ const MIN_EXTERNAL_DNS_COUNT: usize = 1;
 /// persisted in the NAT RPW table
 pub struct ServiceZoneNatTracker {
     datastore: Arc<DataStore>,
-    dpd_clients: Vec<Arc<dpd_client::Client>>,
+    resolver: Resolver,
 }
 
 impl ServiceZoneNatTracker {
-    pub fn new(
-        datastore: Arc<DataStore>,
-        dpd_clients: Vec<Arc<dpd_client::Client>>,
-    ) -> Self {
-        Self { datastore, dpd_clients }
+    pub fn new(datastore: Arc<DataStore>, resolver: Resolver) -> Self {
+        Self { datastore, resolver }
     }
 }
 
@@ -332,7 +334,31 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
             // notify dpd if we've added any new records
             if result > 0 {
-                for client in &self.dpd_clients {
+
+                let switch_zone_addresses = match self
+                    .resolver
+                    .lookup_all_ipv6(ServiceName::Dendrite)
+                    .await
+                {
+                    Ok(addrs) => addrs,
+                    Err(e) => {
+                        error!(log, "failed to resolve addresses for Dendrite services"; "error" => %e);
+                        return json!({
+                            "error":
+                                format!(
+                                    "failed to resolve addresses for Dendrite services: {:#}",
+                                    e
+                                )
+                            });
+                    },
+                };
+
+                let mappings =
+                    map_switch_zone_addrs(log, switch_zone_addresses).await;
+
+                let dpd_clients = build_dpd_clients(&mappings, log);
+
+                for (_location, client) in dpd_clients {
                     if let Err(e) = client.ipv4_nat_trigger_update().await {
                         error!(
                             &log,

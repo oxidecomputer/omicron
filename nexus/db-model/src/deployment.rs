@@ -15,6 +15,10 @@ use crate::{ipv6, Generation, MacAddr, Name, SqlU16, SqlU32, SqlU8};
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_types::deployment::BlueprintTarget;
+use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZonesConfig;
+use omicron_common::api::internal::shared::NetworkInterface;
 use uuid::Uuid;
 
 /// See [`nexus_types::deployment::Blueprint`].
@@ -23,6 +27,8 @@ use uuid::Uuid;
 pub struct Blueprint {
     pub id: Uuid,
     pub parent_blueprint_id: Option<Uuid>,
+    pub internal_dns_version: Generation,
+    pub external_dns_version: Generation,
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
@@ -33,6 +39,8 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
         Self {
             id: bp.id,
             parent_blueprint_id: bp.parent_blueprint_id,
+            internal_dns_version: Generation(bp.internal_dns_version),
+            external_dns_version: Generation(bp.external_dns_version),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
@@ -45,6 +53,8 @@ impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
         Self {
             id: value.id,
             parent_blueprint_id: value.parent_blueprint_id,
+            internal_dns_version: *value.internal_dns_version,
+            external_dns_version: *value.external_dns_version,
             time_created: value.time_created,
             creator: value.creator,
             comment: value.comment,
@@ -96,7 +106,7 @@ impl BpSledOmicronZones {
     pub fn new(
         blueprint_id: Uuid,
         sled_id: Uuid,
-        zones_config: &nexus_types::deployment::OmicronZonesConfig,
+        zones_config: &BlueprintZonesConfig,
     ) -> Self {
         Self {
             blueprint_id,
@@ -137,9 +147,9 @@ impl BpOmicronZone {
     pub fn new(
         blueprint_id: Uuid,
         sled_id: Uuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone: &BlueprintZoneConfig,
     ) -> Result<Self, anyhow::Error> {
-        let zone = OmicronZone::new(sled_id, zone)?;
+        let zone = OmicronZone::new(sled_id, &zone.config)?;
         Ok(Self {
             blueprint_id,
             sled_id: zone.sled_id,
@@ -165,10 +175,11 @@ impl BpOmicronZone {
         })
     }
 
-    pub fn into_omicron_zone_config(
+    pub fn into_blueprint_zone_config(
         self,
         nic_row: Option<BpOmicronZoneNic>,
-    ) -> Result<nexus_types::inventory::OmicronZoneConfig, anyhow::Error> {
+        disposition: BlueprintZoneDisposition,
+    ) -> Result<BlueprintZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
             sled_id: self.sled_id,
             id: self.id,
@@ -191,7 +202,9 @@ impl BpOmicronZone {
             snat_first_port: self.snat_first_port,
             snat_last_port: self.snat_last_port,
         };
-        zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))
+        let config =
+            zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))?;
+        Ok(BlueprintZoneConfig { config, disposition })
     }
 }
 
@@ -227,9 +240,9 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
 impl BpOmicronZoneNic {
     pub fn new(
         blueprint_id: Uuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone: &BlueprintZoneConfig,
     ) -> Result<Option<BpOmicronZoneNic>, anyhow::Error> {
-        let zone_nic = OmicronZoneNic::new(zone)?;
+        let zone_nic = OmicronZoneNic::new(&zone.config)?;
         Ok(zone_nic.map(|nic| Self {
             blueprint_id,
             id: nic.id,
@@ -246,7 +259,7 @@ impl BpOmicronZoneNic {
     pub fn into_network_interface_for_zone(
         self,
         zone_id: Uuid,
-    ) -> Result<nexus_types::inventory::NetworkInterface, anyhow::Error> {
+    ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
     }

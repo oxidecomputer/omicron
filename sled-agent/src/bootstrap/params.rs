@@ -12,7 +12,7 @@ use omicron_common::ledger::Ledgerable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv6Addr, SocketAddrV6};
@@ -493,6 +493,7 @@ mod tests {
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),
                 bgp: Vec::new(),
+                bfd: Vec::new(),
             },
         };
 

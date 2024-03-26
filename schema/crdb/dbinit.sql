@@ -73,11 +73,41 @@ CREATE TABLE IF NOT EXISTS omicron.public.rack (
  * Sleds
  */
 
-CREATE TYPE IF NOT EXISTS omicron.public.sled_provision_state AS ENUM (
-    -- New resources can be provisioned onto the sled
-    'provisionable',
-    -- New resources must not be provisioned onto the sled
-    'non_provisionable'
+-- The disposition for a particular sled. This is updated solely by the
+-- operator, and not by Nexus.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_policy AS ENUM (
+    -- The sled is in service, and new resources can be provisioned onto it.
+    'in_service',
+    -- The sled is in service, but the operator has indicated that new
+    -- resources should not be provisioned onto it.
+    'no_provision',
+    -- The operator has marked that the sled has, or will be, removed from the
+    -- rack, and it should be assumed that any resources currently on it are
+    -- now permanently missing.
+    'expunged'
+);
+
+-- The actual state of the sled. This is updated exclusively by Nexus.
+--
+-- Nexus's goal is to match the sled's state with the operator-indicated
+-- policy. For example, if the sled_policy is "expunged" and the sled_state is
+-- "active", Nexus will assume that the sled is gone. Based on that, Nexus will
+-- reallocate resources currently on the expunged sled to other sleds, etc.
+-- Once the expunged sled no longer has any resources attached to it, Nexus
+-- will mark it as decommissioned.
+CREATE TYPE IF NOT EXISTS omicron.public.sled_state AS ENUM (
+    -- The sled has resources of any kind allocated on it, or, is available for
+    -- new resources.
+    --
+    -- The sled can be in this state and have a different sled policy, e.g.
+    -- "expunged".
+    'active',
+
+    -- The sled no longer has resources allocated on it, now or in the future.
+    --
+    -- This is a terminal state. This state is only valid if the sled policy is
+    -- 'expunged'.
+    'decommissioned'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.sled (
@@ -111,8 +141,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled (
     /* The last address allocated to a propolis instance on this sled. */
     last_used_address INET NOT NULL,
 
-    /* The state of whether resources should be provisioned onto the sled */
-    provision_state omicron.public.sled_provision_state NOT NULL,
+    /* The policy for the sled, updated exclusively by the operator */
+    sled_policy omicron.public.sled_policy NOT NULL,
+
+    /* The actual state of the sled, updated exclusively by Nexus */
+    sled_state omicron.public.sled_state NOT NULL,
+
+    /* Generation number owned and incremented by the sled-agent */
+    sled_agent_gen INT8 NOT NULL DEFAULT 1,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.
@@ -207,7 +243,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.sled_underlay_subnet_allocation (
     subnet_octet INT2 NOT NULL UNIQUE CHECK (subnet_octet BETWEEN 33 AND 255)
 );
 
--- Add an index which allows pagination by {rack_id, sled_id} pairs. 
+-- Add an index which allows pagination by {rack_id, sled_id} pairs.
 CREATE UNIQUE INDEX IF NOT EXISTS lookup_subnet_allocation_by_rack_and_sled ON omicron.public.sled_underlay_subnet_allocation (
     rack_id,
     sled_id
@@ -426,10 +462,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.virtual_provisioning_resource (
     ram_provisioned INT8 NOT NULL
 );
 
-/*
- * ZPools of Storage, attached to Sleds.
- * These are backed by a single physical disk.
- */
+-- ZPools of Storage, attached to Sleds.
+-- These are backed by a single physical disk.
+--
+-- For information about the provisioned zpool, reference the
+-- "omicron.public.inv_zpool" table, which returns information
+-- that has actually been returned from the underlying sled.
 CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     /* Identity metadata (asset) */
     id UUID PRIMARY KEY,
@@ -442,9 +480,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.zpool (
     sled_id UUID NOT NULL,
 
     /* FK into the Physical Disk table */
-    physical_disk_id UUID NOT NULL,
-
-    total_size INT NOT NULL
+    physical_disk_id UUID NOT NULL
 );
 
 /* Create an index on the physical disk id */
@@ -853,7 +889,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.silo_quotas (
  * A view of the amount of provisioned and allocated (set by quotas) resources
  * on a given silo.
  */
-CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization 
+CREATE VIEW IF NOT EXISTS omicron.public.silo_utilization
 AS SELECT
     c.id AS silo_id,
     s.name AS silo_name,
@@ -866,7 +902,7 @@ AS SELECT
     s.discoverable as silo_discoverable
 FROM
     omicron.public.virtual_provisioning_collection AS c
-    RIGHT JOIN omicron.public.silo_quotas AS q 
+    RIGHT JOIN omicron.public.silo_quotas AS q
     ON c.id = q.silo_id
     INNER JOIN omicron.public.silo AS s
     ON c.id = s.id
@@ -970,7 +1006,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_project ON omicron.public.i
     time_deleted IS NULL;
 
 /*
- * A special view of an instance provided to operators for insights into what's running 
+ * A special view of an instance provided to operators for insights into what's running
  * on a sled.
  *
  * This view requires the VMM table, which doesn't exist yet, so create a
@@ -1119,9 +1155,9 @@ SELECT
     digest,
     block_size,
     size_bytes
-FROM 
+FROM
     omicron.public.image
-WHERE 
+WHERE
     project_id IS NOT NULL;
 
 CREATE VIEW IF NOT EXISTS omicron.public.silo_image AS
@@ -1140,9 +1176,9 @@ SELECT
     digest,
     block_size,
     size_bytes
-FROM 
+FROM
     omicron.public.image
-WHERE 
+WHERE
     project_id IS NULL;
 
 /* Index for silo images */
@@ -1459,6 +1495,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_name_kind_key ON o
     kind
 )
 STORING (vpc_id, subnet_id, is_primary)
+WHERE
+    time_deleted IS NULL;
+
+/*
+ * Index used to verify that all interfaces for a resource (e.g. Instance,
+ * Service) have unique slots.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS network_interface_parent_id_slot_key ON omicron.public.network_interface (
+    parent_id,
+    slot
+)
 WHERE
     time_deleted IS NULL;
 
@@ -2915,6 +2962,52 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_agent (
     PRIMARY KEY (inv_collection_id, sled_id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+    -- The slot where this disk was last observed
+    slot INT8 CHECK (slot >= 0) NOT NULL,
+
+    vendor STRING(63) NOT NULL,
+    model STRING(63) NOT NULL,
+    serial STRING(63) NOT NULL,
+
+    variant omicron.public.physical_disk_kind NOT NULL,
+
+    -- FK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, slot)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    -- when this observation was made
+    time_collected TIMESTAMPTZ NOT NULL,
+
+    -- The control plane ID of the zpool
+    id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+    total_size INT NOT NULL,
+
+    -- PK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, id)
+);
+
+-- Allow looking up the most recent Zpool by ID
+CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time ON omicron.public.inv_zpool (id, time_collected DESC);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3085,7 +3178,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.blueprint (
     -- These fields are for debugging only.
     time_created TIMESTAMPTZ NOT NULL,
     creator TEXT NOT NULL,
-    comment TEXT NOT NULL
+    comment TEXT NOT NULL,
+
+    -- identifies the latest internal DNS version when blueprint planning began
+    internal_dns_version INT8 NOT NULL,
+    -- identifies the latest external DNS version when blueprint planning began
+    external_dns_version INT8 NOT NULL
 );
 
 -- table describing both the current and historical target blueprints of the
@@ -3234,25 +3332,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zones_not_in_service (
 COMMIT;
 BEGIN;
 
-CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
-    -- There should only be one row of this table for the whole DB.
-    -- It's a little goofy, but filter on "singleton = true" before querying
-    -- or applying updates, and you'll access the singleton row.
-    --
-    -- We also add a constraint on this table to ensure it's not possible to
-    -- access the version of this table with "singleton = false".
-    singleton BOOL NOT NULL PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    -- Semver representation of the DB version
-    version STRING(64) NOT NULL,
-
-    -- (Optional) Semver representation of the DB version to which we're upgrading
-    target_version STRING(64),
-
-    CHECK (singleton = true)
-);
-
 -- Per-VMM state.
 CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     id UUID PRIMARY KEY,
@@ -3263,7 +3342,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     time_state_updated TIMESTAMPTZ NOT NULL,
     state_generation INT NOT NULL,
     sled_id UUID NOT NULL,
-    propolis_ip INET NOT NULL
+    propolis_ip INET NOT NULL,
+    propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400
 );
 
 /*
@@ -3396,29 +3476,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_bfd_session ON omicron.public.bfd_sessi
     switch
 ) WHERE time_deleted IS NULL;
 
-/*
- * Metadata for the schema itself. This version number isn't great, as there's
- * nothing to ensure it gets bumped when it should be, but it's a start.
- */
-CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
-    -- There should only be one row of this table for the whole DB.
-    -- It's a little goofy, but filter on "singleton = true" before querying
-    -- or applying updates, and you'll access the singleton row.
-    --
-    -- We also add a constraint on this table to ensure it's not possible to
-    -- access the version of this table with "singleton = false".
-    singleton BOOL NOT NULL PRIMARY KEY,
-    time_created TIMESTAMPTZ NOT NULL,
-    time_modified TIMESTAMPTZ NOT NULL,
-    -- Semver representation of the DB version
-    version STRING(64) NOT NULL,
-
-    -- (Optional) Semver representation of the DB version to which we're upgrading
-    target_version STRING(64),
-
-    CHECK (singleton = true)
-);
-
 ALTER TABLE omicron.public.switch_port_settings_link_config ADD COLUMN IF NOT EXISTS autoneg BOOL NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS ipv4_nat_lookup_by_vni ON omicron.public.ipv4_nat_entry (
@@ -3497,6 +3554,174 @@ SELECT
   deleted
 FROM interleaved_versions;
 
+CREATE TABLE IF NOT EXISTS omicron.public.probe (
+    id UUID NOT NULL PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    project_id UUID NOT NULL,
+    sled UUID NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_probe_by_name ON omicron.public.probe (
+    name
+) WHERE
+    time_deleted IS NULL;
+
+ALTER TABLE omicron.public.external_ip ADD COLUMN IF NOT EXISTS is_probe BOOL NOT NULL DEFAULT false;
+
+ALTER TYPE omicron.public.network_interface_kind ADD VALUE IF NOT EXISTS 'probe';
+
+CREATE TYPE IF NOT EXISTS omicron.public.upstairs_repair_notification_type AS ENUM (
+  'started',
+  'succeeded',
+  'failed'
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.upstairs_repair_type AS ENUM (
+  'live',
+  'reconciliation'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.upstairs_repair_notification (
+    time TIMESTAMPTZ NOT NULL,
+
+    repair_id UUID NOT NULL,
+    repair_type omicron.public.upstairs_repair_type NOT NULL,
+
+    upstairs_id UUID NOT NULL,
+    session_id UUID NOT NULL,
+
+    region_id UUID NOT NULL,
+    target_ip INET NOT NULL,
+    target_port INT4 CHECK (target_port BETWEEN 0 AND 65535) NOT NULL,
+
+    notification_type omicron.public.upstairs_repair_notification_type NOT NULL,
+
+    /*
+     * A repair is uniquely identified by the four UUIDs here, and a
+     * notification is uniquely identified by its type.
+     */
+    PRIMARY KEY (repair_id, upstairs_id, session_id, region_id, notification_type)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.upstairs_repair_progress (
+    repair_id UUID NOT NULL,
+    time TIMESTAMPTZ NOT NULL,
+    current_item INT8 NOT NULL,
+    total_items INT8 NOT NULL,
+
+    PRIMARY KEY (repair_id, time, current_item, total_items)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stop_request_reason_type AS ENUM (
+  'replacing',
+  'disabled',
+  'failed_reconcile',
+  'io_error',
+  'bad_negotiation_order',
+  'incompatible',
+  'failed_live_repair',
+  'too_many_outstanding_jobs',
+  'deactivated'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.downstairs_client_stop_request_notification (
+    time TIMESTAMPTZ NOT NULL,
+    upstairs_id UUID NOT NULL,
+    downstairs_id UUID NOT NULL,
+    reason omicron.public.downstairs_client_stop_request_reason_type NOT NULL,
+
+    PRIMARY KEY (time, upstairs_id, downstairs_id, reason)
+);
+
+CREATE TYPE IF NOT EXISTS omicron.public.downstairs_client_stopped_reason_type AS ENUM (
+  'connection_timeout',
+  'connection_failed',
+  'timeout',
+  'write_failed',
+  'read_failed',
+  'requested_stop',
+  'finished',
+  'queue_closed',
+  'receive_task_cancelled'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.downstairs_client_stopped_notification (
+    time TIMESTAMPTZ NOT NULL,
+    upstairs_id UUID NOT NULL,
+    downstairs_id UUID NOT NULL,
+    reason omicron.public.downstairs_client_stopped_reason_type NOT NULL,
+
+    PRIMARY KEY (time, upstairs_id, downstairs_id, reason)
+);
+
+CREATE INDEX IF NOT EXISTS rack_initialized ON omicron.public.rack (initialized);
+
+-- table for tracking bootstore configuration changes over time
+-- this makes reconciliation easier and also gives us a visible history of changes
+CREATE TABLE IF NOT EXISTS omicron.public.bootstore_config (
+    key TEXT NOT NULL,
+    generation INT8 NOT NULL,
+    PRIMARY KEY (key, generation),
+    data JSONB NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS address_lot_names ON omicron.public.address_lot(name);
+
+CREATE VIEW IF NOT EXISTS omicron.public.bgp_peer_view
+AS
+SELECT
+ sp.switch_location,
+ sp.port_name,
+ bpc.addr,
+ bpc.hold_time,
+ bpc.idle_hold_time,
+ bpc.delay_open,
+ bpc.connect_retry,
+ bpc.keepalive,
+ bc.asn
+FROM omicron.public.switch_port sp
+JOIN omicron.public.switch_port_settings_bgp_peer_config bpc
+ON sp.port_settings_id = bpc.port_settings_id
+JOIN omicron.public.bgp_config bc ON bc.id = bpc.bgp_config_id;
+
+CREATE INDEX IF NOT EXISTS switch_port_id_and_name
+ON omicron.public.switch_port (port_settings_id, port_name) STORING (switch_location);
+
+CREATE INDEX IF NOT EXISTS switch_port_name ON omicron.public.switch_port (port_name);
+
+/*
+ * Metadata for the schema itself. This version number isn't great, as there's
+ * nothing to ensure it gets bumped when it should be, but it's a start.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.db_metadata (
+    -- There should only be one row of this table for the whole DB.
+    -- It's a little goofy, but filter on "singleton = true" before querying
+    -- or applying updates, and you'll access the singleton row.
+    --
+    -- We also add a constraint on this table to ensure it's not possible to
+    -- access the version of this table with "singleton = false".
+    singleton BOOL NOT NULL PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    -- Semver representation of the DB version
+    version STRING(64) NOT NULL,
+
+    -- (Optional) Semver representation of the DB version to which we're upgrading
+    target_version STRING(64),
+
+    CHECK (singleton = true)
+);
+
+/*
+ * Keep this at the end of file so that the database does not contain a version
+ * until it is fully populated.
+ */
 INSERT INTO omicron.public.db_metadata (
     singleton,
     time_created,
@@ -3504,7 +3729,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '33.0.1', NULL)
+    ( TRUE, NOW(), NOW(), '47.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

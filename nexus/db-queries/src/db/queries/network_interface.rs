@@ -25,21 +25,14 @@ use diesel::QueryResult;
 use diesel::RunQueryDsl;
 use ipnetwork::IpNetwork;
 use ipnetwork::Ipv4Network;
-use nexus_db_model::NetworkInterfaceKind;
-use nexus_db_model::NetworkInterfaceKindEnum;
+use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
+use nexus_db_model::{NetworkInterfaceKind, MAX_NICS_PER_INSTANCE};
+use nexus_db_model::{NetworkInterfaceKindEnum, SqlU8};
 use omicron_common::api::external;
 use omicron_common::api::external::MacAddr;
-use omicron_common::nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use once_cell::sync::Lazy;
 use std::net::IpAddr;
 use uuid::Uuid;
-
-/// The max number of interfaces that may be associated with a resource,
-/// e.g., instance or service.
-///
-/// RFD 135 caps instances at 8 interfaces and we use the same limit for
-/// all types of interfaces for simplicity.
-pub(crate) const MAX_NICS: usize = 8;
 
 // These are sentinel values and other constants used to verify the state of the
 // system when operating on network interfaces
@@ -111,6 +104,8 @@ pub enum InsertError {
     IpAddressNotAvailable(std::net::IpAddr),
     /// An explicity-requested MAC address is already in use
     MacAddressNotAvailable(MacAddr),
+    /// An explicity-requested interface slot is already in use
+    SlotNotAvailable(u8),
     /// There are no slots available for a new interface
     NoSlotsAvailable,
     /// There are no MAC addresses available
@@ -164,6 +159,9 @@ impl InsertError {
             InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Service) => {
                 unimplemented!("service network interface")
             }
+            InsertError::InterfaceAlreadyExists(_name, NetworkInterfaceKind::Probe) => {
+                unimplemented!("probe network interface")
+            }
             InsertError::NoAvailableIpAddresses => {
                 external::Error::invalid_request(
                     "No available IP addresses for interface",
@@ -176,21 +174,26 @@ impl InsertError {
                 ))
             }
             InsertError::IpAddressNotAvailable(ip) => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "The IP address '{}' is not available",
                     ip
                 ))
             }
             InsertError::MacAddressNotAvailable(mac) => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "The MAC address '{}' is not available",
                     mac
                 ))
             }
+            InsertError::SlotNotAvailable(slot) => {
+                external::Error::invalid_request(format!(
+                    "The interface slot '{slot}' is not available",
+                ))
+            }
             InsertError::NoSlotsAvailable => {
-                external::Error::invalid_request(&format!(
+                external::Error::invalid_request(format!(
                     "May not attach more than {} network interfaces",
-                    MAX_NICS
+                    MAX_NICS_PER_INSTANCE
                 ))
             }
             InsertError::NoMacAddrressesAvailable => {
@@ -259,6 +262,12 @@ fn decode_database_error(
     // MAC that is already allocated to another interface in the same VPC.
     const MAC_NOT_AVAILABLE_CONSTRAINT: &str =
         "network_interface_vpc_id_mac_key";
+
+    // The name of the index whose uniqueness is violated if we try to assign a
+    // slot to an interface that is already allocated to another interface in
+    // the same instance or service.
+    const SLOT_NOT_AVAILABLE_CONSTRAINT: &str =
+        "network_interface_parent_id_slot_key";
 
     // The name of the index whose uniqueness is violated if we try to assign a
     // name to an interface that is already used for another interface on the
@@ -386,6 +395,12 @@ fn decode_database_error(
                 let mac = interface.mac.unwrap_or_else(|| MacAddr::from_i64(0));
                 InsertError::MacAddressNotAvailable(mac)
             }
+            // Constraint violated if a user-requested slot has
+            // already been assigned within the same instance or service.
+            Some(constraint) if constraint == SLOT_NOT_AVAILABLE_CONSTRAINT => {
+                let slot = interface.slot.unwrap_or(0);
+                InsertError::SlotNotAvailable(slot)
+            }
             // Constraint violated if the user-requested name is already
             // assigned to an interface on this resource
             Some(constraint) if constraint == NAME_CONFLICT_CONSTRAINT => {
@@ -395,6 +410,9 @@ fn decode_database_error(
                     }
                     NetworkInterfaceKind::Service => {
                         external::ResourceType::ServiceNetworkInterface
+                    }
+                    NetworkInterfaceKind::Probe => {
+                        external::ResourceType::ProbeNetworkInterface
                     }
                 };
                 InsertError::External(error::public_error_from_diesel(
@@ -504,8 +522,8 @@ impl NextIpv4Address {
         let subnet = IpNetwork::from(subnet);
         let net = IpNetwork::from(first_available_address(&subnet));
         let max_shift = i64::from(last_address_offset(&subnet));
-        let generator =
-            DefaultShiftGenerator { base: net, max_shift, min_shift: 0 };
+        let generator = DefaultShiftGenerator::new(net, max_shift, 0)
+            .expect("invalid min/max shift");
         Self { inner: NextItem::new_scoped(generator, subnet_id) }
     }
 }
@@ -563,12 +581,13 @@ pub struct NextNicSlot {
 
 impl NextNicSlot {
     pub fn new(parent_id: Uuid) -> Self {
-        let generator = DefaultShiftGenerator {
-            base: 0,
-            max_shift: i64::try_from(MAX_NICS)
+        let generator = DefaultShiftGenerator::new(
+            0,
+            i64::try_from(MAX_NICS_PER_INSTANCE)
                 .expect("Too many network interfaces"),
-            min_shift: 0,
-        };
+            0,
+        )
+        .expect("invalid min/max shift");
         Self { inner: NextItem::new_scoped(generator, parent_id) }
     }
 }
@@ -595,25 +614,62 @@ pub struct NextMacAddress {
     >,
 }
 
+// Helper to ensure we correctly compute the min/max shifts for a next MAC
+// query.
+#[derive(Copy, Clone, Debug)]
+struct NextMacShifts {
+    base: MacAddr,
+    min_shift: i64,
+    max_shift: i64,
+}
+
+impl NextMacShifts {
+    fn for_guest() -> Self {
+        let base = MacAddr::random_guest();
+        Self::shifts_for(base, MacAddr::MIN_GUEST_ADDR, MacAddr::MAX_GUEST_ADDR)
+    }
+
+    fn for_system() -> NextMacShifts {
+        let base = MacAddr::random_system();
+        Self::shifts_for(
+            base,
+            MacAddr::MIN_SYSTEM_ADDR,
+            MacAddr::MAX_SYSTEM_ADDR,
+        )
+    }
+
+    fn shifts_for(base: MacAddr, min: i64, max: i64) -> NextMacShifts {
+        let x = base.to_i64();
+
+        // The max shift is the distance to the last value. This min shift is
+        // always expressed as a negative number, giving the largest leftward
+        // shift, i.e., the distance to the first value.
+        let max_shift = max - x;
+        let min_shift = min - x;
+        Self { base, min_shift, max_shift }
+    }
+}
+
 impl NextMacAddress {
     pub fn new(vpc_id: Uuid, kind: NetworkInterfaceKind) -> Self {
         let (base, max_shift, min_shift) = match kind {
-            NetworkInterfaceKind::Instance => {
-                let base = MacAddr::random_guest();
-                let x = base.to_i64();
-                let max_shift = MacAddr::MAX_GUEST_ADDR - x;
-                let min_shift = x - MacAddr::MIN_GUEST_ADDR;
+            NetworkInterfaceKind::Instance | NetworkInterfaceKind::Probe => {
+                let NextMacShifts { base, min_shift, max_shift } =
+                    NextMacShifts::for_guest();
                 (base.into(), max_shift, min_shift)
             }
             NetworkInterfaceKind::Service => {
-                let base = MacAddr::random_system();
-                let x = base.to_i64();
-                let max_shift = MacAddr::MAX_SYSTEM_ADDR - x;
-                let min_shift = x - MacAddr::MAX_SYSTEM_ADDR;
+                let NextMacShifts { base, min_shift, max_shift } =
+                    NextMacShifts::for_system();
                 (base.into(), max_shift, min_shift)
             }
         };
-        let generator = DefaultShiftGenerator { base, max_shift, min_shift };
+        let generator = DefaultShiftGenerator::new(base, max_shift, min_shift)
+            .unwrap_or_else(|| {
+                panic!(
+                "invalid min shift ({min_shift}) or max_shift ({max_shift})"
+            )
+            });
         Self { inner: NextItem::new_scoped(generator, vpc_id) }
     }
 }
@@ -984,6 +1040,7 @@ pub struct InsertQuery {
     parent_id_str: String,
     ip_sql: Option<IpNetwork>,
     mac_sql: Option<db::model::MacAddr>,
+    slot_sql: Option<SqlU8>,
     next_mac_subquery: NextMacAddress,
     next_ipv4_address_subquery: NextIpv4Address,
     next_slot_subquery: NextNicSlot,
@@ -998,6 +1055,7 @@ impl InsertQuery {
         let parent_id_str = interface.parent_id.to_string();
         let ip_sql = interface.ip.map(|ip| ip.into());
         let mac_sql = interface.mac.map(|mac| mac.into());
+        let slot_sql = interface.slot.map(|slot| slot.into());
         let next_mac_subquery =
             NextMacAddress::new(interface.subnet.vpc_id, interface.kind);
         let next_ipv4_address_subquery = NextIpv4Address::new(
@@ -1015,6 +1073,7 @@ impl InsertQuery {
             parent_id_str,
             ip_sql,
             mac_sql,
+            slot_sql,
             next_mac_subquery,
             next_ipv4_address_subquery,
             next_slot_subquery,
@@ -1169,7 +1228,11 @@ impl QueryFragment<Pg> for InsertQuery {
         out.push_identifier(dsl::ip::NAME)?;
         out.push_sql(", ");
 
-        select_from_cte(out.reborrow(), dsl::slot::NAME)?;
+        if let Some(slot) = &self.slot_sql {
+            out.push_bind_param::<sql_types::Int2, SqlU8>(slot)?;
+        } else {
+            select_from_cte(out.reborrow(), dsl::slot::NAME)?;
+        }
         out.push_sql(", ");
         select_from_cte(out.reborrow(), dsl::is_primary::NAME)?;
 
@@ -1681,7 +1744,7 @@ mod tests {
     use super::first_available_address;
     use super::last_address_offset;
     use super::InsertError;
-    use super::MAX_NICS;
+    use super::MAX_NICS_PER_INSTANCE;
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use crate::authz;
     use crate::context::OpContext;
@@ -1694,6 +1757,7 @@ mod tests {
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
+    use crate::db::queries::network_interface::NextMacShifts;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;
     use ipnetwork::Ipv4Network;
@@ -1713,6 +1777,7 @@ mod tests {
     use omicron_common::api::external::MacAddr;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::db::CockroachInstance;
+    use std::collections::HashSet;
     use std::convert::TryInto;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
@@ -1894,7 +1959,8 @@ mod tests {
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
             let (opctx, db_datastore) =
-                crate::db::datastore::datastore_test(&logctx, &db).await;
+                crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                    .await;
 
             let authz_silo = opctx.authn.silo_required().unwrap();
 
@@ -2167,8 +2233,14 @@ mod tests {
     async fn test_insert_request_mac() {
         let context = TestContext::new("test_insert_request_mac", 1).await;
 
-        // Insert a service NIC with an explicit MAC address
+        // Ensure service NICs are recorded with the explicit requested MAC
+        // address
         let service_id = Uuid::new_v4();
+        let ip = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
         let mac = MacAddr::random_system();
         let interface = IncompleteNetworkInterface::new_service(
             Uuid::new_v4(),
@@ -2178,8 +2250,9 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            None,
-            Some(mac),
+            ip.into(),
+            mac,
+            0,
         )
         .unwrap();
         let inserted_interface = context
@@ -2193,12 +2266,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_insert_request_slot() {
+        let context = TestContext::new("test_insert_request_slot", 1).await;
+
+        // Ensure service NICs are recorded with the explicit requested slot
+        let mut used_macs = HashSet::new();
+        let mut ips = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
+        for slot in 0..u8::try_from(MAX_NICS_PER_INSTANCE).unwrap() {
+            let service_id = Uuid::new_v4();
+            let ip = ips.next().expect("exhausted test subnet");
+            let mut mac = MacAddr::random_system();
+            while !used_macs.insert(mac) {
+                mac = MacAddr::random_system();
+            }
+            let interface = IncompleteNetworkInterface::new_service(
+                Uuid::new_v4(),
+                service_id,
+                context.net1.subnets[0].clone(),
+                IdentityMetadataCreateParams {
+                    name: "service-nic".parse().unwrap(),
+                    description: String::from("service nic"),
+                },
+                ip.into(),
+                mac,
+                slot,
+            )
+            .unwrap();
+            let inserted_interface = context
+                .db_datastore
+                .service_create_network_interface_raw(&context.opctx, interface)
+                .await
+                .expect("Failed to insert interface");
+            assert_eq!(inserted_interface.slot, i16::from(slot));
+        }
+
+        context.success().await;
+    }
+
+    #[tokio::test]
     async fn test_insert_request_same_mac_fails() {
         let context =
             TestContext::new("test_insert_request_same_mac_fails", 2).await;
 
+        let mut ips = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES);
+
         // Insert a service NIC
         let service_id = Uuid::new_v4();
+        let mac = MacAddr::random_system();
         let interface = IncompleteNetworkInterface::new_service(
             Uuid::new_v4(),
             service_id,
@@ -2207,8 +2327,9 @@ mod tests {
                 name: "service-nic".parse().unwrap(),
                 description: String::from("service nic"),
             },
-            None,
-            None,
+            ips.next().expect("exhausted test subnet").into(),
+            mac,
+            0,
         )
         .unwrap();
         let inserted_interface = context
@@ -2216,6 +2337,7 @@ mod tests {
             .service_create_network_interface_raw(&context.opctx, interface)
             .await
             .expect("Failed to insert interface");
+        assert_eq!(inserted_interface.mac.0, mac);
 
         // Inserting an interface with the same MAC should fail, even if all
         // other parameters are valid.
@@ -2228,8 +2350,9 @@ mod tests {
                 name: "new-service-nic".parse().unwrap(),
                 description: String::from("new-service nic"),
             },
-            None,
-            Some(inserted_interface.mac.0),
+            ips.next().expect("exhausted test subnet").into(),
+            mac,
+            0,
         )
         .unwrap();
         let result = context
@@ -2239,6 +2362,80 @@ mod tests {
         assert!(
             matches!(result, Err(InsertError::MacAddressNotAvailable(_))),
             "Requesting an interface with an existing MAC should fail"
+        );
+        context.success().await;
+    }
+
+    #[tokio::test]
+    async fn test_insert_request_same_slot_fails() {
+        let context =
+            TestContext::new("test_insert_request_same_slot_fails", 2).await;
+
+        let ip0 = context.net1.subnets[0]
+            .ipv4_block
+            .iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+        let ip1 = context.net1.subnets[1]
+            .ipv4_block
+            .iter()
+            .nth(NUM_INITIAL_RESERVED_IP_ADDRESSES)
+            .unwrap();
+
+        let mut next_mac = {
+            let mut used_macs = HashSet::new();
+            move || {
+                let mut mac = MacAddr::random_system();
+                while !used_macs.insert(mac) {
+                    mac = MacAddr::random_system();
+                }
+                mac
+            }
+        };
+
+        // Insert a service NIC
+        let service_id = Uuid::new_v4();
+        let interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[0].clone(),
+            IdentityMetadataCreateParams {
+                name: "service-nic".parse().unwrap(),
+                description: String::from("service nic"),
+            },
+            ip0.into(),
+            next_mac(),
+            0,
+        )
+        .unwrap();
+        let inserted_interface = context
+            .db_datastore
+            .service_create_network_interface_raw(&context.opctx, interface)
+            .await
+            .expect("Failed to insert interface");
+        assert_eq!(inserted_interface.slot, 0);
+
+        // Inserting an interface with the same slot on the same service should
+        let new_interface = IncompleteNetworkInterface::new_service(
+            Uuid::new_v4(),
+            service_id,
+            context.net1.subnets[1].clone(),
+            IdentityMetadataCreateParams {
+                name: "new-service-nic".parse().unwrap(),
+                description: String::from("new-service nic"),
+            },
+            ip1.into(),
+            next_mac(),
+            0,
+        )
+        .unwrap();
+        let result = context
+            .db_datastore
+            .service_create_network_interface_raw(&context.opctx, new_interface)
+            .await;
+        assert!(
+            matches!(result, Err(InsertError::SlotNotAvailable(0))),
+            "Requesting an interface with an existing slot should fail"
         );
         context.success().await;
     }
@@ -2539,6 +2736,7 @@ mod tests {
             NetworkInterfaceKind::Service => {
                 (inserted.mac.is_system(), "system")
             }
+            NetworkInterfaceKind::Probe => (inserted.mac.is_system(), "probe"),
         };
         assert!(
             mac_in_range,
@@ -2553,11 +2751,11 @@ mod tests {
     async fn test_limit_number_of_interfaces_per_instance_query() {
         let context = TestContext::new(
             "test_limit_number_of_interfaces_per_instance_query",
-            MAX_NICS as u8 + 1,
+            MAX_NICS_PER_INSTANCE as u8 + 1,
         )
         .await;
         let instance = context.create_stopped_instance().await;
-        for slot in 0..MAX_NICS {
+        for slot in 0..MAX_NICS_PER_INSTANCE {
             let subnet = &context.net1.subnets[slot];
             let interface = IncompleteNetworkInterface::new_instance(
                 Uuid::new_v4(),
@@ -2649,5 +2847,38 @@ mod tests {
             first_available_address(&subnet),
             "fd00::5".parse::<IpAddr>().unwrap(),
         );
+    }
+
+    #[test]
+    fn test_next_mac_shifts_for_system() {
+        let NextMacShifts { base, min_shift, max_shift } =
+            NextMacShifts::for_system();
+        assert!(base.is_system());
+        assert!(
+            min_shift <= 0,
+            "expected min shift to be negative, found {min_shift}"
+        );
+        assert!(max_shift >= 0, "found {max_shift}");
+        let x = base.to_i64();
+        assert_eq!(x + min_shift, MacAddr::MIN_SYSTEM_ADDR);
+        assert_eq!(x + max_shift, MacAddr::MAX_SYSTEM_ADDR);
+    }
+
+    #[test]
+    fn test_next_mac_shifts_for_guest() {
+        let NextMacShifts { base, min_shift, max_shift } =
+            NextMacShifts::for_guest();
+        assert!(base.is_guest());
+        assert!(
+            min_shift <= 0,
+            "expected min shift to be negative, found {min_shift}"
+        );
+        assert!(
+            max_shift >= 0,
+            "expected max shift to be positive, found {max_shift}"
+        );
+        let x = base.to_i64();
+        assert_eq!(x + min_shift, MacAddr::MIN_GUEST_ADDR);
+        assert_eq!(x + max_shift, MacAddr::MAX_GUEST_ADDR);
     }
 }

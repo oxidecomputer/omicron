@@ -5,8 +5,8 @@
 //! Sleds, and the hardware and services within them.
 
 use crate::internal_api::params::{
-    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentStartupInfo,
-    SledRole, ZpoolPutRequest,
+    PhysicalDiskDeleteRequest, PhysicalDiskPutRequest, SledAgentInfo, SledRole,
+    ZpoolPutRequest,
 };
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
@@ -14,6 +14,8 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::model::DatasetKind;
+use nexus_types::external_api::views::SledPolicy;
+use nexus_types::external_api::views::SledProvisionPolicy;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -30,8 +32,7 @@ impl super::Nexus {
         opctx: &'a OpContext,
         sled_id: &Uuid,
     ) -> LookupResult<lookup::Sled<'a>> {
-        let sled = LookupPath::new(opctx, &self.db_datastore).sled_id(*sled_id);
-        Ok(sled)
+        nexus_networking::sled_lookup(&self.db_datastore, opctx, *sled_id)
     }
 
     // TODO-robustness we should have a limit on how many sled agents there can
@@ -43,7 +44,7 @@ impl super::Nexus {
         &self,
         _opctx: &OpContext,
         id: Uuid,
-        info: SledAgentStartupInfo,
+        info: SledAgentInfo,
     ) -> Result<(), Error> {
         info!(self.log, "registered sled agent"; "sled_uuid" => id.to_string());
 
@@ -56,8 +57,8 @@ impl super::Nexus {
             id,
             info.sa_address,
             db::model::SledBaseboard {
-                serial_number: info.baseboard.serial_number,
-                part_number: info.baseboard.part_number,
+                serial_number: info.baseboard.serial,
+                part_number: info.baseboard.part,
                 revision: info.baseboard.revision,
             },
             db::model::SledSystemHardware {
@@ -67,10 +68,27 @@ impl super::Nexus {
                 reservoir_size: info.reservoir_size.into(),
             },
             self.rack_id,
+            info.generation.into(),
         );
         self.db_datastore.sled_upsert(sled).await?;
-
         Ok(())
+    }
+
+    /// Mark a sled as expunged
+    ///
+    /// This is an irreversible process! It should only be called after
+    /// sufficient warning to the operator.
+    ///
+    /// This is idempotent, and it returns the old policy of the sled.
+    pub(crate) async fn sled_expunge(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<SledPolicy, Error> {
+        let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
+        let (authz_sled,) =
+            sled_lookup.lookup_for(authz::Action::Modify).await?;
+        self.db_datastore.sled_set_policy_to_expunged(opctx, &authz_sled).await
     }
 
     pub(crate) async fn sled_request_firewall_rules(
@@ -102,21 +120,14 @@ impl super::Nexus {
         // Frankly, returning an "Arc" here without a connection pool is a
         // little silly; it's not actually used if each client connection exists
         // as a one-shot.
-        let (.., sled) =
-            self.sled_lookup(&self.opctx_alloc, id)?.fetch().await?;
-
-        let log = self.log.new(o!("SledAgent" => id.clone().to_string()));
-        let dur = std::time::Duration::from_secs(60);
-        let client = reqwest::ClientBuilder::new()
-            .connect_timeout(dur)
-            .timeout(dur)
-            .build()
-            .unwrap();
-        Ok(Arc::new(SledAgentClient::new_with_client(
-            &format!("http://{}", sled.address()),
-            client,
-            log,
-        )))
+        let client = nexus_networking::sled_client(
+            &self.db_datastore,
+            &self.opctx_alloc,
+            *id,
+            &self.log,
+        )
+        .await?;
+        Ok(Arc::new(client))
     }
 
     pub(crate) async fn reserve_on_random_sled(
@@ -146,17 +157,17 @@ impl super::Nexus {
             .await
     }
 
-    /// Returns the old state.
-    pub(crate) async fn sled_set_provision_state(
+    /// Returns the old provision policy.
+    pub(crate) async fn sled_set_provision_policy(
         &self,
         opctx: &OpContext,
         sled_lookup: &lookup::Sled<'_>,
-        state: db::model::SledProvisionState,
-    ) -> Result<db::model::SledProvisionState, Error> {
+        new_policy: SledProvisionPolicy,
+    ) -> Result<SledProvisionPolicy, Error> {
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await?;
         self.db_datastore
-            .sled_set_provision_state(opctx, &authz_sled, state)
+            .sled_set_provision_policy(opctx, &authz_sled, new_policy)
             .await
     }
 
@@ -253,12 +264,7 @@ impl super::Nexus {
                 )
                 .fetch()
                 .await?;
-        let zpool = db::model::Zpool::new(
-            id,
-            sled_id,
-            db_disk.uuid(),
-            info.size.into(),
-        );
+        let zpool = db::model::Zpool::new(id, sled_id, db_disk.uuid());
         self.db_datastore.zpool_upsert(zpool).await?;
         Ok(())
     }
@@ -285,18 +291,13 @@ impl super::Nexus {
         opctx: &OpContext,
         sleds_filter: &[Uuid],
     ) -> Result<(), Error> {
-        let svcs_vpc = LookupPath::new(opctx, &self.db_datastore)
-            .vpc_id(*db::fixed_data::vpc::SERVICES_VPC_ID);
-        let svcs_fw_rules =
-            self.vpc_list_firewall_rules(opctx, &svcs_vpc).await?;
-        let (_, _, _, svcs_vpc) = svcs_vpc.fetch().await?;
-        self.send_sled_agents_firewall_rules(
+        nexus_networking::plumb_service_firewall_rules(
+            &self.db_datastore,
             opctx,
-            &svcs_vpc,
-            &svcs_fw_rules,
             sleds_filter,
+            &self.opctx_alloc,
+            &self.log,
         )
-        .await?;
-        Ok(())
+        .await
     }
 }
