@@ -8,6 +8,7 @@ use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
 use clap::CommandFactory;
 use clap::FromArgMatches;
+use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
@@ -192,6 +193,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
+        Commands::BlueprintDiffDns(args) => cmd_blueprint_diff_dns(sim, args),
         Commands::BlueprintDiffInventory(args) => {
             cmd_blueprint_diff_inventory(sim, args)
         }
@@ -242,6 +244,8 @@ enum Commands {
     BlueprintShow(BlueprintArgs),
     /// show differences between two blueprints
     BlueprintDiff(BlueprintDiffArgs),
+    /// show differences between a blueprint and a particular DNS version
+    BlueprintDiffDns(BlueprintDiffDnsArgs),
     /// show differences between a blueprint and an inventory collection
     BlueprintDiffInventory(BlueprintDiffInventoryArgs),
 
@@ -283,6 +287,22 @@ struct BlueprintPlanArgs {
 struct BlueprintArgs {
     /// id of the blueprint
     blueprint_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintDiffDnsArgs {
+    /// DNS group (internal or external)
+    dns_group: CliDnsGroup,
+    /// DNS version to diff against
+    dns_version: u32,
+    /// id of the blueprint
+    blueprint_id: Uuid,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliDnsGroup {
+    Internal,
+    External,
 }
 
 #[derive(Debug, Args)]
@@ -666,6 +686,54 @@ fn make_sleds_by_id(
         })
         .collect();
     Ok(sleds_by_id)
+}
+
+fn cmd_blueprint_diff_dns(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintDiffDnsArgs,
+) -> anyhow::Result<Option<String>> {
+    let dns_group = args.dns_group;
+    let dns_version = Generation::from(args.dns_version);
+    let blueprint_id = args.blueprint_id;
+    let blueprint = sim
+        .blueprints
+        .get(&blueprint_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
+
+    let existing_dns_config = match dns_group {
+        CliDnsGroup::Internal => sim.internal_dns.get(&dns_version),
+        CliDnsGroup::External => sim.external_dns.get(&dns_version),
+    }
+    .ok_or_else(|| {
+        anyhow!("no such {:?} DNS version: {}", dns_group, dns_version)
+    })?;
+
+    let blueprint_dns_config = match dns_group {
+        CliDnsGroup::Internal => {
+            let sleds_by_id = make_sleds_by_id(sim)?;
+            blueprint_internal_dns_config(
+                &blueprint,
+                &sleds_by_id,
+                &Default::default(),
+            )
+            .with_context(|| {
+                format!(
+                    "computing internal DNS config for blueprint {}",
+                    blueprint_id
+                )
+            })?
+        }
+        CliDnsGroup::External => blueprint_external_dns_config(
+            &blueprint,
+            &blueprint_nexus_external_ips(&blueprint),
+            &sim.silo_names,
+            &sim.external_dns_zone_names,
+        ),
+    };
+
+    let dns_diff = DnsDiff::new(&existing_dns_config, &blueprint_dns_config)
+        .context("failed to assemble DNS diff")?;
+    Ok(Some(dns_diff.to_string()))
 }
 
 fn cmd_blueprint_diff_inventory(

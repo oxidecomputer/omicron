@@ -14,7 +14,7 @@ use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
@@ -72,10 +72,7 @@ pub(crate) async fn deploy_dns(
         .await
         .internal_context("listing Silos (for configuring external DNS)")?
         .into_iter()
-        // We do not generate a DNS name for the "default" Silo.
-        .filter_map(|silo| {
-            (silo.id() != *DEFAULT_SILO_ID).then(|| silo.name().clone())
-        })
+        .map(|silo| silo.name().clone())
         .collect::<Vec<_>>();
 
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
@@ -363,7 +360,18 @@ pub fn blueprint_external_dns_config(
 
     let records = silos
         .into_iter()
-        .map(|silo_name| (silo_dns_name(&silo_name), dns_records.clone()))
+        // We do not generate a DNS name for the "default" Silo.
+        //
+        // We use the name here rather than the id.  It shouldn't really matter
+        // since every system will have this silo and so no other Silo could
+        // have this name.  But callers (particularly the test suite and
+        // reconfigurator-cli) specify silos by name, not id, so if we used the
+        // id here then they'd have to apply this filter themselves (and this
+        // abstraction, such as it is, would be leakier).
+        .filter_map(|silo_name| {
+            (silo_name != DEFAULT_SILO.name())
+                .then(|| (silo_dns_name(&silo_name), dns_records.clone()))
+        })
         .collect::<HashMap<String, Vec<DnsRecord>>>();
 
     let zones = external_dns_zone_names
