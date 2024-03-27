@@ -5710,6 +5710,7 @@ dependencies = [
  "atomicwrites",
  "camino",
  "camino-tempfile",
+ "derive_more",
  "dropshot",
  "expectorate",
  "filetime",

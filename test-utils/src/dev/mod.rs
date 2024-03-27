@@ -8,6 +8,7 @@
 pub mod clickhouse;
 pub mod db;
 pub mod dendrite;
+#[cfg(all(test, target_os = "illumos"))]
 pub mod falcon;
 pub mod maghemite;
 pub mod poll;
