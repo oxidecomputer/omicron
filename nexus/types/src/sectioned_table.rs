@@ -9,10 +9,8 @@
 
 use tabled::builder::Builder;
 use tabled::settings::span::ColumnSpan;
-use tabled::settings::Alignment;
 use tabled::settings::Modify;
 use tabled::settings::Padding;
-use tabled::settings::Style;
 use tabled::Table;
 
 /// A sectioned table.
@@ -69,7 +67,6 @@ impl StBuilder {
     /// Does the final build to produce a
     pub(crate) fn build(self) -> Table {
         let mut table = self.builder.build();
-        apply_general_settings(&mut table);
         apply_heading_settings(&mut table, &self.headings);
         apply_spanned_row_settings(&mut table, &self.spanned_rows);
 
@@ -228,14 +225,11 @@ enum HeadingSpacing {
     No,
 }
 
-fn apply_general_settings(table: &mut Table) {
-    table.with(Style::blank()).with(Alignment::left());
-}
-
 fn apply_heading_settings(
     table: &mut Table,
     headings: &[(HeadingSpacing, usize)],
 ) {
+    let columns = table.count_columns();
     for &(kind, h) in headings {
         let padding = match kind {
             HeadingSpacing::Yes => Padding::new(0, 0, 1, 0),
@@ -244,20 +238,20 @@ fn apply_heading_settings(
 
         table.with(
             Modify::new((h, 0))
-                // Adjust each heading row to span the whole column.
-                .with(ColumnSpan::new(5))
-                .with(Alignment::left())
+                // Adjust each heading row to span the whole row.
+                .with(ColumnSpan::new(columns))
                 .with(padding),
         );
     }
 }
 
 fn apply_spanned_row_settings(table: &mut Table, spanned_rows: &[usize]) {
+    let columns = table.count_columns();
     for &sr in spanned_rows {
         table.with(
             Modify::new((sr, 0))
-                .with(ColumnSpan::new(5))
-                .with(Alignment::left()),
+                // Adjust each spanned row to span the whole row.
+                .with(ColumnSpan::new(columns)),
         );
     }
 }

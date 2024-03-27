@@ -200,36 +200,42 @@ impl Blueprint {
         self.blueprint_zones.keys().copied()
     }
 
-    /// Summarize the difference between sleds and zones between two blueprints
-    pub fn diff_sleds(
+    /// Summarize the difference between sleds and zones between two
+    /// blueprints.
+    ///
+    /// The argument provided is the "before" side, and `self` is the "after"
+    /// side. This matches the order of arguments to
+    /// [`Blueprint::diff_since_collection`].
+    pub fn diff_since_blueprint(
         &self,
-        other: &Blueprint,
-    ) -> Result<OmicronZonesDiff, BlueprintDiffError> {
-        OmicronZonesDiff::new(
-            DiffBeforeMetadata::Blueprint(self.diff_metadata()),
+        before: &Blueprint,
+    ) -> Result<BlueprintDiff, BlueprintDiffError> {
+        BlueprintDiff::new(
+            DiffBeforeMetadata::Blueprint(before.diff_metadata()),
+            before.blueprint_zones.clone(),
+            self.diff_metadata(),
             self.blueprint_zones.clone(),
-            other.diff_metadata(),
-            other.blueprint_zones.clone(),
         )
     }
 
     /// Summarize the differences in sleds and zones between a collection and a
-    /// blueprint
+    /// blueprint.
     ///
     /// This gives an idea about what would change about a running system if
     /// one were to execute the blueprint.
     ///
-    /// Note that collections do not currently include information about what
-    /// zones are in-service, so it is assumed that all zones in the collection
-    /// are in-service. (This is the same assumption made by
+    /// Note that collections do not include information about zone
+    /// disposition, so it is assumed that all zones in the collection have the
+    /// [`InService`](BlueprintZoneDisposition::InService) disposition. (This
+    /// is the same assumption made by
     /// [`BlueprintZonesConfig::initial_from_collection`]. The logic here may
     /// also be expanded to handle cases where not all zones in the collection
     /// are in-service.)
-    pub fn diff_sleds_from_collection(
+    pub fn diff_since_collection(
         &self,
-        collection: &Collection,
-    ) -> Result<OmicronZonesDiff, BlueprintDiffError> {
-        let before_zones = collection
+        before: &Collection,
+    ) -> Result<BlueprintDiff, BlueprintDiffError> {
+        let before_zones = before
             .omicron_zones
             .iter()
             .map(|(sled_id, zones_found)| {
@@ -250,8 +256,8 @@ impl Blueprint {
             })
             .collect();
 
-        OmicronZonesDiff::new(
-            DiffBeforeMetadata::Collection { id: collection.id },
+        BlueprintDiff::new(
+            DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
             self.diff_metadata(),
             self.blueprint_zones.clone(),
@@ -268,8 +274,8 @@ impl Blueprint {
     // Helper methods
     // ---
 
-    fn diff_metadata(&self) -> BlueprintDiffMetadata {
-        BlueprintDiffMetadata {
+    fn diff_metadata(&self) -> DiffBlueprintMetadata {
+        DiffBlueprintMetadata {
             id: self.id,
             internal_dns_version: self.internal_dns_version,
             external_dns_version: self.external_dns_version,
@@ -316,9 +322,12 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
         writeln!(f, "internal DNS version: {}", b.internal_dns_version)?;
         writeln!(f, "external DNS version: {}", b.external_dns_version)?;
         writeln!(f, "comment: {}", b.comment)?;
-        writeln!(f, "\n{}\n", table_display::double_underline("ZONES"))?;
 
-        writeln!(f, "{}", self.make_zones_table())?;
+        writeln!(f, "\n{}\n", table_display::zone_table_underlined())?;
+        writeln!(f, "{}", self.make_zone_table())?;
+
+        writeln!(f, "\n{}", table_display::metadata_heading())?;
+        writeln!(f, "{}", self.make_metadata_table())?;
 
         Ok(())
     }
@@ -346,7 +355,8 @@ impl BlueprintZonesConfig {
     /// Constructs a new [`BlueprintZonesConfig`] from a collection's zones.
     ///
     /// For the initial blueprint, all zones within a collection are assumed to
-    /// be in-service.
+    /// have the [`InService`](BlueprintZoneDisposition::InService)
+    /// disposition.
     pub fn initial_from_collection(collection: &OmicronZonesConfig) -> Self {
         let zones = collection
             .zones
@@ -608,19 +618,19 @@ pub struct BlueprintTargetSet {
 
 /// Summarizes the differences between two blueprints
 #[derive(Debug)]
-pub struct OmicronZonesDiff {
+pub struct BlueprintDiff {
     before_meta: DiffBeforeMetadata,
-    after_meta: BlueprintDiffMetadata,
+    after_meta: DiffBlueprintMetadata,
     sleds: DiffSleds,
 }
 
-impl OmicronZonesDiff {
+impl BlueprintDiff {
     /// Build a diff with the provided contents, verifying that the provided
     /// data is valid.
     fn new(
         before_meta: DiffBeforeMetadata,
         before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
-        after_meta: BlueprintDiffMetadata,
+        after_meta: DiffBlueprintMetadata,
         after_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
     ) -> Result<Self, BlueprintDiffError> {
         let mut errors = Vec::new();
@@ -640,7 +650,7 @@ impl OmicronZonesDiff {
     }
 
     /// Returns metadata about the source of the "after" data.
-    pub fn after_meta(&self) -> &BlueprintDiffMetadata {
+    pub fn after_meta(&self) -> &DiffBlueprintMetadata {
         &self.after_meta
     }
 
@@ -734,13 +744,13 @@ impl DiffSleds {
 #[derive(Clone, Debug)]
 #[must_use = "this struct does nothing unless displayed"]
 pub struct OmicronZonesDiffDisplay<'diff> {
-    diff: &'diff OmicronZonesDiff,
+    diff: &'diff BlueprintDiff,
     // TODO: add colorization with a stylesheet
 }
 
 impl<'diff> OmicronZonesDiffDisplay<'diff> {
     #[inline]
-    fn new(diff: &'diff OmicronZonesDiff) -> Self {
+    fn new(diff: &'diff BlueprintDiff) -> Self {
         Self { diff }
     }
 }
@@ -756,44 +766,25 @@ impl<'diff> fmt::Display for OmicronZonesDiffDisplay<'diff> {
                 writeln!(
                     f,
                     "from: collection {}\n\
-                     to:   blueprint  {}\n\
-                     +       external DNS version: {}\n\
-                     +       internal DNS version: {}",
-                    id,
-                    diff.after_meta.id,
-                    diff.after_meta.external_dns_version,
-                    diff.after_meta.internal_dns_version,
+                     to:   blueprint  {}",
+                    id, diff.after_meta.id,
                 )?;
             }
             DiffBeforeMetadata::Blueprint(before) => {
                 writeln!(
                     f,
                     "from: blueprint {}\n\
-                     -       external DNS version: {}\n\
-                     -       internal DNS version: {}",
-                    before.id,
-                    before.external_dns_version,
-                    before.internal_dns_version,
-                )?;
-
-                writeln!(
-                    f,
-                    "to:   blueprint {}\n\
-                     +       external DNS version: {}\n\
-                     +       internal DNS version: {}",
-                    diff.after_meta.id,
-                    diff.after_meta.external_dns_version,
-                    diff.after_meta.internal_dns_version,
+                     to:   blueprint {}",
+                    before.id, diff.after_meta.id
                 )?;
             }
         }
 
-        writeln!(
-            f,
-            "\n{}\n\n{}",
-            table_display::double_underline("ZONES"),
-            self.make_zones_diff_table()
-        )?;
+        writeln!(f, "\n{}\n", table_display::zone_table_underlined())?;
+        writeln!(f, "{}", self.make_zone_diff_table())?;
+
+        writeln!(f, "\n{}", table_display::metadata_heading())?;
+        writeln!(f, "{}", self.make_metadata_diff_table())?;
 
         Ok(())
     }
@@ -802,7 +793,7 @@ impl<'diff> fmt::Display for OmicronZonesDiffDisplay<'diff> {
 #[derive(Clone, Debug, Error)]
 pub struct BlueprintDiffError {
     pub before_meta: DiffBeforeMetadata,
-    pub after_meta: BlueprintDiffMetadata,
+    pub after_meta: DiffBlueprintMetadata,
     pub errors: Vec<BlueprintDiffSingleError>,
 }
 
@@ -859,7 +850,7 @@ pub enum DiffBeforeMetadata {
     /// The diff was made from a collection.
     Collection { id: Uuid },
     /// The diff was made from a blueprint.
-    Blueprint(BlueprintDiffMetadata),
+    Blueprint(DiffBlueprintMetadata),
 }
 
 impl DiffBeforeMetadata {
@@ -876,13 +867,13 @@ impl DiffBeforeMetadata {
 /// This can either be [`OmicronZonesDiff::after_meta`], or the payload of the
 /// [`DiffBeforeMetadata::Blueprint`] variant.
 #[derive(Clone, Debug)]
-pub struct BlueprintDiffMetadata {
+pub struct DiffBlueprintMetadata {
     pub id: Uuid,
     pub internal_dns_version: Generation,
     pub external_dns_version: Generation,
 }
 
-impl BlueprintDiffMetadata {
+impl DiffBlueprintMetadata {
     pub fn display_id(&self) -> String {
         format!("blueprint {}", self.id)
     }
@@ -1064,54 +1055,21 @@ mod table_display {
     use crate::sectioned_table::StSectionBuilder;
     use tabled::builder::Builder;
     use tabled::settings::object::Columns;
-    use tabled::settings::Alignment;
     use tabled::settings::Border;
     use tabled::settings::Modify;
     use tabled::settings::Padding;
     use tabled::settings::Style;
     use tabled::Table;
 
-    const SLED_HEAD_INDENT: &str = "  ";
-    const SLED_INDENT: &str = "    ";
-    const ZONE_HEAD_INDENT: &str = "      ";
-    // Due to somewhat mysterious reasons with how padding works with tabled,
-    // this needs to be 7 columns wide rather than 8.
-    const ZONE_INDENT: &str = "       ";
-    // Similarly, this is 9 columns wide rather than 10.
-    const CHANGE_TABLE_INDENT: &str = "         ";
-    const ADDED_PREFIX: char = '+';
-    const REMOVED_PREFIX: char = '-';
-    const MODIFIED_PREFIX: char = '~';
-    const UNCHANGED_PREFIX: char = ' ';
-    const WARNING_PREFIX: char = '!';
-    const ARROW: &str = "->";
-    const ARROW_UNCHANGED: &str = "  ";
-    const ZONE_TYPE_HEADER: &str = "zone type";
-    const ZONE_ID_HEADER: &str = "zone ID";
-    const DISPOSITION_HEADER: &str = "disposition";
-    const UNDERLAY_IP_HEADER: &str = "underlay IP";
-    const REMOVED_SLEDS_HEADING: &str = "REMOVED SLEDS";
-    const MODIFIED_SLEDS_HEADING: &str = "MODIFIED SLEDS";
-    const UNCHANGED_SLEDS_HEADING: &str = "UNCHANGED SLEDS";
-    const ADDED_SLEDS_HEADING: &str = "ADDED SLEDS";
-    const REMOVED_ZONES_HEADING: &str = "removed zones";
-    const MODIFIED_ZONES_HEADING: &str = "modified zones";
-    const UNCHANGED_ZONES_HEADING: &str = "unchanged zones";
-    const ADDED_ZONES_HEADING: &str = "added zones";
-    const UNCHANGED: &str = "(unchanged)";
-    const CONFIG_CHANGED: &str = "(config changed)";
-    const NO_ZONES: &str = "(no zones)";
-
     impl<'a> super::BlueprintDisplay<'a> {
-        pub(super) fn make_zones_table(&self) -> Table {
+        pub(super) fn make_zone_table(&self) -> Table {
             let blueprint_zones = &self.blueprint.blueprint_zones;
             let mut builder = StBuilder::new();
             builder.push_record(first_row());
 
             for (sled_id, sled_zones) in blueprint_zones {
                 let heading = format!(
-                    "{SLED_INDENT}sled {sled_id}:\n\
-                    {SLED_INDENT}  zones at generation {}",
+                    "{SLED_INDENT}sled {sled_id}: zones at generation {}",
                     sled_zones.generation
                 );
                 builder.make_section(
@@ -1140,10 +1098,60 @@ mod table_display {
             apply_table_settings(&mut table);
             table
         }
+
+        pub(super) fn make_metadata_table(&self) -> Table {
+            let mut builder = Builder::new();
+
+            // Metadata is presented as a linear (top-to-bottom) table with a
+            // small indent.
+
+            builder.push_record(vec![
+                METADATA_INDENT.to_string(),
+                linear_table_label(&CREATED_BY),
+                self.blueprint.creator.clone(),
+            ]);
+
+            builder.push_record(vec![
+                METADATA_INDENT.to_string(),
+                linear_table_label(&CREATED_AT),
+                humantime::format_rfc3339_millis(
+                    self.blueprint.time_created.into(),
+                )
+                .to_string(),
+            ]);
+
+            let comment = if self.blueprint.comment.is_empty() {
+                NONE.to_string()
+            } else {
+                self.blueprint.comment.clone()
+            };
+
+            builder.push_record(vec![
+                METADATA_INDENT.to_string(),
+                linear_table_label(&COMMENT),
+                comment,
+            ]);
+
+            builder.push_record(vec![
+                METADATA_INDENT.to_string(),
+                linear_table_label(&INTERNAL_DNS_VERSION),
+                self.blueprint.internal_dns_version.to_string(),
+            ]);
+
+            builder.push_record(vec![
+                METADATA_INDENT.to_string(),
+                linear_table_label(&EXTERNAL_DNS_VERSION),
+                self.blueprint.external_dns_version.to_string(),
+            ]);
+
+            let mut table = builder.build();
+            apply_linear_table_settings(&mut table);
+            table
+        }
     }
 
     impl<'diff> OmicronZonesDiffDisplay<'diff> {
-        pub(super) fn make_zones_diff_table(&self) -> Table {
+        pub(super) fn make_zone_diff_table(&self) -> Table {
             let diff = self.diff;
 
             // Add the unchanged prefix to the zone indent since the first
@@ -1215,6 +1223,84 @@ mod table_display {
             apply_table_settings(&mut table);
             table
         }
+
+        pub(super) fn make_metadata_diff_table(&self) -> Table {
+            let diff = self.diff;
+            let mut builder = Builder::new();
+
+            // Metadata is presented as a linear (top-to-bottom) table with a
+            // small indent.
+
+            match &diff.before_meta {
+                DiffBeforeMetadata::Collection { .. } => {
+                    // Collections don't have DNS versions, so this is new.
+                    builder.push_record(vec![
+                        format!("{ADDED_PREFIX}{METADATA_DIFF_INDENT}"),
+                        metadata_table_internal_dns(),
+                        format!(
+                            "{} (new)",
+                            diff.after_meta.internal_dns_version
+                        ),
+                    ]);
+
+                    builder.push_record(vec![
+                        format!("{ADDED_PREFIX}{METADATA_DIFF_INDENT}"),
+                        metadata_table_external_dns(),
+                        format!(
+                            "{} (new)",
+                            diff.after_meta.external_dns_version
+                        ),
+                    ]);
+                }
+                DiffBeforeMetadata::Blueprint(before) => {
+                    if before.internal_dns_version
+                        != diff.after_meta.internal_dns_version
+                    {
+                        builder.push_record(vec![
+                            format!("{MODIFIED_PREFIX}{METADATA_DIFF_INDENT}"),
+                            metadata_table_internal_dns(),
+                            linear_table_modified(
+                                &before.internal_dns_version,
+                                &diff.after_meta.internal_dns_version,
+                            ),
+                        ]);
+                    } else {
+                        builder.push_record(vec![
+                            format!("{UNCHANGED_PREFIX}{METADATA_DIFF_INDENT}"),
+                            metadata_table_internal_dns(),
+                            linear_table_unchanged(
+                                &before.internal_dns_version,
+                            ),
+                        ]);
+                    };
+
+                    if before.external_dns_version
+                        != diff.after_meta.external_dns_version
+                    {
+                        builder.push_record(vec![
+                            format!("{MODIFIED_PREFIX}{METADATA_DIFF_INDENT}"),
+                            metadata_table_external_dns(),
+                            linear_table_modified(
+                                &before.external_dns_version,
+                                &diff.after_meta.external_dns_version,
+                            ),
+                        ]);
+                    } else {
+                        builder.push_record(vec![
+                            format!("{UNCHANGED_PREFIX}{METADATA_DIFF_INDENT}"),
+                            metadata_table_external_dns(),
+                            linear_table_unchanged(
+                                &before.external_dns_version,
+                            ),
+                        ]);
+                    };
+                }
+            }
+
+            let mut table = builder.build();
+            apply_linear_table_settings(&mut table);
+            table
+        }
     }
 
     fn add_whole_sled_records(
@@ -1251,35 +1337,38 @@ mod table_display {
         modified: &DiffSledModified,
         section: &mut StSectionBuilder,
     ) {
+        let (generation_heading, warning) = if modified.generation_before
+            != modified.generation_after
+        {
+            (
+                format!(
+                    "zones at generation: {} -> {}",
+                    modified.generation_before, modified.generation_after,
+                ),
+                None,
+            )
+        } else {
+            // Modified sleds should always see a generation bump.
+            (
+                format!("zones at generation: {}", modified.generation_before),
+                Some(format!(
+                    "{WARNING_PREFIX}{ZONE_HEAD_INDENT}\
+                     warning: generation should have changed"
+                )),
+            )
+        };
+
         let sled_heading =
-            format!("{MODIFIED_PREFIX}{SLED_INDENT}sled {sled_id}:");
+            format!("{MODIFIED_PREFIX}{SLED_INDENT}sled {sled_id}: {generation_heading}");
 
         section.make_subsection(SectionSpacing::Always, sled_heading, |s2| {
-            let generation_heading =
-                if modified.generation_before != modified.generation_after {
-                    format!(
-                        "{MODIFIED_PREFIX}{ZONE_HEAD_INDENT}\
-                         zones at generation: {} -> {}",
-                        modified.generation_before, modified.generation_after,
-                    )
-                } else {
-                    // Modified sleds should always see a generation bump.
-                    format!(
-                        "{WARNING_PREFIX}{ZONE_HEAD_INDENT}\
-                         zones at generation: {} \
-                         (warning: generation should have changed)",
-                        modified.generation_before,
-                    )
-                };
-
-            s2.push_nested_heading(
-                SectionSpacing::IfNotFirst,
-                generation_heading,
-            );
+            if let Some(warning) = warning {
+                s2.push_nested_heading(SectionSpacing::Never, warning);
+            }
 
             // First, removed zones.
             s2.make_subsection(
-                SectionSpacing::IfNotFirst,
+                SectionSpacing::Never,
                 removed_zones_heading(),
                 |s3| {
                     for zone in modified.zones_removed() {
@@ -1294,18 +1383,18 @@ mod table_display {
 
             // Then, changed zones.
             s2.make_subsection(
-                SectionSpacing::IfNotFirst,
+                SectionSpacing::Never,
                 modified_zones_heading(),
                 |s3| {
                     for zone_changed in modified.zones_modified() {
-                        add_change_table(zone_changed, s3);
+                        add_zone_change_table(zone_changed, s3);
                     }
                 },
             );
 
             // Then, unchanged zones.
             s2.make_subsection(
-                SectionSpacing::IfNotFirst,
+                SectionSpacing::Never,
                 unchanged_zones_heading(),
                 |s3| {
                     for zone_unchanged in modified.zones_unchanged() {
@@ -1320,7 +1409,7 @@ mod table_display {
 
             // Finally, added zones.
             s2.make_subsection(
-                SectionSpacing::IfNotFirst,
+                SectionSpacing::Never,
                 added_zones_heading(),
                 |s3| {
                     for zone in modified.zones_added() {
@@ -1336,7 +1425,7 @@ mod table_display {
             // If no rows were pushed, add a row indicating that for this sled.
             if s2.is_empty() {
                 s2.push_nested_heading(
-                    SectionSpacing::IfNotFirst,
+                    SectionSpacing::Never,
                     format!(
                         "{UNCHANGED_PREFIX}{ZONE_HEAD_INDENT}\
                              {NO_ZONES}"
@@ -1363,11 +1452,11 @@ mod table_display {
         ]);
     }
 
-    /// Add a change table to the section.
+    /// Add a change table for the zone to the section.
     ///
     /// For diffs, this contains a table of changes between two zone
     /// records.
-    fn add_change_table(
+    fn add_zone_change_table(
         common: &DiffZoneCommon,
         section: &mut StSectionBuilder,
     ) {
@@ -1380,18 +1469,12 @@ mod table_display {
             common.zone_before.config.id,
         );
 
-        section.make_subsection(
-            SectionSpacing::IfNotFirst,
-            heading,
-            |section| {
-                // Push another row containing the change table.
-                let change_table = make_zone_change_table(
-                    &common.zone_before,
-                    &common.zone_after,
-                );
-                section.push_spanned_row(change_table.to_string());
-            },
-        );
+        section.make_subsection(SectionSpacing::Never, heading, |section| {
+            // Push another row containing the change table.
+            let change_table =
+                make_zone_change_table(&common.zone_before, &common.zone_after);
+            section.push_spanned_row(change_table.to_string());
+        });
     }
 
     fn make_zone_change_table(
@@ -1400,68 +1483,49 @@ mod table_display {
     ) -> Table {
         let mut builder = Builder::new();
 
-        if before.disposition != after.disposition {
-            builder.push_record(vec![
-                format!("{MODIFIED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                format!("* {DISPOSITION_HEADER}:"),
-                before.disposition.to_string(),
-                ARROW.to_string(),
-                after.disposition.to_string(),
-            ]);
-        } else {
-            builder.push_record(vec![
-                format!("{UNCHANGED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                format!("* {DISPOSITION_HEADER}:"),
-                before.disposition.to_string(),
-                ARROW_UNCHANGED.to_string(),
-                UNCHANGED.to_string(),
-            ]);
-        }
-
         if before.config.zone_type != after.config.zone_type {
             // This means that the config changed.
             builder.push_record(vec![
                 format!("{MODIFIED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                format!("* {ZONE_TYPE_HEADER}:"),
-                before.config.zone_type.kind().to_string(),
-                ARROW_UNCHANGED.to_string(),
+                change_table_zone_type(),
                 CONFIG_CHANGED.to_string(),
+            ]);
+        }
+
+        if before.disposition != after.disposition {
+            builder.push_record(vec![
+                format!("{MODIFIED_PREFIX}{CHANGE_TABLE_INDENT}"),
+                change_table_disposition(),
+                linear_table_modified(&before.disposition, &after.disposition),
             ]);
         } else {
             builder.push_record(vec![
                 format!("{UNCHANGED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                format!("* {ZONE_TYPE_HEADER}:"),
-                before.config.zone_type.kind().to_string(),
-                ARROW_UNCHANGED.to_string(),
-                UNCHANGED.to_string(),
+                change_table_disposition(),
+                linear_table_unchanged(&before.disposition),
             ]);
         }
 
         if before.config.underlay_address != after.config.underlay_address {
             builder.push_record(vec![
                 format!("{MODIFIED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                format!("* {UNDERLAY_IP_HEADER}:"),
-                before.config.underlay_address.to_string(),
-                ARROW.to_string(),
-                after.config.underlay_address.to_string(),
+                change_table_underlay_ip(),
+                linear_table_modified(
+                    &before.config.underlay_address,
+                    &after.config.underlay_address,
+                ),
             ]);
         } else {
             builder.push_record(vec![
                 format!("{UNCHANGED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                format!("* {UNDERLAY_IP_HEADER}:"),
-                before.config.underlay_address.to_string(),
-                "".to_string(),
-                UNCHANGED.to_string(),
+                change_table_underlay_ip(),
+                linear_table_unchanged(&before.config.underlay_address),
             ]);
         }
 
         let mut table = builder.build();
-        // Style::blank + Padding::zero makes it so that there's a gap of one
-        // space between the most constrained columns.
-        table
-            .with(Style::blank())
-            .with(Alignment::left())
-            .with(Padding::zero());
+
+        apply_linear_table_settings(&mut table);
 
         table
     }
@@ -1494,12 +1558,89 @@ mod table_display {
     fn first_row() -> Vec<String> {
         vec![
             " ".to_string(),
-            underline(ZONE_TYPE_HEADER),
-            underline(ZONE_ID_HEADER),
-            underline(DISPOSITION_HEADER),
-            underline(UNDERLAY_IP_HEADER),
+            underline(ZONE_TYPE),
+            underline(ZONE_ID),
+            underline(DISPOSITION),
+            underline(UNDERLAY_IP),
         ]
     }
+
+    fn apply_table_settings(table: &mut Table) {
+        table
+            .with(Style::blank())
+            .with(
+                // Column 0 (indent and prefix) should not have any padding.
+                Modify::new(Columns::first())
+                    .with(Padding::zero())
+                    .with(Border::empty()),
+            )
+            .with(
+                Modify::new(Columns::single(1))
+                    // Column 1 (zone type) should have no padding on the left.
+                    .with(Padding::new(0, 1, 0, 0)),
+            );
+    }
+
+    // Apply settings for a table which has top-to-bottom rows, and a first
+    // column with indents.
+    fn apply_linear_table_settings(table: &mut Table) {
+        table.with(Style::empty()).with(Padding::zero()).with(
+            Modify::new(Columns::single(1))
+                // Add an padding on the right of the label column to make the
+                // table visually distinctive.
+                .with(Padding::new(0, 2, 0, 0)),
+        );
+    }
+
+    // ---
+    // Heading and other definitions
+    // ---
+
+    // This aligns the heading with the first column of actual text.
+    const H1_INDENT: &str = "  ";
+    const SLED_HEAD_INDENT: &str = " ";
+    const SLED_INDENT: &str = "  ";
+    const ZONE_HEAD_INDENT: &str = "   ";
+    // Due to somewhat mysterious reasons with how padding works with tabled,
+    // this needs to be 3 columns wide rather than 4.
+    const ZONE_INDENT: &str = "   ";
+    const CHANGE_TABLE_INDENT: &str = "     ";
+    const METADATA_INDENT: &str = "    ";
+    const METADATA_DIFF_INDENT: &str = "   ";
+
+    const ADDED_PREFIX: char = '+';
+    const REMOVED_PREFIX: char = '-';
+    const MODIFIED_PREFIX: char = '*';
+    const UNCHANGED_PREFIX: char = ' ';
+    const WARNING_PREFIX: char = '!';
+
+    const ARROW: &str = "->";
+
+    const ZONE_TABLE_HEADING: &str = "ZONE TABLE";
+    const REMOVED_SLEDS_HEADING: &str = "REMOVED SLEDS";
+    const MODIFIED_SLEDS_HEADING: &str = "MODIFIED SLEDS";
+    const UNCHANGED_SLEDS_HEADING: &str = "UNCHANGED SLEDS";
+    const ADDED_SLEDS_HEADING: &str = "ADDED SLEDS";
+    const REMOVED_ZONES_HEADING: &str = "removed zones";
+    const MODIFIED_ZONES_HEADING: &str = "modified zones";
+    const UNCHANGED_ZONES_HEADING: &str = "unchanged zones";
+    const ADDED_ZONES_HEADING: &str = "added zones";
+    const ZONE_TYPE: &str = "zone type";
+    const ZONE_ID: &str = "zone ID";
+    const DISPOSITION: &str = "disposition";
+    const UNDERLAY_IP: &str = "underlay IP";
+
+    const METADATA_HEADING: &str = "METADATA";
+    const CREATED_BY: &str = "created by";
+    const CREATED_AT: &str = "created at";
+    const INTERNAL_DNS_VERSION: &str = "internal DNS version";
+    const EXTERNAL_DNS_VERSION: &str = "external DNS version";
+    const COMMENT: &str = "comment";
+
+    const UNCHANGED: &str = "(unchanged)";
+    const CONFIG_CHANGED: &str = "(config changed)";
+    const NO_ZONES: &str = "(no zones)";
+    const NONE: &str = "(none)";
 
     fn underline(header: &str) -> String {
         // We just add a newline and the same number of dashes as the header.
@@ -1507,22 +1648,30 @@ mod table_display {
         format!("{}\n{}", header, "-".repeat(header.len()))
     }
 
-    pub(super) fn double_underline(header: &str) -> String {
+    fn double_underline(prefix: &str, heading: &str) -> String {
         // We just add a newline and the same number of equals signs as the
         // header. Header text is always ASCII, so using .len() is fine.
-        format!("{}\n{}", header, "=".repeat(header.len()))
+        format!("{prefix}{heading}\n{prefix}{}", "=".repeat(heading.len()))
+    }
+
+    pub(super) fn zone_table_underlined() -> String {
+        double_underline(H1_INDENT, ZONE_TABLE_HEADING)
+    }
+
+    pub(super) fn metadata_heading() -> String {
+        format!("{H1_INDENT}{METADATA_HEADING}:")
     }
 
     fn sleds_heading(prefix: char, heading: &'static str) -> String {
-        format!("{prefix}{SLED_HEAD_INDENT}{heading}")
+        format!("{prefix}{SLED_HEAD_INDENT}{heading}:")
     }
 
     fn removed_sleds_heading() -> String {
-        sleds_heading(REMOVED_PREFIX, REMOVED_SLEDS_HEADING)
+        sleds_heading(UNCHANGED_PREFIX, REMOVED_SLEDS_HEADING)
     }
 
     fn added_sleds_heading() -> String {
-        sleds_heading(ADDED_PREFIX, ADDED_SLEDS_HEADING)
+        sleds_heading(UNCHANGED_PREFIX, ADDED_SLEDS_HEADING)
     }
 
     fn modified_sleds_heading() -> String {
@@ -1538,33 +1687,53 @@ mod table_display {
     }
 
     fn removed_zones_heading() -> String {
-        zones_heading(REMOVED_PREFIX, REMOVED_ZONES_HEADING)
+        zones_heading(UNCHANGED_PREFIX, REMOVED_ZONES_HEADING)
     }
 
     fn added_zones_heading() -> String {
-        zones_heading(ADDED_PREFIX, ADDED_ZONES_HEADING)
+        zones_heading(UNCHANGED_PREFIX, ADDED_ZONES_HEADING)
     }
 
     fn modified_zones_heading() -> String {
-        zones_heading(MODIFIED_PREFIX, MODIFIED_ZONES_HEADING)
+        zones_heading(UNCHANGED_PREFIX, MODIFIED_ZONES_HEADING)
     }
 
     fn unchanged_zones_heading() -> String {
         zones_heading(UNCHANGED_PREFIX, UNCHANGED_ZONES_HEADING)
     }
 
-    fn apply_table_settings(table: &mut Table) {
-        table
-            .with(
-                // Column 0 (indent and prefix) should not have any padding.
-                Modify::new(Columns::first())
-                    .with(Padding::zero())
-                    .with(Border::empty()),
-            )
-            .with(
-                Modify::new(Columns::single(1))
-                    // Column 1 (zone type) should have no padding on the left.
-                    .with(Padding::new(0, 1, 0, 0)),
-            );
+    fn change_table_zone_type() -> String {
+        linear_table_label(&ZONE_TYPE)
+    }
+
+    fn change_table_disposition() -> String {
+        linear_table_label(&DISPOSITION)
+    }
+
+    fn change_table_underlay_ip() -> String {
+        linear_table_label(&UNDERLAY_IP)
+    }
+
+    fn metadata_table_internal_dns() -> String {
+        linear_table_label(&INTERNAL_DNS_VERSION)
+    }
+
+    fn metadata_table_external_dns() -> String {
+        linear_table_label(&EXTERNAL_DNS_VERSION)
+    }
+
+    fn linear_table_label(value: &dyn fmt::Display) -> String {
+        format!("{value}:")
+    }
+
+    fn linear_table_modified(
+        before: &dyn fmt::Display,
+        after: &dyn fmt::Display,
+    ) -> String {
+        format!("{before} {ARROW} {after}")
+    }
+
+    fn linear_table_unchanged(value: &dyn fmt::Display) -> String {
+        format!("{value} {UNCHANGED}")
     }
 }

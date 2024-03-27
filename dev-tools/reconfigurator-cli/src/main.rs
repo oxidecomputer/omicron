@@ -529,8 +529,8 @@ fn cmd_blueprint_diff(
         .get(&blueprint2_id)
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
 
-    let diff = blueprint1
-        .diff_sleds(&blueprint2)
+    let diff = blueprint2
+        .diff_since_blueprint(&blueprint1)
         .context("failed to diff blueprints")?;
     Ok(Some(diff.display().to_string()))
 }
@@ -550,7 +550,7 @@ fn cmd_blueprint_diff_inventory(
         .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
 
     let diff = blueprint
-        .diff_sleds_from_collection(&collection)
+        .diff_since_collection(&collection)
         .context("failed to diff blueprint from inventory collection")?;
     Ok(Some(diff.display().to_string()))
 }

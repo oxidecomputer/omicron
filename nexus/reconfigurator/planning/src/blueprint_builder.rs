@@ -938,7 +938,7 @@ pub mod test {
         verify_blueprint(&blueprint_initial);
 
         let diff =
-            blueprint_initial.diff_sleds_from_collection(&collection).unwrap();
+            blueprint_initial.diff_since_collection(&collection).unwrap();
         println!(
             "collection -> initial blueprint (expected no changes):\n{}",
             diff.display()
@@ -959,7 +959,7 @@ pub mod test {
         .expect("failed to create builder");
         let blueprint = builder.build();
         verify_blueprint(&blueprint);
-        let diff = blueprint_initial.diff_sleds(&blueprint).unwrap();
+        let diff = blueprint.diff_since_blueprint(&blueprint_initial).unwrap();
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             diff.display()
@@ -1004,7 +1004,7 @@ pub mod test {
 
         let blueprint2 = builder.build();
         verify_blueprint(&blueprint2);
-        let diff = blueprint1.diff_sleds(&blueprint2).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!(
             "initial blueprint -> next blueprint (expected no changes):\n{}",
             diff.display()
@@ -1037,7 +1037,7 @@ pub mod test {
 
         let blueprint3 = builder.build();
         verify_blueprint(&blueprint3);
-        let diff = blueprint2.diff_sleds(&blueprint3).unwrap();
+        let diff = blueprint3.diff_since_blueprint(&blueprint2).unwrap();
         println!("expecting new NTP and Crucible zones:\n{}", diff.display());
 
         // No sleds were changed or removed.

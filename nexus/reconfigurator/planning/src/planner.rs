@@ -398,7 +398,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint1.diff_sleds(&blueprint2).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!("1 -> 2 (expected no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
@@ -426,7 +426,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_sleds(&blueprint3).unwrap();
+        let diff = blueprint3.diff_since_blueprint(&blueprint2).unwrap();
         println!(
             "2 -> 3 (expect new NTP zone on new sled):\n{}",
             diff.display()
@@ -467,7 +467,7 @@ mod test {
         .with_rng_seed((TEST_NAME, "bp4"))
         .plan()
         .expect("failed to plan");
-        let diff = blueprint3.diff_sleds(&blueprint4).unwrap();
+        let diff = blueprint4.diff_since_blueprint(&blueprint3).unwrap();
         println!("3 -> 4 (expected no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
@@ -510,7 +510,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint3.diff_sleds(&blueprint5).unwrap();
+        let diff = blueprint5.diff_since_blueprint(&blueprint3).unwrap();
         println!("3 -> 5 (expect Crucible zones):\n{}", diff.display());
         assert_contents(
             "tests/output/planner_basic_add_sled_3_5.txt",
@@ -552,7 +552,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint5.diff_sleds(&blueprint6).unwrap();
+        let diff = blueprint6.diff_since_blueprint(&blueprint5).unwrap();
         println!("5 -> 6 (expect no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
@@ -628,7 +628,7 @@ mod test {
             internal_dns_version,
             external_dns_version,
             &policy,
-            "add more Nexus",
+            "test_blueprint2",
             &collection,
         )
         .expect("failed to create planner")
@@ -636,7 +636,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint1.diff_sleds(&blueprint2).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
@@ -702,7 +702,7 @@ mod test {
             Generation::new(),
             Generation::new(),
             &policy,
-            "add more Nexus",
+            "test_blueprint2",
             &collection,
         )
         .expect("failed to create planner")
@@ -710,7 +710,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint1.diff_sleds(&blueprint2).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
@@ -824,7 +824,7 @@ mod test {
             Generation::new(),
             Generation::new(),
             &policy,
-            "add more Nexus",
+            "test_blueprint2",
             &collection,
         )
         .expect("failed to create planner")
@@ -841,7 +841,7 @@ mod test {
             &blueprint2.display().to_string(),
         );
 
-        let diff = blueprint1.diff_sleds(&blueprint2).unwrap();
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
         assert_contents(
             "tests/output/planner_nonprovisionable_1_2.txt",
@@ -938,7 +938,10 @@ mod test {
 
         blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
 
-        let diff = blueprint2.diff_sleds(&blueprint2a).unwrap();
+        blueprint2a.external_dns_version =
+            blueprint2a.external_dns_version.next();
+
+        let diff = blueprint2a.diff_since_blueprint(&blueprint2).unwrap();
         println!("2 -> 2a (manually modified zones):\n{}", diff.display());
         assert_contents(
             "tests/output/planner_nonprovisionable_2_2a.txt",
