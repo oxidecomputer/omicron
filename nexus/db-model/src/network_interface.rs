@@ -145,6 +145,21 @@ pub struct ServiceNetworkInterface {
     pub primary: bool,
 }
 
+impl From<ServiceNetworkInterface>
+    for nexus_types::deployment::ServiceNetworkInterface
+{
+    fn from(nic: ServiceNetworkInterface) -> Self {
+        Self {
+            id: nic.id(),
+            vpc_id: nic.vpc_id,
+            mac: *nic.mac,
+            ip: nic.ip,
+            slot: nic.slot,
+            primary: nic.primary,
+        }
+    }
+}
+
 impl NetworkInterface {
     /// Treat this `NetworkInterface` as an `InstanceNetworkInterface`.
     ///
