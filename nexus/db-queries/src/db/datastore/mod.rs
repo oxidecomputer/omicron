@@ -951,10 +951,21 @@ mod test {
             assert_eq!(expected_region_count, dataset_and_regions.len());
             let mut disk_datasets = HashSet::new();
             let mut disk_zpools = HashSet::new();
+            let mut regions = HashSet::new();
 
             for (dataset, region) in dataset_and_regions {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
+                // All regions should be unique
+                assert!(regions.insert(region.id()));
+
+                // Check there's no cross contamination between returned UUIDs
+                //
+                // This is a little goofy, but it catches a bug that has
+                // happened before. The returned columns share names (like
+                // "id"), so we need to process them in-order.
+                assert!(regions.get(&dataset.id()).is_none());
+                assert!(disk_datasets.get(&region.id()).is_none());
 
                 // Dataset must not be eligible for provisioning.
                 if let Some(kind) =
