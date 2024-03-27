@@ -666,8 +666,8 @@ impl BlueprintDiff {
     }
 
     /// Return a struct that can be used to display the diff.
-    pub fn display(&self) -> OmicronZonesDiffDisplay<'_> {
-        OmicronZonesDiffDisplay::new(self)
+    pub fn display(&self) -> BlueprintDiffDisplay<'_> {
+        BlueprintDiffDisplay::new(self)
     }
 }
 
@@ -719,24 +719,24 @@ impl DiffSleds {
     }
 }
 
-/// Wrapper to allow a [`OmicronZonesDiff`] to be displayed.
+/// Wrapper to allow a [`BlueprintDiff`] to be displayed.
 ///
-/// Returned by [`OmicronZonesDiff::display()`].
+/// Returned by [`BlueprintDiff::display()`].
 #[derive(Clone, Debug)]
 #[must_use = "this struct does nothing unless displayed"]
-pub struct OmicronZonesDiffDisplay<'diff> {
+pub struct BlueprintDiffDisplay<'diff> {
     diff: &'diff BlueprintDiff,
     // TODO: add colorization with a stylesheet
 }
 
-impl<'diff> OmicronZonesDiffDisplay<'diff> {
+impl<'diff> BlueprintDiffDisplay<'diff> {
     #[inline]
     fn new(diff: &'diff BlueprintDiff) -> Self {
         Self { diff }
     }
 }
 
-impl<'diff> fmt::Display for OmicronZonesDiffDisplay<'diff> {
+impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let diff = self.diff;
 
@@ -824,7 +824,7 @@ impl fmt::Display for BlueprintDiffSingleError {
     }
 }
 
-/// Data about the "before" version within a [`OmicronZonesDiff`].
+/// Data about the "before" version within a [`BlueprintDiff`].
 #[derive(Clone, Debug)]
 pub enum DiffBeforeMetadata {
     /// The diff was made from a collection.
@@ -842,9 +842,9 @@ impl DiffBeforeMetadata {
     }
 }
 
-/// General metadata about a blueprint stored within a [`OmicronZonesDiff`].
+/// General metadata about a blueprint stored within a [`BlueprintDiff`].
 ///
-/// This can either be [`OmicronZonesDiff::after_meta`], or the payload of the
+/// This can either be [`BlueprintDiff::after_meta`], or the payload of the
 /// [`DiffBeforeMetadata::Blueprint`] variant.
 #[derive(Clone, Debug)]
 pub struct DiffBlueprintMetadata {
@@ -1127,7 +1127,7 @@ mod table_display {
         }
     }
 
-    impl<'diff> OmicronZonesDiffDisplay<'diff> {
+    impl<'diff> BlueprintDiffDisplay<'diff> {
         pub(super) fn make_zone_diff_table(&self) -> Table {
             let diff = self.diff;
 
