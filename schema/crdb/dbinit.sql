@@ -379,11 +379,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
 
     variant omicron.public.physical_disk_kind NOT NULL,
 
-    disk_policy omicron.public.physical_disk_policy NOT NULL,
-    disk_state omicron.public.physical_disk_state NOT NULL,
-
     -- FK into the Sled table
     sled_id UUID NOT NULL,
+
+    disk_policy omicron.public.physical_disk_policy NOT NULL,
+    disk_state omicron.public.physical_disk_state NOT NULL,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.

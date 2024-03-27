@@ -26,9 +26,9 @@ pub struct PhysicalDisk {
     pub model: String,
 
     pub variant: PhysicalDiskKind,
+    pub sled_id: Uuid,
     pub disk_policy: PhysicalDiskPolicy,
     pub disk_state: PhysicalDiskState,
-    pub sled_id: Uuid,
 }
 
 impl PhysicalDisk {
@@ -49,9 +49,9 @@ impl PhysicalDisk {
             serial,
             model,
             variant,
+            sled_id,
             disk_policy: PhysicalDiskPolicy::InService,
             disk_state: PhysicalDiskState::Active,
-            sled_id,
         }
     }
 
