@@ -175,6 +175,7 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(instance_disk_detach)?;
         api.register(instance_serial_console)?;
         api.register(instance_serial_console_stream)?;
+        api.register(instance_vnc)?;
         api.register(instance_ssh_public_key_list)?;
 
         api.register(image_list)?;
@@ -2771,6 +2772,53 @@ async fn instance_serial_console_stream(
                     &instance_lookup,
                     &query,
                 )
+                .await?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = client_stream
+                .close(Some(CloseFrame {
+                    code: CloseCode::Error,
+                    reason: e.to_string().into(),
+                }))
+                .await
+                .is_ok();
+            Err(e.into())
+        }
+    }
+}
+
+/// Stream instance VNC framebuffer
+#[channel {
+    protocol = WEBSOCKETS,
+    path = "/v1/instances/{instance}/vnc",
+    tags = ["instances"],
+}]
+async fn instance_vnc(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    path_params: Path<params::InstancePath>,
+    query_params: Query<params::OptionalProjectSelector>,
+    conn: WebsocketConnection,
+) -> WebsocketChannelResult {
+    let apictx = rqctx.context();
+    let nexus = &apictx.nexus;
+    let path = path_params.into_inner();
+    let query = query_params.into_inner();
+    let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+    let instance_selector = params::InstanceSelector {
+        project: query.project.clone(),
+        instance: path.instance,
+    };
+    let mut client_stream = WebSocketStream::from_raw_socket(
+        conn.into_inner(),
+        WebSocketRole::Server,
+        None,
+    )
+    .await;
+    match nexus.instance_lookup(&opctx, instance_selector) {
+        Ok(instance_lookup) => {
+            nexus
+                .instance_vnc_stream(&opctx, client_stream, &instance_lookup)
                 .await?;
             Ok(())
         }
