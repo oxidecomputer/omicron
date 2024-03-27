@@ -104,16 +104,23 @@ impl StBuilder {
         table
             .with(Style::blank())
             .with(
-                // Column 0 and 1 (indent/gutter) should not have any padding.
+                // Columns 0 and 1 (indent/gutter) should not have any border
+                // and padding.
                 Modify::new(Columns::new(0..=1))
-                    .with(Padding::zero())
-                    .with(Border::empty()),
+                    .with(Border::empty())
+                    .with(Padding::zero()),
             )
             .with(
                 Modify::new(Columns::single(2))
                     // Column 2 (first column of actual data) should not have
                     // left padding.
                     .with(Padding::new(0, 1, 0, 0)),
+            )
+            .with(
+                Modify::new(Columns::last())
+                    // Rightmost column should have no border and padding.
+                    .with(Border::empty())
+                    .with(Padding::zero()),
             );
         apply_normal_row_settings(
             &mut table,
