@@ -397,7 +397,7 @@ impl DnsConfigBuilder {
     }
 
     /// Construct a `DnsConfigZone` describing the control plane zone described
-    /// up to this piont
+    /// up to this point
     pub fn build_zone(self) -> DnsConfigZone {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
