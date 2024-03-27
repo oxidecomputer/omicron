@@ -298,7 +298,7 @@ impl super::Nexus {
             &parent_blueprint,
             planning_context.internal_dns_version,
             planning_context.external_dns_version,
-            &planning_context.planning_input.policy,
+            &planning_context.planning_input,
             &planning_context.creator,
             &inventory,
         )

@@ -136,10 +136,9 @@ pub struct ExternalIp {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceNetworkInterface {
     pub id: Uuid,
-    pub vpc_id: Uuid,
     pub mac: MacAddr,
     pub ip: IpNetwork,
-    pub slot: i16,
+    pub slot: u8,
     pub primary: bool,
 }
 

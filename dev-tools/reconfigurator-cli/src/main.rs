@@ -15,12 +15,17 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
+use nexus_types::deployment::ExternalIp;
+use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::OmicronZonesConfig;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::{GenericUuid, ServiceKind, TypedUuid};
 use reedline::{Reedline, Signal};
 use std::io::BufRead;
+use std::net::IpAddr;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
 use uuid::Uuid;
@@ -40,6 +45,14 @@ struct ReconfiguratorSim {
 
     /// blueprints created by the user
     blueprints: IndexMap<Uuid, Blueprint>,
+
+    /// external IPs allocated to services
+    ///
+    /// In the real system, external IPs have IDs, but those IDs only live in
+    /// CRDB - they're not part of the zone config sent from Reconfigurator to
+    /// sled-agent. This mimics the minimal bit of the CRDB `external_ip` table
+    /// we need.
+    external_ips: IndexMap<IpAddr, Uuid>,
 
     log: slog::Logger,
 }
@@ -65,6 +78,7 @@ fn main() -> anyhow::Result<()> {
         system: SystemDescription::new(),
         collections: IndexMap::new(),
         blueprints: IndexMap::new(),
+        external_ips: IndexMap::new(),
         log,
     };
 
@@ -483,13 +497,50 @@ fn cmd_blueprint_plan(
         .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
     let dns_version = Generation::new();
     let policy = sim.system.to_policy().context("generating policy")?;
+    let planning_input = PlanningInput {
+        policy,
+        service_external_ips: parent_blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zone)| {
+                let Ok(Some(ip)) = zone.zone_type.external_ip() else {
+                    return None;
+                };
+                let service_id =
+                    TypedUuid::<ServiceKind>::from_untyped_uuid(zone.id);
+                let external_ip = ExternalIp {
+                    id: *sim
+                        .external_ips
+                        .entry(ip)
+                        .or_insert_with(Uuid::new_v4),
+                    ip: ip.into(),
+                };
+                Some((service_id, external_ip))
+            })
+            .collect(),
+        service_nics: parent_blueprint
+            .all_omicron_zones()
+            .filter_map(|(_, zone)| {
+                let nic = zone.zone_type.service_vnic()?;
+                let service_id =
+                    TypedUuid::<ServiceKind>::from_untyped_uuid(zone.id);
+                let nic = ServiceNetworkInterface {
+                    id: nic.id,
+                    mac: nic.mac,
+                    ip: nic.ip.into(),
+                    slot: nic.slot,
+                    primary: nic.primary,
+                };
+                Some((service_id, nic))
+            })
+            .collect(),
+    };
     let creator = "reconfigurator-sim";
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
         dns_version,
         dns_version,
-        &policy,
+        &planning_input,
         creator,
         collection,
     )
