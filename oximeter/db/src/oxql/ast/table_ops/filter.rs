@@ -102,25 +102,35 @@ impl Filter {
     ///     | filter (foo == "bar") || (timestamp > @now() - 1m && foo == "baz")
     /// ```
     ///
+    /// This requires fetching part of one timeseries, and all of another. One
+    /// cannot run this as a conjunction on the fields and then a query on the
+    /// measurements. It must be run in such a way to get the sets of keys
+    /// consistent with each term in the disjunction _independently_, so that
+    /// one can apply the timestamp filter to only the correct one.
+    ///
+    /// We use this method to generate the DNF, a form with only disjunctions.
+    /// Each of those is then a separate query against the fields table, where
+    /// we keep track of the keys in each. Each set of predicates and consistent
+    /// keys is then used later to fetch the measurements.
+    ///
     /// # Notes
     ///
     /// There is a huge academic literature on this topic, part of the study of
     /// formal languages and other areas theoretical computer science. These
     /// references are mostly pretty dense and formal, though a few are really
-    /// useful. This paper [1] is a good and accessible survey to the idea of
-    /// translation systems -- it's mostly focused on programming languages and
-    /// compilers, but Figures 7-9 in particular are about DNF.
+    /// useful. This [paper](https://www.researchgate.net/publication/220154187_A_Survey_of_Strategies_in_Program_Transformation_Systems)
+    /// is a good and accessible survey to the idea of translation systems --
+    /// it's mostly focused on programming languages and compilers, but Figures
+    /// 7-9 in particular are about DNF.
     ///
-    /// As usual, the Wikipedia page is a reasonable overview as well, here [2].
-    /// We're using the "syntactic" DNF conversion algorithm, essentially. This
-    /// involves a recursive application of de Morgan's rules [3], involution /
-    /// double-negation [4], distributivity of Boolean operators [5], etc.
-    ///
-    /// [1] https://www.researchgate.net/publication/220154187_A_Survey_of_Strategies_in_Program_Transformation_Systems
-    /// [2] https://en.wikipedia.org/wiki/Disjunctive_normal_form
-    /// [3] https://en.wikipedia.org/wiki/De_Morgan%27s_laws
-    /// [4] https://en.wikipedia.org/wiki/Involution_(mathematics)
-    /// [5] https://en.wikipedia.org/wiki/Boolean_algebra#Monotone_laws
+    /// As usual, the Wikipedia page is a reasonable overview as well,
+    /// [here](https://en.wikipedia.org/wiki/Disjunctive_normal_form). We're
+    /// using the "syntactic" DNF conversion algorithm, essentially. This
+    /// involves a recursive application of
+    /// [de Morgan's rules](https://en.wikipedia.org/wiki/De_Morgan%27s_laws),
+    /// [involution / double-negation](https://en.wikipedia.org/wiki/Involution_(mathematics)),
+    /// distributivity of [Boolean operators](https://en.wikipedia.org/wiki/Boolean_algebra#Monotone_laws),
+    /// etc.
     pub fn simplify_to_dnf(&self) -> Result<Self, Error> {
         let mut out = self.simplify_to_dnf_inner()?;
         if &out == self {
