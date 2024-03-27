@@ -893,6 +893,7 @@ pub mod test {
     use crate::example::example;
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
+    use expectorate::assert_contents;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
     use sled_agent_client::types::{OmicronZoneConfig, OmicronZoneType};
@@ -942,6 +943,10 @@ pub mod test {
         println!(
             "collection -> initial blueprint (expected no changes):\n{}",
             diff.display()
+        );
+        assert_contents(
+            "tests/output/blueprint_builder_initial_diff.txt",
+            &diff.display().to_string(),
         );
         assert_eq!(diff.sleds_added().len(), 0);
         assert_eq!(diff.sleds_removed().len(), 0);
