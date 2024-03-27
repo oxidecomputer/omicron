@@ -4,6 +4,7 @@
 
 //! CTE utility for iterating over all columns in a table.
 
+use crate::db::raw_query_builder::TrustedStr;
 use diesel::prelude::*;
 use std::marker::PhantomData;
 
@@ -17,14 +18,30 @@ pub(crate) struct ColumnWalker<T> {
     remaining: PhantomData<T>,
 }
 
+pub type AllColumnsOf<T> = ColumnWalker<<T as diesel::Table>::AllColumns>;
+
 impl<T> ColumnWalker<T> {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self { remaining: PhantomData }
     }
 }
 
 macro_rules! impl_column_walker {
     ( $len:literal $($column:ident)+ ) => (
+        #[allow(dead_code)]
+        impl<$($column: Column),+> ColumnWalker<($($column,)+)> {
+            pub fn with_prefix(prefix: &'static str) -> TrustedStr {
+                // This string is derived from:
+                // - The "table" type, with associated columns, which
+                // are not controlled by an arbitrary user, and
+                // - The "prefix" type, which is a "&'static str" (AKA,
+                // hopefully known at compile-time, and not leaked).
+                TrustedStr::i_take_responsibility_for_validating_this_string(
+                    [$([prefix, $column::NAME].join("."),)+].join(", ")
+                )
+            }
+        }
+
         impl<$($column: Column),+> IntoIterator for ColumnWalker<($($column,)+)> {
             type Item = &'static str;
             type IntoIter = std::array::IntoIter<Self::Item, $len>;
@@ -108,5 +125,13 @@ mod test {
         assert_eq!(iter.next(), Some("id"));
         assert_eq!(iter.next(), Some("value"));
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_all_columns_with_prefix() {
+        assert_eq!(
+            AllColumnsOf::<test_table::table>::with_prefix("foo").as_str(),
+            "foo.id, foo.value, foo.time_deleted"
+        );
     }
 }
