@@ -62,6 +62,9 @@ struct ReconfiguratorSim {
     /// External DNS zone name configured
     external_dns_zone_name: String,
 
+    /// Policy overrides
+    num_nexus: Option<u16>,
+
     log: slog::Logger,
 }
 
@@ -91,6 +94,7 @@ fn main() -> anyhow::Result<()> {
         log,
         silo_names: vec!["example-silo".parse().unwrap()],
         external_dns_zone_name: String::from("oxide.example"),
+        num_nexus: None,
     };
 
     if let Some(input_file) = cmd.input_file {
@@ -203,7 +207,8 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::BlueprintDiffInventory(args) => {
             cmd_blueprint_diff_inventory(sim, args)
         }
-        Commands::DnsShow => cmd_dns_show(sim),
+        Commands::Show => cmd_show(sim),
+        Commands::Set(args) => cmd_set(sim, args),
         Commands::Load(args) => cmd_load(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
@@ -263,8 +268,11 @@ enum Commands {
     /// show differences between a blueprint and an inventory collection
     BlueprintDiffInventory(BlueprintDiffInventoryArgs),
 
-    /// show information about DNS configurations
-    DnsShow,
+    /// show system properties
+    Show,
+    /// set system properties
+    #[command(subcommand)]
+    Set(SetArgs),
 
     /// save state to a file
     Save(SaveArgs),
@@ -342,6 +350,14 @@ struct BlueprintDiffArgs {
     blueprint1_id: Uuid,
     /// id of the second blueprint
     blueprint2_id: Uuid,
+}
+
+#[derive(Debug, Subcommand)]
+enum SetArgs {
+    /// target number of Nexus instances (for planning)
+    NumNexus { num_nexus: u16 },
+    /// system's external DNS zone name (suffix)
+    ExternalDnsZoneName { zone_name: String },
 }
 
 #[derive(Debug, Args)]
@@ -813,13 +829,21 @@ fn cmd_save(
     )))
 }
 
-fn cmd_dns_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
-    do_print_dns(&mut s, sim);
+    do_print_properties(&mut s, sim);
+    swriteln!(
+        s,
+        "target number of Nexus instances: {}",
+        match sim.num_nexus {
+            Some(n) => n.to_string(),
+            None => String::from("default"),
+        }
+    );
     Ok(Some(s))
 }
 
-fn do_print_dns(s: &mut String, sim: &ReconfiguratorSim) {
+fn do_print_properties(s: &mut String, sim: &ReconfiguratorSim) {
     swriteln!(
         s,
         "configured external DNS zone name: {}",
@@ -852,6 +876,26 @@ fn do_print_dns(s: &mut String, sim: &ReconfiguratorSim) {
             .collect::<Vec<_>>()
             .join(", "),
     );
+}
+
+fn cmd_set(
+    sim: &mut ReconfiguratorSim,
+    args: SetArgs,
+) -> anyhow::Result<Option<String>> {
+    Ok(Some(match args {
+        SetArgs::NumNexus { num_nexus } => {
+            let rv = format!("{:?} -> {}", sim.num_nexus, num_nexus);
+            sim.num_nexus = Some(num_nexus);
+            sim.system.target_nexus_zone_count(usize::from(num_nexus));
+            rv
+        }
+        SetArgs::ExternalDnsZoneName { zone_name } => {
+            let rv =
+                format!("{:?} -> {:?}", sim.external_dns_zone_name, zone_name);
+            sim.external_dns_zone_name = zone_name;
+            rv
+        }
+    }))
 }
 
 fn read_file(
@@ -1019,7 +1063,7 @@ fn cmd_load(
         sim.external_dns_zone_name =
             loaded.external_dns_zone_names.into_iter().next().unwrap();
     }
-    do_print_dns(&mut s, sim);
+    do_print_properties(&mut s, sim);
 
     swriteln!(s, "loaded data from {:?}", input_path);
     Ok(Some(s))
