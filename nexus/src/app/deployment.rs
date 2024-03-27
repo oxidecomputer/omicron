@@ -14,7 +14,6 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::Policy;
 use nexus_types::inventory::Collection;
 use omicron_common::address::NEXUS_REDUNDANCY;
@@ -33,7 +32,6 @@ use uuid::Uuid;
 /// Common structure for collecting information that the planner needs
 struct PlanningContext {
     policy: Policy,
-    input: PlanningInput,
     creator: String,
     inventory: Option<Collection>,
     internal_dns_version: Generation,

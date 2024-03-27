@@ -433,8 +433,8 @@ impl DataStore {
         self.allocate_external_ip(opctx, data).await
     }
 
-    /// List external IPs allocated to internal services
-    pub async fn service_ip_list(
+    /// List one page of all external IPs allocated to internal services
+    pub async fn service_ip_all_list(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -447,6 +447,7 @@ impl DataStore {
         paginated(dsl::external_ip, dsl::id, pagparams)
             .filter(dsl::is_service)
             .filter(dsl::time_deleted.is_null())
+            .select(ExternalIp::as_select())
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -458,7 +459,7 @@ impl DataStore {
     /// This should generally not be used in API handlers or other
     /// latency-sensitive contexts, but it can make sense in saga actions or
     /// background tasks.
-    pub async fn service_ip_list_all_batched(
+    pub async fn service_ip_all_list_batched(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<ExternalIp> {
@@ -468,7 +469,7 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let batch =
-                self.service_ip_list(opctx, &p.current_pagparams()).await?;
+                self.service_ip_all_list(opctx, &p.current_pagparams()).await?;
             paginator = p.found_batch(&batch, &|ip: &ExternalIp| ip.id);
             all_ips.extend(batch);
         }
@@ -1206,5 +1207,123 @@ impl DataStore {
             _ => return Err(Error::internal_error("unreachable")),
         }
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::datastore::test_utils::datastore_test;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::shared::IpRange;
+    use omicron_common::address::NUM_SOURCE_NAT_PORTS;
+    use omicron_test_utils::dev;
+    use std::collections::BTreeSet;
+    use std::net::Ipv4Addr;
+
+    async fn read_all_service_ips(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> Vec<ExternalIp> {
+        let all_batched = datastore
+            .service_ip_all_list_batched(opctx)
+            .await
+            .expect("failed to fetch all service IPs batched");
+        let all_paginated = datastore
+            .service_ip_all_list(opctx, &DataPageParams::max_page())
+            .await
+            .expect("failed to fetch all service IPs paginated");
+        assert_eq!(all_batched, all_paginated);
+        all_batched
+    }
+
+    #[tokio::test]
+    async fn test_service_ip_list() {
+        usdt::register_probes().unwrap();
+        let logctx = dev::test_setup_log("test_service_ip_list");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // No IPs, to start
+        let ips = read_all_service_ips(&datastore, &opctx).await;
+        assert_eq!(ips, vec![]);
+
+        // Set up service IP pool range
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 10),
+        ))
+        .unwrap();
+        let (service_ip_pool, _) = datastore
+            .ip_pools_service_lookup(&opctx)
+            .await
+            .expect("lookup service ip pool");
+        datastore
+            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
+            .await
+            .expect("add range to service ip pool");
+
+        // Allocate a bunch of fake service IPs.
+        let mut external_ips = Vec::new();
+        let mut allocate_snat = false; // flip-flop between regular and snat
+        for (i, ip) in ip_range.iter().enumerate() {
+            let name = format!("service-ip-{i}");
+            let external_ip = if allocate_snat {
+                datastore
+                    .allocate_explicit_service_snat_ip(
+                        &opctx,
+                        Uuid::new_v4(),
+                        Uuid::new_v4(),
+                        ip,
+                        (0, NUM_SOURCE_NAT_PORTS - 1),
+                    )
+                    .await
+                    .expect("failed to allocate service IP")
+            } else {
+                datastore
+                    .allocate_explicit_service_ip(
+                        &opctx,
+                        Uuid::new_v4(),
+                        &Name(name.parse().unwrap()),
+                        &name,
+                        Uuid::new_v4(),
+                        ip,
+                    )
+                    .await
+                    .expect("failed to allocate service IP")
+            };
+            external_ips.push(external_ip);
+            allocate_snat = !allocate_snat;
+        }
+        external_ips.sort_by_key(|ip| ip.id);
+
+        // Ensure we see them all.
+        let ips = read_all_service_ips(&datastore, &opctx).await;
+        assert_eq!(ips, external_ips);
+
+        // Deallocate a few, and ensure we don't see them anymore.
+        let mut removed_ip_ids = BTreeSet::new();
+        for (i, external_ip) in external_ips.iter().enumerate() {
+            if i % 3 == 0 {
+                let id = external_ip.id;
+                datastore
+                    .deallocate_external_ip(&opctx, id)
+                    .await
+                    .expect("failed to deallocate IP");
+                removed_ip_ids.insert(id);
+            }
+        }
+
+        // Check that we removed at least one, then prune them from our list of
+        // expected IPs.
+        assert!(!removed_ip_ids.is_empty());
+        external_ips.retain(|ip| !removed_ip_ids.contains(&ip.id));
+
+        // Ensure we see them all remaining IPs.
+        let ips = read_all_service_ips(&datastore, &opctx).await;
+        assert_eq!(ips, external_ips);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }
