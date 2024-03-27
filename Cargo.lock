@@ -1651,7 +1651,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=de065a84831e66c829603d9a098e237e8f5faaa1#de065a84831e66c829603d9a098e237e8f5faaa1"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8207cb9c90cd7144c3f351823bfb2ae3e221ad10#8207cb9c90cd7144c3f351823bfb2ae3e221ad10"
 dependencies = [
  "percent-encoding",
  "progenitor",
@@ -4062,7 +4062,7 @@ dependencies = [
  "colored",
  "dlpi",
  "libc",
- "num_enum 0.5.11",
+ "num_enum",
  "nvpair",
  "nvpair-sys",
  "rusty-doors",
@@ -4314,7 +4314,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=de065a84831e66c829603d9a098e237e8f5faaa1#de065a84831e66c829603d9a098e237e8f5faaa1"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8207cb9c90cd7144c3f351823bfb2ae3e221ad10#8207cb9c90cd7144c3f351823bfb2ae3e221ad10"
 dependencies = [
  "anyhow",
  "chrono",
