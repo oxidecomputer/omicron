@@ -139,12 +139,9 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
 
         if !names_changed {
             writeln!(f, "  DNS zone: {:?} (unchanged)", zone_name,)?;
-            return Ok(());
+        } else {
+            writeln!(f, "~ DNS zone: {:?}: ", zone_name)?;
         }
-
-        // The DNS contents has changed.  Iterate over the names in order and
-        // print what happened with each one.
-        writeln!(f, "~ DNS zone: {:?}: ", zone_name)?;
 
         let print_records = |f: &mut std::fmt::Formatter<'_>,
                              prefix,
