@@ -33,6 +33,7 @@ nexus-reconfigurator-preparation.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 oximeter-client.workspace = true
+petgraph.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 ratatui.workspace = true

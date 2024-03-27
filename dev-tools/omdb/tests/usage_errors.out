@@ -103,6 +103,8 @@ Commands:
   sleds                Print information about sleds
   instances            Print information about customer instances
   network              Print information about the network
+  regions              Print information related to regions
+  sagas                Print information related to sagas
   snapshots            Print information about snapshots
   validate             Validate the contents of the database
   help                 Print this message or the help of the given subcommand(s)
@@ -133,6 +135,8 @@ Commands:
   sleds                Print information about sleds
   instances            Print information about customer instances
   network              Print information about the network
+  regions              Print information related to regions
+  sagas                Print information related to sagas
   snapshots            Print information about snapshots
   validate             Validate the contents of the database
   help                 Print this message or the help of the given subcommand(s)
