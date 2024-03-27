@@ -5,6 +5,7 @@
 //! [`DataStore`] methods on [`ExternalIp`]s.
 
 use super::DataStore;
+use super::SQL_BATCH_SIZE;
 use crate::authz;
 use crate::authz::ApiResource;
 use crate::context::OpContext;
@@ -24,6 +25,7 @@ use crate::db::model::IncompleteExternalIp;
 use crate::db::model::IpKind;
 use crate::db::model::Name;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::queries::external_ip::NextExternalIp;
 use crate::db::queries::external_ip::MAX_EXTERNAL_IPS_PER_INSTANCE;
@@ -41,6 +43,7 @@ use nexus_db_model::IpAttachState;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
+use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -428,6 +431,48 @@ impl DataStore {
             port_range,
         );
         self.allocate_external_ip(opctx, data).await
+    }
+
+    /// List external IPs allocated to internal services
+    pub async fn service_ip_list(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<ExternalIp> {
+        use db::schema::external_ip::dsl;
+
+        let (authz_pool, _pool) = self.ip_pools_service_lookup(opctx).await?;
+        opctx.authorize(authz::Action::ListChildren, &authz_pool).await?;
+
+        paginated(dsl::external_ip, dsl::id, pagparams)
+            .filter(dsl::is_service)
+            .filter(dsl::time_deleted.is_null())
+            .get_results_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all external IPs allocated to internal services, making as many
+    /// queries as needed to get them all
+    ///
+    /// This should generally not be used in API handlers or other
+    /// latency-sensitive contexts, but it can make sense in saga actions or
+    /// background tasks.
+    pub async fn service_ip_list_all_batched(
+        &self,
+        opctx: &OpContext,
+    ) -> ListResultVec<ExternalIp> {
+        opctx.check_complex_operations_allowed()?;
+
+        let mut all_ips = Vec::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        while let Some(p) = paginator.next() {
+            let batch =
+                self.service_ip_list(opctx, &p.current_pagparams()).await?;
+            paginator = p.found_batch(&batch, &|ip: &ExternalIp| ip.id);
+            all_ips.extend(batch);
+        }
+        Ok(all_ips)
     }
 
     /// Attempt to move a target external IP from detached to attaching,
