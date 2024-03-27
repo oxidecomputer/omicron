@@ -867,8 +867,8 @@ impl DataStore {
         Ok(())
     }
 
-    // XXX-dap once we eliminate the service table, we can eliminate this
-    // function and the branch in the sole caller
+    // TODO once we eliminate the service table, we can eliminate this function
+    // and the branch in the sole caller
     pub async fn nexus_external_addresses_from_service_table(
         &self,
         opctx: &OpContext,

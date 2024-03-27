@@ -130,8 +130,6 @@ impl<'a> DnsDiff<'a> {
     }
 }
 
-// XXX-dap TODO-coverage
-// XXX-dap rewrite omdb version in terms of this?
 impl<'a> std::fmt::Display for DnsDiff<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let names_changed = !self.is_empty();

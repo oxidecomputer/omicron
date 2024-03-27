@@ -161,9 +161,6 @@ pub struct DnsConfigBuilder {
 
     /// similar to service_instances_zones, but for services that run on sleds
     service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Sled, u16>>,
-
-    /// generation number for this config
-    generation: Generation,
 }
 
 /// Describes a host of type "sled" in the control plane DNS zone
@@ -195,7 +192,6 @@ impl DnsConfigBuilder {
             zones: BTreeMap::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
-            generation: Generation::new(),
         }
     }
 
@@ -400,11 +396,6 @@ impl DnsConfigBuilder {
         self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
     }
 
-    // XXX-dap is this now unused?
-    pub fn generation(&mut self, generation: Generation) {
-        self.generation = generation;
-    }
-
     /// Construct a `DnsConfigZone` describing the control plane zone described
     /// up to this piont
     pub fn build_zone(self) -> DnsConfigZone {
@@ -471,12 +462,10 @@ impl DnsConfigBuilder {
     /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
     /// our DNS servers) for the control plane DNS zone described up to this
     /// point
-    // XXX-dap is this now unused?
     pub fn build(self) -> DnsConfigParams {
-        let generation = u64::from(self.generation);
         let zone = self.build_zone();
         DnsConfigParams {
-            generation,
+            generation: u64::from(Generation::new()),
             time_created: chrono::Utc::now(),
             zones: vec![zone],
         }
