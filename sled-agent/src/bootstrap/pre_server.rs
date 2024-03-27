@@ -61,6 +61,15 @@ impl BootstrapAgentStartup {
     pub(super) async fn run(config: Config) -> Result<Self, StartError> {
         let base_log = build_logger(&config)?;
 
+        // Ensure we have a thread that automatically reaps process contracts
+        // when they become empty. See the comments in
+        // illumos-utils/src/running_zone.rs for more detail.
+        //
+        // We're going to start monitoring for hardware below, which could
+        // trigger launching the switch zone, and we need the contract reaper to
+        // exist before entering any zones.
+        illumos_utils::running_zone::ensure_contract_reaper(&base_log);
+
         let log = base_log.new(o!("component" => "BootstrapAgentStartup"));
 
         // Perform several blocking startup tasks first; we move `config` and

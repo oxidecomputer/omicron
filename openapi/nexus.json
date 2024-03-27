@@ -9010,6 +9010,7 @@
         ]
       },
       "BfdMode": {
+        "description": "BFD connection mode.",
         "type": "string",
         "enum": [
           "single_hop",

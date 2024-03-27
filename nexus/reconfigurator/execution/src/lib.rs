@@ -98,7 +98,7 @@ where
     resource_allocation::ensure_zone_resources_allocated(
         &opctx,
         datastore,
-        &blueprint.omicron_zones,
+        blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;
@@ -111,8 +111,12 @@ where
         .into_iter()
         .map(|db_sled| (db_sled.id(), Sled::from(db_sled)))
         .collect();
-    omicron_zones::deploy_zones(&opctx, &sleds_by_id, &blueprint.omicron_zones)
-        .await?;
+    omicron_zones::deploy_zones(
+        &opctx,
+        &sleds_by_id,
+        &blueprint.blueprint_zones,
+    )
+    .await?;
 
     // After deploying omicron zones, we may need to refresh OPTE service
     // firewall rules. This is an idempotent operation, so we don't attempt
