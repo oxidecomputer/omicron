@@ -2,6 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::net::SocketAddr;
+use std::time::Duration;
+
 use super::SqlU16;
 use crate::impl_enum_type;
 use crate::schema::metric_producer;
@@ -40,6 +43,18 @@ impl From<ProducerKind> for internal::nexus::ProducerKind {
             ProducerKind::SledAgent => internal::nexus::ProducerKind::SledAgent,
             ProducerKind::Service => internal::nexus::ProducerKind::Service,
             ProducerKind::Instance => internal::nexus::ProducerKind::Instance,
+        }
+    }
+}
+
+impl From<ProducerEndpoint> for internal::nexus::ProducerEndpoint {
+    fn from(ep: ProducerEndpoint) -> Self {
+        internal::nexus::ProducerEndpoint {
+            id: ep.id(),
+            kind: ep.kind.into(),
+            address: SocketAddr::new(ep.ip.ip(), *ep.port),
+            base_route: ep.base_route.clone(),
+            interval: Duration::from_secs_f64(ep.interval),
         }
     }
 }

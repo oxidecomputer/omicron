@@ -182,7 +182,7 @@ mod tests {
             address: collector.addr(),
         });
         datastore
-            .oximeter_create(&collector_info)
+            .oximeter_create(&opctx, &collector_info)
             .await
             .expect("failed to insert collector");
 
@@ -198,7 +198,7 @@ mod tests {
             collector_info.id,
         );
         datastore
-            .producer_endpoint_create(&producer)
+            .producer_endpoint_create(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 

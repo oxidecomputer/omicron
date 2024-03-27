@@ -6,8 +6,8 @@
 
 use super::DataStore;
 use super::SQL_BATCH_SIZE;
+use crate::context::OpContext;
 use crate::db;
-use crate::db::datastore::OpContext;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
@@ -29,12 +29,13 @@ impl DataStore {
     /// Lookup an oximeter instance by its ID.
     pub async fn oximeter_lookup(
         &self,
+        opctx: &OpContext,
         id: &Uuid,
     ) -> Result<OximeterInfo, Error> {
         use db::schema::oximeter::dsl;
         dsl::oximeter
             .find(*id)
-            .first_async(&*self.pool_connection_unauthorized().await?)
+            .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
@@ -42,6 +43,7 @@ impl DataStore {
     /// Create a record for a new Oximeter instance
     pub async fn oximeter_create(
         &self,
+        opctx: &OpContext,
         info: &OximeterInfo,
     ) -> Result<(), Error> {
         use db::schema::oximeter::dsl;
@@ -59,7 +61,7 @@ impl DataStore {
                 dsl::ip.eq(info.ip),
                 dsl::port.eq(info.port),
             ))
-            .execute_async(&*self.pool_connection_unauthorized().await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -76,12 +78,13 @@ impl DataStore {
     /// List the oximeter collector instances
     pub async fn oximeter_list(
         &self,
+        opctx: &OpContext,
         page_params: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<OximeterInfo> {
         use db::schema::oximeter::dsl;
         paginated(dsl::oximeter, dsl::id, page_params)
             .load_async::<OximeterInfo>(
-                &*self.pool_connection_unauthorized().await?,
+                &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
@@ -90,6 +93,7 @@ impl DataStore {
     /// Create a record for a new producer endpoint
     pub async fn producer_endpoint_create(
         &self,
+        opctx: &OpContext,
         producer: &ProducerEndpoint,
     ) -> Result<(), Error> {
         use db::schema::metric_producer::dsl;
@@ -107,7 +111,7 @@ impl DataStore {
                 dsl::interval.eq(producer.interval),
                 dsl::base_route.eq(producer.base_route.clone()),
             ))
-            .execute_async(&*self.pool_connection_unauthorized().await?)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -128,13 +132,14 @@ impl DataStore {
     /// returned. If there was no record, `None` is returned.
     pub async fn producer_endpoint_delete(
         &self,
+        opctx: &OpContext,
         id: &Uuid,
     ) -> Result<Option<Uuid>, Error> {
         use db::schema::metric_producer::dsl;
         diesel::delete(dsl::metric_producer.find(*id))
             .returning(dsl::oximeter_id)
             .get_result_async::<Uuid>(
-                &*self.pool_connection_unauthorized().await?,
+                &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .optional()
@@ -144,6 +149,7 @@ impl DataStore {
     /// List the producer endpoint records by the oximeter instance to which they're assigned.
     pub async fn producers_list_by_oximeter_id(
         &self,
+        opctx: &OpContext,
         oximeter_id: Uuid,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<ProducerEndpoint> {
@@ -152,7 +158,7 @@ impl DataStore {
             .filter(dsl::oximeter_id.eq(oximeter_id))
             .order_by((dsl::oximeter_id, dsl::id))
             .select(ProducerEndpoint::as_select())
-            .load_async(&*self.pool_connection_unauthorized().await?)
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -281,7 +287,7 @@ mod tests {
             address: "[::1]:0".parse().unwrap(), // unused
         });
         datastore
-            .oximeter_create(&collector_info)
+            .oximeter_create(&opctx, &collector_info)
             .await
             .expect("failed to insert collector");
 
@@ -297,13 +303,14 @@ mod tests {
             collector_info.id,
         );
         datastore
-            .producer_endpoint_create(&producer)
+            .producer_endpoint_create(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 
         // Our producer should show up when we list by its collector
         let mut all_producers = datastore
             .producers_list_by_oximeter_id(
+                &opctx,
                 collector_info.id,
                 &DataPageParams::max_page(),
             )

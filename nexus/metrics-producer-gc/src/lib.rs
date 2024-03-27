@@ -63,9 +63,10 @@ pub async fn prune_expired_producers(
     let mut all_prunes = expired_producers
         .producer_client_pairs()
         .map(|(producer, client)| async {
-            let result =
-                unregister_producer(datastore, producer, client, &opctx.log)
-                    .await;
+            let result = unregister_producer(
+                opctx, datastore, producer, client, &opctx.log,
+            )
+            .await;
             (producer.id(), result)
         })
         .collect::<FuturesUnordered<_>>();
@@ -87,6 +88,7 @@ pub async fn prune_expired_producers(
 }
 
 async fn unregister_producer(
+    opctx: &OpContext,
     datastore: &DataStore,
     producer: &ProducerEndpoint,
     client: &OximeterClient,
@@ -115,7 +117,7 @@ async fn unregister_producer(
         }
     }
 
-    datastore.producer_endpoint_delete(&producer.id()).await.map(|_| ())
+    datastore.producer_endpoint_delete(opctx, &producer.id()).await.map(|_| ())
 }
 
 // Internal combination of all expired producers and a set of OximeterClients
@@ -143,12 +145,12 @@ impl ExpiredProducers {
                 Entry::Occupied(_) => continue,
             };
             let info = datastore
-                .oximeter_lookup(&producer.oximeter_id)
+                .oximeter_lookup(opctx, &producer.oximeter_id)
                 .await
                 .map_err(|err| Error::GetOximterInfo {
-                id: producer.oximeter_id,
-                err,
-            })?;
+                    id: producer.oximeter_id,
+                    err,
+                })?;
             let client_log =
                 opctx.log.new(o!("oximeter-collector" => info.id.to_string()));
             let address = SocketAddr::new(info.ip.ip(), *info.port);
@@ -224,7 +226,7 @@ mod tests {
             address: "[::1]:0".parse().unwrap(),
         });
         datastore
-            .oximeter_create(&collector_info)
+            .oximeter_create(&opctx, &collector_info)
             .await
             .expect("failed to insert collector");
 
@@ -248,7 +250,7 @@ mod tests {
             collector_info.id,
         );
         datastore
-            .producer_endpoint_create(&producer)
+            .producer_endpoint_create(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 
@@ -315,7 +317,7 @@ mod tests {
             address: collector.addr(),
         });
         datastore
-            .oximeter_create(&collector_info)
+            .oximeter_create(&opctx, &collector_info)
             .await
             .expect("failed to insert collector");
 
@@ -331,7 +333,7 @@ mod tests {
             collector_info.id,
         );
         datastore
-            .producer_endpoint_create(&producer)
+            .producer_endpoint_create(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 

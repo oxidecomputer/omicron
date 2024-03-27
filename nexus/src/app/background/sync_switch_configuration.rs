@@ -1143,7 +1143,8 @@ async fn switch_loopback_addresses(
                 .insert((*location, IpAddr::V4(entry.addr)));
         }
 
-        for entry in ipv6_loopbacks.iter() {
+        for entry in ipv6_loopbacks.iter().filter(|x| x.tag == OMICRON_DPD_TAG)
+        {
             current_loopback_addresses
                 .insert((*location, IpAddr::V6(entry.addr)));
         }
