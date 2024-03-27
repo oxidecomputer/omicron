@@ -1854,8 +1854,7 @@ impl super::Nexus {
             }
         } else {
             Err(Error::invalid_request(format!(
-                "instance is {} and has no active serial console \
-                    server",
+                "instance is {} and has no active console server",
                 instance.runtime().nexus_state
             )))
         }
