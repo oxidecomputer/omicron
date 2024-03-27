@@ -4062,7 +4062,7 @@ dependencies = [
  "colored",
  "dlpi",
  "libc",
- "num_enum 0.5.11",
+ "num_enum",
  "nvpair",
  "nvpair-sys",
  "rusty-doors",
