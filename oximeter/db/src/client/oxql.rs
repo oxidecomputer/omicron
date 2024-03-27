@@ -97,6 +97,16 @@ pub struct OxqlResult {
 // this. If we exceed it, the whole query fails.
 pub const MAX_DATABASE_ROWS: u64 = 1_000_000;
 
+// When running an OxQL query, we may need to separately run several field
+// queries, to get the consistent keys independently for a range of time.
+//
+// This type stores the predicates used to generate the keys, and the keys
+// consistent with it.
+struct ConsistentKeyGroup {
+    predicates: Option<Filter>,
+    consistent_keys: BTreeMap<TimeseriesKey, (Target, Metric)>,
+}
+
 impl Client {
     /// Run a OxQL query.
     pub async fn oxql_query(
@@ -142,148 +152,8 @@ impl Client {
         result
     }
 
-    // NOTE:
-    //
-    // A few ideas.
-    //
-    // First, we really need to make separate queries for the different
-    // expressions which refer to different time ranges. It's tempting to use a
-    // UNION or similar, but we need to be able to match up the consistent keys
-    // with the right time range.
-    //
-    // So for the test query at the end of this file, we need two field queries
-    // -- one for the timeseries we're fetching a part of and one for the
-    // timeseries we're fetching all of.
-    //
-    // But good news: we can use a single measurement query!
-    //
-    //
-    // --
-    //
-    // For a query with no ORs, this doesn't matter.
-    //
-    // --
-    //
-    // I think we might be able to break the queries into those that we can
-    // prove have the same time range. OR queries can't be proven like that. AND
-    // can. What about XOR?
-    //
-    // filter (exactly_choose_one) ^ (timestamp > @now() - 5m && exactly_choose_another)
-    //
-    // The logic is trickier, but it's the same at the end of the day: we need
-    // to do two field queries, one for each time range in play.
-    //
-    // --
-    //
-    // What about nesting? This is where it gets pretty tricky.
-    //
-    // filter (exactly_choose_one)
-    //  || (timestamp > @now() - 5m && exactly_choose_another)
-    //  || (timestamp > @now() - 10m && exactly_choose_a_third)
-    //
-    //  This is the same actually
-    //
-    // filter (choose_some_subset)
-    //  && ((timestamp > @now() - 5m && restrict_further)
-    //      || (timestamp > @now() - 10m && restrict_another_way))
-    //
-    // This is different. Ideally I'd do it like this:
-    //
-    // query 1: timestamp > @now() - 5m: choose_some_subset && restrict_further
-    // query 2: timestamp > @now() - 10m: choose_some_subset && restrict_another_way
-    //
-    // Note that there is no query just picking `choose_some_subset`. That's
-    // because it is conjoined with the others, which means the timestamp
-    // expressions actually apply to it.
-    //
-    // It really seems like I want to break things into as few _disjunctions_ as
-    // possible, and run each separately. Does that work for XOR?
-    //
-    // filter (choose_some_subset)
-    //  && ((timestamp > @now() - 5m && restrict_further)
-    //      ^ (timestamp > @now() - 10m && restrict_another_way))
-    //
-    // Rewrite as disjunction of possibilites:
-    //
-    //
-    // filter (choose_some_subset)
-    //  && (
-    //      ((timestamp > @now() - 5m && restrict_further)
-    //      && !(timestamp > @now() - 10m && restrict_another_way))
-    //    ||
-    //      !(timestamp > @now() - 5m && restrict_further)
-    //      && (timestamp > @now() - 10m && restrict_another_way)
-    //    )
-    //
-    // And then rewrite it like the above, distributing the `choose_some_subset`
-    // over the others.
-    //
-    // So we'll need some operations:
-    //
-    // - rewrite XOR as disjunction
-    // - merge two timestamp filters (e.g., `t > 1` merge `t > 2` -> `t > 2`
-    //      or `t > 1` merge `t < 10` -> `t > 1 && t < 10). Ugh, really hope I
-    //      don't need to implement an interval tree.
-    // - distribute AND over OR
-    // - push down negation with de Morgan's laws?
-    // - collapse multiple negations, when count is even: !!x -> x
-    //
-    //
-    // ---
-    // From wikipedia page on "Disjunctive normal form"
-    //
-    // A disjunction of conjunections: sum of products, etc. Not sure if we want
-    // _full_ DNF, which can actually be more complicated. But I think we want
-    // the smallest number of OR expressions.
-    //
-    // There are syntactic transformations that can be used to write things in
-    // DNF:
-    //
-    // - involution (!!x -> x)
-    // - de Morgan 1: !(x | y) -> !x & !y
-    // - de Morgan 2: !(x & y) -> !x | !y
-    // - distribute and: x & (y | z) -> (x & y) | (x & z) (Note NOT the other
-    // way, since that introduces more ANDs)
-    // - distribute left: (x | y) & z -> (x & z) | (y & z)
-    //
-    // ---
-    //
-    // I'm not sure how to determine how many different subqueries we need to
-    // run. The glib answer is "as many as there are distinct time ranges in
-    // the query". Distinct means different ranges contained in two disjoint
-    // predicates. The tricky part is that I have a tree, and I'm not sure you
-    // can just inspect a node in the tree to know whether it can be combined in
-    // the same time-range query.
-    //
-    // a && b && c || d
-    //
-    // So for all these, the ands are associative, so we can do:
-    //
-    // (a && b && c) || d
-    //
-    // I wonder if we can flatten things. For example, distribute and over or
-    // and or over and as much as possible; rewrite disjunction; push down
-    // negation, etc.
-    //
-    // And the build a _list_ (flat structure) that merges together as many
-    // operations as are associative with one another. E.g.:
-    //
-    // - start at the beginning, take the first node and op
-    // - If it's simple, we're done (base case)
-    // - if not:
-    //   - if the op in this is the same as the last one in the list, push both
-    //   sides
-    //   - if it is a new op, complete the list and start a new one taking both
-    //   sides and the op. Goto 1.
-    //
-    //
-    // https://web.eecs.umich.edu/~jag/eecs584/papers/qopt.pdf
-    // https://www.researchgate.net/publication/220154187_A_Survey_of_Strategies_in_Program_Transformation_Systems
-
-    // TODO(ben): This is just wrong. We can only split queries into the parts
-    // applied to the fields and those on the timestamps in a few limited cases,
-    // when all the fields are logically conjoined. Disjunction, and probably
-    // many other cases, are NOT correct when implemented this way.
+    /// Rewrite the predicates from an OxQL query so that they apply only to the
+    /// field tables.
     fn rewrite_predicate_for_fields(
         schema: &TimeseriesSchema,
         preds: &filter::Filter,
@@ -329,6 +199,8 @@ impl Client {
         }
     }
 
+    /// Rewrite the predicates from an OxQL query so that they apply only to the
+    /// measurement table.
     fn rewrite_predicate_for_measurements(
         schema: &TimeseriesSchema,
         preds: &oxql::ast::table_ops::filter::Filter,
@@ -499,25 +371,96 @@ impl Client {
             "coalesced" => ?&preds,
         );
 
-        // We generally run 2 SQL queries for each OxQL query:
+        // We generally run a few SQL queries for each OxQL query:
         //
-        // 1. Fetch all the fields consistent with the query.
-        // 2. Fetch the consistent samples.
-        let mut query_summaries = Vec::with_capacity(2);
-        let all_fields_query =
-            self.all_fields_query(&schema, preds.as_ref())?;
-        let (summary, info) = self
-            .select_matching_timeseries_info(&all_fields_query, &schema)
-            .await?;
-        debug!(
-            query_log,
-            "fetched information for matching timeseries keys";
-            "n_keys" => info.len(),
-        );
-        query_summaries.push(summary);
+        // - Some number of queries to fetch the timeseries keys that are
+        // consistent with it.
+        // - Fetch the consistent samples.
+        //
+        // Note that there are often 2 or more queries needed for the first
+        // case. In particular, there is one query required for each independent
+        // time range in the query (including when a time range isn't
+        // specified).
+        //
+        // For example, consider the filter operation:
+        //
+        // ```
+        // filter some_predicate || (timestamp > @now() - 1m && other_predicate)
+        // ```
+        //
+        // That is, we return all timepoints for things where `some_predicate`
+        // is true, and only the last minute for those satisfying
+        // `other_predicate`. If we simply drop the timestamp filter, and run
+        // the two predicates conjoined, we would erroneously return only the
+        // last minute for everything, including those satisfying
+        // `some_predicate`.
+        //
+        // So instead, we need to run one query for each of those, fetch the
+        // keys associated with it, and then independently select the
+        // measurements satisfying both the time range and key-consistency
+        // constraints. Thankfully that can be done in one query, albeit a
+        // complicated one.
+        //
+        // Convert any outer predicates to DNF, and split into disjoint key
+        // groups for the measurement queries.
+        let disjoint_predicates = if let Some(preds) = preds.as_ref() {
+            let simplified = preds.simplify_to_dnf()?;
+            debug!(
+                query_log,
+                "simplified filtering predicates to disjunctive normal form";
+                "original" => %preds,
+                "DNF" => %simplified,
+            );
+            simplified
+                .flatten_disjunctions()
+                .into_iter()
+                .map(Option::Some)
+                .collect()
+        } else {
+            // There are no outer predicates, so we have 1 disjoint key group,
+            // with no predicates.
+            vec![None]
+        };
 
-        // If there are no consistent keys, we can just return an empty table.
-        if info.is_empty() {
+        // Run each query group indepdendently, keeping the predicates and the
+        // timeseries keys corresponding to it.
+        let mut consistent_key_groups =
+            Vec::with_capacity(1 + disjoint_predicates.len());
+        let mut query_summaries =
+            Vec::with_capacity(1 + disjoint_predicates.len());
+        for predicates in disjoint_predicates.into_iter() {
+            debug!(
+                query_log,
+                "running disjoint query predicate";
+                "predicate" => predicates.as_ref().map(|s| s.to_string()).unwrap_or("none".into()),
+            );
+            let all_fields_query =
+                self.all_fields_query(&schema, predicates.as_ref())?;
+            let (summary, consistent_keys) = self
+                .select_matching_timeseries_info(&all_fields_query, &schema)
+                .await?;
+            debug!(
+                query_log,
+                "fetched information for matching timeseries keys";
+                "n_keys" => consistent_keys.len(),
+            );
+            query_summaries.push(summary);
+
+            // If there are no consistent keys, move to the next independent
+            // query chunk.
+            if consistent_keys.is_empty() {
+                continue;
+            }
+
+            // Push the disjoint filter itself, plus the keys consistent with
+            // it.
+            consistent_key_groups
+                .push(ConsistentKeyGroup { predicates, consistent_keys });
+        }
+
+        // If there are no consistent keys _at all_, we can just return an empty
+        // table.
+        if consistent_key_groups.is_empty() {
             let result = OxqlResult {
                 query_id,
                 total_duration: query_start.elapsed(),
@@ -527,7 +470,7 @@ impl Client {
             return Ok(result);
         }
 
-        // Fetch the consistent measurements for this timeseries.
+        // Fetch the consistent measurements for this timeseries, by key group.
         //
         // We'll keep track of all the measurements for this timeseries schema,
         // organized by timeseries key. That's because we fetch all consistent
@@ -537,8 +480,7 @@ impl Client {
             .select_matching_samples(
                 query_log,
                 &schema,
-                preds.as_ref(),
-                &info,
+                &consistent_key_groups,
                 total_rows_fetched,
             )
             .await?;
@@ -592,8 +534,7 @@ impl Client {
         &self,
         query_log: &Logger,
         schema: &TimeseriesSchema,
-        preds: Option<&oxql::ast::table_ops::filter::Filter>,
-        info: &BTreeMap<TimeseriesKey, (Target, Metric)>,
+        consistent_key_groups: &[ConsistentKeyGroup],
         total_rows_fetched: &mut u64,
     ) -> Result<(QuerySummary, BTreeMap<TimeseriesKey, oxql::Timeseries>), Error>
     {
@@ -602,8 +543,7 @@ impl Client {
         let mut measurements_by_key: BTreeMap<_, Vec<_>> = BTreeMap::new();
         let measurements_query = self.measurements_query(
             schema,
-            preds,
-            info.keys(),
+            consistent_key_groups,
             total_rows_fetched,
         )?;
         let mut n_measurements: u64 = 0;
@@ -633,6 +573,18 @@ impl Client {
             total_rows_fetched,
             n_measurements,
         )?;
+
+        // At this point, we no longer care about the consistent_key groups. We
+        // throw away the predicates that distinguished them, and merge the
+        // timeseries information together.
+        let info = consistent_key_groups
+            .iter()
+            .map(|group| group.consistent_keys.clone())
+            .reduce(|mut acc, current| {
+                acc.extend(current);
+                acc
+            })
+            .expect("Should have at least one key-group for every query");
 
         // Remove the last measurement, returning just the keys and timeseries.
         let mut out = BTreeMap::new();
@@ -672,39 +624,74 @@ impl Client {
         Ok((summary, out))
     }
 
-    fn measurements_query<'keys>(
+    fn measurements_query(
         &self,
         schema: &TimeseriesSchema,
-        preds: Option<&oxql::ast::table_ops::filter::Filter>,
-        consistent_keys: impl ExactSizeIterator<Item = &'keys TimeseriesKey>,
+        consistent_key_groups: &[ConsistentKeyGroup],
         total_rows_fetched: &mut u64,
     ) -> Result<String, Error> {
         use std::fmt::Write;
 
+        // Build the base query, which just selects the timeseries by name based
+        // on the datum type.
+        let mut query = self.measurements_query_raw(schema.datum_type);
+        query.push_str(" WHERE timeseries_name = '");
+        write!(query, "{}", schema.timeseries_name).unwrap();
+        query.push('\'');
+
         // Filter down the fields to those which apply to the data itself, which
         // includes the timestamps and data values. The supported fields here
         // depend on the datum type.
-        let preds_for_measurements = preds
-            .map(|p| Self::rewrite_predicate_for_measurements(schema, p))
-            .transpose()?
-            .flatten();
-        let mut query = self.measurements_query_raw(schema.datum_type);
-        query.push_str(" WHERE ");
-        if let Some(preds) = preds_for_measurements {
-            query.push_str(&preds);
-            query.push_str(" AND ");
-        }
-        query.push_str("timeseries_name = '");
-        write!(query, "{}", schema.timeseries_name).unwrap();
-        query.push('\'');
-        if consistent_keys.len() > 0 {
-            query.push_str(" AND timeseries_key IN (");
-            query.push_str(
-                &consistent_keys
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
+        //
+        // We join all the consistent key groups with OR, which mirrors how they
+        // were split originally.
+        let all_predicates = consistent_key_groups
+            .iter()
+            .map(|group| {
+                // Write out the predicates on the measurements themselves,
+                // which really refers to the timestamps (and possibly start
+                // times).
+                let maybe_predicates = group
+                    .predicates
+                    .as_ref()
+                    .map(|preds| {
+                        Self::rewrite_predicate_for_measurements(schema, preds)
+                    })
+                    .transpose()?
+                    .flatten();
+
+                // Push the predicate that selects the timeseries keys, which
+                // are unique to this group.
+                let maybe_key_set = if group.consistent_keys.len() > 0 {
+                    let mut chunk = String::from("timeseries_key IN (");
+                    let keys = group
+                        .consistent_keys
+                        .keys()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    chunk.push_str(&keys);
+                    chunk.push(')');
+                    Some(chunk)
+                } else {
+                    None
+                };
+
+                let chunk = match (maybe_predicates, maybe_key_set) {
+                    (Some(preds), None) => preds,
+                    (None, Some(key_set)) => key_set,
+                    (Some(preds), Some(key_set)) => {
+                        format!("({preds} AND {key_set})")
+                    }
+                    (None, None) => String::new(),
+                };
+                Ok(chunk)
+            })
+            .collect::<Result<Vec<_>, Error>>()?
+            .join(" OR ");
+        if !all_predicates.is_empty() {
+            query.push_str(" AND (");
+            query.push_str(&all_predicates);
             query.push(')');
         }
 

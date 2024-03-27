@@ -48,7 +48,7 @@ impl core::str::FromStr for Filter {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         crate::oxql::ast::grammar::query_parser::filter_expr(s)
-            .context("Invalid filter expression")
+            .map_err(|e| anyhow::anyhow!("invalid filter expression: {e}"))
     }
 }
 
@@ -58,10 +58,38 @@ impl Filter {
         Self { negated: !self.negated, ..self.clone() }
     }
 
+    /// Split the filter at top-level disjunctions.
+    ///
+    /// This is likely only useful after simplifying to DNF with
+    /// `simplify_to_dnf()`.
+    pub fn flatten_disjunctions(&self) -> Vec<Self> {
+        let mut out = vec![];
+        self.flatten_disjunctions_inner(&mut out);
+        out
+    }
+
+    fn flatten_disjunctions_inner(&self, dis: &mut Vec<Self>) {
+        // Recursion is only needed if this is an OR expression. In that case,
+        // we split the left and push it, and then recurse on the right.
+        if let FilterExpr::Compound(CompoundFilter {
+            left,
+            op: LogicalOp::Or,
+            right,
+        }) = &self.expr
+        {
+            dis.push(*left.clone());
+            right.flatten_disjunctions_inner(dis);
+        } else {
+            // It's not an OR expression, or it is a simple filter expression.
+            // In either case, just push it directly, withouth recursing.
+            dis.push(self.clone());
+        }
+    }
+
     /// Simplfy a filter expression to disjunctive normal form (DNF).
     ///
     /// Disjunctive normal form is one of a few canonical ways of writing a
-    /// boolean expression. It simplifies it to a disjunction of conjunctions,
+    /// boolean expression. It simplifies to a disjunction of conjunctions,
     /// i.e., only has terms like `(a && b) || (c && d) || ...`.
     ///
     /// This method exists for the purposes of creating _independent_ pieces of
@@ -103,7 +131,8 @@ impl Filter {
         // This makes me really nervous, so I'm adding an escape hatch that we
         // only allow a few iterations. If we've not simplified within that,
         // we'll just declare the expression too complicated to handle.
-        for _ in 0..8 {
+        const EXPR_COMPLEXITY_LIMIT: usize = 6;
+        for _ in 0..EXPR_COMPLEXITY_LIMIT {
             let out_ = out.simplify_to_dnf_inner()?;
             if out_ == out {
                 return Ok(out_);
