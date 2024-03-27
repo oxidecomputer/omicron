@@ -1233,7 +1233,7 @@ mod test {
             &opctx,
             sled_id,
             PhysicalDiskKind::U2,
-            format!("fake serial"),
+            "fake serial".to_string(),
         )
         .await;
 
@@ -1331,7 +1331,7 @@ mod test {
             &opctx,
             sled_id,
             PhysicalDiskKind::U2,
-            format!("fake serial"),
+            "fake serial".to_string(),
         )
         .await;
 
