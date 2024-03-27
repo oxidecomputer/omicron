@@ -1967,7 +1967,7 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
 
         VerifyEndpoint {
             url: &HARDWARE_DISK_URL,
-            visibility: Visibility::Public,
+            visibility: Visibility::Protected,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![AllowedMethod::Get],
         },
