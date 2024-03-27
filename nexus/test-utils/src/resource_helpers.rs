@@ -744,7 +744,7 @@ impl DiskTest {
 
         let disk_identity = DiskIdentity {
             vendor: "test-vendor".into(),
-            serial: "test-serial".into(),
+            serial: format!("totally-unique-serial: {}", physical_disk_id),
             model: "test-model".into(),
         };
 
