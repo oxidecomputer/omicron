@@ -15,6 +15,7 @@ base64.workspace = true
 bb8.workspace = true
 camino.workspace = true
 chrono.workspace = true
+const_format.workspace = true
 cookie.workspace = true
 diesel.workspace = true
 diesel-dtrace.workspace = true
