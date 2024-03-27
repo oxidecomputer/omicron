@@ -28,6 +28,8 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
                                                                                                 
 *  sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9: zones at generation: 2                            
 !   warning: generation should have changed                                                     
+    removed zones:                                                                              
+-    crucible       4f1ce8a2-d3a5-4a38-be4c-9817de52db37   in service    fd00:1122:3344:105::2c 
     modified zones:                                                                             
 *    crucible 19fbc4f8-a683-4f22-8f5a-e74782b935be:                                             
 *     disposition:  in service -> quiesced                                                      
@@ -40,7 +42,6 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
       disposition:  in service (unchanged)                                                      
       underlay IP:  fd00:1122:3344:105::22 (unchanged)                                          
     unchanged zones:                                                                            
-     crucible       4f1ce8a2-d3a5-4a38-be4c-9817de52db37   in service    fd00:1122:3344:105::2c 
      crucible       6b53ab2e-d98c-485f-87a3-4d5df595390f   in service    fd00:1122:3344:105::27 
      crucible       93b137a1-a1d6-4b5b-b2cb-21a9f11e2883   in service    fd00:1122:3344:105::23 
      crucible       9f0abbad-dbd3-4d43-9675-78092217ffd9   in service    fd00:1122:3344:105::25 

@@ -783,7 +783,7 @@ impl<'diff> fmt::Display for OmicronZonesDiffDisplay<'diff> {
         writeln!(f, "\n{}\n", table_display::zone_table_underlined())?;
         writeln!(f, "{}", self.make_zone_diff_table())?;
 
-        writeln!(f, "\n{}", table_display::metadata_heading())?;
+        writeln!(f, "\n{}", table_display::metadata_diff_heading())?;
         writeln!(f, "{}", self.make_metadata_diff_table())?;
 
         Ok(())
@@ -1605,7 +1605,7 @@ mod table_display {
     // this needs to be 3 columns wide rather than 4.
     const ZONE_INDENT: &str = "   ";
     const CHANGE_TABLE_INDENT: &str = "     ";
-    const METADATA_INDENT: &str = "    ";
+    const METADATA_INDENT: &str = "  ";
     const METADATA_DIFF_INDENT: &str = "   ";
 
     const ADDED_PREFIX: char = '+';
@@ -1659,6 +1659,10 @@ mod table_display {
     }
 
     pub(super) fn metadata_heading() -> String {
+        format!("{METADATA_HEADING}:")
+    }
+
+    pub(super) fn metadata_diff_heading() -> String {
         format!("{H1_INDENT}{METADATA_HEADING}:")
     }
 

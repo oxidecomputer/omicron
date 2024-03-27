@@ -93,9 +93,9 @@ comment:
     nexus          d0095508-bdb8-4faf-b091-964276a20b15   in service    fd00:1122:3344:101::31 
     nexus          ff422442-4b31-4ade-a11a-9e5a25f0404c   in service    fd00:1122:3344:101::2f 
 
-  METADATA:
-    created by:            test_blueprint2         
-    created at:            1970-01-01T00:00:00.000Z
-    comment:               (none)                  
-    internal DNS version:  1                       
-    external DNS version:  1                       
+METADATA:
+  created by:            test_blueprint2         
+  created at:            1970-01-01T00:00:00.000Z
+  comment:               (none)                  
+  internal DNS version:  1                       
+  external DNS version:  1                       

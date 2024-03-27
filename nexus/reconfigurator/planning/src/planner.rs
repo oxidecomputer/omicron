@@ -896,30 +896,42 @@ mod test {
         //   generation staying the same (the latter should produce a warning)
         let mut blueprint2a = blueprint2.clone();
 
-        let mut changed_crucible_zone = false;
+        enum NextCrucibleMutate {
+            Modify,
+            Remove,
+            Done,
+        }
+        let mut next = NextCrucibleMutate::Modify;
 
         // Leave the non-provisionable sled's generation alone.
-        for zone in &mut blueprint2a
+        let zones = &mut blueprint2a
             .blueprint_zones
             .get_mut(&nonprovisionable_sled_id)
             .unwrap()
-            .zones
-        {
+            .zones;
+
+        zones.retain_mut(|zone| {
             if let OmicronZoneType::Nexus { internal_address, .. } =
                 &mut zone.config.zone_type
             {
                 // Change one of these params to ensure that the diff output
                 // makes sense.
                 *internal_address = format!("{internal_address}foo");
+                true
             } else if let OmicronZoneType::Crucible { .. } =
                 zone.config.zone_type
             {
-                // Only change one crucible zone to see how other zones render.
-                if changed_crucible_zone {
-                    continue;
-                } else {
-                    zone.disposition = BlueprintZoneDisposition::Quiesced;
-                    changed_crucible_zone = true;
+                match next {
+                    NextCrucibleMutate::Modify => {
+                        zone.disposition = BlueprintZoneDisposition::Quiesced;
+                        next = NextCrucibleMutate::Remove;
+                        true
+                    }
+                    NextCrucibleMutate::Remove => {
+                        next = NextCrucibleMutate::Done;
+                        false
+                    }
+                    NextCrucibleMutate::Done => true,
                 }
             } else if let OmicronZoneType::InternalNtp { .. } =
                 &mut zone.config.zone_type
@@ -928,8 +940,11 @@ mod test {
                 let mut segments = zone.config.underlay_address.segments();
                 segments[0] += 1;
                 zone.config.underlay_address = segments.into();
+                true
+            } else {
+                true
             }
-        }
+        });
 
         let expunged_zones =
             blueprint2a.blueprint_zones.get_mut(&expunged_sled_id).unwrap();
