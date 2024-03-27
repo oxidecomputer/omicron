@@ -304,27 +304,8 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 .map(|u| u.to_string())
                 .unwrap_or_else(|| String::from("<none>"))
         )?;
-        writeln!(
-            f,
-            "created by {}{}",
-            b.creator,
-            if b.creator.parse::<Uuid>().is_ok() {
-                " (likely a Nexus instance)"
-            } else {
-                ""
-            }
-        )?;
-        writeln!(
-            f,
-            "created at {}",
-            humantime::format_rfc3339_millis(b.time_created.into(),)
-        )?;
-        writeln!(f, "internal DNS version: {}", b.internal_dns_version)?;
-        writeln!(f, "external DNS version: {}", b.external_dns_version)?;
-        writeln!(f, "comment: {}", b.comment)?;
 
-        writeln!(f, "\n{}\n", table_display::zone_table_underlined())?;
-        writeln!(f, "{}", self.make_zone_table())?;
+        writeln!(f, "\n{}", self.make_zone_table())?;
 
         writeln!(f, "\n{}", table_display::metadata_heading())?;
         writeln!(f, "{}", self.make_metadata_table())?;
@@ -780,8 +761,7 @@ impl<'diff> fmt::Display for OmicronZonesDiffDisplay<'diff> {
             }
         }
 
-        writeln!(f, "\n{}\n", table_display::zone_table_underlined())?;
-        writeln!(f, "{}", self.make_zone_diff_table())?;
+        writeln!(f, "\n{}", self.make_zone_diff_table())?;
 
         writeln!(f, "\n{}", table_display::metadata_diff_heading())?;
         writeln!(f, "{}", self.make_metadata_diff_table())?;
@@ -1589,7 +1569,6 @@ mod table_display {
     const DISPOSITION: &str = "disposition";
     const UNDERLAY_IP: &str = "underlay IP";
     const STATUS: &str = "status";
-    const ZONE_TABLE_HEADING: &str = "ZONE TABLE";
     const REMOVED_SLEDS_HEADING: &str = "REMOVED SLEDS";
     const MODIFIED_SLEDS_HEADING: &str = "MODIFIED SLEDS";
     const UNCHANGED_SLEDS_HEADING: &str = "UNCHANGED SLEDS";
@@ -1632,16 +1611,6 @@ mod table_display {
             UNDERLAY_IP.to_string(),
             STATUS.to_string(),
         ]
-    }
-
-    fn double_underline(prefix: &str, heading: &str) -> String {
-        // We just add a newline and the same number of equals signs as the
-        // header. Header text is always ASCII, so using .len() is fine.
-        format!("{prefix}{heading}\n{prefix}{}", "=".repeat(heading.len()))
-    }
-
-    pub(super) fn zone_table_underlined() -> String {
-        double_underline(H1_INDENT, ZONE_TABLE_HEADING)
     }
 
     pub(super) fn metadata_heading() -> String {

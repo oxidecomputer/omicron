@@ -1,8 +1,5 @@
-from: collection 9605c9b5-aaca-4bac-93be-c4be7bb96d5a
+from: collection fe998b63-0a45-44c4-abf4-776e93678e3d
 to:   blueprint  9d2c007b-46f1-4ff2-8b4c-8a5767030f76
-
-  ZONE TABLE
-  ==========
 
   --------------------------------------------------------------------------------------------------------
      zone type      zone ID                                disposition   underlay IP              status  

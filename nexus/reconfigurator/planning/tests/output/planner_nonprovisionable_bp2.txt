@@ -1,13 +1,5 @@
 blueprint  9f71f5d3-a272-4382-9154-6ea2e171a6c6
 parent:    55502b1b-e255-438b-a16a-2680a4b5f962
-created by test_blueprint2
-created at 1970-01-01T00:00:00.000Z
-internal DNS version: 1
-external DNS version: 1
-comment: 
-
-  ZONE TABLE
-  ==========
 
   ----------------------------------------------------------------------------------------------
     zone type      zone ID                                disposition   underlay IP             
