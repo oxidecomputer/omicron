@@ -2042,8 +2042,8 @@ impl super::Nexus {
         let (closed_tx, mut closed_rx) = tokio::sync::oneshot::channel::<()>();
 
         let mut jh = tokio::spawn(async move {
-            // medium-sized websocket binary frame
-            let mut read_buffer = vec![0u8; 65536];
+            // big enough for 1024x768 32bpp and then some
+            let mut read_buffer = vec![0u8; 4 * 1024 * 1024];
             loop {
                 tokio::select! {
                     _ = &mut closed_rx => break,
