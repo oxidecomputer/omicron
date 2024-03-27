@@ -5,7 +5,7 @@
 #: target = "helios-2.0"
 #: output_rules = [
 #:	"=/work/manifest*.toml",
-#:	"=/work/repo-*.zip.part*",
+#:	"=/work/repo-*.zip",
 #:	"=/work/repo-*.zip.sha256.txt",
 #: ]
 #: access_repos = [
@@ -23,13 +23,8 @@
 #:
 #: [[publish]]
 #: series = "rot-all"
-#: name = "repo.zip.parta"
-#: from_output = "/work/repo-rot-all.zip.parta"
-#:
-#: [[publish]]
-#: series = "rot-all"
-#: name = "repo.zip.partb"
-#: from_output = "/work/repo-rot-all.zip.partb"
+#: name = "repo.zip"
+#: from_output = "/work/repo-rot-all.zip"
 #:
 #: [[publish]]
 #: series = "rot-all"
@@ -201,12 +196,3 @@ add_hubris_artifacts  prod/rel     cert-prod-rel-v1.0.7
 # Build the TUF ZIP.
 /work/tufaceous assemble --no-generate-key /work/manifest.toml /work/repo-rot-all.zip
 digest -a sha256 /work/repo-rot-all.zip > /work/repo-rot-all.zip.sha256.txt
-
-#
-# XXX: There are some issues downloading Buildomat artifacts > 1 GiB, see
-# oxidecomputer/buildomat#36.
-#
-split -a 1 -b 1024m /work/repo-rot-all.zip /work/repo-rot-all.zip.part
-rm /work/repo-rot-all.zip
-# Ensure the build doesn't fail if the repo gets smaller than 1 GiB.
-touch /work/repo-rot-all.zip.partb
