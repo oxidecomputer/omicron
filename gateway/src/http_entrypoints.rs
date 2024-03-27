@@ -310,7 +310,11 @@ struct UpdatePreparationProgress {
     JsonSchema,
 )]
 pub struct SpSensorReading {
-    /// SP-centric timestamp.
+    /// SP-centric timestamp of when `result` was recorded from this sensor.
+    ///
+    /// Currently this value represents "milliseconds since the last SP boot"
+    /// and is primarily useful as a delta between sensors on this SP (assuming
+    /// no reboot in between). The meaning could change with future SP releases.
     pub timestamp: u64,
     /// Value (or error) from the sensor.
     pub result: SpSensorReadingResult,
@@ -679,7 +683,7 @@ async fn sp_startup_options_set(
 /// Sensor IDs come from the host topo tree.
 #[endpoint {
     method = GET,
-    path = "/sp/{type}/{slot}/sensor/value/{sensor_id}",
+    path = "/sp/{type}/{slot}/sensor/{sensor_id}/value",
 }]
 async fn sp_sensor_read_value(
     rqctx: RequestContext<Arc<ServerContext>>,

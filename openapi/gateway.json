@@ -1300,7 +1300,7 @@
         }
       }
     },
-    "/sp/{type}/{slot}/sensor/value/{sensor_id}": {
+    "/sp/{type}/{slot}/sensor/{sensor_id}/value": {
       "get": {
         "summary": "Read the current value of a sensor by ID",
         "description": "Sensor IDs come from the host topo tree.",
@@ -2857,7 +2857,7 @@
             ]
           },
           "timestamp": {
-            "description": "SP-centric timestamp.",
+            "description": "SP-centric timestamp of when `result` was recorded from this sensor.\n\nCurrently this value represents \"milliseconds since the last SP boot\" and is primarily useful as a delta between sensors on this SP (assuming no reboot in between). The meaning could change with future SP releases.",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
