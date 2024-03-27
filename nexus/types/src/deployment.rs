@@ -101,14 +101,17 @@ impl SledResources {
     }
 }
 
-/// Additional inputs to the Reconfigurator planner
+/// Policy and database inputs to the Reconfigurator planner
 ///
 /// The primary inputs to the planner are the parent (either a parent blueprint
-/// or an inventory collection) and the current [`Policy`]. This type holds
-/// supplementary (but necessary) additional information the planner needs, such
-/// as internal state from CRDB.
+/// or an inventory collection) and this structure. This type holds the
+/// fleet-wide policy as well as any additional information fetched from CRDB
+/// that the planner needs to make decisions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningInput {
+    /// fleet-wide policy
+    pub policy: Policy,
+
     /// external IPs allocated to services
     pub service_external_ips: BTreeMap<TypedUuid<ServiceKind>, ExternalIp>,
 
