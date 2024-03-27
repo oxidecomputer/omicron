@@ -1055,7 +1055,6 @@ mod table_display {
     use crate::sectioned_table::StSectionBuilder;
     use tabled::builder::Builder;
     use tabled::settings::object::Columns;
-    use tabled::settings::Border;
     use tabled::settings::Modify;
     use tabled::settings::Padding;
     use tabled::settings::Style;
@@ -1065,7 +1064,7 @@ mod table_display {
         pub(super) fn make_zone_table(&self) -> Table {
             let blueprint_zones = &self.blueprint.blueprint_zones;
             let mut builder = StBuilder::new();
-            builder.push_record(first_row());
+            builder.push_header_row(header_row());
 
             for (sled_id, sled_zones) in blueprint_zones {
                 let heading = format!(
@@ -1087,16 +1086,14 @@ mod table_display {
                         if section.is_empty() {
                             section.push_nested_heading(
                                 SectionSpacing::IfNotFirst,
-                                format!("{ZONE_HEAD_INDENT}{NO_ZONES}"),
+                                format!("{ZONE_HEAD_INDENT}{NO_ZONES_PARENS}"),
                             );
                         }
                     },
                 );
             }
 
-            let mut table = builder.build();
-            apply_table_settings(&mut table);
-            table
+            builder.build()
         }
 
         pub(super) fn make_metadata_table(&self) -> Table {
@@ -1121,7 +1118,7 @@ mod table_display {
             ]);
 
             let comment = if self.blueprint.comment.is_empty() {
-                NONE.to_string()
+                NONE_PARENS.to_string()
             } else {
                 self.blueprint.comment.clone()
             };
@@ -1157,9 +1154,39 @@ mod table_display {
             // Add the unchanged prefix to the zone indent since the first
             // column will be used as the prefix.
             let mut builder = StBuilder::new();
-            builder.push_record(first_row());
+            builder.push_header_row(diff_header_row());
 
-            // Print out the whole sled for removed sleds.
+            // The order is:
+            //
+            // 1. Unchanged
+            // 2. Removed
+            // 3. Modified
+            // 4. Added
+            //
+            // The idea behind the order is to (a) group all changes together
+            // and (b) put changes towards the bottom, so people have to scroll
+            // back less.
+            //
+            // Zones within a modified sled follow the same order. If you're
+            // changing the order here, make sure to keep that in sync.
+
+            // First, unchanged sleds.
+            builder.make_section(
+                SectionSpacing::Always,
+                unchanged_sleds_heading(),
+                |section| {
+                    for (sled_id, sled_zones) in diff.sleds_unchanged() {
+                        add_whole_sled_records(
+                            sled_id,
+                            sled_zones,
+                            WholeSledKind::Unchanged,
+                            section,
+                        );
+                    }
+                },
+            );
+
+            // Then, removed sleds.
             builder.make_section(
                 SectionSpacing::Always,
                 removed_sleds_heading(),
@@ -1187,23 +1214,7 @@ mod table_display {
                 },
             );
 
-            // Then unchanged sleds.
-            builder.make_section(
-                SectionSpacing::Always,
-                unchanged_sleds_heading(),
-                |section| {
-                    for (sled_id, sled_zones) in diff.sleds_unchanged() {
-                        add_whole_sled_records(
-                            sled_id,
-                            sled_zones,
-                            WholeSledKind::Unchanged,
-                            section,
-                        );
-                    }
-                },
-            );
-
-            // Print out the whole sled for added sleds.
+            // Finally, added sleds.
             builder.make_section(
                 SectionSpacing::Always,
                 added_sleds_heading(),
@@ -1219,9 +1230,7 @@ mod table_display {
                 },
             );
 
-            let mut table = builder.build();
-            apply_table_settings(&mut table);
-            table
+            builder.build()
         }
 
         pub(super) fn make_metadata_diff_table(&self) -> Table {
@@ -1314,21 +1323,29 @@ mod table_display {
             kind.prefix(),
             sled_zones.generation,
         );
+        let prefix = kind.prefix();
+        let status = kind.status();
         section.make_subsection(SectionSpacing::Always, heading, |s2| {
             // Also add another section for zones.
-            s2.make_subsection(
-                SectionSpacing::Never,
-                kind.zones_heading(),
-                |s3| {
-                    for zone in &sled_zones.zones {
-                        add_zone_record(
-                            format!("{}{ZONE_INDENT}", kind.prefix()),
+            for zone in &sled_zones.zones {
+                match status {
+                    Some(status) => {
+                        add_zone_record_with_status(
+                            format!("{prefix}{ZONE_INDENT}"),
                             zone,
-                            s3,
+                            status,
+                            s2,
                         );
                     }
-                },
-            );
+                    None => {
+                        add_zone_record(
+                            format!("{prefix}{ZONE_INDENT}"),
+                            zone,
+                            s2,
+                        );
+                    }
+                }
+            }
         });
     }
 
@@ -1366,61 +1383,53 @@ mod table_display {
                 s2.push_nested_heading(SectionSpacing::Never, warning);
             }
 
-            // First, removed zones.
-            s2.make_subsection(
-                SectionSpacing::Never,
-                removed_zones_heading(),
-                |s3| {
-                    for zone in modified.zones_removed() {
-                        add_zone_record(
-                            format!("{REMOVED_PREFIX}{ZONE_INDENT}"),
-                            zone,
-                            s3,
-                        );
-                    }
-                },
-            );
+            // The order is:
+            //
+            // 1. Unchanged
+            // 2. Removed
+            // 3. Modified
+            // 4. Added
+            //
+            // The idea behind the order is to (a) group all changes together
+            // and (b) put changes towards the bottom, so people have to scroll
+            // back less.
+            //
+            // Sleds follow the same order. If you're changing the order here,
+            // make sure to keep that in sync.
 
-            // Then, changed zones.
-            s2.make_subsection(
-                SectionSpacing::Never,
-                modified_zones_heading(),
-                |s3| {
-                    for zone_changed in modified.zones_modified() {
-                        add_zone_change_table(zone_changed, s3);
-                    }
-                },
-            );
+            // First, unchanged zones.
+            for zone_unchanged in modified.zones_unchanged() {
+                add_zone_record(
+                    format!("{UNCHANGED_PREFIX}{ZONE_INDENT}"),
+                    &zone_unchanged.zone_before,
+                    s2,
+                );
+            }
 
-            // Then, unchanged zones.
-            s2.make_subsection(
-                SectionSpacing::Never,
-                unchanged_zones_heading(),
-                |s3| {
-                    for zone_unchanged in modified.zones_unchanged() {
-                        add_zone_record(
-                            format!("{UNCHANGED_PREFIX}{ZONE_INDENT}"),
-                            &zone_unchanged.zone_before,
-                            s3,
-                        );
-                    }
-                },
-            );
+            // Then, removed zones.
+            for zone in modified.zones_removed() {
+                add_zone_record_with_status(
+                    format!("{REMOVED_PREFIX}{ZONE_INDENT}"),
+                    zone,
+                    REMOVED,
+                    s2,
+                );
+            }
+
+            // Then, modified zones.
+            for zone_modified in modified.zones_modified() {
+                add_modified_zone_records(zone_modified, s2);
+            }
 
             // Finally, added zones.
-            s2.make_subsection(
-                SectionSpacing::Never,
-                added_zones_heading(),
-                |s3| {
-                    for zone in modified.zones_added() {
-                        add_zone_record(
-                            format!("{ADDED_PREFIX}{ZONE_INDENT}"),
-                            zone,
-                            s3,
-                        );
-                    }
-                },
-            );
+            for zone in modified.zones_added() {
+                add_zone_record_with_status(
+                    format!("{ADDED_PREFIX}{ZONE_INDENT}"),
+                    zone,
+                    ADDED,
+                    s2,
+                );
+            }
 
             // If no rows were pushed, add a row indicating that for this sled.
             if s2.is_empty() {
@@ -1428,7 +1437,7 @@ mod table_display {
                     SectionSpacing::Never,
                     format!(
                         "{UNCHANGED_PREFIX}{ZONE_HEAD_INDENT}\
-                             {NO_ZONES}"
+                             {NO_ZONES_PARENS}"
                     ),
                 );
             }
@@ -1452,82 +1461,66 @@ mod table_display {
         ]);
     }
 
+    fn add_zone_record_with_status(
+        first_column: String,
+        zone: &BlueprintZoneConfig,
+        status: &str,
+        section: &mut StSectionBuilder,
+    ) {
+        section.push_record(vec![
+            first_column,
+            zone.config.zone_type.kind().to_string(),
+            zone.config.id.to_string(),
+            zone.disposition.to_string(),
+            zone.config.underlay_address.to_string(),
+            status.to_string(),
+        ]);
+    }
+
     /// Add a change table for the zone to the section.
     ///
     /// For diffs, this contains a table of changes between two zone
     /// records.
-    fn add_zone_change_table(
-        common: &DiffZoneCommon,
+    fn add_modified_zone_records(
+        modified: &DiffZoneCommon,
         section: &mut StSectionBuilder,
     ) {
-        // Create a heading containing the zone type and ID.
-        let heading = format!(
-            "{MODIFIED_PREFIX}{ZONE_INDENT} {} {}:",
-            // The zone type for before and after is always the same --
-            // this is verified at diff construction time.
-            common.zone_before.config.zone_type.kind(),
-            common.zone_before.config.id,
+        // Negative record for the before.
+        let before = &modified.zone_before;
+        let after = &modified.zone_after;
+
+        // Before record.
+        add_zone_record_with_status(
+            format!("{REMOVED_PREFIX}{ZONE_INDENT}"),
+            &before,
+            MODIFIED,
+            section,
         );
 
-        section.make_subsection(SectionSpacing::Never, heading, |section| {
-            // Push another row containing the change table.
-            let change_table =
-                make_zone_change_table(&common.zone_before, &common.zone_after);
-            section.push_spanned_row(change_table.to_string());
-        });
-    }
+        let zone_type_changed =
+            before.config.zone_type != after.config.zone_type;
 
-    fn make_zone_change_table(
-        before: &BlueprintZoneConfig,
-        after: &BlueprintZoneConfig,
-    ) -> Table {
-        let mut builder = Builder::new();
+        let record = vec![
+            format!("{ADDED_PREFIX}{ZONE_INDENT}"),
+            // First two columns of data are skipped over since they're
+            // always the same (verified at diff construction time).
+            format!(
+                " {}",
+                if zone_type_changed { SUB_NOT_LAST } else { SUB_LAST }
+            ),
+            "".to_string(),
+            after.disposition.to_string(),
+            after.config.underlay_address.to_string(),
+        ];
+        section.push_record(record);
 
-        if before.config.zone_type != after.config.zone_type {
-            // This means that the config changed.
-            builder.push_record(vec![
-                format!("{MODIFIED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                change_table_zone_type(),
-                CONFIG_CHANGED.to_string(),
-            ]);
+        // If the zone type config changed, add a spanned row indicating that.
+        if zone_type_changed {
+            section.push_spanned_row(format!(
+                "{MODIFIED_PREFIX}{ZONE_INDENT}  \
+                 {SUB_LAST} zone type config changed",
+            ));
         }
-
-        if before.disposition != after.disposition {
-            builder.push_record(vec![
-                format!("{MODIFIED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                change_table_disposition(),
-                linear_table_modified(&before.disposition, &after.disposition),
-            ]);
-        } else {
-            builder.push_record(vec![
-                format!("{UNCHANGED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                change_table_disposition(),
-                linear_table_unchanged(&before.disposition),
-            ]);
-        }
-
-        if before.config.underlay_address != after.config.underlay_address {
-            builder.push_record(vec![
-                format!("{MODIFIED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                change_table_underlay_ip(),
-                linear_table_modified(
-                    &before.config.underlay_address,
-                    &after.config.underlay_address,
-                ),
-            ]);
-        } else {
-            builder.push_record(vec![
-                format!("{UNCHANGED_PREFIX}{CHANGE_TABLE_INDENT}"),
-                change_table_underlay_ip(),
-                linear_table_unchanged(&before.config.underlay_address),
-            ]);
-        }
-
-        let mut table = builder.build();
-
-        apply_linear_table_settings(&mut table);
-
-        table
     }
 
     #[derive(Copy, Clone, Debug)]
@@ -1546,39 +1539,13 @@ mod table_display {
             }
         }
 
-        fn zones_heading(self) -> String {
+        fn status(self) -> Option<&'static str> {
             match self {
-                WholeSledKind::Removed => removed_zones_heading(),
-                WholeSledKind::Added => added_zones_heading(),
-                WholeSledKind::Unchanged => unchanged_zones_heading(),
+                WholeSledKind::Removed => Some(REMOVED),
+                WholeSledKind::Added => Some(ADDED),
+                WholeSledKind::Unchanged => None,
             }
         }
-    }
-
-    fn first_row() -> Vec<String> {
-        vec![
-            " ".to_string(),
-            underline(ZONE_TYPE),
-            underline(ZONE_ID),
-            underline(DISPOSITION),
-            underline(UNDERLAY_IP),
-        ]
-    }
-
-    fn apply_table_settings(table: &mut Table) {
-        table
-            .with(Style::blank())
-            .with(
-                // Column 0 (indent and prefix) should not have any padding.
-                Modify::new(Columns::first())
-                    .with(Padding::zero())
-                    .with(Border::empty()),
-            )
-            .with(
-                Modify::new(Columns::single(1))
-                    // Column 1 (zone type) should have no padding on the left.
-                    .with(Padding::new(0, 1, 0, 0)),
-            );
     }
 
     // Apply settings for a table which has top-to-bottom rows, and a first
@@ -1604,7 +1571,6 @@ mod table_display {
     // Due to somewhat mysterious reasons with how padding works with tabled,
     // this needs to be 3 columns wide rather than 4.
     const ZONE_INDENT: &str = "   ";
-    const CHANGE_TABLE_INDENT: &str = "     ";
     const METADATA_INDENT: &str = "  ";
     const METADATA_DIFF_INDENT: &str = "   ";
 
@@ -1615,20 +1581,22 @@ mod table_display {
     const WARNING_PREFIX: char = '!';
 
     const ARROW: &str = "->";
+    const SUB_NOT_LAST: &str = "├─";
+    const SUB_LAST: &str = "└─";
 
+    const ZONE_TYPE: &str = "zone type";
+    const ZONE_ID: &str = "zone ID";
+    const DISPOSITION: &str = "disposition";
+    const UNDERLAY_IP: &str = "underlay IP";
+    const STATUS: &str = "status";
     const ZONE_TABLE_HEADING: &str = "ZONE TABLE";
     const REMOVED_SLEDS_HEADING: &str = "REMOVED SLEDS";
     const MODIFIED_SLEDS_HEADING: &str = "MODIFIED SLEDS";
     const UNCHANGED_SLEDS_HEADING: &str = "UNCHANGED SLEDS";
     const ADDED_SLEDS_HEADING: &str = "ADDED SLEDS";
-    const REMOVED_ZONES_HEADING: &str = "removed zones";
-    const MODIFIED_ZONES_HEADING: &str = "modified zones";
-    const UNCHANGED_ZONES_HEADING: &str = "unchanged zones";
-    const ADDED_ZONES_HEADING: &str = "added zones";
-    const ZONE_TYPE: &str = "zone type";
-    const ZONE_ID: &str = "zone ID";
-    const DISPOSITION: &str = "disposition";
-    const UNDERLAY_IP: &str = "underlay IP";
+    const REMOVED: &str = "removed";
+    const ADDED: &str = "added";
+    const MODIFIED: &str = "modified";
 
     const METADATA_HEADING: &str = "METADATA";
     const CREATED_BY: &str = "created by";
@@ -1637,15 +1605,33 @@ mod table_display {
     const EXTERNAL_DNS_VERSION: &str = "external DNS version";
     const COMMENT: &str = "comment";
 
-    const UNCHANGED: &str = "(unchanged)";
-    const CONFIG_CHANGED: &str = "(config changed)";
-    const NO_ZONES: &str = "(no zones)";
-    const NONE: &str = "(none)";
+    const UNCHANGED_PARENS: &str = "(unchanged)";
+    const NO_ZONES_PARENS: &str = "(no zones)";
+    const NONE_PARENS: &str = "(none)";
 
-    fn underline(header: &str) -> String {
-        // We just add a newline and the same number of dashes as the header.
-        // Header text is always ASCII, so using .len() is fine.
-        format!("{}\n{}", header, "-".repeat(header.len()))
+    fn header_row() -> Vec<String> {
+        vec![
+            // First column is so that the header border aligns with the ZONE
+            // TABLE section header.
+            SLED_INDENT.to_string(),
+            ZONE_TYPE.to_string(),
+            ZONE_ID.to_string(),
+            DISPOSITION.to_string(),
+            UNDERLAY_IP.to_string(),
+        ]
+    }
+
+    fn diff_header_row() -> Vec<String> {
+        vec![
+            // First column is so that the header border aligns with the ZONE
+            // TABLE section header.
+            SLED_HEAD_INDENT.to_string(),
+            ZONE_TYPE.to_string(),
+            ZONE_ID.to_string(),
+            DISPOSITION.to_string(),
+            UNDERLAY_IP.to_string(),
+            STATUS.to_string(),
+        ]
     }
 
     fn double_underline(prefix: &str, heading: &str) -> String {
@@ -1686,38 +1672,6 @@ mod table_display {
         sleds_heading(UNCHANGED_PREFIX, UNCHANGED_SLEDS_HEADING)
     }
 
-    fn zones_heading(prefix: char, heading: &'static str) -> String {
-        format!("{prefix}{ZONE_HEAD_INDENT}{heading}:")
-    }
-
-    fn removed_zones_heading() -> String {
-        zones_heading(UNCHANGED_PREFIX, REMOVED_ZONES_HEADING)
-    }
-
-    fn added_zones_heading() -> String {
-        zones_heading(UNCHANGED_PREFIX, ADDED_ZONES_HEADING)
-    }
-
-    fn modified_zones_heading() -> String {
-        zones_heading(UNCHANGED_PREFIX, MODIFIED_ZONES_HEADING)
-    }
-
-    fn unchanged_zones_heading() -> String {
-        zones_heading(UNCHANGED_PREFIX, UNCHANGED_ZONES_HEADING)
-    }
-
-    fn change_table_zone_type() -> String {
-        linear_table_label(&ZONE_TYPE)
-    }
-
-    fn change_table_disposition() -> String {
-        linear_table_label(&DISPOSITION)
-    }
-
-    fn change_table_underlay_ip() -> String {
-        linear_table_label(&UNDERLAY_IP)
-    }
-
     fn metadata_table_internal_dns() -> String {
         linear_table_label(&INTERNAL_DNS_VERSION)
     }
@@ -1738,6 +1692,6 @@ mod table_display {
     }
 
     fn linear_table_unchanged(value: &dyn fmt::Display) -> String {
-        format!("{value} {UNCHANGED}")
+        format!("{value} {UNCHANGED_PARENS}")
     }
 }

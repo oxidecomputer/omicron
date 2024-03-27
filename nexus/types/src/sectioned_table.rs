@@ -7,10 +7,18 @@
 //! This could live in its own crate (within omicron, or even on crates.io),
 //! but is here for now.
 
+use std::collections::HashSet;
+use std::iter;
+
 use tabled::builder::Builder;
+use tabled::grid::config::Border;
+use tabled::settings::object::Columns;
+use tabled::settings::object::Object;
+use tabled::settings::object::Rows;
 use tabled::settings::span::ColumnSpan;
 use tabled::settings::Modify;
 use tabled::settings::Padding;
+use tabled::settings::Style;
 use tabled::Table;
 
 /// A sectioned table.
@@ -29,7 +37,11 @@ use tabled::Table;
 #[derive(Debug)]
 pub(crate) struct StBuilder {
     builder: Builder,
+    // Rows that are marked off with ---- on both sides.
+    header_rows: Vec<usize>,
+    // Heading rows that span all columns.
     headings: Vec<(HeadingSpacing, usize)>,
+    // Other rows that span all columns.
     spanned_rows: Vec<usize>,
 }
 
@@ -37,7 +49,22 @@ impl StBuilder {
     pub(crate) fn new() -> Self {
         let builder = Builder::new();
 
-        Self { builder, headings: Vec::new(), spanned_rows: Vec::new() }
+        Self {
+            builder,
+            header_rows: Vec::new(),
+            headings: Vec::new(),
+            spanned_rows: Vec::new(),
+        }
+    }
+
+    /// Adds a header row to the table.
+    ///
+    /// This row contains column titles, along with *two* initial columns of
+    /// padding. The border will extend to the first column but not the second
+    /// one.
+    pub(crate) fn push_header_row(&mut self, row: Vec<String>) {
+        self.header_rows.push(self.builder.count_records());
+        self.push_record(row);
     }
 
     /// Adds a record to the table.
@@ -64,9 +91,40 @@ impl StBuilder {
         section.finish_with_root(self);
     }
 
-    /// Does the final build to produce a
-    pub(crate) fn build(self) -> Table {
+    /// Does the final build to produce a [`Table`].
+    pub(crate) fn build(mut self) -> Table {
+        // Insert a column between 0 and 1 to enable header borders to be
+        // properly aligned with the rest of the text.
+        self.builder.insert_column(
+            1,
+            iter::repeat("").take(self.builder.count_records()),
+        );
+
         let mut table = self.builder.build();
+        table
+            .with(Style::blank())
+            .with(
+                // Column 0 and 1 (indent/gutter) should not have any padding.
+                Modify::new(Columns::new(0..=1))
+                    .with(Padding::zero())
+                    .with(Border::empty()),
+            )
+            .with(
+                Modify::new(Columns::single(2))
+                    // Column 2 (first column of actual data) should not have
+                    // left padding.
+                    .with(Padding::new(0, 1, 0, 0)),
+            );
+        apply_normal_row_settings(
+            &mut table,
+            self.header_rows
+                .iter()
+                .copied()
+                .chain(self.headings.iter().map(|(_, i)| *i))
+                .chain(self.spanned_rows.iter().copied())
+                .collect(),
+        );
+        apply_header_row_settings(&mut table, &self.header_rows);
         apply_heading_settings(&mut table, &self.headings);
         apply_spanned_row_settings(&mut table, &self.spanned_rows);
 
@@ -167,9 +225,9 @@ impl StSectionBuilder {
             root.spanned_rows.extend(self.spanned_rows);
 
             // Push all the rows.
-            root.builder.push_record(vec![self.heading]);
+            root.push_record(vec![self.heading]);
             for row in self.rows {
-                root.builder.push_record(row);
+                root.push_record(row);
             }
         }
     }
@@ -225,11 +283,47 @@ enum HeadingSpacing {
     No,
 }
 
+fn apply_normal_row_settings(table: &mut Table, special_rows: HashSet<usize>) {
+    for row in 0..table.count_rows() {
+        if special_rows.contains(&row) {
+            continue;
+        }
+
+        table.with(
+            Modify::new((row, 0))
+                // Adjust the first column to span 2 (the extra indent).
+                .with(ColumnSpan::new(2)),
+        );
+    }
+}
+
+fn apply_header_row_settings(table: &mut Table, header_rows: &[usize]) {
+    for &hr in header_rows {
+        table.with(
+            Modify::new(Rows::single(hr).intersect(Columns::new(1..)))
+                // Column 1 onwards (everything after the initial indent) have
+                // borders.
+                .with(Border::new(
+                    // top/bottom
+                    Some('-'),
+                    Some('-'),
+                    // no left/right
+                    None,
+                    None,
+                    // corners
+                    Some('-'),
+                    Some('-'),
+                    Some('-'),
+                    Some('-'),
+                )),
+        );
+    }
+}
+
 fn apply_heading_settings(
     table: &mut Table,
     headings: &[(HeadingSpacing, usize)],
 ) {
-    let columns = table.count_columns();
     for &(kind, h) in headings {
         let padding = match kind {
             HeadingSpacing::Yes => Padding::new(0, 0, 1, 0),
@@ -239,19 +333,18 @@ fn apply_heading_settings(
         table.with(
             Modify::new((h, 0))
                 // Adjust each heading row to span the whole row.
-                .with(ColumnSpan::new(columns))
+                .with(ColumnSpan::max())
                 .with(padding),
         );
     }
 }
 
 fn apply_spanned_row_settings(table: &mut Table, spanned_rows: &[usize]) {
-    let columns = table.count_columns();
     for &sr in spanned_rows {
         table.with(
             Modify::new((sr, 0))
                 // Adjust each spanned row to span the whole row.
-                .with(ColumnSpan::new(columns)),
+                .with(ColumnSpan::max()),
         );
     }
 }
