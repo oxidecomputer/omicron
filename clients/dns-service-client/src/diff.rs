@@ -138,7 +138,7 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
         if !names_changed {
             writeln!(f, "  DNS zone: {:?} (unchanged)", zone_name,)?;
         } else {
-            writeln!(f, "~ DNS zone: {:?}: ", zone_name)?;
+            writeln!(f, "* DNS zone: {:?}: ", zone_name)?;
         }
 
         let print_records = |f: &mut std::fmt::Formatter<'_>,
@@ -148,7 +148,7 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
             for r in records.iter() {
                 writeln!(
                     f,
-                    "  {}     {}",
+                    "{}       {}",
                     prefix,
                     match r {
                         DnsRecord::A(addr) => format!("A    {}", addr),
@@ -168,7 +168,7 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
                 NameDiff::Added(name, records) => {
                     writeln!(
                         f,
-                        "  + name: {:50} (records: {})",
+                        "+   name: {:50} (records: {})",
                         name,
                         records.len()
                     )?;
@@ -177,7 +177,7 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
                 NameDiff::Removed(name, records) => {
                     writeln!(
                         f,
-                        "  - name: {:50} (records: {})",
+                        "-   name: {:50} (records: {})",
                         name,
                         records.len()
                     )?;
@@ -195,7 +195,7 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
                 NameDiff::Changed(name, records1, records2) => {
                     writeln!(
                         f,
-                        "  ~ name: {:50} (records: {} -> {})",
+                        "*   name: {:50} (records: {} -> {})",
                         name,
                         records1.len(),
                         records2.len(),
