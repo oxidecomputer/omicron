@@ -400,14 +400,14 @@ impl DnsConfigBuilder {
         self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
     }
 
+    // XXX-dap is this now unused?
     pub fn generation(&mut self, generation: Generation) {
         self.generation = generation;
     }
 
-    /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
-    /// our DNS servers) for the control plane DNS zone described up to this
-    /// point
-    pub fn build(self) -> DnsConfigParams {
+    /// Construct a `DnsConfigZone` describing the control plane zone described
+    /// up to this piont
+    pub fn build_zone(self) -> DnsConfigZone {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
             let name = Host::Sled(sled.0).dns_name();
@@ -465,13 +465,20 @@ impl DnsConfigBuilder {
             .chain(srv_records_zones)
             .collect();
 
+        DnsConfigZone { zone_name: DNS_ZONE.to_owned(), records: all_records }
+    }
+
+    /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
+    /// our DNS servers) for the control plane DNS zone described up to this
+    /// point
+    // XXX-dap is this now unused?
+    pub fn build(self) -> DnsConfigParams {
+        let generation = u64::from(self.generation);
+        let zone = self.build_zone();
         DnsConfigParams {
-            generation: u64::from(self.generation),
+            generation,
             time_created: chrono::Utc::now(),
-            zones: vec![DnsConfigZone {
-                zone_name: DNS_ZONE.to_owned(),
-                records: all_records,
-            }],
+            zones: vec![zone],
         }
     }
 }

@@ -14,7 +14,6 @@ use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
 use nexus_reconfigurator_execution::blueprint_external_dns_config;
 use nexus_reconfigurator_execution::blueprint_internal_dns_config;
-use nexus_reconfigurator_execution::blueprint_nexus_external_ips;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
@@ -60,8 +59,8 @@ struct ReconfiguratorSim {
     /// These are used to determine the contents of external DNS.
     silo_names: Vec<Name>,
 
-    /// External DNS zone names configured
-    external_dns_zone_names: Vec<String>,
+    /// External DNS zone name configured
+    external_dns_zone_name: String,
 
     log: slog::Logger,
 }
@@ -91,7 +90,7 @@ fn main() -> anyhow::Result<()> {
         external_dns: BTreeMap::new(),
         log,
         silo_names: vec!["example-silo".parse().unwrap()],
-        external_dns_zone_names: vec![String::from("oxide.example")],
+        external_dns_zone_name: String::from("oxide.example"),
     };
 
     if let Some(input_file) = cmd.input_file {
@@ -583,21 +582,6 @@ fn cmd_blueprint_plan(
     let policy = sim.system.to_policy().context("generating policy")?;
     let creator = "reconfigurator-sim";
 
-    let sleds_by_id = make_sleds_by_id(&sim)?;
-    let parent_internal_dns_version = blueprint_internal_dns_config(
-        &parent_blueprint,
-        &sleds_by_id,
-        &Default::default(),
-    )?
-    .generation;
-    let parent_external_dns_version = blueprint_external_dns_config(
-        &parent_blueprint,
-        &blueprint_nexus_external_ips(&parent_blueprint),
-        &sim.silo_names,
-        &sim.external_dns_zone_names,
-    )
-    .generation;
-
     let planner = Planner::new_based_on(
         sim.log.clone(),
         parent_blueprint,
@@ -625,20 +609,9 @@ fn cmd_blueprint_plan(
         //
         // But in this CLI, there's no execution at all.  As a result, there's
         // no way to really choose between these -- and it doesn't really
-        // matter, either.
-        //
-        // We assume here that the parent blueprint was the last thing that was
-        // executed because that's usually what people are trying to simulate
-        // when they use this tool.  Note that this is only safe because we're
-        // faking all this up and not actually executing anything.
-        Generation::from(
-            u32::try_from(parent_internal_dns_version)
-                .context("internal DNS version got too big")?,
-        ),
-        Generation::from(
-            u32::try_from(parent_external_dns_version)
-                .context("external DNS version got too big")?,
-        ),
+        // matter, either.  We'll just pick the parent blueprint's.
+        parent_blueprint.internal_dns_version,
+        parent_blueprint.external_dns_version,
         &policy,
         creator,
         collection,
@@ -703,15 +676,13 @@ fn cmd_blueprint_diff(
 
     let external_dns_config1 = blueprint_external_dns_config(
         &blueprint1,
-        &blueprint_nexus_external_ips(&blueprint1),
         &sim.silo_names,
-        &sim.external_dns_zone_names,
+        sim.external_dns_zone_name.clone(),
     );
     let external_dns_config2 = blueprint_external_dns_config(
         &blueprint2,
-        &blueprint_nexus_external_ips(&blueprint2),
         &sim.silo_names,
-        &sim.external_dns_zone_names,
+        sim.external_dns_zone_name.clone(),
     );
     let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
         .context("failed to assemble external DNS diff")?;
@@ -766,7 +737,7 @@ fn cmd_blueprint_diff_dns(
         anyhow!("no such {:?} DNS version: {}", dns_group, dns_version)
     })?;
 
-    let blueprint_dns_config = match dns_group {
+    let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
             let sleds_by_id = make_sleds_by_id(sim)?;
             blueprint_internal_dns_config(
@@ -783,13 +754,13 @@ fn cmd_blueprint_diff_dns(
         }
         CliDnsGroup::External => blueprint_external_dns_config(
             &blueprint,
-            &blueprint_nexus_external_ips(&blueprint),
             &sim.silo_names,
-            &sim.external_dns_zone_names,
+            sim.external_dns_zone_name.clone(),
         ),
     };
 
-    let dns_diff = DnsDiff::new(&existing_dns_config, &blueprint_dns_config)
+    let existing_dns_zone = existing_dns_config.sole_zone()?;
+    let dns_diff = DnsDiff::new(&existing_dns_zone, &blueprint_dns_zone)
         .context("failed to assemble DNS diff")?;
     Ok(Some(dns_diff.to_string()))
 }
@@ -824,7 +795,7 @@ fn cmd_save(
         internal_dns: sim.internal_dns.clone(),
         external_dns: sim.external_dns.clone(),
         silo_names: sim.silo_names.clone(),
-        external_dns_zone_names: sim.external_dns_zone_names.clone(),
+        external_dns_zone_names: vec![sim.external_dns_zone_name.clone()],
     };
 
     let output_path = &args.filename;
@@ -851,8 +822,8 @@ fn cmd_dns_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
 fn do_print_dns(s: &mut String, sim: &ReconfiguratorSim) {
     swriteln!(
         s,
-        "configured external DNS zone names: {}",
-        sim.external_dns_zone_names.join(", ")
+        "configured external DNS zone name: {}",
+        sim.external_dns_zone_name,
     );
     swriteln!(
         s,
@@ -1035,7 +1006,19 @@ fn cmd_load(
     sim.internal_dns = loaded.internal_dns;
     sim.external_dns = loaded.external_dns;
     sim.silo_names = loaded.silo_names;
-    sim.external_dns_zone_names = loaded.external_dns_zone_names;
+
+    let nnames = loaded.external_dns_zone_names.len();
+    if nnames > 0 {
+        if nnames > 1 {
+            swriteln!(
+                s,
+                "warn: found {} external DNS names; using only the first one",
+                nnames
+            );
+        }
+        sim.external_dns_zone_name =
+            loaded.external_dns_zone_names.into_iter().next().unwrap();
+    }
     do_print_dns(&mut s, sim);
 
     swriteln!(s, "loaded data from {:?}", input_path);

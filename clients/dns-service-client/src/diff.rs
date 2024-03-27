@@ -2,12 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::types::DnsConfigParams;
+use crate::types::DnsConfigZone;
 use crate::types::DnsRecord;
 use crate::types::Srv;
 use crate::DnsRecords;
 use anyhow::ensure;
-use anyhow::Context;
 use std::collections::BTreeSet;
 
 #[derive(Debug)]
@@ -24,22 +23,16 @@ pub struct DnsDiff<'a> {
     left: &'a DnsRecords,
     right: &'a DnsRecords,
     zone_name: &'a str,
-    left_generation: u64,
-    right_generation: u64,
 }
 
 impl<'a> DnsDiff<'a> {
-    /// Compare the DNS records contained in two sets of DNS configuration
+    /// Compare the DNS records contained in two DNS zones' configs
     ///
-    /// Both configurations are expected to contain exactly one zone and they
-    /// should have the same name.
+    /// Both zones are expected to have the same name.
     pub fn new(
-        left: &'a DnsConfigParams,
-        right: &'a DnsConfigParams,
+        left_zone: &'a DnsConfigZone,
+        right_zone: &'a DnsConfigZone,
     ) -> Result<DnsDiff<'a>, anyhow::Error> {
-        let left_zone = left.sole_zone().context("left side of diff")?;
-        let right_zone = right.sole_zone().context("right side of diff")?;
-
         ensure!(
             left_zone.zone_name == right_zone.zone_name,
             "cannot compare DNS configuration from zones with different names: \
@@ -50,8 +43,6 @@ impl<'a> DnsDiff<'a> {
             left: &left_zone.records,
             right: &right_zone.records,
             zone_name: &left_zone.zone_name,
-            left_generation: left.generation,
-            right_generation: right.generation,
         })
     }
 
@@ -144,40 +135,17 @@ impl<'a> DnsDiff<'a> {
 impl<'a> std::fmt::Display for DnsDiff<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let names_changed = !self.is_empty();
-        let generation_changed = self.left_generation != self.right_generation;
         let zone_name = &self.zone_name;
 
-        if !names_changed && !generation_changed {
-            writeln!(
-                f,
-                "  DNS zone: {:?}: generation {} (unchanged)",
-                zone_name, self.left_generation,
-            )?;
+        if !names_changed {
+            writeln!(f, "  DNS zone: {:?} (unchanged)", zone_name,)?;
             return Ok(());
         }
 
-        // Either the DNS contents (names) changed or the generation number
-        // changed.  First print a header line showing the DNS zone and any
-        // change in the generation number.
-        write!(f, "~ DNS zone: {:?}: ", zone_name)?;
+        // The DNS contents has changed.  Iterate over the names in order and
+        // print what happened with each one.
+        writeln!(f, "~ DNS zone: {:?}: ", zone_name)?;
 
-        if !generation_changed {
-            writeln!(f, "generation {}", self.left_generation)?;
-            writeln!(
-                f,
-                "  WARNING: DNS contents changed but generation number \
-                did not change."
-            )?;
-        } else {
-            writeln!(
-                f,
-                "generation {} -> {}",
-                self.left_generation, self.right_generation,
-            )?;
-        }
-
-        // Now iterate over the names in order and print what happened with each
-        // one.
         let print_records = |f: &mut std::fmt::Formatter<'_>,
                              prefix,
                              records: &[DnsRecord]|
@@ -250,92 +218,38 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
 #[cfg(test)]
 mod test {
     use super::DnsDiff;
-    use crate::types::DnsConfigParams;
     use crate::types::DnsConfigZone;
     use crate::types::DnsRecord;
-    use chrono::Utc;
     use std::collections::HashMap;
     use std::net::Ipv4Addr;
 
     const ZONE_NAME: &str = "dummy";
 
-    fn example() -> DnsConfigParams {
-        DnsConfigParams {
-            generation: 4,
-            time_created: Utc::now(),
-            zones: vec![DnsConfigZone {
-                zone_name: ZONE_NAME.to_string(),
-                records: HashMap::from([
-                    (
-                        "ex1".to_string(),
-                        vec![DnsRecord::A(Ipv4Addr::LOCALHOST)],
-                    ),
-                    (
-                        "ex2".to_string(),
-                        vec![DnsRecord::A("192.168.1.3".parse().unwrap())],
-                    ),
-                ]),
-            }],
+    fn example() -> DnsConfigZone {
+        DnsConfigZone {
+            zone_name: ZONE_NAME.to_string(),
+            records: HashMap::from([
+                ("ex1".to_string(), vec![DnsRecord::A(Ipv4Addr::LOCALHOST)]),
+                (
+                    "ex2".to_string(),
+                    vec![DnsRecord::A("192.168.1.3".parse().unwrap())],
+                ),
+            ]),
         }
     }
 
     #[test]
     fn diff_invalid() {
-        let example_empty = DnsConfigParams {
-            generation: 3,
-            time_created: Utc::now(),
-            zones: vec![],
-        };
-
-        // Configs must have at least one zone.
-        let error = DnsDiff::new(&example_empty, &example_empty)
-            .expect_err("unexpectedly succeeded comparing two empty configs");
-        assert!(
-            format!("{:#}", error).contains("expected exactly one DNS zone")
-        );
-
-        let example = example();
-        let error = DnsDiff::new(&example_empty, &example)
-            .expect_err("unexpectedly succeeded comparing an empty config");
-        assert!(
-            format!("{:#}", error).contains("expected exactly one DNS zone")
-        );
-
-        // Configs must not have more than one zone.
-        let example_multiple = DnsConfigParams {
-            generation: 3,
-            time_created: Utc::now(),
-            zones: vec![
-                DnsConfigZone {
-                    zone_name: ZONE_NAME.to_string(),
-                    records: HashMap::new(),
-                },
-                DnsConfigZone {
-                    zone_name: "two".to_string(),
-                    records: HashMap::new(),
-                },
-            ],
-        };
-        let error = DnsDiff::new(&example_multiple, &example).expect_err(
-            "unexpectedly succeeded comparing config with multiple zones",
-        );
-        assert!(
-            format!("{:#}", error).contains("expected exactly one DNS zone")
-        );
-
         // Cannot compare different zone names
-        let example_different_zone = DnsConfigParams {
-            generation: 3,
-            time_created: Utc::now(),
-            zones: vec![DnsConfigZone {
-                zone_name: format!("{}-other", ZONE_NAME),
-                records: HashMap::new(),
-            }],
+        let example_different_zone = DnsConfigZone {
+            zone_name: format!("{}-other", ZONE_NAME),
+            records: HashMap::new(),
         };
-        let error = DnsDiff::new(&example_different_zone, &example).expect_err(
-            "unexpectedly succeeded comparing configs with \
+        let error = DnsDiff::new(&example_different_zone, &example())
+            .expect_err(
+                "unexpectedly succeeded comparing configs with \
             different zone names",
-        );
+            );
         assert_eq!(
             format!("{:#}", error),
             "cannot compare DNS configuration from zones with different \
@@ -360,22 +274,18 @@ mod test {
     #[test]
     fn diff_different() {
         let example = example();
-        let example2 = DnsConfigParams {
-            generation: example.generation,
-            time_created: Utc::now(),
-            zones: vec![DnsConfigZone {
-                zone_name: ZONE_NAME.to_string(),
-                records: HashMap::from([
-                    (
-                        "ex2".to_string(),
-                        vec![DnsRecord::A("192.168.1.4".parse().unwrap())],
-                    ),
-                    (
-                        "ex3".to_string(),
-                        vec![DnsRecord::A(std::net::Ipv4Addr::LOCALHOST)],
-                    ),
-                ]),
-            }],
+        let example2 = DnsConfigZone {
+            zone_name: ZONE_NAME.to_string(),
+            records: HashMap::from([
+                (
+                    "ex2".to_string(),
+                    vec![DnsRecord::A("192.168.1.4".parse().unwrap())],
+                ),
+                (
+                    "ex3".to_string(),
+                    vec![DnsRecord::A(std::net::Ipv4Addr::LOCALHOST)],
+                ),
+            ]),
         };
 
         let diff = DnsDiff::new(&example, &example2).unwrap();
@@ -411,8 +321,6 @@ mod test {
         // Diff'ing the reverse direction exercises different cases (e.g., what
         // was added now appears as removed).  Also, the generation number
         // should really be different.
-        let example2 =
-            DnsConfigParams { generation: example.generation + 1, ..example2 };
         let diff = DnsDiff::new(&example2, &example).unwrap();
         expectorate::assert_contents(
             "tests/output/diff_example_different_reversed.out",
