@@ -130,10 +130,13 @@ async fn main() -> anyhow::Result<()> {
         base_route: "/collect".to_string(),
         interval: Duration::from_secs(10),
     };
-    let config =
-        Config { server_info, registration_address: args.nexus, dropshot, log };
+    let config = Config {
+        server_info,
+        registration_address: Some(args.nexus),
+        dropshot,
+        log,
+    };
     let server = Server::with_registry(registry, &config)
-        .await
         .context("failed to create producer")?;
     server.serve_forever().await.context("server failed")
 }

@@ -592,9 +592,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         // Set up a test metric producer server
         let producer_id = Uuid::parse_str(PRODUCER_UUID).unwrap();
-        let producer = start_producer_server(nexus_internal_addr, producer_id)
-            .await
-            .unwrap();
+        let producer =
+            start_producer_server(nexus_internal_addr, producer_id).unwrap();
         register_test_producer(&producer).unwrap();
 
         self.producer = Some(producer);
@@ -1415,7 +1414,7 @@ impl oximeter::Producer for IntegrationProducer {
 ///
 /// Actual producers can be registered with the [`register_producer`]
 /// helper function.
-pub async fn start_producer_server(
+pub fn start_producer_server(
     nexus_address: SocketAddr,
     id: Uuid,
 ) -> Result<ProducerServer, String> {
@@ -1428,12 +1427,12 @@ pub async fn start_producer_server(
         id,
         kind: ProducerKind::Service,
         address: producer_address,
-        base_route: "/collect".to_string(),
+        base_route: String::new(), // Unused, will be removed.
         interval: Duration::from_secs(1),
     };
     let config = oximeter_producer::Config {
         server_info,
-        registration_address: nexus_address,
+        registration_address: Some(nexus_address),
         dropshot: ConfigDropshot {
             bind_address: producer_address,
             ..Default::default()
@@ -1442,9 +1441,7 @@ pub async fn start_producer_server(
             level: ConfigLoggingLevel::Error,
         }),
     };
-    let server =
-        ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
-    Ok(server)
+    ProducerServer::start(&config).map_err(|e| e.to_string())
 }
 
 /// Registers an arbitrary producer with the test server.

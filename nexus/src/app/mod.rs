@@ -28,6 +28,7 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
+use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
@@ -55,7 +56,7 @@ mod instance_network;
 mod ip_pool;
 mod metrics;
 mod network_interface;
-mod oximeter;
+pub(crate) mod oximeter;
 mod probe;
 mod project;
 mod quota;
@@ -147,6 +148,9 @@ pub struct Nexus {
     /// Status of background task to populate database
     populate_status: tokio::sync::watch::Receiver<PopulateStatus>,
 
+    /// The metric producer server from which oximeter collects metric data.
+    producer_server: std::sync::Mutex<Option<ProducerServer>>,
+
     /// Client to the timeseries database.
     timeseries_client: LazyTimeseriesClient,
 
@@ -214,7 +218,7 @@ impl Nexus {
             db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
                 .await?,
         );
-        db_datastore.register_producers(&producer_registry);
+        db_datastore.register_producers(producer_registry);
 
         let my_sec_id = db::SecId::from(config.deployment.id);
         let sec_store = Arc::new(db::CockroachDbSecStore::new(
@@ -404,6 +408,7 @@ impl Nexus {
             external_server: std::sync::Mutex::new(None),
             techport_external_server: std::sync::Mutex::new(None),
             internal_server: std::sync::Mutex::new(None),
+            producer_server: std::sync::Mutex::new(None),
             populate_status,
             timeseries_client,
             updates_config: config.pkg.updates.clone(),
@@ -520,6 +525,11 @@ impl Nexus {
         Ok(nexus)
     }
 
+    /// Return the ID for this Nexus instance.
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
+
     /// Return the tunable configuration parameters, e.g. for use in tests.
     pub fn tunables(&self) -> &Tunables {
         &self.tunables
@@ -577,6 +587,7 @@ impl Nexus {
         external_server: DropshotServer,
         techport_external_server: DropshotServer,
         internal_server: DropshotServer,
+        producer_server: ProducerServer,
     ) {
         // If any servers already exist, close them.
         let _ = self.close_servers().await;
@@ -588,9 +599,13 @@ impl Nexus {
             .unwrap()
             .replace(techport_external_server);
         self.internal_server.lock().unwrap().replace(internal_server);
+        self.producer_server.lock().unwrap().replace(producer_server);
     }
 
     pub(crate) async fn close_servers(&self) -> Result<(), String> {
+        // NOTE: All these take the lock and swap out of the option immediately,
+        // because they are synchronous mutexes, which cannot be held across the
+        // await point these `close()` methods expose.
         let external_server = self.external_server.lock().unwrap().take();
         if let Some(server) = external_server {
             server.close().await?;
@@ -603,6 +618,10 @@ impl Nexus {
         let internal_server = self.internal_server.lock().unwrap().take();
         if let Some(server) = internal_server {
             server.close().await?;
+        }
+        let producer_server = self.producer_server.lock().unwrap().take();
+        if let Some(server) = producer_server {
+            server.close().await.map_err(|e| e.to_string())?;
         }
         Ok(())
     }

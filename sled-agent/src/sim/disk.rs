@@ -146,7 +146,7 @@ mod producers {
 /// See `Simulatable` for how this works.
 pub struct SimDisk {
     state: DiskStates,
-    producer: Option<oximeter_producer::Server>,
+    producer: Option<ProducerServer>,
 }
 
 // "producer" doesn't implement Debug, so we can't derive it on SimDisk.
@@ -171,12 +171,12 @@ impl SimDisk {
             id,
             kind: ProducerKind::SledAgent,
             address: producer_address,
-            base_route: "/collect".to_string(),
+            base_route: String::new(), // Unused, will be removed.
             interval: Duration::from_millis(200),
         };
         let config = oximeter_producer::Config {
             server_info,
-            registration_address: nexus_address,
+            registration_address: Some(nexus_address),
             dropshot: ConfigDropshot {
                 bind_address: producer_address,
                 ..Default::default()
@@ -186,8 +186,7 @@ impl SimDisk {
             }),
         };
         let server =
-            ProducerServer::start(&config).await.map_err(|e| e.to_string())?;
-
+            ProducerServer::start(&config).map_err(|e| e.to_string())?;
         let producer = producers::DiskProducer::new(id);
         server
             .registry()
