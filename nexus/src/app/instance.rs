@@ -173,6 +173,13 @@ enum InstanceStateChangeRequestAction {
     SendToSled(Uuid),
 }
 
+/// What is the higher level operation that is calling
+/// `instance_ensure_registered`?
+pub(crate) enum InstanceRegisterReason {
+    Start { vmm_id: Uuid },
+    Migrate { vmm_id: Uuid, target_vmm_id: Uuid },
+}
+
 impl super::Nexus {
     pub fn instance_lookup<'a>(
         &'a self,
@@ -1010,6 +1017,7 @@ impl super::Nexus {
         db_instance: &db::model::Instance,
         propolis_id: &Uuid,
         initial_vmm: &db::model::Vmm,
+        operation: InstanceRegisterReason,
     ) -> Result<(), Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
@@ -1065,8 +1073,19 @@ impl super::Nexus {
                 }
             };
 
-            let volume =
-                self.db_datastore.volume_checkout(disk.volume_id).await?;
+            let volume = self
+                .db_datastore
+                .volume_checkout(
+                    disk.volume_id,
+                    match operation {
+                        InstanceRegisterReason::Start { vmm_id } =>
+                            db::datastore::VolumeCheckoutReason::InstanceStart { vmm_id },
+                        InstanceRegisterReason::Migrate { vmm_id, target_vmm_id } =>
+                            db::datastore::VolumeCheckoutReason::InstanceMigrate { vmm_id, target_vmm_id },
+                    }
+                )
+                .await?;
+
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(slot.0),

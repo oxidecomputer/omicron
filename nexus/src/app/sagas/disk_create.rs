@@ -390,7 +390,10 @@ async fn sdc_regions_ensure(
 
                 let volume = osagactx
                     .datastore()
-                    .volume_checkout(db_snapshot.volume_id)
+                    .volume_checkout(
+                        db_snapshot.volume_id,
+                        db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+                    )
                     .await
                     .map_err(ActionError::action_failed)?;
 
@@ -433,7 +436,10 @@ async fn sdc_regions_ensure(
 
                 let volume = osagactx
                     .datastore()
-                    .volume_checkout(image.volume_id)
+                    .volume_checkout(
+                        image.volume_id,
+                        db::datastore::VolumeCheckoutReason::ReadOnlyCopy,
+                    )
                     .await
                     .map_err(ActionError::action_failed)?;
 

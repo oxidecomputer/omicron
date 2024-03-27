@@ -769,7 +769,10 @@ pub(crate) async fn call_pantry_attach_for_disk(
 
     let disk_volume = nexus
         .datastore()
-        .volume_checkout(disk.volume_id)
+        .volume_checkout(
+            disk.volume_id,
+            db::datastore::VolumeCheckoutReason::Pantry,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
