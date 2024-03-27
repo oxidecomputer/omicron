@@ -58,8 +58,7 @@ use sled_agent_client::types::InstancePutStateBody;
 use std::matches;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::Interest;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use uuid::Uuid;
 
 type SledAgentClientError =
@@ -1769,7 +1768,9 @@ impl super::Nexus {
     pub(crate) async fn instance_vnc_stream(
         &self,
         opctx: &OpContext,
-        mut client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
+        mut client_stream: WebSocketStream<
+            impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        >,
         instance_lookup: &lookup::Instance<'_>,
     ) -> Result<(), Error> {
         const VNC_PORT: u16 = 5900;
@@ -1797,7 +1798,7 @@ impl super::Nexus {
 
         match tokio::net::TcpStream::connect((propolis_ip, VNC_PORT)).await {
             Ok(propolis_conn) => {
-                Self::wrap_tcp_socket_ws(client_stream, propolis_conn)
+                Self::proxy_tcp_socket_ws(client_stream, propolis_conn)
                     .await
                     .map_err(|e| Error::internal_error(&format!("{}", e)))
             }
@@ -2029,61 +2030,45 @@ impl super::Nexus {
     /// Trivially pack data read from a TcpStream into binary websocket frames,
     /// and unpack those received from the client accordingly.
     /// NoVNC (a web VNC client) calls their version of this "websockify".
-    async fn wrap_tcp_socket_ws(
-        client_stream: WebSocketStream<impl AsyncRead + AsyncWrite + Unpin>,
+    async fn proxy_tcp_socket_ws(
+        client_stream: WebSocketStream<
+            impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        >,
         propolis_conn: tokio::net::TcpStream,
     ) -> Result<(), propolis_client::support::tungstenite::Error> {
         let (mut nexus_sink, mut nexus_stream) = client_stream.split();
+        let (mut propolis_reader, mut propolis_writer) =
+            propolis_conn.into_split();
+        let (closed_tx, mut closed_rx) = tokio::sync::oneshot::channel::<()>();
 
-        // buffered_input is Some if there's a websocket message waiting to be
-        // sent from the client to propolis.
-        let mut buffered_input = None;
-        // buffered_output is Some if there's data waiting to be sent from
-        // propolis to the client.
-        let mut buffered_output = None;
-
-        loop {
-            let nexus_read;
-            let nexus_reserve;
-            let propolis_readiness;
-
-            // TODO: come up with a less arbitrary size
-            let mut propolis_read_buffer = vec![0u8; 65536];
-
-            if buffered_input.is_some() {
-                // We already have a buffered input -- do not read any further
-                // messages from the client.
-                nexus_read = Fuse::terminated();
-                if buffered_output.is_some() {
-                    // We already have a buffered output -- do not read any
-                    // further messages from propolis.
-                    nexus_reserve = nexus_sink.reserve().fuse();
-                    propolis_readiness =
-                        propolis_conn.ready(Interest::WRITABLE).fuse();
-                } else {
-                    nexus_reserve = Fuse::terminated();
-                    // We have both a buffered input to send propolis, and an
-                    // empty output buffer to receive from it.
-                    propolis_readiness = propolis_conn
-                        .ready(Interest::READABLE | Interest::WRITABLE)
-                        .fuse();
-                }
-            } else {
-                nexus_read = nexus_stream.next().fuse();
-                if buffered_output.is_some() {
-                    // We already have a buffered output -- do not read any
-                    // further messages from propolis.
-                    nexus_reserve = nexus_sink.reserve().fuse();
-                    propolis_readiness = Fuse::terminated();
-                } else {
-                    nexus_reserve = Fuse::terminated();
-                    propolis_readiness =
-                        propolis_conn.ready(Interest::READABLE).fuse();
+        let mut jh = tokio::spawn(async move {
+            // medium-sized websocket binary frame
+            let mut read_buffer = vec![0u8; 65536];
+            loop {
+                tokio::select! {
+                    _ = &mut closed_rx => break,
+                    num_bytes_res = propolis_reader.read(&mut read_buffer) => {
+                        let Ok(num_bytes) = num_bytes_res else {
+                            let _ = nexus_sink.send(WebSocketMessage::Close(None)).await.is_ok();
+                            break;
+                        };
+                        let data = Vec::from(&read_buffer[..num_bytes]);
+                        match nexus_sink.send(WebSocketMessage::Binary(data)).await {
+                            Ok(_) => {}
+                            Err(_e) => break,
+                        }
+                    }
                 }
             }
+            Ok::<_, Error>(nexus_sink)
+        });
 
+        let mut close_frame = None;
+
+        loop {
             tokio::select! {
-                msg = nexus_read => {
+                _ = &mut jh => break,
+                msg = nexus_stream.next() => {
                     match msg {
                         None => {
                             // websocket connection to nexus client closed unexpectedly
@@ -2101,80 +2086,35 @@ impl super::Nexus {
                             // TODO: json payloads specifying client-sent metadata?
                         }
                         Some(Ok(WebSocketMessage::Binary(data))) => {
-                            debug_assert!(
-                                buffered_input.is_none(),
-                                "attempted to drop buffered_input message ({buffered_input:?})",
-                            );
-                            buffered_input = Some(data);
+                            let mut start = 0;
+                            while start < data.len() {
+                                match propolis_writer.write(&data[start..]).await {
+                                    Ok(num_bytes) => {
+                                        start += num_bytes;
+                                    }
+                                    Err(e) => {
+                                        close_frame = Some(CloseFrame {
+                                            code: CloseCode::Error,
+                                            reason: e.to_string().into(),
+                                        });
+                                        break;
+                                    }
+                                }
+                            }
                         }
                         // Frame won't exist at this level, and ping reply is handled by tungstenite
                         Some(Ok(WebSocketMessage::Frame(_) | WebSocketMessage::Ping(_) | WebSocketMessage::Pong(_))) => {}
                     }
                 }
-                result = nexus_reserve => {
-                    let permit = result?;
-                    let message = buffered_output
-                        .take()
-                        .expect("nexus_reserve is only active when buffered_output is Some");
-                    permit.send(message)?.await?;
-                }
-                result = propolis_readiness => {
-                    let ready = result?;
-                    if ready.is_readable() {
-                        match propolis_conn.try_read(&mut propolis_read_buffer) {
-                            Ok(num_bytes) => {
-                                let prev = buffered_output.replace(WebSocketMessage::Binary(
-                                    Vec::from(&propolis_read_buffer[..num_bytes])
-                                ));
-                                if prev.is_some() {
-                                    panic!("propolis_readiness is only readable when buffered_output is None");
-                                }
-                            }
-                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                // readiness event was a false-positive. ignore
-                                continue;
-                            }
-                            Err(e) => {
-                                nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
-                                    code: CloseCode::Abnormal,
-                                    reason: std::borrow::Cow::from(
-                                        "nexus: TCP connection to VNC closed unexpectedly while reading"
-                                    ),
-                                }))).await?;
-                                return Err(e.into());
-                            }
-                        }
-                    }
-                    if ready.is_writable() {
-                        let data = buffered_input
-                            .take()
-                            .expect("propolis_readiness is only writable when buffered_input is Some");
-
-                        match propolis_conn.try_write(&data) {
-                            Ok(num_bytes) => {
-                                if num_bytes == data.len() {
-                                    buffered_input = None;
-                                } else {
-                                    buffered_input = Some(Vec::from(&data[num_bytes..]));
-                                }
-                            }
-                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                                // readiness event was a false-positive. ignore
-                                continue;
-                            }
-                            Err(e) => {
-                                nexus_sink.send(WebSocketMessage::Close(Some(CloseFrame {
-                                    code: CloseCode::Abnormal,
-                                    reason: std::borrow::Cow::from(
-                                        "nexus: TCP connection to VNC closed unexpectedly while writing"
-                                    ),
-                                }))).await?;
-                                return Err(e.into());
-                            }
-                        }
-                    }
-                }
             }
+        }
+
+        let _ = closed_tx.send(()).is_ok();
+        if let Ok(Ok(mut nexus_sink)) = jh.await {
+            let _ = nexus_sink
+                .send(WebSocketMessage::Close(close_frame))
+                .await
+                .is_ok();
         }
 
         Ok(())
@@ -2426,8 +2366,11 @@ mod tests {
                 None,
             )
             .await;
-            Nexus::wrap_tcp_socket_ws(nexus_client_stream, propolis_client_conn)
-                .await
+            Nexus::proxy_tcp_socket_ws(
+                nexus_client_stream,
+                propolis_client_conn,
+            )
+            .await
         });
         let mut nexus_client_ws = WebSocketStream::from_raw_socket(
             nexus_client_conn,
