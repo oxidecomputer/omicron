@@ -3950,9 +3950,10 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         "Expected ephemeral IP to come from pool2"
     );
 
-    // added 1 snat because snat comes from default pool.
-    // https://github.com/oxidecomputer/omicron/issues/5043 is about changing that
-    assert_ip_pool_utilization(client, "pool1", 3, 5, 0, 0).await;
+    // SNAT comes from default pool, but count does not change because
+    // SNAT IPs can be shared. https://github.com/oxidecomputer/omicron/issues/5043
+    // is about getting SNAT IP from specified pool instead of default.
+    assert_ip_pool_utilization(client, "pool1", 2, 5, 0, 0).await;
 
     // ephemeral IP comes from specified pool
     assert_ip_pool_utilization(client, "pool2", 1, 5, 0, 0).await;
@@ -3973,7 +3974,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     );
 
     // pool1 unchanged
-    assert_ip_pool_utilization(client, "pool1", 3, 5, 0, 0).await;
+    assert_ip_pool_utilization(client, "pool1", 2, 5, 0, 0).await;
     // +1 snat (now that pool2 is default) and +1 ephemeral
     assert_ip_pool_utilization(client, "pool2", 3, 5, 0, 0).await;
 

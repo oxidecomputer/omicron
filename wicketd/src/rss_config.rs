@@ -560,6 +560,8 @@ fn validate_rack_network_config(
                 originate: config.originate.clone(),
             })
             .collect(),
+        //TODO(ry) bfd config in wicket
+        bfd: vec![],
     })
 }
 

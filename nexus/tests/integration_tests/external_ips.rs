@@ -654,8 +654,8 @@ async fn test_external_ip_live_attach_detach(
     }
 
     // the two instances above were deliberately not given ephemeral IPs, but
-    // they still always get SNAT IPs, so we went from 2 to 4
-    assert_ip_pool_utilization(client, "default", 4, 65536, 0, 0).await;
+    // they still always get SNAT IPs, but they share one, so we go from 2 to 3
+    assert_ip_pool_utilization(client, "default", 3, 65536, 0, 0).await;
 
     // Attach a floating IP and ephemeral IP to each instance.
     let mut recorded_ephs = vec![];
@@ -699,9 +699,9 @@ async fn test_external_ip_live_attach_detach(
         recorded_ephs.push(eph_resp);
     }
 
-    // now 6 because an ephemeral IP was added for each instance. floating IPs
+    // now 5 because an ephemeral IP was added for each instance. floating IPs
     // were attached, but they were already allocated
-    assert_ip_pool_utilization(client, "default", 6, 65536, 0, 0).await;
+    assert_ip_pool_utilization(client, "default", 5, 65536, 0, 0).await;
 
     // Detach a floating IP and ephemeral IP from each instance.
     for (instance, fip) in instances.iter().zip(&fips) {
@@ -733,8 +733,8 @@ async fn test_external_ip_live_attach_detach(
         );
     }
 
-    // 2 ephemeral go away on detachment but still 2 floating and 2 SNAT
-    assert_ip_pool_utilization(client, "default", 4, 65536, 0, 0).await;
+    // 2 ephemeral go away on detachment but still 2 floating and 1 SNAT
+    assert_ip_pool_utilization(client, "default", 3, 65536, 0, 0).await;
 
     // Finally, two kind of funny tests. There is special logic in the handler
     // for the case where the floating IP is specified by name but the instance
@@ -796,7 +796,7 @@ async fn test_external_ip_live_attach_detach(
     assert_eq!(eip_list[0].ip(), fips[1].ip);
 
     // none of that changed the number of allocated IPs
-    assert_ip_pool_utilization(client, "default", 4, 65536, 0, 0).await;
+    assert_ip_pool_utilization(client, "default", 3, 65536, 0, 0).await;
 }
 
 #[nexus_test]

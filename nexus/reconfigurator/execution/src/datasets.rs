@@ -19,11 +19,11 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeSet;
 use std::net::SocketAddrV6;
 
-/// For each crucible zone in `blueprint`, ensure that a corresponding dataset
-/// record exists in `datastore`
+/// For each crucible zone in `all_omicron_zones`, ensure that a corresponding
+/// dataset record exists in `datastore`
 ///
-/// Does not modify any existing dataset records. Returns the number of datasets
-/// inserted.
+/// Does not modify any existing dataset records. Returns the number of
+/// datasets inserted.
 pub(crate) async fn ensure_crucible_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,

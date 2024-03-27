@@ -67,6 +67,11 @@ impl OximeterArgs {
             .with(tabled::settings::Padding::new(0, 1, 0, 0))
             .to_string();
         println!("Collector ID: {}\n", info.id);
+        let last_refresh = info
+            .last_refresh
+            .map(|r| r.to_string())
+            .unwrap_or(String::from("Never"));
+        println!("Last refresh: {}\n", last_refresh);
         println!("{table}");
         Ok(())
     }

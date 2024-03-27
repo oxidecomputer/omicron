@@ -16,14 +16,13 @@ use nexus_db_queries::db::fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_queries::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::OmicronZoneType;
-use nexus_types::deployment::OmicronZonesConfig;
 use nexus_types::deployment::SourceNatConfig;
+use nexus_types::inventory::OmicronZoneConfig;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use slog::info;
 use slog::warn;
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use uuid::Uuid;
@@ -31,47 +30,45 @@ use uuid::Uuid;
 pub(crate) async fn ensure_zone_resources_allocated(
     opctx: &OpContext,
     datastore: &DataStore,
-    zones: &BTreeMap<Uuid, OmicronZonesConfig>,
+    all_omicron_zones: impl Iterator<Item = &OmicronZoneConfig>,
 ) -> anyhow::Result<()> {
     let allocator = ResourceAllocator { opctx, datastore };
 
-    for config in zones.values() {
-        for z in &config.zones {
-            match &z.zone_type {
-                OmicronZoneType::Nexus { external_ip, nic, .. } => {
-                    allocator
-                        .ensure_nexus_external_networking_allocated(
-                            z.id,
-                            *external_ip,
-                            nic,
-                        )
-                        .await?;
-                }
-                OmicronZoneType::ExternalDns { dns_address, nic, .. } => {
-                    allocator
-                        .ensure_external_dns_external_networking_allocated(
-                            z.id,
-                            dns_address,
-                            nic,
-                        )
-                        .await?;
-                }
-                OmicronZoneType::BoundaryNtp { snat_cfg, nic, .. } => {
-                    allocator
-                        .ensure_boundary_ntp_external_networking_allocated(
-                            z.id, snat_cfg, nic,
-                        )
-                        .await?;
-                }
-                OmicronZoneType::InternalNtp { .. }
-                | OmicronZoneType::Clickhouse { .. }
-                | OmicronZoneType::ClickhouseKeeper { .. }
-                | OmicronZoneType::CockroachDb { .. }
-                | OmicronZoneType::Crucible { .. }
-                | OmicronZoneType::CruciblePantry { .. }
-                | OmicronZoneType::InternalDns { .. }
-                | OmicronZoneType::Oximeter { .. } => (),
+    for z in all_omicron_zones {
+        match &z.zone_type {
+            OmicronZoneType::Nexus { external_ip, nic, .. } => {
+                allocator
+                    .ensure_nexus_external_networking_allocated(
+                        z.id,
+                        *external_ip,
+                        nic,
+                    )
+                    .await?;
             }
+            OmicronZoneType::ExternalDns { dns_address, nic, .. } => {
+                allocator
+                    .ensure_external_dns_external_networking_allocated(
+                        z.id,
+                        dns_address,
+                        nic,
+                    )
+                    .await?;
+            }
+            OmicronZoneType::BoundaryNtp { snat_cfg, nic, .. } => {
+                allocator
+                    .ensure_boundary_ntp_external_networking_allocated(
+                        z.id, snat_cfg, nic,
+                    )
+                    .await?;
+            }
+            OmicronZoneType::InternalNtp { .. }
+            | OmicronZoneType::Clickhouse { .. }
+            | OmicronZoneType::ClickhouseKeeper { .. }
+            | OmicronZoneType::CockroachDb { .. }
+            | OmicronZoneType::Crucible { .. }
+            | OmicronZoneType::CruciblePantry { .. }
+            | OmicronZoneType::InternalDns { .. }
+            | OmicronZoneType::Oximeter { .. } => (),
         }
     }
 
@@ -510,7 +507,6 @@ mod tests {
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
     use omicron_common::address::NTP_OPTE_IPV4_SUBNET;
     use omicron_common::address::NUM_SOURCE_NAT_PORTS;
-    use omicron_common::api::external::Generation;
     use omicron_common::api::external::IpNet;
     use omicron_common::api::external::MacAddr;
     use omicron_common::api::external::Vni;
@@ -619,65 +615,56 @@ mod tests {
 
         // Build the `zones` map needed by `ensure_zone_resources_allocated`,
         // with an arbitrary sled_id.
-        let mut zones = BTreeMap::new();
-        let sled_id = Uuid::new_v4();
-        zones.insert(
-            sled_id,
-            OmicronZonesConfig {
-                generation: Generation::new().next(),
-                zones: vec![
-                    OmicronZoneConfig {
-                        id: nexus_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
-                        zone_type: OmicronZoneType::Nexus {
-                            internal_address: Ipv6Addr::LOCALHOST.to_string(),
-                            external_ip: nexus_external_ip,
-                            nic: nexus_nic.clone(),
-                            external_tls: false,
-                            external_dns_servers: Vec::new(),
-                        },
-                    },
-                    OmicronZoneConfig {
-                        id: dns_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
-                        zone_type: OmicronZoneType::ExternalDns {
-                            dataset: OmicronZoneDataset {
-                                pool_name: format!("oxp_{}", Uuid::new_v4())
-                                    .parse()
-                                    .expect("bad name"),
-                            },
-                            http_address: SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
-                                0,
-                                0,
-                                0,
-                            )
-                            .to_string(),
-                            dns_address: SocketAddr::new(dns_external_ip, 0)
-                                .to_string(),
-                            nic: dns_nic.clone(),
-                        },
-                    },
-                    OmicronZoneConfig {
-                        id: ntp_id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
-                        zone_type: OmicronZoneType::BoundaryNtp {
-                            address: SocketAddr::new(dns_external_ip, 0)
-                                .to_string(),
-                            ntp_servers: Vec::new(),
-                            dns_servers: Vec::new(),
-                            domain: None,
-                            nic: ntp_nic.clone(),
-                            snat_cfg: ntp_snat,
-                        },
-                    },
-                ],
+        let zones = vec![
+            OmicronZoneConfig {
+                id: nexus_id,
+                underlay_address: Ipv6Addr::LOCALHOST,
+                zone_type: OmicronZoneType::Nexus {
+                    internal_address: Ipv6Addr::LOCALHOST.to_string(),
+                    external_ip: nexus_external_ip,
+                    nic: nexus_nic.clone(),
+                    external_tls: false,
+                    external_dns_servers: Vec::new(),
+                },
             },
-        );
+            OmicronZoneConfig {
+                id: dns_id,
+                underlay_address: Ipv6Addr::LOCALHOST,
+                zone_type: OmicronZoneType::ExternalDns {
+                    dataset: OmicronZoneDataset {
+                        pool_name: format!("oxp_{}", Uuid::new_v4())
+                            .parse()
+                            .expect("bad name"),
+                    },
+                    http_address: SocketAddrV6::new(
+                        Ipv6Addr::LOCALHOST,
+                        0,
+                        0,
+                        0,
+                    )
+                    .to_string(),
+                    dns_address: SocketAddr::new(dns_external_ip, 0)
+                        .to_string(),
+                    nic: dns_nic.clone(),
+                },
+            },
+            OmicronZoneConfig {
+                id: ntp_id,
+                underlay_address: Ipv6Addr::LOCALHOST,
+                zone_type: OmicronZoneType::BoundaryNtp {
+                    address: SocketAddr::new(dns_external_ip, 0).to_string(),
+                    ntp_servers: Vec::new(),
+                    dns_servers: Vec::new(),
+                    domain: None,
+                    nic: ntp_nic.clone(),
+                    snat_cfg: ntp_snat,
+                },
+            },
+        ];
 
         // Initialize resource allocation: this should succeed and create all
         // the relevant db records.
-        ensure_zone_resources_allocated(&opctx, datastore, &zones)
+        ensure_zone_resources_allocated(&opctx, datastore, zones.iter())
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
@@ -761,7 +748,7 @@ mod tests {
 
         // We should be able to run the function again with the same inputs, and
         // it should succeed without inserting any new records.
-        ensure_zone_resources_allocated(&opctx, datastore, &zones)
+        ensure_zone_resources_allocated(&opctx, datastore, zones.iter())
             .await
             .with_context(|| format!("{zones:#?}"))
             .unwrap();
@@ -814,8 +801,8 @@ mod tests {
         let bogus_ip = external_ips.next().expect("exhausted external_ips");
         for mutate_zones_fn in [
             // non-matching IP on Nexus
-            (&|config: &mut OmicronZonesConfig| {
-                for zone in &mut config.zones {
+            (&|zones: &mut [OmicronZoneConfig]| {
+                for zone in zones {
                     if let OmicronZoneType::Nexus {
                         ref mut external_ip, ..
                     } = &mut zone.zone_type
@@ -827,11 +814,12 @@ mod tests {
                         );
                     }
                 }
+
                 panic!("didn't find expected zone");
-            }) as &dyn Fn(&mut OmicronZonesConfig) -> String,
+            }) as &dyn Fn(&mut [OmicronZoneConfig]) -> String,
             // non-matching IP on External DNS
-            &|config| {
-                for zone in &mut config.zones {
+            &|zones| {
+                for zone in zones {
                     if let OmicronZoneType::ExternalDns {
                         ref mut dns_address,
                         ..
@@ -847,8 +835,8 @@ mod tests {
                 panic!("didn't find expected zone");
             },
             // non-matching SNAT port range on Boundary NTP
-            &|config| {
-                for zone in &mut config.zones {
+            &|zones| {
+                for zone in zones {
                     if let OmicronZoneType::BoundaryNtp {
                         ref mut snat_cfg,
                         ..
@@ -866,24 +854,24 @@ mod tests {
             },
         ] {
             // Run `mutate_zones_fn` on our config...
-            let mut config =
-                zones.remove(&sled_id).expect("missing zone config");
-            let orig_config = config.clone();
-            let expected_error = mutate_zones_fn(&mut config);
-            zones.insert(sled_id, config);
+            let (mutated_zones, expected_error) = {
+                let mut zones = zones.clone();
+                let expected_error = mutate_zones_fn(&mut zones);
+                (zones, expected_error)
+            };
 
-            // ... check that we get the error we expect
-            let err =
-                ensure_zone_resources_allocated(&opctx, datastore, &zones)
-                    .await
-                    .expect_err("unexpected success");
+            // and check that we get the error we expect.
+            let err = ensure_zone_resources_allocated(
+                &opctx,
+                datastore,
+                mutated_zones.iter(),
+            )
+            .await
+            .expect_err("unexpected success");
             assert!(
                 err.to_string().contains(&expected_error),
                 "expected {expected_error:?}, got {err:#}"
             );
-
-            // ... and restore the original, valid config before iterating.
-            zones.insert(sled_id, orig_config);
         }
 
         // Also try some requests that ought to fail because the request
@@ -922,11 +910,7 @@ mod tests {
         ] {
             // Try this NIC mutation on Nexus...
             let mut mutated_zones = zones.clone();
-            for zone in &mut mutated_zones
-                .get_mut(&sled_id)
-                .expect("missing sled")
-                .zones
-            {
+            for zone in &mut mutated_zones {
                 if let OmicronZoneType::Nexus { ref mut nic, .. } =
                     &mut zone.zone_type
                 {
@@ -935,7 +919,7 @@ mod tests {
                     let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
-                        &mutated_zones,
+                        mutated_zones.iter(),
                     )
                     .await
                     .expect_err("unexpected success");
@@ -951,11 +935,7 @@ mod tests {
 
             // ... and again on ExternalDns
             let mut mutated_zones = zones.clone();
-            for zone in &mut mutated_zones
-                .get_mut(&sled_id)
-                .expect("missing sled")
-                .zones
-            {
+            for zone in &mut mutated_zones {
                 if let OmicronZoneType::ExternalDns { ref mut nic, .. } =
                     &mut zone.zone_type
                 {
@@ -964,7 +944,7 @@ mod tests {
                     let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
-                        &mutated_zones,
+                        mutated_zones.iter(),
                     )
                     .await
                     .expect_err("unexpected success");
@@ -980,11 +960,7 @@ mod tests {
 
             // ... and again on BoundaryNtp
             let mut mutated_zones = zones.clone();
-            for zone in &mut mutated_zones
-                .get_mut(&sled_id)
-                .expect("missing sled")
-                .zones
-            {
+            for zone in &mut mutated_zones {
                 if let OmicronZoneType::BoundaryNtp { ref mut nic, .. } =
                     &mut zone.zone_type
                 {
@@ -993,7 +969,7 @@ mod tests {
                     let err = ensure_zone_resources_allocated(
                         &opctx,
                         datastore,
-                        &mutated_zones,
+                        mutated_zones.iter(),
                     )
                     .await
                     .expect_err("unexpected success");

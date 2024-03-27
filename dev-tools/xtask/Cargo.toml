@@ -10,3 +10,7 @@ camino.workspace = true
 cargo_toml = "0.19"
 cargo_metadata = "0.18"
 clap.workspace = true
+serde.workspace = true
+toml.workspace = true
+fs-err.workspace = true
+swrite.workspace = true

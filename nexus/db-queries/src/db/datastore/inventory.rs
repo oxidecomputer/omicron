@@ -1096,6 +1096,7 @@ impl DataStore {
             nsled_agent_zones,
             nzones,
             nnics,
+            nzpools,
             nerrors,
         ) = conn
             .transaction_async(|conn| async move {
@@ -1206,6 +1207,16 @@ impl DataStore {
                     .await?
                 };
 
+                let nzpools = {
+                    use db::schema::inv_zpool::dsl;
+                    diesel::delete(
+                        dsl::inv_zpool
+                            .filter(dsl::inv_collection_id.eq(collection_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 // Remove rows for errors encountered.
                 let nerrors = {
                     use db::schema::inv_collection_error::dsl;
@@ -1228,6 +1239,7 @@ impl DataStore {
                     nsled_agent_zones,
                     nzones,
                     nnics,
+                    nzpools,
                     nerrors,
                 ))
             })
@@ -1251,6 +1263,7 @@ impl DataStore {
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
+            "nzpools" => nzpools,
             "nerrors" => nerrors,
         );
 

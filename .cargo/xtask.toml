@@ -1,0 +1,41 @@
+# This config file is used by `cargo xtask verify-libraries`
+
+
+# These are libraries that we expect to show up in any executable produced
+# by the omicron repo.
+[libraries."libc.so.1"]
+[libraries."libcontract.so.1"]
+[libraries."libcrypto.so.3"]
+[libraries."libdevinfo.so.1"]
+[libraries."libdlpi.so.1"]
+[libraries."libdoor.so.1"]
+[libraries."libefi.so.1"]
+[libraries."libgcc_s.so.1"]
+[libraries."libipcc.so.1"]
+[libraries."libkstat.so.1"]
+[libraries."libm.so.2"]
+[libraries."libnsl.so.1"]
+[libraries."libnvpair.so.1"]
+[libraries."libpq.so.5"]
+[libraries."libpthread.so.1"]
+[libraries."libresolv.so.2"]
+[libraries."librt.so.1"]
+[libraries."libscf.so.1"]
+[libraries."libsocket.so.1"]
+[libraries."libssl.so.3"]
+[libraries."libumem.so.1"]
+[libraries."libxml2.so.2"]
+[libraries."libxmlsec1.so.1"]
+
+# libnvme is a global zone only library and therefore we must be sure that only
+# programs running in the gz require it. Additionally only sled-agent should be
+# managing a sled's hardware.
+[libraries."libnvme.so.1"]
+binary_allow_list = [
+  "installinator",
+  "omicron-dev",
+  "omicron-package",
+  "services-ledger-check-migrate",
+  "sled-agent",
+  "sled-agent-sim",
+]

@@ -20,7 +20,7 @@
 #: access_repos = [
 #:	"oxidecomputer/testbed",
 #: ]
-#: enable = true
+#: enable = false
 
 source ./env.sh
 

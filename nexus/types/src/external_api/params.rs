@@ -9,7 +9,7 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, ByteCount, Hostname, IdentityMetadataCreateParams,
+    AddressLotKind, BfdMode, ByteCount, Hostname, IdentityMetadataCreateParams,
     IdentityMetadataUpdateParams, InstanceCpuCount, IpNet, Ipv4Net, Ipv6Net,
     Name, NameOrId, PaginationOrder, RouteDestination, RouteTarget,
     SemverVersion,
@@ -1812,24 +1812,6 @@ pub struct BgpConfigCreate {
 pub struct BgpStatusSelector {
     /// A name or id of the BGP configuration to get status for
     pub name_or_id: NameOrId,
-}
-
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Serialize,
-    JsonSchema,
-    PartialEq,
-    Eq,
-    Ord,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum BfdMode {
-    SingleHop,
-    MultiHop,
 }
 
 /// Information about a bidirectional forwarding detection (BFD) session.

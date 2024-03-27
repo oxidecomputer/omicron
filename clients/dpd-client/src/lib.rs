@@ -17,6 +17,10 @@
 
 use slog::info;
 use slog::Logger;
+use types::LinkCreate;
+use types::LinkId;
+use types::LinkSettings;
+use types::PortSettings;
 
 include!(concat!(env!("OUT_DIR"), "/dpd-client.rs"));
 
@@ -785,5 +789,41 @@ impl From<u64> for MacAddr {
                 (x & 0xff) as u8,
             ],
         }
+    }
+}
+
+impl Eq for PortSettings {}
+
+impl PartialEq for PortSettings {
+    fn eq(&self, other: &Self) -> bool {
+        self.links == other.links
+    }
+}
+
+impl Eq for LinkSettings {}
+
+impl PartialEq for LinkSettings {
+    fn eq(&self, other: &Self) -> bool {
+        self.addrs == other.addrs && self.params == other.params
+    }
+}
+
+impl Eq for LinkCreate {}
+
+impl PartialEq for LinkCreate {
+    fn eq(&self, other: &Self) -> bool {
+        self.autoneg == other.autoneg
+            && self.fec == other.fec
+            && self.kr == other.kr
+            && self.lane == other.lane
+            && self.speed == other.speed
+    }
+}
+
+impl Eq for LinkId {}
+
+impl PartialEq for LinkId {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }

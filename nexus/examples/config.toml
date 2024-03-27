@@ -91,6 +91,7 @@ dns_external.period_secs_config = 60
 dns_external.period_secs_servers = 60
 dns_external.period_secs_propagation = 60
 dns_external.max_concurrent_server_updates = 5
+metrics_producer_gc.period_secs = 60
 # How frequently we check the list of stored TLS certificates.  This is
 # approximately an upper bound on how soon after updating the list of
 # certificates it will take _other_ Nexus instances to notice and stop serving

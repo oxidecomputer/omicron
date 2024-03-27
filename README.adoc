@@ -60,6 +60,8 @@ $ cargo nextest run
 
 Nextest https://github.com/nextest-rs/nextest/issues/16[does not support doctests]. Run doctests separately with `cargo test --doc`.
 
+Similarly, you can run tests inside a https://github.com/oxidecomputer/falcon[Falcon] based VM. This is described in the `test-utils` https://github.com/oxidecomputer/omicron/tree/main/test-utils[README].
+
 === rustfmt and clippy
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
@@ -105,6 +107,10 @@ When you're happy with things and want to make sure you haven't missed something
 ```
 cargo nextest run
 ```
+
+=== Adding a new system library dependency
+
+We check that certain system library dependencies are not leaked outside of their intended binaries via `cargo xtask verify-libraries` in CI. If you are adding a new dependency on a illumos/helios library it is recommended that you update xref:.cargo/xtask.toml[] with an allow list of where you expect the dependency to show up. For example some libraries such as `libnvme.so.1` are only available in the global zone and therefore will not be present in any other zone. This check is here to help us catch any leakage before we go to deploy on a rack. You can inspect a compiled binary in the target directory for what it requires by using `elfedit` - for example `elfedit -r -e 'dyn:tag NEEDED' /path/to/omicron/target/debug/sled-agent`.
 
 === Rust packages in Omicron
 

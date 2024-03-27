@@ -128,7 +128,7 @@ impl DataStore {
         let (blocks_per_extent, extent_count) =
             Self::get_crucible_allocation(&block_size, size);
 
-        let query = crate::db::queries::region_allocation::RegionAllocate::new(
+        let query = crate::db::queries::region_allocation::allocation_query(
             volume_id,
             block_size.to_bytes() as u64,
             blocks_per_extent,
@@ -141,6 +141,12 @@ impl DataStore {
                 crate::db::queries::region_allocation::from_diesel(e)
             })?;
 
+        info!(
+            self.log,
+            "Allocated regions for volume";
+            "volume_id" => %volume_id,
+            "datasets_and_regions" => ?dataset_and_regions,
+        );
         Ok(dataset_and_regions)
     }
 

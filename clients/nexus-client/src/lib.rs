@@ -382,3 +382,35 @@ impl From<omicron_common::api::internal::shared::ExternalPortDiscovery>
         }
     }
 }
+
+impl From<types::ProducerKind>
+    for omicron_common::api::internal::nexus::ProducerKind
+{
+    fn from(kind: types::ProducerKind) -> Self {
+        use omicron_common::api::internal::nexus::ProducerKind;
+        match kind {
+            types::ProducerKind::SledAgent => ProducerKind::SledAgent,
+            types::ProducerKind::Instance => ProducerKind::Instance,
+            types::ProducerKind::Service => ProducerKind::Service,
+        }
+    }
+}
+
+impl TryFrom<types::ProducerEndpoint>
+    for omicron_common::api::internal::nexus::ProducerEndpoint
+{
+    type Error = String;
+
+    fn try_from(ep: types::ProducerEndpoint) -> Result<Self, String> {
+        let Ok(address) = ep.address.parse() else {
+            return Err(format!("Invalid IP address: {}", ep.address));
+        };
+        Ok(Self {
+            id: ep.id,
+            kind: ep.kind.into(),
+            address,
+            base_route: ep.base_route,
+            interval: ep.interval.into(),
+        })
+    }
+}

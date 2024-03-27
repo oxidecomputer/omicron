@@ -13,11 +13,13 @@ use super::dns_propagation;
 use super::dns_servers;
 use super::external_endpoints;
 use super::inventory_collection;
+use super::metrics_producer_gc;
 use super::nat_cleanup;
 use super::phantom_disks;
 use super::region_replacement;
 use super::sync_service_zone_nat::ServiceZoneNatTracker;
 use super::sync_switch_configuration::SwitchPortSettingsManager;
+use crate::app::oximeter::PRODUCER_LEASE_DURATION;
 use crate::app::sagas::SagaRequest;
 use nexus_config::BackgroundTaskConfig;
 use nexus_config::DnsTasksConfig;
@@ -47,6 +49,9 @@ pub struct BackgroundTasks {
     pub task_external_dns_config: common::TaskHandle,
     /// task handle for the external DNS servers background task
     pub task_external_dns_servers: common::TaskHandle,
+
+    /// task handle for pruning metrics producers with expired leases
+    pub task_metrics_producer_gc: common::TaskHandle,
 
     /// task handle for the task that keeps track of external endpoints
     pub task_external_endpoints: common::TaskHandle,
@@ -112,6 +117,24 @@ impl BackgroundTasks {
             resolver.clone(),
             &config.dns_external,
         );
+
+        let task_metrics_producer_gc = {
+            let gc = metrics_producer_gc::MetricProducerGc::new(
+                datastore.clone(),
+                PRODUCER_LEASE_DURATION,
+            );
+            driver.register(
+                String::from("metrics_producer_gc"),
+                String::from(
+                    "unregisters Oximeter metrics producers that have not \
+                    renewed their lease",
+                ),
+                config.metrics_producer_gc.period_secs,
+                Box::new(gc),
+                opctx.child(BTreeMap::new()),
+                vec![],
+            )
+        };
 
         // Background task: External endpoints list watcher
         let (task_external_endpoints, external_endpoints) = {
@@ -301,6 +324,7 @@ impl BackgroundTasks {
             task_internal_dns_servers,
             task_external_dns_config,
             task_external_dns_servers,
+            task_metrics_producer_gc,
             task_external_endpoints,
             external_endpoints,
             nat_cleanup,

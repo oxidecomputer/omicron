@@ -516,6 +516,7 @@ pub async fn run_standalone_server(
             infra_ip_last: Ipv4Addr::LOCALHOST,
             ports: Vec::new(),
             bgp: Vec::new(),
+            bfd: Vec::new(),
         },
     };
 

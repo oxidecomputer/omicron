@@ -26,6 +26,9 @@ use nexus_config::NexusConfig;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_test_interface::NexusServer;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneConfig;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::external_api::params::UserId;
 use nexus_types::internal_api::params::Certificate;
 use nexus_types::internal_api::params::DatasetCreateRequest;
@@ -57,7 +60,6 @@ use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use slog::{debug, error, o, Logger};
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -790,29 +792,34 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         };
 
         let blueprint = {
-            let mut omicron_zones = BTreeMap::new();
-            let mut zones_in_service = BTreeSet::new();
+            let mut blueprint_zones = BTreeMap::new();
             for (maybe_sled_agent, zones) in [
                 (self.sled_agent.as_ref(), &self.omicron_zones),
                 (self.sled_agent2.as_ref(), &self.omicron_zones2),
             ] {
                 if let Some(sa) = maybe_sled_agent {
-                    omicron_zones.insert(
+                    blueprint_zones.insert(
                         sa.sled_agent.id,
-                        OmicronZonesConfig {
+                        BlueprintZonesConfig {
                             generation: Generation::new().next(),
-                            zones: zones.clone(),
+                            zones: zones
+                                .iter()
+                                .map(|z| {
+                                    BlueprintZoneConfig {
+                                        config: z.clone(),
+                                        // All initial zones are in-service
+                                        disposition:
+                                            BlueprintZoneDisposition::InService,
+                                    }
+                                })
+                                .collect(),
                         },
                     );
-                    for z in zones {
-                        zones_in_service.insert(z.id);
-                    }
                 }
             }
             Blueprint {
                 id: Uuid::new_v4(),
-                omicron_zones,
-                zones_in_service,
+                blueprint_zones,
                 parent_blueprint_id: None,
                 internal_dns_version: dns_config
                     .generation
@@ -1404,6 +1411,7 @@ pub async fn start_oximeter(
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),
         db,
+        refresh_interval: oximeter_collector::default_refresh_interval(),
         log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Error },
     };
     let args = oximeter_collector::OximeterArguments {

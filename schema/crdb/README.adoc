@@ -56,41 +56,75 @@ See RFD 319 for more discussion of the online upgrade plans.
 
 Assumptions:
 
-* The (previously) latest schema version is referred to as `OLD_VERSION`
-* Your new changes will bring the schema to a new version, `NEW_VERSION`
+* We'll call the (previously) latest schema version `OLD_VERSION`.
+* We'll call your new schema version `NEW_VERSION`.  This will always be a major
+  version bump from `OLD_VERSION`.  So if `OLD_VERSION` is 43.0.0, `NEW_VERSION`
+  should be `44.0.0`.
+* You can write a sequence of SQL statements to update a database that's
+  currently running `OLD_VERSION` to one running `NEW_VERSION`.
 
 Process:
 
-* Choose a `NEW_VERSION` number. This should almost certainly be a major
-  version bump over `OLD_VERSION`.
-* Create directory `schema/crdb/NEW_VERSION`.
-* If only one SQL statement is necessary to get from `OLD_VERSION` to
-  `NEW_VERSION`, put that statement into `schema/crdb/NEW_VERSION/up.sql`.  If
-  multiple statements are required, put each one into a separate file, naming
-  these `schema/crdb/NEW_VERSION/upN.sql` for as many `N` as you need, staring
-  with `N=1`.
-** Each file should contain _either_ one schema-modifying statement _or_ some
-   number of data-modifying statements.  You can combine multiple data-modifying
-   statements.  But you should not mix schema-modifying statements and
-   data-modifying statements in one file.  And you should not include multiple
-   schema-modifying statements in one file.
-** Beware that the entire file will be run in one transaction.  Expensive data-
-   modifying operations leading to long-running transactions are generally
-   to-be-avoided; however, there's no better way to do this today if you really
-   do need to update thousands of rows as part of the update.
-* Update `schema/crdb/dbinit.sql` to match what the database should look like
-  after your update is applied. Don't forget to update the version field of
-  `db_metadata` at the bottom of the file!
-** If necessary, do the same thing for `schema/crdb/dbwipe.sql`.
-* Update Nexus's idea of the latest schema, by updating its `SCHEMA_VERSION` to
-  `NEW_VERSION` within `nexus/db-model/src/schema.rs`.
+* Create a directory of SQL files describing how to update a database running
+  version `OLD_VERSION` to one running version `NEW_VERSION`:
+** Choose a unique, descriptive name for the directory.  It's suggested that
+   you stick to lowercase letters, numbers, and hyphen.  For example, if you're
+   adding a table called `widgets`, you might create a directory called
+   `create-table-widgets`.
+** Create the directory: `schema/crdb/NAME`.
+*** If only one SQL statement is necessary to get from `OLD_VERSION` to
+    `NEW_VERSION`, put that statement into `schema/crdb/NAME/up.sql`.  If
+    multiple statements are required, put each one into a separate file, naming
+    these `schema/crdb/NAME/upN.sql` for as many `N` as you need, starting with
+    `N=1`.
+*** Each file should contain _either_ one schema-modifying statement _or_ some
+    number of data-modifying statements.  You can combine multiple data-modifying
+    statements.  But you should not mix schema-modifying statements and
+    data-modifying statements in one file.  And you should not include multiple
+    schema-modifying statements in one file.
+*** Beware that the entire file will be run in one transaction.  Expensive data-
+    modifying operations leading to long-running transactions are generally
+    to-be-avoided; however, there's no better way to do this today if you really
+    do need to update thousands of rows as part of the update.
+* Update `schema/crdb/dbinit.sql`:
+** Update the SQL statements to match what the database should look like
+   after your up*.sql files are applied.
+** Update the version field of `db_metadata` at the bottom of the file.
+* Update `schema/crdb/dbwipe.sql` if needed.  (This is rare.)
+* Update `nexus/db-model/src/schema_versions.rs`:
+** Update the major number of `SCHEMA_VERSION` so that it matches `NEW_VERSION`.
+** Add a new entry to the *top* of `KNOWN_VERSIONS`.  It should be just one
+   line: `KnownVersion::new(NEW_VERSION.major, NAME)`
+* Optional: check some of this work by running `cargo nextest run -p nexus-db-model -- schema_versions`.  This is recommended because if you get
+  one of these steps wrong, these tests should be able to tell you, whereas
+  other tests might fail in much worse ways (e.g., they can hang if you've
+  updated `SCHEMA_VERSION` but not the database schema version).
 
-SQL Validation, via Automated Tests:
+There are automated tests to validate many of these steps:
 
-* The `SCHEMA_VERSION` matches the version used in `dbinit.sql`
-* The combination of all `up.sql` files results in the same schema as
-  `dbinit.sql`
-* All `up.sql` files can be applied twice without error
+* The `SCHEMA_VERSION` matches the version used in `dbinit.sql`.  (This catches
+  the case where you forget to update either one of these).
+* The `KNOWN_VERSIONS` are all strictly increasing semvers.  New known versions
+  must be sequential major numbers with minor and micro both being `0`.  (This
+  catches various mismerge errors: accidentally duplicating a version, putting
+  versions in the wrong order, etc.)
+* The combination of all `up*.sql` files results in the same schema as
+  `dbinit.sql`.  (This catches forgetting to update dbinit.sql, forgetting to
+  implement a schema update altogether, or a mismatch between dbinit.sql and
+  the update.)
+* All `up*.sql` files can be applied twice without error.  (This catches
+  non-idempotent update steps.)
+
+**If you've finished all this and another PR lands on "main" that chose the
+same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
+`NEW_VERSION` needs to change, too.  You'll need to:
+
+* In `nexus/db-model/src/schema_versions.rs`.
+** Make sure `SCHEMA_VERSION` reflects your new `NEW_VERSION`.
+** Make sure the `KNOWN_VERSIONS` entry that you added reflects your new
+   `NEW_VERSION` and still appears at the top of the list (logically after the
+   new version that came in from "main").
+* Update the version in `dbinit.sql` to match the new `NEW_VERSION`.
 
 === General notes
 

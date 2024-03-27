@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
 use diesel::query_dsl::methods::LoadQuery;
 use diesel::{ExpressionMethods, QueryDsl};
-use nexus_config::SchemaConfig;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::LookupType;
@@ -72,6 +71,8 @@ mod oximeter;
 mod physical_disk;
 mod probe;
 mod project;
+#[cfg(any(test, feature = "testing"))]
+pub mod pub_test_utils;
 mod quota;
 mod rack;
 mod region;
@@ -100,13 +101,10 @@ mod vpc;
 mod zpool;
 
 pub use address_lot::AddressLotCreateResult;
-pub use db_metadata::{
-    all_sql_for_version_migration, SchemaUpgrade, SchemaUpgradeStep,
-    EARLIEST_SUPPORTED_VERSION,
-};
 pub use dns::DnsVersionUpdateBuilder;
 pub use instance::InstanceAndActiveVmm;
 pub use inventory::DataStoreInventoryTest;
+use nexus_db_model::AllSchemaVersions;
 pub use probe::ProbeInfo;
 pub use rack::RackInit;
 pub use silo::Discoverability;
@@ -197,14 +195,13 @@ impl DataStore {
     pub async fn new(
         log: &Logger,
         pool: Arc<Pool>,
-        config: Option<&SchemaConfig>,
+        config: Option<&AllSchemaVersions>,
     ) -> Result<Self, String> {
         let datastore =
             Self::new_unchecked(log.new(o!("component" => "datastore")), pool)?;
 
         // Keep looping until we find that the schema matches our expectation.
-        const EXPECTED_VERSION: SemverVersion =
-            nexus_db_model::schema::SCHEMA_VERSION;
+        const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
         retry_notify(
             retry_policy_internal_service(),
             || async {
@@ -214,7 +211,7 @@ impl DataStore {
                 {
                     Ok(()) => return Ok(()),
                     Err(e) => {
-                        warn!(log, "Failed to ensure schema version: {e}");
+                        warn!(log, "Failed to ensure schema version"; "error" => #%e);
                     }
                 };
                 return Err(BackoffError::transient(()));
@@ -954,10 +951,21 @@ mod test {
             assert_eq!(expected_region_count, dataset_and_regions.len());
             let mut disk_datasets = HashSet::new();
             let mut disk_zpools = HashSet::new();
+            let mut regions = HashSet::new();
 
             for (dataset, region) in dataset_and_regions {
                 // Must be 3 unique datasets
                 assert!(disk_datasets.insert(dataset.id()));
+                // All regions should be unique
+                assert!(regions.insert(region.id()));
+
+                // Check there's no cross contamination between returned UUIDs
+                //
+                // This is a little goofy, but it catches a bug that has
+                // happened before. The returned columns share names (like
+                // "id"), so we need to process them in-order.
+                assert!(regions.get(&dataset.id()).is_none());
+                assert!(disk_datasets.get(&region.id()).is_none());
 
                 // Dataset must not be eligible for provisioning.
                 if let Some(kind) =

@@ -42,6 +42,10 @@ impl super::Nexus {
         self.background_tasks
             .driver
             .activate(&self.background_tasks.bfd_manager);
+        // for timely propagation to bootstore
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
     }
 
@@ -56,6 +60,10 @@ impl super::Nexus {
         self.background_tasks
             .driver
             .activate(&self.background_tasks.bfd_manager);
+        // for timely propagation to bootstore
+        self.background_tasks
+            .driver
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(())
     }
 
@@ -93,10 +101,10 @@ impl super::Nexus {
                     required_rx: info.config.required_rx,
                     mode: match info.config.mode {
                         mg_admin_client::types::SessionMode::SingleHop => {
-                            params::BfdMode::SingleHop
+                            omicron_common::api::external::BfdMode::SingleHop
                         }
                         mg_admin_client::types::SessionMode::MultiHop => {
-                            params::BfdMode::MultiHop
+                            omicron_common::api::external::BfdMode::MultiHop
                         }
                     },
                 })

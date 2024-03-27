@@ -87,6 +87,7 @@ pub(crate) mod sagas;
 
 pub(crate) use nexus_db_queries::db::queries::disk::MAX_DISKS_PER_INSTANCE;
 
+use nexus_db_model::AllSchemaVersions;
 pub(crate) use nexus_db_model::MAX_NICS_PER_INSTANCE;
 
 // XXX: Might want to recast as max *floating* IPs, we have at most one
@@ -202,13 +203,16 @@ impl Nexus {
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
         let pool = Arc::new(pool);
+        let all_versions = config
+            .pkg
+            .schema
+            .as_ref()
+            .map(|s| AllSchemaVersions::load(&s.schema_dir))
+            .transpose()
+            .map_err(|error| format!("{error:#}"))?;
         let db_datastore = Arc::new(
-            db::DataStore::new(
-                &log,
-                Arc::clone(&pool),
-                config.pkg.schema.as_ref(),
-            )
-            .await?,
+            db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
+                .await?,
         );
         db_datastore.register_producers(&producer_registry);
 

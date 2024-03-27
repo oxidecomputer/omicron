@@ -383,11 +383,6 @@ impl SledAgent {
         info!(log, "Mounting backing filesystems");
         crate::backing_fs::ensure_backing_fs(&parent_log, &boot_disk.1)?;
 
-        // Ensure we have a thread that automatically reaps process contracts
-        // when they become empty. See the comments in
-        // illumos-utils/src/running_zone.rs for more detail.
-        illumos_utils::running_zone::ensure_contract_reaper(&parent_log);
-
         // TODO-correctness Bootstrap-agent already ensures the underlay
         // etherstub and etherstub VNIC exist on startup - could it pass them
         // through to us?
