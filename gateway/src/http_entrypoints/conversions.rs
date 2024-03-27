@@ -20,6 +20,8 @@ use super::SpComponentPresence;
 use super::SpIdentifier;
 use super::SpIgnition;
 use super::SpIgnitionSystemType;
+use super::SpSensorReading;
+use super::SpSensorReadingResult;
 use super::SpState;
 use super::SpType;
 use super::SpUpdateStatus;
@@ -38,6 +40,31 @@ pub(super) fn component_from_str(s: &str) -> Result<SpComponent, HttpError> {
             "invalid SP component name".to_string(),
         )
     })
+}
+
+impl From<gateway_messages::SensorReading> for SpSensorReading {
+    fn from(value: gateway_messages::SensorReading) -> Self {
+        Self {
+            timestamp: value.timestamp,
+            result: match value.value {
+                Ok(value) => SpSensorReadingResult::Success { value },
+                Err(err) => err.into(),
+            },
+        }
+    }
+}
+
+impl From<gateway_messages::SensorDataMissing> for SpSensorReadingResult {
+    fn from(value: gateway_messages::SensorDataMissing) -> Self {
+        use gateway_messages::SensorDataMissing;
+        match value {
+            SensorDataMissing::DeviceOff => Self::DeviceOff,
+            SensorDataMissing::DeviceError => Self::DeviceError,
+            SensorDataMissing::DeviceNotPresent => Self::DeviceNotPresent,
+            SensorDataMissing::DeviceUnavailable => Self::DeviceUnavailable,
+            SensorDataMissing::DeviceTimeout => Self::DeviceTimeout,
+        }
+    }
 }
 
 impl From<UpdateStatus> for SpUpdateStatus {
