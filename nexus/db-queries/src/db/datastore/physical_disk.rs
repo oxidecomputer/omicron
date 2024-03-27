@@ -13,6 +13,8 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskPolicy;
+use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -75,6 +77,46 @@ impl DataStore {
         })?;
 
         Ok(disk_in_db)
+    }
+
+    pub async fn physical_disk_update_policy(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        policy: PhysicalDiskPolicy,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl;
+
+        diesel::update(dsl::physical_disk.filter(dsl::id.eq(id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::disk_policy.eq(policy))
+            .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|err| {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            })?;
+        Ok(())
+    }
+
+    pub async fn physical_disk_update_state(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        state: PhysicalDiskState,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl;
+
+        diesel::update(dsl::physical_disk.filter(dsl::id.eq(id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::disk_state.eq(state))
+            .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|err| {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            })?;
+        Ok(())
     }
 
     pub async fn physical_disk_list(

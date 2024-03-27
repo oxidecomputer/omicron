@@ -380,9 +380,9 @@ mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
         BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
-        PhysicalDisk, PhysicalDiskKind, Project, Rack, Region, Service,
-        ServiceKind, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
-        SshKey, VpcSubnet, Zpool,
+        PhysicalDisk, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
+        Project, Rack, Region, Service, ServiceKind, SiloUser, SledBaseboard,
+        SledSystemHardware, SledUpdate, SshKey, VpcSubnet, Zpool,
     };
     use crate::db::queries::vpc_subnet::FilterConflictingVpcSubnetRangesQuery;
     use chrono::{Duration, Utc};
@@ -627,19 +627,23 @@ mod test {
     }
 
     const TEST_VENDOR: &str = "test-vendor";
-    const TEST_SERIAL: &str = "test-serial";
     const TEST_MODEL: &str = "test-model";
 
+    /// Creates a disk on a sled of a particular kind.
+    ///
+    /// The "serial" value of the disk is supplied by the
+    /// caller, and is arbitrary, but should be unique.
     async fn create_test_physical_disk(
         datastore: &DataStore,
         opctx: &OpContext,
         sled_id: Uuid,
         kind: PhysicalDiskKind,
+        serial: String,
     ) -> Uuid {
         let physical_disk = PhysicalDisk::new(
             Uuid::new_v4(),
             TEST_VENDOR.into(),
-            TEST_SERIAL.into(),
+            serial,
             TEST_MODEL.into(),
             kind,
             sled_id,
@@ -829,18 +833,21 @@ mod test {
                 .map(|sled_id| {
                     let sled_id_iter: Vec<Uuid> =
                         (0..9).map(|_| sled_id).collect();
-                    stream::iter(sled_id_iter).then(|sled_id| {
-                        let disk_id_future = create_test_physical_disk(
-                            &datastore,
-                            opctx,
-                            sled_id,
-                            PhysicalDiskKind::U2,
-                        );
-                        async move {
-                            let disk_id = disk_id_future.await;
-                            PhysicalDisk { sled_id, disk_id }
-                        }
-                    })
+                    stream::iter(sled_id_iter).enumerate().then(
+                        |(i, sled_id)| {
+                            let disk_id_future = create_test_physical_disk(
+                                &datastore,
+                                opctx,
+                                sled_id,
+                                PhysicalDiskKind::U2,
+                                format!("{sled_id}, disk index {i}"),
+                            );
+                            async move {
+                                let disk_id = disk_id_future.await;
+                                PhysicalDisk { sled_id, disk_id }
+                            }
+                        },
+                    )
                 })
                 .flatten()
                 .collect()
@@ -1226,6 +1233,7 @@ mod test {
             &opctx,
             sled_id,
             PhysicalDiskKind::U2,
+            format!("fake serial"),
         )
         .await;
 
@@ -1323,6 +1331,7 @@ mod test {
             &opctx,
             sled_id,
             PhysicalDiskKind::U2,
+            format!("fake serial"),
         )
         .await;
 
@@ -1385,6 +1394,123 @@ mod test {
         );
 
         assert!(matches!(err, Error::InsufficientCapacity { .. }));
+
+        let _ = db.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_region_allocation_only_considers_disks_in_service() {
+        let logctx = dev::test_setup_log(
+            "test_region_allocation_only_considers_disks_in_service",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a sled...
+        let sled_id = create_test_sled(&datastore).await;
+
+        // ... and create several disks on that sled, each with a zpool/dataset.
+        let mut physical_disk_ids = vec![];
+        for i in 0..REGION_REDUNDANCY_THRESHOLD {
+            let physical_disk_id = create_test_physical_disk(
+                &datastore,
+                &opctx,
+                sled_id,
+                PhysicalDiskKind::U2,
+                format!("fake serial #{i}"),
+            )
+            .await;
+            let zpool_id = create_test_zpool(
+                &datastore,
+                &opctx,
+                sled_id,
+                physical_disk_id,
+            )
+            .await;
+            let bogus_addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0);
+            let dataset = Dataset::new(
+                Uuid::new_v4(),
+                zpool_id,
+                bogus_addr,
+                DatasetKind::Crucible,
+            );
+            datastore.dataset_upsert(dataset).await.unwrap();
+            physical_disk_ids.push(physical_disk_id);
+        }
+
+        // Check the following combinations of physical disk policy/state
+        // on region allocation. Since we only created
+        // REGION_REDUNDANCY_THRESHOLD disks/zpools/datasets, updating the
+        // state of a single disk should be sufficient to prevent the
+        // allocations from occurring.
+        use PhysicalDiskPolicy as Policy;
+        use PhysicalDiskState as State;
+
+        // Just a bool with a fancier name -- determines whether or not
+        // we expect the policy/state combinations to pass or not.
+        enum AllocationShould {
+            Fail,
+            Succeed,
+        }
+
+        let policy_state_combos = [
+            (Policy::Expunged, State::Active, AllocationShould::Fail),
+            (Policy::Expunged, State::Decommissioned, AllocationShould::Fail),
+            (Policy::InService, State::Decommissioned, AllocationShould::Fail),
+            // Save this one for last, since it actually leaves an allocation
+            // lying around.
+            (Policy::InService, State::Active, AllocationShould::Succeed),
+        ];
+
+        let volume_id = Uuid::new_v4();
+        let params = create_test_disk_create_params(
+            "disk",
+            ByteCount::from_mebibytes_u32(500),
+        );
+
+        for (policy, state, expected) in policy_state_combos {
+            // Update policy/state only on a single physical disk.
+            //
+            // The rest are assumed "in service" + "active".
+            datastore
+                .physical_disk_update_policy(
+                    &opctx,
+                    physical_disk_ids[0],
+                    policy,
+                )
+                .await
+                .unwrap();
+            datastore
+                .physical_disk_update_state(&opctx, physical_disk_ids[0], state)
+                .await
+                .unwrap();
+
+            let result = datastore
+                .region_allocate(
+                    &opctx,
+                    volume_id,
+                    &params.disk_source,
+                    params.size,
+                    &RegionAllocationStrategy::Random { seed: Some(0) },
+                )
+                .await;
+
+            match expected {
+                AllocationShould::Fail => {
+                    let err = result.unwrap_err();
+                    let expected = "Not enough zpool space to allocate disks";
+                    assert!(
+                        err.to_string().contains(expected),
+                        "Saw error: \'{err}\', but expected \'{expected}\'"
+                    );
+                    assert!(matches!(err, Error::InsufficientCapacity { .. }));
+                }
+                AllocationShould::Succeed => {
+                    let _ = result.expect("Allocation should have succeeded");
+                }
+            }
+        }
 
         let _ = db.cleanup().await;
         logctx.cleanup_successful();

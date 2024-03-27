@@ -332,7 +332,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
 );
 
 -- The disposition for a particular physical disk.
--- This is update by the operator, either explicitly through an operator API,
+-- This is updated by the operator, either explicitly through an operator API,
 -- or implicitly when altering sled policy.
 CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_policy AS ENUM (
     -- The disk is in service, and new resources can be provisioned onto it.
