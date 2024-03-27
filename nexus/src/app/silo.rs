@@ -98,7 +98,7 @@ impl super::Nexus {
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
         let nexus_external_dns_zones = datastore
-            .dns_zones_list_all(opctx, DnsGroup::External)
+            .dns_zones_list_all(nexus_opctx, DnsGroup::External)
             .await
             .internal_context("listing external DNS zones")?;
         let target_blueprint = datastore
