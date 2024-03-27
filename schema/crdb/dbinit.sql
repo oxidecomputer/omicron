@@ -1323,6 +1323,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_producer_by_oximeter ON omicron.public.
     id
 );
 
+CREATE INDEX IF NOT EXISTS lookup_producer_by_time_modified ON omicron.public.metric_producer (
+    time_modified
+);
+
 /*
  * VPCs and networking primitives
  */
@@ -3766,7 +3770,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '48.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '49.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

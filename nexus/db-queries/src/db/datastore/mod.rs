@@ -71,6 +71,8 @@ mod oximeter;
 mod physical_disk;
 mod probe;
 mod project;
+#[cfg(any(test, feature = "testing"))]
+pub mod pub_test_utils;
 mod quota;
 mod rack;
 mod region;
