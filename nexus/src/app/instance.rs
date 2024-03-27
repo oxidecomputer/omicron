@@ -2303,6 +2303,7 @@ mod tests {
         InstanceSerialConsoleHelper, WSClientOffset,
     };
     use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[tokio::test]
     async fn test_serial_console_stream_proxying() {
@@ -2386,6 +2387,95 @@ mod tests {
         slog::info!(
             logctx.log,
             "propolis server closed, waiting \
+             1s for proxy task to shut down"
+        );
+        tokio::time::timeout(Duration::from_secs(1), jh)
+            .await
+            .expect("proxy task shut down within 1s")
+            .expect("task successfully completed")
+            .expect("proxy task exited successfully");
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_tcp_stream_proxying() {
+        let logctx = test_setup_log("test_tcp_stream_proxying");
+        let (nexus_client_conn, nexus_server_conn) = tokio::io::duplex(1024);
+        let propolis_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("couldn't make TcpListener");
+
+        let addr = propolis_listener.local_addr().unwrap();
+
+        let jh = tokio::spawn(async move { propolis_listener.accept().await });
+
+        let propolis_client_conn = tokio::net::TcpStream::connect(addr)
+            .await
+            .expect("couldn't open TcpStream connection to TcpListener");
+
+        let mut propolis_server_conn = jh
+            .await
+            .expect("couldn't join")
+            .expect("couldn't accept client connection from TcpListener")
+            .0;
+
+        let jh = tokio::spawn(async move {
+            let nexus_client_stream = WebSocketStream::from_raw_socket(
+                nexus_server_conn,
+                Role::Server,
+                None,
+            )
+            .await;
+            Nexus::wrap_tcp_socket_ws(nexus_client_stream, propolis_client_conn)
+                .await
+        });
+        let mut nexus_client_ws = WebSocketStream::from_raw_socket(
+            nexus_client_conn,
+            Role::Client,
+            None,
+        )
+        .await;
+
+        slog::info!(logctx.log, "sending messages to nexus client");
+        let sent1 = WebSocketMessage::Binary(vec![1, 2, 3, 42, 5]);
+        nexus_client_ws.send(sent1.clone()).await.unwrap();
+        let sent2 = WebSocketMessage::Binary(vec![5, 42, 3, 2, 1]);
+        nexus_client_ws.send(sent2.clone()).await.unwrap();
+        slog::info!(
+            logctx.log,
+            "messages sent, receiving them via propolis server"
+        );
+        let received =
+            tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                let mut buf = [0u8; 1024];
+                let mut received = Vec::<u8>::new();
+                while received.len() < 10 {
+                    let bytes =
+                        propolis_server_conn.read(&mut buf).await.unwrap();
+                    received.extend(&buf[..bytes]);
+                }
+                received
+            })
+            .await
+            .expect("timed out receiving");
+        assert_eq!(received, vec![1, 2, 3, 42, 5, 5, 42, 3, 2, 1]);
+
+        slog::info!(logctx.log, "sending data to propolis server");
+        let sent3 = vec![6, 7, 8, 90, 90, 8, 7, 6];
+        propolis_server_conn.write_all(&sent3).await.unwrap();
+        slog::info!(logctx.log, "data sent, receiving it via nexus client");
+        let received3 = nexus_client_ws.next().await.unwrap().unwrap();
+        assert_eq!(WebSocketMessage::Binary(sent3), received3);
+
+        slog::info!(logctx.log, "sending close message to nexus client");
+        let sent = WebSocketMessage::Close(Some(CloseFrame {
+            code: CloseCode::Normal,
+            reason: std::borrow::Cow::from("test done"),
+        }));
+        nexus_client_ws.send(sent.clone()).await.unwrap();
+        slog::info!(
+            logctx.log,
+            "sent close message, waiting \
              1s for proxy task to shut down"
         );
         tokio::time::timeout(Duration::from_secs(1), jh)
