@@ -265,8 +265,8 @@ maplit = "1.0.2"
 mime_guess = "2.0.4"
 mockall = "0.12"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "c0bee2cd0c249cf989f7d0f6a0bdbfd1e9b0a83c" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "c0bee2cd0c249cf989f7d0f6a0bdbfd1e9b0a83c" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "1ed9551856424712946c60a35a8939f309979866" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "1ed9551856424712946c60a35a8939f309979866" }
 multimap = "0.10.0"
 nexus-client = { path = "clients/nexus-client" }
 nexus-config = { path = "nexus-config" }
