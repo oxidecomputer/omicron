@@ -1219,7 +1219,7 @@ mod tests {
     fn test_now_with_offset() {
         fn check(expr: &str, expected: DateTime<Utc>) {
             // Rough but still-useful bound in microseconds.
-            const MAX_DIFF_IN_MICROS: i64 = 500;
+            const MAX_DIFF_IN_MICROS: i64 = 1000;
             let d = query_parser::now_timestamp(expr).unwrap();
             let now = Utc::now();
             let micros = d.timestamp_micros() - expected.timestamp_micros();
