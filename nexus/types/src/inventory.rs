@@ -360,7 +360,7 @@ pub struct PhysicalDisk {
 impl From<sled_agent_client::types::InventoryDisk> for PhysicalDisk {
     fn from(disk: sled_agent_client::types::InventoryDisk) -> PhysicalDisk {
         PhysicalDisk {
-            identity: disk.identity.into(),
+            identity: disk.identity,
             variant: disk.variant.into(),
             slot: disk.slot,
         }

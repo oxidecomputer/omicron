@@ -205,7 +205,7 @@ PXA_END="$EXTRA_IP_END"
 export GATEWAY_IP GATEWAY_MAC PXA_START PXA_END
 
 pfexec zpool create -f scratch c1t1d0 c2t1d0
-ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
+VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 
 #
 # Generate a self-signed certificate to use as the initial TLS certificate for
@@ -214,7 +214,12 @@ ZPOOL_VDEV_DIR=/scratch ptime -m pfexec ./tools/create_virtual_hardware.sh
 # real system, the certificate would come from the customer during initial rack
 # setup on the technician port.
 #
-tar xf out/omicron-sled-agent.tar pkg/config-rss.toml
+tar xf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
+
+# Update the vdevs to point to where we've created them
+sed -E -i~ "s/(m2|u2)(.*\.vdev)/\/scratch\/\1\2/g" pkg/config.toml
+diff -u pkg/config.toml{~,} || true
+
 SILO_NAME="$(sed -n 's/silo_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 EXTERNAL_DNS_DOMAIN="$(sed -n 's/external_dns_zone_name = "\(.*\)"/\1/p' pkg/config-rss.toml)"
 
@@ -241,8 +246,8 @@ addresses = \\[\"$UPLINK_IP/24\"\\]
 " pkg/config-rss.toml
 diff -u pkg/config-rss.toml{~,} || true
 
-tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml
-rm -f pkg/config-rss.toml*
+tar rvf out/omicron-sled-agent.tar pkg/config-rss.toml pkg/config.toml
+rm -f pkg/config-rss.toml* pkg/config.toml*
 
 #
 # By default, OpenSSL creates self-signed certificates with "CA:true".  The TLS

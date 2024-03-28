@@ -294,6 +294,11 @@ impl std::fmt::Display for ZoneType {
     }
 }
 
+pub type OmicronPhysicalDiskConfig =
+    sled_storage::disk::OmicronPhysicalDiskConfig;
+pub type OmicronPhysicalDisksConfig =
+    sled_storage::disk::OmicronPhysicalDisksConfig;
+
 /// Describes the set of Omicron-managed zones running on a sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,

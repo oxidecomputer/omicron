@@ -894,7 +894,7 @@ resource: Service id "7f7bb301-5dc9-41f1-ab29-d369f4835079"
   silo1-proj1-viewer               ✘  ✘  ✘  ✘  ✘  ✘  ✘  ✘
   unauthenticated                  !  !  !  !  !  !  !  !
 
-resource: PhysicalDisk id "vendor-serial-model"
+resource: PhysicalDisk id "c9f923f6-caf3-4c83-96f9-8ffe8c627dd2"
 
   USER                             Q  R LC RP  M MP CC  D
   fleet-admin                      ✘  ✔  ✔  ✔  ✔  ✔  ✔  ✔

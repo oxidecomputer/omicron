@@ -4,11 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow.workspace = true
 async-trait.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 cfg-if.workspace = true
+debug-ignore.workspace = true
 derive_more.workspace = true
 glob.workspace = true
+futures.workspace = true
 illumos-utils.workspace = true
 key-manager.workspace = true
 omicron-common.workspace = true
@@ -24,9 +28,9 @@ uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-illumos-utils = { workspace = true, features = ["tmp_keypath", "testing"] }
+expectorate.workspace = true
+illumos-utils = { workspace = true, features = ["testing"] }
 omicron-test-utils.workspace = true
-camino-tempfile.workspace = true
 
 [features]
 # Quotas and the like can be shrunk via this feature

@@ -52,7 +52,7 @@ cp target/release/dhcp-server /out/
 banner "testbed"
 cd /work/oxidecomputer
 rm -rf testbed
-git clone https://github.com/oxidecomputer/testbed
+git clone -b vdev https://github.com/oxidecomputer/testbed
 cd testbed/a4x2
 
 #

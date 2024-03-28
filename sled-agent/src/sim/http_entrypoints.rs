@@ -11,7 +11,7 @@ use crate::params::{
     DiskEnsureBody, InstanceEnsureBody, InstanceExternalIpBody,
     InstancePutMigrationIdsBody, InstancePutStateBody,
     InstancePutStateResponse, InstanceUnregisterResponse, Inventory,
-    OmicronZonesConfig, VpcFirewallRulesEnsureBody,
+    OmicronPhysicalDisksConfig, OmicronZonesConfig, VpcFirewallRulesEnsureBody,
 };
 use dropshot::endpoint;
 use dropshot::ApiDescription;
@@ -31,6 +31,7 @@ use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SwitchPorts;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_storage::resources::DisksManagementResult;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -60,6 +61,8 @@ pub fn api() -> SledApiDescription {
         api.register(read_network_bootstore_config)?;
         api.register(write_network_bootstore_config)?;
         api.register(inventory)?;
+        api.register(omicron_physical_disks_get)?;
+        api.register(omicron_physical_disks_put)?;
         api.register(omicron_zones_get)?;
         api.register(omicron_zones_put)?;
 
@@ -439,6 +442,31 @@ async fn inventory(
             .await
             .map_err(|e| HttpError::for_internal_error(format!("{:#}", e)))?,
     ))
+}
+
+#[endpoint {
+    method = PUT,
+    path = "/omicron-physical-disks",
+}]
+async fn omicron_physical_disks_put(
+    rqctx: RequestContext<Arc<SledAgent>>,
+    body: TypedBody<OmicronPhysicalDisksConfig>,
+) -> Result<HttpResponseOk<DisksManagementResult>, HttpError> {
+    let sa = rqctx.context();
+    let body_args = body.into_inner();
+    let result = sa.omicron_physical_disks_ensure(body_args).await?;
+    Ok(HttpResponseOk(result))
+}
+
+#[endpoint {
+    method = GET,
+    path = "/omicron-physical-disks",
+}]
+async fn omicron_physical_disks_get(
+    rqctx: RequestContext<Arc<SledAgent>>,
+) -> Result<HttpResponseOk<OmicronPhysicalDisksConfig>, HttpError> {
+    let sa = rqctx.context();
+    Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
 }
 
 #[endpoint {

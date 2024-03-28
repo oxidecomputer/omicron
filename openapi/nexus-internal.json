@@ -919,65 +919,6 @@
         }
       }
     },
-    "/physical-disk": {
-      "put": {
-        "summary": "Report that a physical disk for the specified sled has come online.",
-        "operationId": "physical_disk_put",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhysicalDiskPutRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PhysicalDiskPutResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "summary": "Report that a physical disk for the specified sled has gone offline.",
-        "operationId": "physical_disk_delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PhysicalDiskDeleteRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/probes/{sled}": {
       "get": {
         "summary": "Get all the probes associated with a given sled.",
@@ -1267,60 +1208,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/sled-agents/{sled_id}/zpools/{zpool_id}": {
-      "put": {
-        "summary": "Report that a pool for a specified sled has come online.",
-        "operationId": "zpool_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "sled_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "zpool_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ZpoolPutRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ZpoolPutResponse"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -5980,30 +5867,6 @@
           "collector_id"
         ]
       },
-      "PhysicalDiskDeleteRequest": {
-        "type": "object",
-        "properties": {
-          "model": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "string"
-          },
-          "sled_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "vendor": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "model",
-          "serial",
-          "sled_id",
-          "vendor"
-        ]
-      },
       "PhysicalDiskKind": {
         "description": "Describes the form factor of physical disks.",
         "type": "string",
@@ -6015,6 +5878,10 @@
       "PhysicalDiskPutRequest": {
         "type": "object",
         "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
           "model": {
             "type": "string"
           },
@@ -6033,15 +5900,13 @@
           }
         },
         "required": [
+          "id",
           "model",
           "serial",
           "sled_id",
           "variant",
           "vendor"
         ]
-      },
-      "PhysicalDiskPutResponse": {
-        "type": "object"
       },
       "PortConfigV1": {
         "type": "object",
@@ -6468,6 +6333,13 @@
               "$ref": "#/components/schemas/IpRange"
             }
           },
+          "physical_disks": {
+            "description": "\"Managed\" physical disks owned by the control plane",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhysicalDiskPutRequest"
+            }
+          },
           "rack_network_config": {
             "description": "Initial rack network configuration",
             "allOf": [
@@ -6490,6 +6362,13 @@
             "items": {
               "$ref": "#/components/schemas/ServicePutRequest"
             }
+          },
+          "zpools": {
+            "description": "Zpools created within the physical disks created by the control plane.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ZpoolPutRequest"
+            }
           }
         },
         "required": [
@@ -6500,9 +6379,11 @@
           "external_port_count",
           "internal_dns_zone_config",
           "internal_services_ip_pool_ranges",
+          "physical_disks",
           "rack_network_config",
           "recovery_silo",
-          "services"
+          "services",
+          "zpools"
         ]
       },
       "RackNetworkConfigV1": {
@@ -7667,36 +7548,27 @@
         "type": "string"
       },
       "ZpoolPutRequest": {
-        "description": "Sent by a sled agent on startup to Nexus to request further instruction",
+        "description": "Identifies information about a Zpool that should be part of the control plane.",
         "type": "object",
         "properties": {
-          "disk_model": {
-            "type": "string"
+          "id": {
+            "type": "string",
+            "format": "uuid"
           },
-          "disk_serial": {
-            "type": "string"
+          "physical_disk_id": {
+            "type": "string",
+            "format": "uuid"
           },
-          "disk_vendor": {
-            "type": "string"
-          },
-          "size": {
-            "description": "Total size of the pool.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ByteCount"
-              }
-            ]
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
-          "disk_model",
-          "disk_serial",
-          "disk_vendor",
-          "size"
+          "id",
+          "physical_disk_id",
+          "sled_id"
         ]
-      },
-      "ZpoolPutResponse": {
-        "type": "object"
       },
       "SemverVersion": {
         "type": "string",

@@ -87,7 +87,7 @@ impl super::Nexus {
         Ok(db_rack)
     }
 
-    /// Marks the rack as initialized with a set of services.
+    /// Marks the rack as initialized with information supplied by RSS.
     ///
     /// This function is a no-op if the rack has already been initialized.
     pub(crate) async fn rack_initialize(
@@ -96,7 +96,36 @@ impl super::Nexus {
         rack_id: Uuid,
         request: RackInitializationRequest,
     ) -> Result<(), Error> {
+        let log = &opctx.log;
+
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+
+        let physical_disks: Vec<_> = request
+            .physical_disks
+            .into_iter()
+            .map(|disk| {
+                db::model::PhysicalDisk::new(
+                    disk.id,
+                    disk.vendor,
+                    disk.serial,
+                    disk.model,
+                    disk.variant.into(),
+                    disk.sled_id,
+                )
+            })
+            .collect();
+
+        let zpools: Vec<_> = request
+            .zpools
+            .into_iter()
+            .map(|pool| {
+                db::model::Zpool::new(
+                    pool.id,
+                    pool.sled_id,
+                    pool.physical_disk_id,
+                )
+            })
+            .collect();
 
         let datasets: Vec<_> = request
             .datasets
@@ -224,10 +253,7 @@ impl super::Nexus {
         match request.external_port_count {
             ExternalPortDiscovery::Auto(switch_mgmt_addrs) => {
                 use dpd_client::Client as DpdClient;
-                info!(
-                    self.log,
-                    "Using automatic external switchport discovery"
-                );
+                info!(log, "Using automatic external switchport discovery");
 
                 for (switch, addr) in switch_mgmt_addrs {
                     let dpd_client = DpdClient::new(
@@ -238,7 +264,7 @@ impl super::Nexus {
                         ),
                         dpd_client::ClientState {
                             tag: "nexus".to_string(),
-                            log: self.log.new(o!("component" => "DpdClient")),
+                            log: log.new(o!("component" => "DpdClient")),
                         },
                     );
 
@@ -247,10 +273,7 @@ impl super::Nexus {
                             Error::internal_error(&format!("encountered error while discovering ports for {switch:#?}: {e}"))
                         })?;
 
-                    info!(
-                        self.log,
-                        "discovered ports for {switch}: {all_ports:#?}"
-                    );
+                    info!(log, "discovered ports for {switch}: {all_ports:#?}");
 
                     let qsfp_ports: Vec<Name> = all_ports
                         .iter()
@@ -261,7 +284,7 @@ impl super::Nexus {
                         .collect();
 
                     info!(
-                        self.log,
+                        log,
                         "populating ports for {switch}: {qsfp_ports:#?}"
                     );
 
@@ -276,7 +299,7 @@ impl super::Nexus {
             // TODO: #3602 Eliminate need for static port mappings for switch ports
             ExternalPortDiscovery::Static(port_mappings) => {
                 info!(
-                    self.log,
+                    log,
                     "Using static configuration for external switchports"
                 );
                 for (switch, ports) in port_mappings {
@@ -295,7 +318,7 @@ impl super::Nexus {
         // Currently calling some of the apis directly, but should we be using sagas
         // going forward via self.run_saga()? Note that self.create_runnable_saga and
         // self.execute_saga are currently not available within this scope.
-        info!(self.log, "Recording Rack Network Configuration");
+        info!(log, "Recording Rack Network Configuration");
         let address_lot_name = Name::from_str(INFRA_LOT).map_err(|e| {
             Error::internal_error(&format!(
                 "unable to use `initial-infra` as `Name`: {e}"
@@ -591,6 +614,8 @@ impl super::Nexus {
                     rack_id,
                     blueprint,
                     services: request.services,
+                    physical_disks,
+                    zpools,
                     datasets,
                     service_ip_pool_ranges,
                     internal_dns,

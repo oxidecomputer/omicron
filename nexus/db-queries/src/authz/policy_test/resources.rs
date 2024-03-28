@@ -102,10 +102,12 @@ pub async fn make_resources(
 
     make_services(&mut builder).await;
 
+    let physical_disk_id =
+        "c9f923f6-caf3-4c83-96f9-8ffe8c627dd2".parse().unwrap();
     builder.new_resource(authz::PhysicalDisk::new(
         authz::FLEET,
-        ("vendor".to_string(), "serial".to_string(), "model".to_string()),
-        LookupType::ByCompositeId("vendor-serial-model".to_string()),
+        physical_disk_id,
+        LookupType::ById(physical_disk_id),
     ));
 
     let device_user_code = String::from("a-device-user-code");
