@@ -10,8 +10,11 @@ use crate::oxql::ast::cmp::Comparison;
 use crate::oxql::ast::ident::Ident;
 use crate::oxql::ast::literal::Literal;
 use crate::oxql::ast::logical_op::LogicalOp;
+use crate::oxql::point::DataType;
+use crate::oxql::point::MetricType;
 use crate::oxql::point::Points;
 use crate::oxql::point::ValueArray;
+use crate::oxql::query::special_idents;
 use crate::oxql::Error;
 use crate::oxql::Table;
 use crate::oxql::Timeseries;
@@ -295,18 +298,15 @@ impl Filter {
             .next()
             .context("Table contains no timeseries to filter")?;
         let ident_names = self.ident_names();
+
+        // There are extra, implied names that depend on the data type of the
+        // timeseries itself, check those as well.
+        let extras = implicit_field_names(first_timeseries);
         let not_valid = ident_names
             .iter()
             .filter(|&&name| {
-                !first_timeseries.fields.contains_key(name)
-                    && !matches!(
-                        name,
-                        "timestamp"
-                            | "start_time"
-                            | "datum"
-                            | "bins"
-                            | "counts"
-                    )
+                !(first_timeseries.fields.contains_key(name)
+                    || extras.contains(name))
             })
             .collect::<Vec<_>>();
         anyhow::ensure!(
@@ -315,7 +315,7 @@ impl Filter {
             valid for its input timeseries. Invalid identifiers: {:?}, \
             timeseries fields: {:?}",
             not_valid,
-            first_timeseries.fields.keys().collect::<Vec<_>>(),
+            ident_names.union(&extras),
         );
 
         // Filter each input table in succession.
@@ -426,6 +426,66 @@ impl Filter {
     fn is_simple(&self) -> bool {
         matches!(self.expr, FilterExpr::Simple(_))
     }
+}
+
+/// Return the names of the implicit fields / columns that a filter can apply
+/// to, based on the metric types of the contained data points.
+fn implicit_field_names(
+    first_timeseries: &Timeseries,
+) -> BTreeSet<&'static str> {
+    let mut out = BTreeSet::new();
+
+    // Everything has a timestamp!
+    out.insert(special_idents::TIMESTAMP);
+    let type_info = first_timeseries
+        .points
+        .metric_types()
+        .zip(first_timeseries.points.data_types());
+    for (metric_type, data_type) in type_info {
+        match (metric_type, data_type) {
+            // Scalar gauges.
+            (
+                MetricType::Gauge,
+                DataType::Integer
+                | DataType::Boolean
+                | DataType::Double
+                | DataType::String,
+            ) => {
+                out.insert(special_idents::DATUM);
+            }
+            // Histogram gauges.
+            (
+                MetricType::Gauge,
+                DataType::IntegerDistribution | DataType::DoubleDistribution,
+            ) => {
+                out.insert(special_idents::BINS);
+                out.insert(special_idents::COUNTS);
+            }
+            // Scalars, either delta or cumulatives.
+            (
+                MetricType::Delta | MetricType::Cumulative,
+                DataType::Integer | DataType::Double,
+            ) => {
+                out.insert(special_idents::DATUM);
+                out.insert(special_idents::START_TIME);
+            }
+            // Histograms, either delta or cumulative.
+            (
+                MetricType::Delta | MetricType::Cumulative,
+                DataType::IntegerDistribution | DataType::DoubleDistribution,
+            ) => {
+                out.insert(special_idents::BINS);
+                out.insert(special_idents::COUNTS);
+                out.insert(special_idents::START_TIME);
+            }
+            // Impossible combinations
+            (
+                MetricType::Delta | MetricType::Cumulative,
+                DataType::Boolean | DataType::String,
+            ) => unreachable!(),
+        }
+    }
+    out
 }
 
 /// A filtering expression, used in the `filter` table operation.
