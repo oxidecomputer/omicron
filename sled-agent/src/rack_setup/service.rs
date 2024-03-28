@@ -115,6 +115,7 @@ use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
+use std::time::Duration;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -683,8 +684,16 @@ impl ServiceInner {
 
         info!(self.log, "Nexus address: {}", nexus_address.to_string());
 
-        let nexus_client = NexusClient::new(
+        const CLIENT_TIMEOUT: Duration = Duration::from_secs(60);
+        let client = reqwest::Client::builder()
+            .connect_timeout(CLIENT_TIMEOUT)
+            .timeout(CLIENT_TIMEOUT)
+            .build()
+            .map_err(SetupServiceError::HttpClient)?;
+
+        let nexus_client = NexusClient::new_with_client(
             &format!("http://{}", nexus_address),
+            client,
             self.log.new(o!("component" => "NexusClient")),
         );
 
