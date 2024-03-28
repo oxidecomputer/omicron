@@ -6,6 +6,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::DnsGroup;
@@ -21,6 +22,8 @@ use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
 use nexus_types::internal_api::params::DnsRecord;
@@ -683,6 +686,52 @@ impl DnsVersionUpdateBuilder {
         self.names_added
             .iter()
             .map(|(name, list)| (name.as_ref(), list.as_ref()))
+    }
+}
+
+/// Extra interfaces that are not intended for use in Nexus, but useful for
+/// testing and `omdb`
+pub trait DataStoreDnsTest: Send + Sync {
+    /// Fetch the DNS configuration for a specific group and version
+    fn dns_config_read_version<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        dns_group: DnsGroup,
+        version: omicron_common::api::external::Generation,
+    ) -> BoxFuture<'_, Result<DnsConfigParams, Error>>;
+}
+
+impl DataStoreDnsTest for DataStore {
+    fn dns_config_read_version<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        dns_group: DnsGroup,
+        version: omicron_common::api::external::Generation,
+    ) -> BoxFuture<'_, Result<DnsConfigParams, Error>> {
+        async move {
+            use db::schema::dns_version::dsl;
+            let dns_version = dsl::dns_version
+                .filter(dsl::dns_group.eq(dns_group))
+                .filter(dsl::version.eq(Generation::from(version)))
+                .select(DnsVersion::as_select())
+                .first_async(&*self.pool_connection_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    // Technically, we could produce a `NotFound` error here.
+                    // But since this is only for testing, it's okay to produce
+                    // an InternalError.
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            self.dns_config_read_version(
+                opctx,
+                &opctx.log,
+                SQL_BATCH_SIZE,
+                &dns_version,
+            )
+            .await
+        }
+        .boxed()
     }
 }
 
