@@ -297,6 +297,7 @@ num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
+omicron-omdb = { path = "dev-tools/omdb" }
 omicron-package = { path = "package" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }

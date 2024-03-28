@@ -1084,30 +1084,21 @@ fn cmd_load(
             continue;
         };
 
-        let inventory_sp = match &inventory_sled_agent.baseboard_id {
-            Some(baseboard_id) => {
-                let inv_sp = primary_collection
-                    .sps
-                    .get(baseboard_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "error: load sled {}: missing SP inventory",
-                            sled_id
-                        )
-                    })?;
-                let inv_rot = primary_collection
-                    .rots
-                    .get(baseboard_id)
-                    .ok_or_else(|| {
-                        anyhow!(
-                            "error: load sled {}: missing RoT inventory",
-                            sled_id
-                        )
-                    })?;
-                Some(SledHwInventory { baseboard_id, sp: inv_sp, rot: inv_rot })
-            }
-            None => None,
-        };
+        let inventory_sp = inventory_sled_agent.baseboard_id.as_ref().and_then(
+            |baseboard_id| {
+                let inv_sp = primary_collection.sps.get(baseboard_id);
+                let inv_rot = primary_collection.rots.get(baseboard_id);
+                if let (Some(inv_sp), Some(inv_rot)) = (inv_sp, inv_rot) {
+                    Some(SledHwInventory {
+                        baseboard_id: &baseboard_id,
+                        sp: inv_sp,
+                        rot: inv_rot,
+                    })
+                } else {
+                    None
+                }
+            },
+        );
 
         let result = sim.system.sled_full(
             sled_id,
