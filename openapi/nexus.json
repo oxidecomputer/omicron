@@ -2676,6 +2676,45 @@
         }
       }
     },
+    "/v1/instances/{instance}/vnc": {
+      "get": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Stream instance VNC framebuffer",
+        "operationId": "instance_vnc",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "x-dropshot-websocket": {}
+      }
+    },
     "/v1/ip-pools": {
       "get": {
         "tags": [

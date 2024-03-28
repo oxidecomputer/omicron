@@ -64,6 +64,7 @@ instance_ssh_public_key_list             GET      /v1/instances/{instance}/ssh-p
 instance_start                           POST     /v1/instances/{instance}/start
 instance_stop                            POST     /v1/instances/{instance}/stop
 instance_view                            GET      /v1/instances/{instance}
+instance_vnc                             GET      /v1/instances/{instance}/vnc
 
 API operations found with tag "login"
 OPERATION ID                             METHOD   URL PATH
