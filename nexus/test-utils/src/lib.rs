@@ -749,8 +749,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             log.clone(),
         );
 
-        let dns_config =
-            self.rack_init_builder.internal_dns_config.clone().build();
+        let dns_config = self
+            .rack_init_builder
+            .internal_dns_config
+            .clone()
+            .build_full_config_for_initial_generation();
 
         slog::info!(log, "DNS population: {:#?}", dns_config);
         dns_config_client.dns_config_put(&dns_config).await.expect(

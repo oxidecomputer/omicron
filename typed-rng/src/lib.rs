@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Typed RNGs with support for trees seeds.
+//! Typed RNGs with support for tree-based RNGs.
 //!
 //! ## [`TypedRng`]
 //!
@@ -13,6 +13,17 @@
 //! `Generatable::generate` method does not have access to anything other than
 //! the RNG state. It may be extended in the future with the capability to pass
 //! in persistent state.
+//!
+//! ### Tree-based RNGs
+//!
+//! Many RNG models are organized in a tree structure, where a parent RNG
+//! generates a child RNG. The main benefit to this kind of structure is
+//! stability of output: because the different child RNGs are all independent
+//! of each other, making more calls to one RNG will not affect any others.
+//!
+//! The `TypedRng` struct provides a method to generate a new RNG from a parent
+//! RNG and a seed. This is useful when you want to generate a new RNG that is
+//! independent of the parent RNG, but still deterministic.
 //!
 //! ### Comparison with property-based testing
 //!
@@ -93,7 +104,10 @@ where
 /// implements [`Generatable`], and any RNG that implements [`RngCore`].
 pub struct TypedRng<T, R> {
     rng: R,
-    _marker: PhantomData<T>,
+    // PhantomData<fn() -> T> is like PhantomData<T>, but it doesn't inherit
+    // Send/Sync from T. See
+    // https://doc.rust-lang.org/nomicon/phantom-data.html#table-of-phantomdata-patterns.
+    _marker: PhantomData<fn() -> T>,
 }
 
 impl<T: Generatable> TypedRng<T, StdRng> {
@@ -232,3 +246,15 @@ impl Generatable for Uuid {
 }
 
 pub type UuidRng = TypedRng<Uuid, StdRng>;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Test that TypedRng<T, ...> is Send and Sync even if T isn't.
+    const _: fn() = || {
+        fn assert_send_sync<T: Send + Sync>() {}
+        struct NotSendSync(*mut u8);
+        assert_send_sync::<TypedRng<NotSendSync, StdRng>>();
+    };
+}

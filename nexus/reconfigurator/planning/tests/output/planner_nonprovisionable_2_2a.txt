@@ -76,12 +76,14 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
      crucible       f55e6aaf-e8fc-4913-9e3c-8cd1bd4bdad3   in service    fd00:1122:3344:105::29           
 -    crucible       4f1ce8a2-d3a5-4a38-be4c-9817de52db37   in service    fd00:1122:3344:105::2c  removed  
 -    crucible       19fbc4f8-a683-4f22-8f5a-e74782b935be   in service    fd00:1122:3344:105::26  modified 
-+     └─                                                   quiesced      fd00:1122:3344:105::26           
++     ├─                                                   quiesced      fd00:1122:3344:105::26           
+*     └─ changed: disposition                                                                             
 -    internal_ntp   7f4e9f9f-08f8-4d14-885d-e977c05525ad   in service    fd00:1122:3344:105::21  modified 
-+     └─                                                   in service    fd01:1122:3344:105::21           
++     ├─                                                   in service    fd01:1122:3344:105::21           
+*     └─ changed: underlay IP                                                                             
 -    nexus          6dff7633-66bb-4924-a6ff-2c896e66964b   in service    fd00:1122:3344:105::22  modified 
 +     ├─                                                   in service    fd00:1122:3344:105::22           
-*     └─ zone type config changed                                                                         
+*     └─ changed: zone type config                                                                        
                                                                                                           
 *  sled 48d95fef-bc9f-4f50-9a53-1e075836291d: zones at generation: 2 -> 3                                 
 -    crucible       094f27af-1acb-4d1e-ba97-1fc1377d4bf2   in service    fd00:1122:3344:103::2c  removed  

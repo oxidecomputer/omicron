@@ -14,6 +14,7 @@
 
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledState;
+use crate::internal_api::params::DnsConfigParams;
 use crate::inventory::Collection;
 pub use crate::inventory::OmicronZoneConfig;
 pub use crate::inventory::OmicronZoneDataset;
@@ -172,6 +173,19 @@ pub struct Blueprint {
 }
 
 impl Blueprint {
+    /// Return metadata for this blueprint.
+    pub fn metadata(&self) -> BlueprintMetadata {
+        BlueprintMetadata {
+            id: self.id,
+            parent_blueprint_id: self.parent_blueprint_id,
+            internal_dns_version: self.internal_dns_version,
+            external_dns_version: self.external_dns_version,
+            time_created: self.time_created,
+            creator: self.creator.clone(),
+            comment: self.comment.clone(),
+        }
+    }
+
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
     /// that match the provided filter, along with the associated sled id.
     pub fn all_blueprint_zones(
@@ -211,9 +225,9 @@ impl Blueprint {
         before: &Blueprint,
     ) -> Result<BlueprintDiff, BlueprintDiffError> {
         BlueprintDiff::new(
-            DiffBeforeMetadata::Blueprint(before.diff_metadata()),
+            DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
             before.blueprint_zones.clone(),
-            self.diff_metadata(),
+            self.metadata(),
             self.blueprint_zones.clone(),
         )
     }
@@ -259,7 +273,7 @@ impl Blueprint {
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
-            self.diff_metadata(),
+            self.metadata(),
             self.blueprint_zones.clone(),
         )
     }
@@ -268,18 +282,6 @@ impl Blueprint {
     /// blueprint.
     pub fn display(&self) -> BlueprintDisplay<'_> {
         BlueprintDisplay { blueprint: self }
-    }
-
-    // ---
-    // Helper methods
-    // ---
-
-    fn diff_metadata(&self) -> DiffBlueprintMetadata {
-        DiffBlueprintMetadata {
-            id: self.id,
-            internal_dns_version: self.internal_dns_version,
-            external_dns_version: self.external_dns_version,
-        }
     }
 }
 
@@ -411,39 +413,6 @@ pub struct BlueprintZoneConfig {
     pub disposition: BlueprintZoneDisposition,
 }
 
-impl BlueprintZoneConfig {
-    /// Return a struct that can be displayed to present information about the
-    /// zone.
-    pub fn display(&self) -> BlueprintZoneConfigDisplay<'_> {
-        BlueprintZoneConfigDisplay { zone: self }
-    }
-}
-
-/// A wrapper to allow a [`BlueprintZoneConfig`] to be displayed with
-/// information.
-///
-/// Returned by [`BlueprintZoneConfig::display()`].
-#[derive(Clone, Debug)]
-#[must_use = "this struct does nothing unless displayed"]
-pub struct BlueprintZoneConfigDisplay<'a> {
-    zone: &'a BlueprintZoneConfig,
-}
-
-impl<'a> fmt::Display for BlueprintZoneConfigDisplay<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let z = self.zone;
-        write!(
-            f,
-            "{} {:<width$} {} [underlay IP {}]",
-            z.config.id,
-            z.disposition,
-            z.config.zone_type.kind(),
-            z.config.underlay_address,
-            width = BlueprintZoneDisposition::DISPLAY_WIDTH,
-        )
-    }
-}
-
 /// The desired state of an Omicron-managed zone in a blueprint.
 ///
 /// Part of [`BlueprintZoneConfig`].
@@ -471,9 +440,6 @@ pub enum BlueprintZoneDisposition {
 }
 
 impl BlueprintZoneDisposition {
-    /// The maximum width of `Display` output.
-    const DISPLAY_WIDTH: usize = 10;
-
     /// Returns true if the zone disposition matches this filter.
     pub fn matches(self, filter: BlueprintZoneFilter) -> bool {
         // This code could be written in three ways:
@@ -577,6 +543,12 @@ pub struct BlueprintMetadata {
     pub comment: String,
 }
 
+impl BlueprintMetadata {
+    pub fn display_id(&self) -> String {
+        format!("blueprint {}", self.id)
+    }
+}
+
 /// Describes what blueprint, if any, the system is currently working toward
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct BlueprintTarget {
@@ -601,7 +573,7 @@ pub struct BlueprintTargetSet {
 #[derive(Debug)]
 pub struct BlueprintDiff {
     before_meta: DiffBeforeMetadata,
-    after_meta: DiffBlueprintMetadata,
+    after_meta: BlueprintMetadata,
     sleds: DiffSleds,
 }
 
@@ -611,7 +583,7 @@ impl BlueprintDiff {
     fn new(
         before_meta: DiffBeforeMetadata,
         before_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
-        after_meta: DiffBlueprintMetadata,
+        after_meta: BlueprintMetadata,
         after_zones: BTreeMap<Uuid, BlueprintZonesConfig>,
     ) -> Result<Self, BlueprintDiffError> {
         let mut errors = Vec::new();
@@ -621,7 +593,11 @@ impl BlueprintDiff {
         if errors.is_empty() {
             Ok(Self { before_meta, after_meta, sleds })
         } else {
-            Err(BlueprintDiffError { before_meta, after_meta, errors })
+            Err(BlueprintDiffError {
+                before_meta,
+                after_meta: Box::new(after_meta),
+                errors,
+            })
         }
     }
 
@@ -631,7 +607,7 @@ impl BlueprintDiff {
     }
 
     /// Returns metadata about the source of the "after" data.
-    pub fn after_meta(&self) -> &DiffBlueprintMetadata {
+    pub fn after_meta(&self) -> &BlueprintMetadata {
         &self.after_meta
     }
 
@@ -773,7 +749,7 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
 #[derive(Clone, Debug, Error)]
 pub struct BlueprintDiffError {
     pub before_meta: DiffBeforeMetadata,
-    pub after_meta: DiffBlueprintMetadata,
+    pub after_meta: Box<BlueprintMetadata>,
     pub errors: Vec<BlueprintDiffSingleError>,
 }
 
@@ -830,7 +806,7 @@ pub enum DiffBeforeMetadata {
     /// The diff was made from a collection.
     Collection { id: Uuid },
     /// The diff was made from a blueprint.
-    Blueprint(DiffBlueprintMetadata),
+    Blueprint(Box<BlueprintMetadata>),
 }
 
 impl DiffBeforeMetadata {
@@ -839,23 +815,6 @@ impl DiffBeforeMetadata {
             DiffBeforeMetadata::Collection { id } => format!("collection {id}"),
             DiffBeforeMetadata::Blueprint(b) => b.display_id(),
         }
-    }
-}
-
-/// General metadata about a blueprint stored within a [`BlueprintDiff`].
-///
-/// This can either be [`BlueprintDiff::after_meta`], or the payload of the
-/// [`DiffBeforeMetadata::Blueprint`] variant.
-#[derive(Clone, Debug)]
-pub struct DiffBlueprintMetadata {
-    pub id: Uuid,
-    pub internal_dns_version: Generation,
-    pub external_dns_version: Generation,
-}
-
-impl DiffBlueprintMetadata {
-    pub fn display_id(&self) -> String {
-        format!("blueprint {}", self.id)
     }
 }
 
@@ -1022,6 +981,10 @@ pub struct UnstableReconfiguratorState {
     pub policy: Policy,
     pub collections: Vec<Collection>,
     pub blueprints: Vec<Blueprint>,
+    pub internal_dns: BTreeMap<Generation, DnsConfigParams>,
+    pub external_dns: BTreeMap<Generation, DnsConfigParams>,
+    pub silo_names: Vec<omicron_common::api::external::Name>,
+    pub external_dns_zone_names: Vec<String>,
 }
 
 /// Code to generate tables.
@@ -1226,18 +1189,18 @@ mod table_display {
                     builder.push_record(vec![
                         format!("{ADDED_PREFIX}{METADATA_DIFF_INDENT}"),
                         metadata_table_internal_dns(),
-                        format!(
-                            "{} (new)",
-                            diff.after_meta.internal_dns_version
+                        linear_table_modified(
+                            &NOT_PRESENT_IN_COLLECTION_PARENS,
+                            &diff.after_meta.internal_dns_version,
                         ),
                     ]);
 
                     builder.push_record(vec![
                         format!("{ADDED_PREFIX}{METADATA_DIFF_INDENT}"),
                         metadata_table_external_dns(),
-                        format!(
-                            "{} (new)",
-                            diff.after_meta.external_dns_version
+                        linear_table_modified(
+                            &NOT_PRESENT_IN_COLLECTION_PARENS,
+                            &diff.after_meta.external_dns_version,
                         ),
                     ]);
                 }
@@ -1477,30 +1440,39 @@ mod table_display {
             section,
         );
 
-        let zone_type_changed =
-            before.config.zone_type != after.config.zone_type;
+        let mut what_changed = Vec::new();
+        if before.config.zone_type != after.config.zone_type {
+            what_changed.push(ZONE_TYPE_CONFIG);
+        }
+        if before.disposition != after.disposition {
+            what_changed.push(DISPOSITION);
+        }
+        if before.config.underlay_address != after.config.underlay_address {
+            what_changed.push(UNDERLAY_IP);
+        }
+        debug_assert!(
+            !what_changed.is_empty(),
+            "at least something should have changed:\n\
+             before = {before:#?}\n\
+             after = {after:#?}"
+        );
 
         let record = vec![
             format!("{ADDED_PREFIX}{ZONE_INDENT}"),
             // First two columns of data are skipped over since they're
             // always the same (verified at diff construction time).
-            format!(
-                " {}",
-                if zone_type_changed { SUB_NOT_LAST } else { SUB_LAST }
-            ),
+            format!(" {SUB_NOT_LAST}"),
             "".to_string(),
             after.disposition.to_string(),
             after.config.underlay_address.to_string(),
         ];
         section.push_record(record);
 
-        // If the zone type config changed, add a spanned row indicating that.
-        if zone_type_changed {
-            section.push_spanned_row(format!(
-                "{MODIFIED_PREFIX}{ZONE_INDENT}  \
-                 {SUB_LAST} zone type config changed",
-            ));
-        }
+        section.push_spanned_row(format!(
+            "{MODIFIED_PREFIX}{ZONE_INDENT}  \
+                 {SUB_LAST} changed: {}",
+            what_changed.join(", "),
+        ));
     }
 
     #[derive(Copy, Clone, Debug)]
@@ -1568,6 +1540,7 @@ mod table_display {
     const ZONE_ID: &str = "zone ID";
     const DISPOSITION: &str = "disposition";
     const UNDERLAY_IP: &str = "underlay IP";
+    const ZONE_TYPE_CONFIG: &str = "zone type config";
     const STATUS: &str = "status";
     const REMOVED_SLEDS_HEADING: &str = "REMOVED SLEDS";
     const MODIFIED_SLEDS_HEADING: &str = "MODIFIED SLEDS";
@@ -1587,6 +1560,8 @@ mod table_display {
     const UNCHANGED_PARENS: &str = "(unchanged)";
     const NO_ZONES_PARENS: &str = "(no zones)";
     const NONE_PARENS: &str = "(none)";
+    const NOT_PRESENT_IN_COLLECTION_PARENS: &str =
+        "(not present in collection)";
 
     fn header_row() -> Vec<String> {
         vec![

@@ -50,5 +50,5 @@ to:   blueprint  9d2c007b-46f1-4ff2-8b4c-8a5767030f76
      nexus          29278a22-1ba1-4117-bfdb-39fcb9ae7fd1   in service    fd00:1122:3344:102::22         
 
   METADATA:
-+   internal DNS version:  1 (new)
-+   external DNS version:  1 (new)
++   internal DNS version:  (not present in collection) -> 1
++   external DNS version:  (not present in collection) -> 1
