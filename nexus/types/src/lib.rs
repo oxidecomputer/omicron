@@ -34,3 +34,4 @@ pub mod external_api;
 pub mod identity;
 pub mod internal_api;
 pub mod inventory;
+mod sectioned_table;
