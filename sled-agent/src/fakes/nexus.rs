@@ -187,7 +187,8 @@ pub async fn start_dns_server(
             nexus_addr.port(),
         )
         .expect("failed to set up DNS");
-    let dns_config = dns_config_builder.build();
+    let dns_config =
+        dns_config_builder.build_full_config_for_initial_generation();
     dns.initialize_with_config(log, &dns_config).await.unwrap();
     dns
 }

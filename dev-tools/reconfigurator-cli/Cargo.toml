@@ -11,12 +11,16 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
+dns-service-client.workspace = true
 dropshot.workspace = true
 humantime.workspace = true
 indexmap.workspace = true
 nexus-reconfigurator-planning.workspace = true
+nexus-reconfigurator-execution.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
+# See omicron-rpaths for more about the "pq-sys" dependency.
+pq-sys = "*"
 reedline.workspace = true
 serde_json.workspace = true
 slog-error-chain.workspace = true

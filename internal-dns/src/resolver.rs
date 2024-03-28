@@ -530,7 +530,7 @@ mod test {
         dns_config
             .service_backend_zone(ServiceName::Cockroach, &zone, 12345)
             .unwrap();
-        let dns_config = dns_config.build();
+        let dns_config = dns_config.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
 
         let resolver = dns_server.resolver().unwrap();
@@ -608,7 +608,8 @@ mod test {
             .service_backend_zone(srv_backend, &zone, crucible_addr.port())
             .unwrap();
 
-        let mut dns_config = dns_builder.build();
+        let mut dns_config =
+            dns_builder.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
 
         // Look up Cockroach
@@ -687,7 +688,7 @@ mod test {
         let zone = dns_builder.host_zone(Uuid::new_v4(), ip1).unwrap();
         let srv_crdb = ServiceName::Cockroach;
         dns_builder.service_backend_zone(srv_crdb, &zone, 12345).unwrap();
-        let dns_config = dns_builder.build();
+        let dns_config = dns_builder.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
         let found_ip = resolver
             .lookup_ipv6(ServiceName::Cockroach)
@@ -702,7 +703,8 @@ mod test {
         let zone = dns_builder.host_zone(Uuid::new_v4(), ip2).unwrap();
         let srv_crdb = ServiceName::Cockroach;
         dns_builder.service_backend_zone(srv_crdb, &zone, 54321).unwrap();
-        let mut dns_config = dns_builder.build();
+        let mut dns_config =
+            dns_builder.build_full_config_for_initial_generation();
         dns_config.generation += 1;
         dns_server.update(&dns_config).await.unwrap();
         let found_ip = resolver
@@ -836,7 +838,7 @@ mod test {
         dns_config
             .service_backend_zone(ServiceName::Nexus, &zone, port)
             .unwrap();
-        let dns_config = dns_config.build();
+        let dns_config = dns_config.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
 
         // Confirm that we can access this record manually.
@@ -918,7 +920,7 @@ mod test {
         dns_config
             .service_backend_zone(ServiceName::Nexus, &zone, port)
             .unwrap();
-        let dns_config = dns_config.build();
+        let dns_config = dns_config.build_full_config_for_initial_generation();
         dns_server1.cleanup_successful();
         dns_server2.update(&dns_config).await.unwrap();
 
@@ -967,7 +969,8 @@ mod test {
             .unwrap();
 
         // Plumb records onto DNS server
-        let mut dns_config = dns_config.build();
+        let mut dns_config =
+            dns_config.build_full_config_for_initial_generation();
         dns_server.update(&dns_config).await.unwrap();
 
         // Using the resolver we should get back both addresses
