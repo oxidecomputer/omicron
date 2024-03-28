@@ -406,7 +406,7 @@ mod test {
         verify_blueprint(&blueprint2);
 
         // Now add a new sled.
-        let new_sled_id = example.sled_rng.next_uuid();
+        let new_sled_id = example.sled_rng.next();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let policy = example.system.to_policy().unwrap();

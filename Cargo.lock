@@ -1148,6 +1148,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
+name = "const_format"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a214c7af3d04997541b18d432afaff4c455e79e2029079647e72fc2bd27673"
+dependencies = [
+ "const_format_proc_macros",
+]
+
+[[package]]
+name = "const_format_proc_macros"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7f6ff08fd20f4f299298a28e2dfa8a8ba1036e6cd2460ac1de7b425d76f2500"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-xid",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1651,7 +1671,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=de065a84831e66c829603d9a098e237e8f5faaa1#de065a84831e66c829603d9a098e237e8f5faaa1"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8207cb9c90cd7144c3f351823bfb2ae3e221ad10#8207cb9c90cd7144c3f351823bfb2ae3e221ad10"
 dependencies = [
  "percent-encoding",
  "progenitor",
@@ -4314,7 +4334,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=de065a84831e66c829603d9a098e237e8f5faaa1#de065a84831e66c829603d9a098e237e8f5faaa1"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=8207cb9c90cd7144c3f351823bfb2ae3e221ad10#8207cb9c90cd7144c3f351823bfb2ae3e221ad10"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4590,6 +4610,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "const_format",
  "cookie 0.18.0",
  "db-macros",
  "diesel",
@@ -4695,6 +4716,7 @@ dependencies = [
  "strum 0.26.1",
  "thiserror",
  "tokio",
+ "typed-rng",
  "uuid 1.7.0",
 ]
 
@@ -4706,6 +4728,33 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.52",
+]
+
+[[package]]
+name = "nexus-metrics-producer-gc"
+version = "0.1.0"
+dependencies = [
+ "async-bb8-diesel",
+ "chrono",
+ "diesel",
+ "futures",
+ "httptest",
+ "ipnetwork",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-test-utils",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "oximeter-client",
+ "pq-sys",
+ "slog",
+ "slog-error-chain",
+ "thiserror",
+ "tokio",
+ "uuid 1.7.0",
 ]
 
 [[package]]
@@ -4778,10 +4827,10 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "rand_seeder",
  "sled-agent-client",
  "slog",
  "thiserror",
+ "typed-rng",
  "uuid 1.7.0",
 ]
 
@@ -5371,6 +5420,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-defaults",
  "nexus-inventory",
+ "nexus-metrics-producer-gc",
  "nexus-networking",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
@@ -10244,6 +10294,17 @@ name = "typed-path"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a90726108dab678edab76459751e1cc7c597c3484a6384d6423191255fa641b"
+
+[[package]]
+name = "typed-rng"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rand_seeder",
+ "uuid 1.7.0",
+]
 
 [[package]]
 name = "typenum"

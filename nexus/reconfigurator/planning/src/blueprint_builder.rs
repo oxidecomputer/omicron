@@ -38,7 +38,6 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use rand::rngs::StdRng;
-use rand::RngCore;
 use rand::SeedableRng;
 use slog::o;
 use slog::Logger;
@@ -50,6 +49,7 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
+use typed_rng::UuidRng;
 use uuid::Uuid;
 
 /// Errors encountered while assembling blueprints
@@ -223,7 +223,7 @@ impl<'a> BlueprintBuilder<'a> {
             })
             .collect::<Result<_, Error>>()?;
         Ok(Blueprint {
-            id: rng.blueprint_rng.next_uuid(),
+            id: rng.blueprint_rng.next(),
             blueprint_zones,
             parent_blueprint_id: None,
             internal_dns_version,
@@ -375,7 +375,7 @@ impl<'a> BlueprintBuilder<'a> {
         let blueprint_zones =
             self.zones.into_zones_map(self.policy.sleds.keys().copied());
         Blueprint {
-            id: self.rng.blueprint_rng.next_uuid(),
+            id: self.rng.blueprint_rng.next(),
             blueprint_zones,
             parent_blueprint_id: Some(self.parent_blueprint.id),
             internal_dns_version: self.internal_dns_version,
@@ -452,7 +452,7 @@ impl<'a> BlueprintBuilder<'a> {
             .collect();
 
         let zone = OmicronZoneConfig {
-            id: self.rng.zone_rng.next_uuid(),
+            id: self.rng.zone_rng.next(),
             underlay_address: ip,
             zone_type: OmicronZoneType::InternalNtp {
                 address: ntp_address.to_string(),
@@ -502,7 +502,7 @@ impl<'a> BlueprintBuilder<'a> {
         let port = omicron_common::address::CRUCIBLE_PORT;
         let address = SocketAddrV6::new(ip, port, 0, 0).to_string();
         let zone = OmicronZoneConfig {
-            id: self.rng.zone_rng.next_uuid(),
+            id: self.rng.zone_rng.next(),
             underlay_address: ip,
             zone_type: OmicronZoneType::Crucible {
                 address,
@@ -589,7 +589,7 @@ impl<'a> BlueprintBuilder<'a> {
         };
 
         for _ in 0..num_nexus_to_add {
-            let nexus_id = self.rng.zone_rng.next_uuid();
+            let nexus_id = self.rng.zone_rng.next();
             let external_ip = self
                 .available_external_ips
                 .next()
@@ -617,7 +617,7 @@ impl<'a> BlueprintBuilder<'a> {
                     .next()
                     .ok_or(Error::NoSystemMacAddressAvailable)?;
                 NetworkInterface {
-                    id: self.rng.network_interface_rng.next_uuid(),
+                    id: self.rng.network_interface_rng.next(),
                     kind: NetworkInterfaceKind::Service { id: nexus_id },
                     name: format!("nexus-{nexus_id}").parse().unwrap(),
                     ip,
@@ -739,14 +739,14 @@ struct BlueprintBuilderRng {
 
 impl BlueprintBuilderRng {
     fn new() -> Self {
-        Self::new_from_rng(StdRng::from_entropy())
+        Self::new_from_parent(StdRng::from_entropy())
     }
 
-    fn new_from_rng(mut root_rng: StdRng) -> Self {
-        let blueprint_rng = UuidRng::from_root_rng(&mut root_rng, "blueprint");
-        let zone_rng = UuidRng::from_root_rng(&mut root_rng, "zone");
+    fn new_from_parent(mut parent: StdRng) -> Self {
+        let blueprint_rng = UuidRng::from_parent_rng(&mut parent, "blueprint");
+        let zone_rng = UuidRng::from_parent_rng(&mut parent, "zone");
         let network_interface_rng =
-            UuidRng::from_root_rng(&mut root_rng, "network_interface");
+            UuidRng::from_parent_rng(&mut parent, "network_interface");
 
         BlueprintBuilderRng { blueprint_rng, zone_rng, network_interface_rng }
     }
@@ -755,40 +755,7 @@ impl BlueprintBuilderRng {
         // Important to add some more bytes here, so that builders with the
         // same seed but different purposes don't end up with the same UUIDs.
         const SEED_EXTRA: &str = "blueprint-builder";
-        let mut seeder = rand_seeder::Seeder::from((seed, SEED_EXTRA));
-        *self = Self::new_from_rng(seeder.make_rng::<StdRng>());
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct UuidRng {
-    rng: StdRng,
-}
-
-impl UuidRng {
-    /// Returns a new `UuidRng` generated from the root RNG.
-    ///
-    /// `extra` is a string that should be unique to the purpose of the UUIDs.
-    fn from_root_rng(root_rng: &mut StdRng, extra: &'static str) -> Self {
-        let seed = root_rng.next_u64();
-        let mut seeder = rand_seeder::Seeder::from((seed, extra));
-        Self { rng: seeder.make_rng::<StdRng>() }
-    }
-
-    /// `extra` is a string that should be unique to the purpose of the UUIDs.
-    pub(crate) fn from_seed<H: Hash>(seed: H, extra: &'static str) -> Self {
-        let mut seeder = rand_seeder::Seeder::from((seed, extra));
-        Self { rng: seeder.make_rng::<StdRng>() }
-    }
-
-    /// Returns a new UUIDv4 generated from the RNG.
-    pub(crate) fn next_uuid(&mut self) -> Uuid {
-        let mut bytes = [0; 16];
-        self.rng.fill_bytes(&mut bytes);
-        // Builder::from_random_bytes will turn the random bytes into a valid
-        // UUIDv4. (Parts of the system depend on the UUID actually being valid
-        // v4, so it's important that we don't just use `uuid::from_bytes`.)
-        uuid::Builder::from_random_bytes(bytes).into_uuid()
+        *self = Self::new_from_parent(typed_rng::from_seed(seed, SEED_EXTRA));
     }
 }
 
@@ -1019,7 +986,7 @@ pub mod test {
         assert_eq!(diff.sleds_modified().count(), 0);
 
         // The next step is adding these zones to a new sled.
-        let new_sled_id = example.sled_rng.next_uuid();
+        let new_sled_id = example.sled_rng.next();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let policy = example.system.to_policy().unwrap();

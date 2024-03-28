@@ -486,6 +486,11 @@ impl DataStore {
             }
         }
 
+        // Sort all zones to match what blueprint builders do.
+        for (_, zones_config) in blueprint_zones.iter_mut() {
+            zones_config.sort();
+        }
+
         bail_unless!(
             omicron_zone_nics.is_empty(),
             "found extra Omicron zone NICs: {:?}",
@@ -1185,6 +1190,7 @@ mod tests {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
     use std::mem;

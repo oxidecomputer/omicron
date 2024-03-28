@@ -24,6 +24,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
 use camino::Utf8PathBuf;
 use chrono::SecondsFormat;
+use clap::ArgAction;
 use clap::Args;
 use clap::Subcommand;
 use clap::ValueEnum;
@@ -92,6 +93,7 @@ use nexus_types::inventory::RotPageWhich;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Generation;
+use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MacAddr;
 use sled_agent_client::types::VolumeConstructionRequest;
@@ -257,7 +259,7 @@ enum DbCommands {
     /// Print information about sleds
     Sleds,
     /// Print information about customer instances
-    Instances,
+    Instances(InstancesOptions),
     /// Print information about the network
     Network(NetworkArgs),
     /// Print information about snapshots
@@ -344,6 +346,13 @@ impl CliDnsGroup {
             CliDnsGroup::External => DnsGroup::External,
         }
     }
+}
+
+#[derive(Debug, Args)]
+struct InstancesOptions {
+    /// Only show the running instances
+    #[arg(short, long, action=ArgAction::SetTrue)]
+    running: bool,
 }
 
 #[derive(Debug, Args)]
@@ -539,8 +548,14 @@ impl DbArgs {
             DbCommands::Sleds => {
                 cmd_db_sleds(&opctx, &datastore, &self.fetch_opts).await
             }
-            DbCommands::Instances => {
-                cmd_db_instances(&opctx, &datastore, &self.fetch_opts).await
+            DbCommands::Instances(instances_options) => {
+                cmd_db_instances(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    instances_options.running,
+                )
+                .await
             }
             DbCommands::Network(NetworkArgs {
                 command: NetworkCommands::ListEips,
@@ -1628,6 +1643,7 @@ async fn cmd_db_instances(
     opctx: &OpContext,
     datastore: &DataStore,
     fetch_opts: &DbFetchOptions,
+    running: bool,
 ) -> Result<(), anyhow::Error> {
     use db::schema::instance::dsl;
     use db::schema::vmm::dsl as vmm_dsl;
@@ -1680,6 +1696,10 @@ async fn cmd_db_instances(
         } else {
             "-".to_string()
         };
+
+        if running && i.effective_state() != InstanceState::Running {
+            continue;
+        }
 
         let cir = CustomerInstanceRow {
             id: i.instance().id().to_string(),
