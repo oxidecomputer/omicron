@@ -3434,7 +3434,7 @@ async fn cmd_db_reconfigurator_save(
         .map(|dns_zone| dns_zone.zone_name)
         .collect();
     let state = UnstableReconfiguratorState {
-        policy: policy,
+        policy,
         collections,
         blueprints,
         internal_dns,

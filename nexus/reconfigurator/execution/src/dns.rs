@@ -905,7 +905,7 @@ mod test {
             std::slice::from_ref(my_silo.name()),
             String::from("oxide.test"),
         );
-        assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"),);
+        assert_eq!(external_dns_zone.zone_name, String::from("oxide.test"));
         let records = &external_dns_zone.records;
         assert_eq!(records.len(), 1);
         let silo_records = records
