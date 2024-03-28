@@ -462,7 +462,7 @@ impl DnsConfigBuilder {
     /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
     /// our DNS servers) for the control plane DNS zone described up to this
     /// point
-    pub fn build(self) -> DnsConfigParams {
+    pub fn build_full_config_for_initial_generation(self) -> DnsConfigParams {
         let zone = self.build_zone();
         DnsConfigParams {
             generation: u64::from(Generation::new()),
@@ -605,7 +605,7 @@ mod test {
             ("zones_only", builder_zones_only),
             ("non_trivial", builder_non_trivial),
         ] {
-            let config = builder.build();
+            let config = builder.build_full_config_for_initial_generation();
             assert_eq!(config.generation, 1);
             assert_eq!(config.zones.len(), 1);
             assert_eq!(config.zones[0].zone_name, DNS_ZONE);

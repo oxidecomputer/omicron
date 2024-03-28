@@ -23,6 +23,7 @@ pub struct DnsDiff<'a> {
     left: &'a DnsRecords,
     right: &'a DnsRecords,
     zone_name: &'a str,
+    all_names: BTreeSet<&'a String>,
 }
 
 impl<'a> DnsDiff<'a> {
@@ -39,20 +40,22 @@ impl<'a> DnsDiff<'a> {
             {:?} vs. {:?}", left_zone.zone_name, right_zone.zone_name,
         );
 
+        let all_names =
+            left_zone.records.keys().chain(right_zone.records.keys()).collect();
+
         Ok(DnsDiff {
             left: &left_zone.records,
             right: &right_zone.records,
             zone_name: &left_zone.zone_name,
+            all_names,
         })
     }
 
     fn iter_names(&self) -> impl Iterator<Item = NameDiff<'_>> {
-        let all_names: BTreeSet<_> =
-            self.left.keys().chain(self.right.keys()).collect();
-        all_names.into_iter().map(|k| {
+        self.all_names.iter().map(|k| {
             let name = k.as_str();
-            let v1 = self.left.get(k);
-            let v2 = self.right.get(k);
+            let v1 = self.left.get(*k);
+            let v2 = self.right.get(*k);
             match (v1, v2) {
                 (None, Some(v2)) => NameDiff::Added(name, v2.as_ref()),
                 (Some(v1), None) => NameDiff::Removed(name, v1.as_ref()),
