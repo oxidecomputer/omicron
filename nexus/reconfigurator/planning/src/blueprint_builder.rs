@@ -907,8 +907,12 @@ pub mod test {
 
         let diff =
             blueprint_initial.diff_since_collection(&collection).unwrap();
+        // There are some differences with even a no-op diff between a
+        // collection and a blueprint, such as new data being added to
+        // blueprints like DNS generation numbers.
         println!(
-            "collection -> initial blueprint (expected no changes):\n{}",
+            "collection -> initial blueprint \
+             (expected no non-trivial changes):\n{}",
             diff.display()
         );
         assert_contents(
