@@ -48,7 +48,7 @@ struct ReconfiguratorSim {
     collections: IndexMap<Uuid, Collection>,
 
     /// blueprints created by the user
-    blueprints: IndexMap<Uuid, RsBlueprint>,
+    blueprints: IndexMap<Uuid, Blueprint>,
 
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -73,14 +73,11 @@ impl ReconfiguratorSim {
     fn blueprint_lookup(&self, id: Uuid) -> Result<&Blueprint, anyhow::Error> {
         self.blueprints
             .get(&id)
-            .map(|rs_blueprint| &rs_blueprint.blueprint)
             .ok_or_else(|| anyhow!("no such blueprint: {}", id))
     }
 
     fn blueprint_insert_new(&mut self, blueprint: Blueprint) {
-        let previous = self
-            .blueprints
-            .insert(blueprint.id, RsBlueprint { blueprint, immutable: false });
+        let previous = self.blueprints.insert(blueprint.id, blueprint);
         assert!(previous.is_none());
     }
 
@@ -92,16 +89,9 @@ impl ReconfiguratorSim {
         if let indexmap::map::Entry::Occupied(_) = &entry {
             return Err(anyhow!("blueprint already exists: {}", blueprint.id));
         }
-        let _ =
-            entry.or_insert_with(|| RsBlueprint { blueprint, immutable: true });
+        let _ = entry.or_insert(blueprint);
         Ok(())
     }
-}
-
-#[derive(Debug)]
-struct RsBlueprint {
-    blueprint: Blueprint,
-    immutable: bool,
 }
 
 /// interactive REPL for exploring the planner
@@ -614,7 +604,7 @@ fn cmd_blueprint_list(
     let rows = sim
         .blueprints
         .values()
-        .map(|rs_blueprint| BlueprintRow { id: rs_blueprint.blueprint.id });
+        .map(|blueprint| BlueprintRow { id: blueprint.id });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -713,10 +703,7 @@ fn cmd_blueprint_edit(
     args: BlueprintEditArgs,
 ) -> anyhow::Result<Option<String>> {
     let blueprint_id = args.blueprint_id;
-    let rs_blueprint = sim
-        .blueprints
-        .get(&blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     // XXX-dap for this to work, the UnstableReconfiguratorState needs to
     // include the service IP pool ranges so that we can stuff that into the
@@ -724,9 +711,9 @@ fn cmd_blueprint_edit(
     let policy = sim.system.to_policy().context("assembling policy")?;
     let mut builder = BlueprintBuilder::new_based_on(
         &sim.log,
-        &rs_blueprint.blueprint,
-        rs_blueprint.blueprint.internal_dns_version,
-        rs_blueprint.blueprint.external_dns_version,
+        &blueprint,
+        blueprint.internal_dns_version,
+        blueprint.external_dns_version,
         &policy,
         creator,
     )
@@ -920,11 +907,7 @@ fn cmd_save(
     let saved = UnstableReconfiguratorState {
         policy,
         collections: sim.collections.values().cloned().collect(),
-        blueprints: sim
-            .blueprints
-            .values()
-            .map(|rs_blueprint| rs_blueprint.blueprint.clone())
-            .collect(),
+        blueprints: sim.blueprints.values().cloned().collect(),
         internal_dns: sim.internal_dns.clone(),
         external_dns: sim.external_dns.clone(),
         silo_names: sim.silo_names.clone(),
