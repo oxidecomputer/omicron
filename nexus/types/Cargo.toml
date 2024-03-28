@@ -10,6 +10,7 @@ chrono.workspace = true
 base64.workspace = true
 futures.workspace = true
 humantime.workspace = true
+ipnetwork.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
 parse-display.workspace = true
@@ -20,6 +21,7 @@ serde_with.workspace = true
 steno.workspace = true
 strum.workspace = true
 thiserror.workspace = true
+newtype-uuid.workspace = true
 uuid.workspace = true
 
 api_identity.workspace = true

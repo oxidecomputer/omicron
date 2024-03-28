@@ -473,6 +473,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
+    use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::Policy;
     use nexus_types::deployment::SledResources;
     use nexus_types::deployment::ZpoolName;
@@ -833,13 +834,13 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, policy) = example(&logctx.log, TEST_NAME, 5);
+        let (collection, input) = example(&logctx.log, TEST_NAME, 5);
         let initial_external_dns_generation = Generation::new();
         let blueprint = BlueprintBuilder::build_initial_from_collection(
             &collection,
             Generation::new(),
             initial_external_dns_generation,
-            &policy,
+            &input.policy,
             "test suite",
         )
         .expect("failed to generate initial blueprint");
@@ -1253,6 +1254,13 @@ mod test {
         policy
             .service_ip_pool_ranges
             .push(IpRange::from(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        let planning_input = PlanningInput {
+            policy,
+            // These are not used because we're not actually going through the
+            // planner.
+            service_external_ips: BTreeMap::new(),
+            service_nics: BTreeMap::new(),
+        };
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
@@ -1262,7 +1270,7 @@ mod test {
             Generation::from(
                 u32::try_from(dns_latest_external.generation).unwrap(),
             ),
-            &policy,
+            &planning_input,
             "test suite",
         )
         .unwrap();
