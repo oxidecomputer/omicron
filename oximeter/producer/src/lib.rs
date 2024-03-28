@@ -251,8 +251,16 @@ pub async fn register(
 ) -> Result<(), Error> {
     let client =
         nexus_client::Client::new(&format!("http://{}", address), log.clone());
-    client.cpapi_producers_post(&server_info.into()).await.map(|_| ()).map_err(
-        |err| {
+    match client.cpapi_producers_post(&server_info.into()).await {
+        Ok(_) => Ok(()),
+        // Convert any unexpected-but-successful response to an Ok.
+        // See https://github.com/oxidecomputer/omicron/issues/5284 for details.
+        Err(nexus_client::Error::UnexpectedResponse(resp))
+            if resp.status().is_success() =>
+        {
+            Ok(())
+        }
+        Err(err) => {
             let retryable = match &err {
                 nexus_client::Error::CommunicationError(..) => true,
                 nexus_client::Error::ErrorResponse(resp) => {
@@ -261,9 +269,9 @@ pub async fn register(
                 _ => false,
             };
             let msg = err.to_string();
-            Error::RegistrationError { retryable, msg }
-        },
-    )
+            Err(Error::RegistrationError { retryable, msg })
+        }
+    }
 }
 
 /// Handle a request to pull available metric data from a [`ProducerRegistry`].
