@@ -2064,10 +2064,21 @@ impl super::Nexus {
         });
 
         let mut close_frame = None;
-
+        let mut task_joined = false;
         loop {
             tokio::select! {
-                _ = &mut jh => break,
+                res = &mut jh => {
+                    task_joined = true;
+                    if let Ok(Ok(mut nexus_sink)) = res {
+                        // .take() here avoids borrow collision in the cleanup code
+                        // below the loop where we also join the task if it hasn't been
+                        let _ = nexus_sink
+                            .send(WebSocketMessage::Close(close_frame.take()))
+                            .await
+                            .is_ok();
+                    }
+                    break;
+                }
                 msg = nexus_stream.next() => {
                     match msg {
                         None => {
@@ -2109,12 +2120,15 @@ impl super::Nexus {
             }
         }
 
-        let _ = closed_tx.send(()).is_ok();
-        if let Ok(Ok(mut nexus_sink)) = jh.await {
-            let _ = nexus_sink
-                .send(WebSocketMessage::Close(close_frame))
-                .await
-                .is_ok();
+        // double-joining a task handle is a panic
+        if !task_joined {
+            let _ = closed_tx.send(()).is_ok();
+            if let Ok(Ok(mut nexus_sink)) = jh.await {
+                let _ = nexus_sink
+                    .send(WebSocketMessage::Close(close_frame))
+                    .await
+                    .is_ok();
+            }
         }
 
         Ok(())
