@@ -4113,6 +4113,45 @@
         }
       }
     },
+    "/v1/system/hardware/disks/{disk_id}": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Get a physical disk",
+        "operationId": "physical_disk_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "description": "ID of the physical disk",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhysicalDisk"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/racks": {
       "get": {
         "tags": [
@@ -14419,6 +14458,14 @@
           "model": {
             "type": "string"
           },
+          "policy": {
+            "description": "The operator-defined policy for a physical disk.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhysicalDiskPolicy"
+              }
+            ]
+          },
           "serial": {
             "type": "string"
           },
@@ -14427,6 +14474,14 @@
             "description": "The sled to which this disk is attached, if any.",
             "type": "string",
             "format": "uuid"
+          },
+          "state": {
+            "description": "The current state Nexus believes the disk to be in.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PhysicalDiskState"
+              }
+            ]
           },
           "time_created": {
             "description": "timestamp when this resource was created",
@@ -14446,7 +14501,9 @@
           "form_factor",
           "id",
           "model",
+          "policy",
           "serial",
+          "state",
           "time_created",
           "time_modified",
           "vendor"
@@ -14458,6 +14515,41 @@
         "enum": [
           "m2",
           "u2"
+        ]
+      },
+      "PhysicalDiskPolicy": {
+        "description": "The operator-defined policy of a physical disk.",
+        "oneOf": [
+          {
+            "description": "The operator has indicated that the disk is in-service.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "in_service"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          {
+            "description": "The operator has indicated that the disk has been permanently removed from service.\n\nThis is a terminal state: once a particular disk ID is expunged, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new disk.)\n\nAn expunged disk is always non-provisionable.",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "expunged"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
         ]
       },
       "PhysicalDiskResultsPage": {
@@ -14479,6 +14571,25 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "PhysicalDiskState": {
+        "description": "The current state of the disk, as determined by Nexus.",
+        "oneOf": [
+          {
+            "description": "The disk is currently active, and has resources allocated on it.",
+            "type": "string",
+            "enum": [
+              "active"
+            ]
+          },
+          {
+            "description": "The disk has been permanently removed from service.\n\nThis is a terminal state: once a particular disk ID is decommissioned, it will never return to service. (The actual hardware may be reused, but it will be treated as a brand-new disk.)",
+            "type": "string",
+            "enum": [
+              "decommissioned"
+            ]
+          }
         ]
       },
       "Ping": {

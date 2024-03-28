@@ -54,7 +54,17 @@ type ControlPlaneTestContext =
 //   403).
 #[nexus_test]
 async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
-    DiskTest::new(cptestctx).await;
+    let mut disk_test = DiskTest::new(cptestctx).await;
+    disk_test
+        .add_zpool_with_dataset_ext(
+            cptestctx,
+            nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
+            uuid::Uuid::new_v4(),
+            uuid::Uuid::new_v4(),
+            DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await;
+
     let client = &cptestctx.external_client;
     let log = &cptestctx.logctx.log;
     let mut setup_results = std::collections::BTreeMap::new();

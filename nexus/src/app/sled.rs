@@ -4,6 +4,7 @@
 
 //! Sleds, and the hardware and services within them.
 
+use crate::external_api::params;
 use crate::internal_api::params::{
     PhysicalDiskPutRequest, SledAgentInfo, SledRole, ZpoolPutRequest,
 };
@@ -170,6 +171,15 @@ impl super::Nexus {
     }
 
     // Physical disks
+
+    pub async fn physical_disk_lookup<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        disk_selector: &params::PhysicalDiskPath,
+    ) -> Result<lookup::PhysicalDisk<'a>, Error> {
+        Ok(lookup::LookupPath::new(&opctx, &self.db_datastore)
+            .physical_disk(disk_selector.disk_id))
+    }
 
     pub(crate) async fn sled_list_physical_disks(
         &self,

@@ -708,8 +708,17 @@ pub struct DiskTest {
 
 impl DiskTest {
     pub const DEFAULT_ZPOOL_SIZE_GIB: u32 = 10;
+    pub const DEFAULT_ZPOOL_COUNT: u32 = 3;
 
-    // Creates fake physical storage, an organization, and a project.
+    /// Creates a new "DiskTest", but does not actually add any zpools.
+    pub async fn empty<N: NexusServer>(
+        cptestctx: &ControlPlaneTestContext<N>,
+    ) -> Self {
+        let sled_agent = cptestctx.sled_agent.sled_agent.clone();
+
+        Self { sled_agent, zpools: vec![] }
+    }
+
     pub async fn new<N: NexusServer>(
         cptestctx: &ControlPlaneTestContext<N>,
     ) -> Self {
@@ -718,10 +727,8 @@ impl DiskTest {
         let mut disk_test = Self { sled_agent, zpools: vec![] };
 
         // Create three Zpools, each 10 GiB, each with one Crucible dataset.
-        for _ in 0..3 {
-            disk_test
-                .add_zpool_with_dataset(cptestctx, Self::DEFAULT_ZPOOL_SIZE_GIB)
-                .await;
+        for _ in 0..Self::DEFAULT_ZPOOL_COUNT {
+            disk_test.add_zpool_with_dataset(cptestctx).await;
         }
 
         disk_test
@@ -730,21 +737,36 @@ impl DiskTest {
     pub async fn add_zpool_with_dataset<N: NexusServer>(
         &mut self,
         cptestctx: &ControlPlaneTestContext<N>,
+    ) {
+        self.add_zpool_with_dataset_ext(
+            cptestctx,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Self::DEFAULT_ZPOOL_SIZE_GIB,
+        )
+        .await
+    }
+
+    pub async fn add_zpool_with_dataset_ext<N: NexusServer>(
+        &mut self,
+        cptestctx: &ControlPlaneTestContext<N>,
+        physical_disk_id: Uuid,
+        zpool_id: Uuid,
+        dataset_id: Uuid,
         gibibytes: u32,
     ) {
         // To get a dataset, we actually need to create a new simulated physical
         // disk, zpool, and dataset, all contained within one another.
         let zpool = TestZpool {
-            id: Uuid::new_v4(),
+            id: zpool_id,
             size: ByteCount::from_gibibytes_u32(gibibytes),
-            datasets: vec![TestDataset { id: Uuid::new_v4() }],
+            datasets: vec![TestDataset { id: dataset_id }],
         };
-
-        let physical_disk_id = Uuid::new_v4();
 
         let disk_identity = DiskIdentity {
             vendor: "test-vendor".into(),
-            serial: "test-serial".into(),
+            serial: format!("totally-unique-serial: {}", physical_disk_id),
             model: "test-model".into(),
         };
 

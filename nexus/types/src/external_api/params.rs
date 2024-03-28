@@ -88,6 +88,7 @@ id_path_param!(GroupPath, group_id, "group");
 // ID that can be used to deterministically generate the UUID.
 id_path_param!(SledPath, sled_id, "sled");
 id_path_param!(SwitchPath, switch_id, "switch");
+id_path_param!(PhysicalDiskPath, disk_id, "physical disk");
 
 // Internal API parameters
 id_path_param!(BlueprintPath, blueprint_id, "blueprint");
