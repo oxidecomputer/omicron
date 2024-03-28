@@ -15,6 +15,7 @@ use indexmap::IndexMap;
 use nexus_reconfigurator_execution::blueprint_external_dns_config;
 use nexus_reconfigurator_execution::blueprint_internal_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
@@ -47,7 +48,7 @@ struct ReconfiguratorSim {
     collections: IndexMap<Uuid, Collection>,
 
     /// blueprints created by the user
-    blueprints: IndexMap<Uuid, Blueprint>,
+    blueprints: IndexMap<Uuid, RsBlueprint>,
 
     /// internal DNS configurations
     internal_dns: BTreeMap<Generation, DnsConfigParams>,
@@ -66,6 +67,41 @@ struct ReconfiguratorSim {
     num_nexus: Option<u16>,
 
     log: slog::Logger,
+}
+
+impl ReconfiguratorSim {
+    fn blueprint_lookup(&self, id: Uuid) -> Result<&Blueprint, anyhow::Error> {
+        self.blueprints
+            .get(&id)
+            .map(|rs_blueprint| &rs_blueprint.blueprint)
+            .ok_or_else(|| anyhow!("no such blueprint: {}", id))
+    }
+
+    fn blueprint_insert_new(&mut self, blueprint: Blueprint) {
+        let previous = self
+            .blueprints
+            .insert(blueprint.id, RsBlueprint { blueprint, immutable: false });
+        assert!(previous.is_none());
+    }
+
+    fn blueprint_insert_loaded(
+        &mut self,
+        blueprint: Blueprint,
+    ) -> Result<(), anyhow::Error> {
+        let entry = self.blueprints.entry(blueprint.id);
+        if let indexmap::map::Entry::Occupied(_) = &entry {
+            return Err(anyhow!("blueprint already exists: {}", blueprint.id));
+        }
+        let _ =
+            entry.or_insert_with(|| RsBlueprint { blueprint, immutable: true });
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct RsBlueprint {
+    blueprint: Blueprint,
+    immutable: bool,
 }
 
 /// interactive REPL for exploring the planner
@@ -200,6 +236,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::BlueprintFromInventory(args) => {
             cmd_blueprint_from_inventory(sim, args)
         }
+        Commands::BlueprintEdit(args) => cmd_blueprint_edit(sim, args),
         Commands::BlueprintPlan(args) => cmd_blueprint_plan(sim, args),
         Commands::BlueprintShow(args) => cmd_blueprint_show(sim, args),
         Commands::BlueprintDiff(args) => cmd_blueprint_diff(sim, args),
@@ -207,6 +244,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::BlueprintDiffInventory(args) => {
             cmd_blueprint_diff_inventory(sim, args)
         }
+        Commands::BlueprintSave(args) => cmd_blueprint_save(sim, args),
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
         Commands::Load(args) => cmd_load(sim, args),
@@ -259,6 +297,8 @@ enum Commands {
     BlueprintFromInventory(InventoryArgs),
     /// run planner to generate a new blueprint
     BlueprintPlan(BlueprintPlanArgs),
+    /// edit contents of a blueprint directly
+    BlueprintEdit(BlueprintEditArgs),
     /// show details about a blueprint
     BlueprintShow(BlueprintArgs),
     /// show differences between two blueprints
@@ -267,6 +307,8 @@ enum Commands {
     BlueprintDiffDns(BlueprintDiffDnsArgs),
     /// show differences between a blueprint and an inventory collection
     BlueprintDiffInventory(BlueprintDiffInventoryArgs),
+    /// write one blueprint to a file
+    BlueprintSave(BlueprintSaveArgs),
 
     /// show system properties
     Show,
@@ -315,6 +357,25 @@ struct BlueprintPlanArgs {
 }
 
 #[derive(Debug, Args)]
+struct BlueprintEditArgs {
+    /// id of the blueprint to edit
+    blueprint_id: Uuid,
+    /// "creator" field for the new blueprint
+    creator: Option<String>,
+    #[command(subcommand)]
+    edit_command: BlueprintEditCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum BlueprintEditCommands {
+    /// add a Nexus instance to a particular sled
+    AddNexus {
+        /// sled on which to deploy the new instance
+        sled_id: Uuid,
+    },
+}
+
+#[derive(Debug, Args)]
 struct BlueprintArgs {
     /// id of the blueprint
     blueprint_id: Uuid,
@@ -342,6 +403,14 @@ struct BlueprintDiffInventoryArgs {
     collection_id: Uuid,
     /// id of the blueprint
     blueprint_id: Uuid,
+}
+
+#[derive(Debug, Args)]
+struct BlueprintSaveArgs {
+    /// id of the blueprint
+    blueprint_id: Uuid,
+    /// output file
+    filename: Utf8PathBuf,
 }
 
 #[derive(Debug, Args)]
@@ -545,7 +614,7 @@ fn cmd_blueprint_list(
     let rows = sim
         .blueprints
         .values()
-        .map(|blueprint| BlueprintRow { id: blueprint.id });
+        .map(|rs_blueprint| BlueprintRow { id: rs_blueprint.blueprint.id });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))
@@ -577,7 +646,7 @@ fn cmd_blueprint_from_inventory(
         "generated blueprint {} from inventory collection {}",
         blueprint.id, collection_id
     );
-    sim.blueprints.insert(blueprint.id, blueprint);
+    sim.blueprint_insert_new(blueprint);
     Ok(Some(rv))
 }
 
@@ -587,10 +656,7 @@ fn cmd_blueprint_plan(
 ) -> anyhow::Result<Option<String>> {
     let parent_blueprint_id = args.parent_blueprint_id;
     let collection_id = args.collection_id;
-    let parent_blueprint = sim
-        .blueprints
-        .get(&parent_blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", parent_blueprint_id))?;
+    let parent_blueprint = sim.blueprint_lookup(parent_blueprint_id)?;
     let collection = sim
         .collections
         .get(&collection_id)
@@ -638,7 +704,51 @@ fn cmd_blueprint_plan(
         "generated blueprint {} based on parent blueprint {}",
         blueprint.id, parent_blueprint_id,
     );
-    sim.blueprints.insert(blueprint.id, blueprint);
+    sim.blueprint_insert_new(blueprint);
+    Ok(Some(rv))
+}
+
+fn cmd_blueprint_edit(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintEditArgs,
+) -> anyhow::Result<Option<String>> {
+    let blueprint_id = args.blueprint_id;
+    let rs_blueprint = sim
+        .blueprints
+        .get(&blueprint_id)
+        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
+    let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
+    // XXX-dap for this to work, the UnstableReconfiguratorState needs to
+    // include the service IP pool ranges so that we can stuff that into the
+    // Policy to allocate addresses correctly
+    let policy = sim.system.to_policy().context("assembling policy")?;
+    let mut builder = BlueprintBuilder::new_based_on(
+        &sim.log,
+        &rs_blueprint.blueprint,
+        rs_blueprint.blueprint.internal_dns_version,
+        rs_blueprint.blueprint.external_dns_version,
+        &policy,
+        creator,
+    )
+    .context("creating blueprint builder")?;
+
+    let label = match args.edit_command {
+        BlueprintEditCommands::AddNexus { sled_id } => {
+            let current = builder.sled_num_nexus_zones(sled_id);
+            let added = builder
+                .sled_ensure_zone_multiple_nexus(sled_id, current + 1)
+                .context("failed to add Nexus zone")?;
+            assert_matches::assert_matches!(added, EnsureMultiple::Added(1));
+            format!("added Nexus zone to sled {}", sled_id)
+        }
+    };
+
+    let new_blueprint = builder.build();
+    let rv = format!(
+        "blueprint {} created from blueprint {}: {}",
+        new_blueprint.id, blueprint_id, label
+    );
+    sim.blueprint_insert_new(new_blueprint);
     Ok(Some(rv))
 }
 
@@ -646,10 +756,7 @@ fn cmd_blueprint_show(
     sim: &mut ReconfiguratorSim,
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
-    let blueprint = sim
-        .blueprints
-        .get(&args.blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", args.blueprint_id))?;
+    let blueprint = sim.blueprint_lookup(args.blueprint_id)?;
     Ok(Some(format!("{}", blueprint.display())))
 }
 
@@ -660,14 +767,8 @@ fn cmd_blueprint_diff(
     let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
     let blueprint2_id = args.blueprint2_id;
-    let blueprint1 = sim
-        .blueprints
-        .get(&blueprint1_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint1_id))?;
-    let blueprint2 = sim
-        .blueprints
-        .get(&blueprint2_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint2_id))?;
+    let blueprint1 = sim.blueprint_lookup(blueprint1_id)?;
+    let blueprint2 = sim.blueprint_lookup(blueprint2_id)?;
 
     let sled_diff = blueprint1.diff_sleds(&blueprint2).display().to_string();
     swriteln!(rv, "{}", sled_diff);
@@ -740,10 +841,7 @@ fn cmd_blueprint_diff_dns(
     let dns_group = args.dns_group;
     let dns_version = Generation::from(args.dns_version);
     let blueprint_id = args.blueprint_id;
-    let blueprint = sim
-        .blueprints
-        .get(&blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
 
     let existing_dns_config = match dns_group {
         CliDnsGroup::Internal => sim.internal_dns.get(&dns_version),
@@ -790,13 +888,28 @@ fn cmd_blueprint_diff_inventory(
     let collection = sim.collections.get(&collection_id).ok_or_else(|| {
         anyhow!("no such inventory collection: {}", collection_id)
     })?;
-    let blueprint = sim
-        .blueprints
-        .get(&blueprint_id)
-        .ok_or_else(|| anyhow!("no such blueprint: {}", blueprint_id))?;
-
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
     let diff = blueprint.diff_sleds_from_collection(&collection);
     Ok(Some(diff.display().to_string()))
+}
+
+fn cmd_blueprint_save(
+    sim: &mut ReconfiguratorSim,
+    args: BlueprintSaveArgs,
+) -> anyhow::Result<Option<String>> {
+    let blueprint_id = args.blueprint_id;
+    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+
+    let output_path = &args.filename;
+    let outfile = std::fs::OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(output_path)
+        .with_context(|| format!("open {:?}", output_path))?;
+    serde_json::to_writer_pretty(&outfile, &blueprint)
+        .with_context(|| format!("writing to {:?}", output_path))
+        .unwrap_or_else(|e| panic!("{:#}", e));
+    Ok(Some(format!("saved blueprint {} to {:?}", blueprint_id, output_path)))
 }
 
 fn cmd_save(
@@ -807,7 +920,11 @@ fn cmd_save(
     let saved = UnstableReconfiguratorState {
         policy,
         collections: sim.collections.values().cloned().collect(),
-        blueprints: sim.blueprints.values().cloned().collect(),
+        blueprints: sim
+            .blueprints
+            .values()
+            .map(|rs_blueprint| rs_blueprint.blueprint.clone())
+            .collect(),
         internal_dns: sim.internal_dns.clone(),
         external_dns: sim.external_dns.clone(),
         silo_names: sim.silo_names.clone(),
@@ -1034,16 +1151,19 @@ fn cmd_load(
     }
 
     for blueprint in loaded.blueprints {
-        if sim.blueprints.contains_key(&blueprint.id) {
-            swriteln!(
-                s,
-                "blueprint {}: skipped (one with the \
-                same id is already loaded)",
-                blueprint.id
-            );
-        } else {
-            swriteln!(s, "blueprint {} loaded", blueprint.id);
-            sim.blueprints.insert(blueprint.id, blueprint);
+        let blueprint_id = blueprint.id;
+        match sim.blueprint_insert_loaded(blueprint) {
+            Ok(_) => {
+                swriteln!(s, "blueprint {}: loaded", blueprint_id);
+            }
+            Err(error) => {
+                swriteln!(
+                    s,
+                    "blueprint {}: skipped ({:#})",
+                    blueprint_id,
+                    error
+                );
+            }
         }
     }
 

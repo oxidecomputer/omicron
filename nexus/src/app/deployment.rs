@@ -271,4 +271,13 @@ impl super::Nexus {
         self.blueprint_add(&opctx, &blueprint).await?;
         Ok(blueprint)
     }
+
+    pub async fn blueprint_import(
+        &self,
+        opctx: &OpContext,
+        blueprint: Blueprint,
+    ) -> Result<(), Error> {
+        let _ = self.blueprint_add(&opctx, &blueprint).await?;
+        Ok(())
+    }
 }

@@ -9,6 +9,7 @@ omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+assert_matches.workspace = true
 camino.workspace = true
 clap.workspace = true
 dns-service-client.workspace = true
