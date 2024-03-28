@@ -709,9 +709,6 @@ fn cmd_blueprint_edit(
     let blueprint_id = args.blueprint_id;
     let blueprint = sim.blueprint_lookup(blueprint_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
-    // XXX-dap for this to work, the UnstableReconfiguratorState needs to
-    // include the service IP pool ranges so that we can stuff that into the
-    // Policy to allocate addresses correctly
     let policy = sim.system.to_policy().context("assembling policy")?;
     let mut builder = BlueprintBuilder::new_based_on(
         &sim.log,
@@ -1157,6 +1154,10 @@ fn cmd_load(
             }
         }
     }
+
+    let ranges = format!("{:?}", loaded.policy.service_ip_pool_ranges);
+    sim.system.service_ip_pool_ranges(loaded.policy.service_ip_pool_ranges);
+    swriteln!(s, "loaded service IP pool ranges: {:?}", ranges);
 
     sim.internal_dns = loaded.internal_dns;
     sim.external_dns = loaded.external_dns;
