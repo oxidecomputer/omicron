@@ -34,8 +34,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use ipnetwork::IpNetwork;
-use nexus_db_model::DnsGroup;
-use nexus_db_model::DnsZone;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
 use nexus_db_model::PasswordHashString;
@@ -55,14 +53,12 @@ use nexus_types::identity::Resource;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use slog_error_chain::InlineErrorChain;
-use std::net::IpAddr;
 use std::sync::{Arc, OnceLock};
 use uuid::Uuid;
 
@@ -893,29 +889,6 @@ impl DataStore {
 
         Ok(())
     }
-
-    pub async fn nexus_external_addresses(
-        &self,
-        opctx: &OpContext,
-        blueprint: &Blueprint,
-    ) -> Result<(Vec<IpAddr>, Vec<DnsZone>), Error> {
-        opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
-
-        let dns_zones = self
-            .dns_zones_list_all(opctx, DnsGroup::External)
-            .await
-            .internal_context("listing DNS zones to list external addresses")?;
-
-        let nexus_external_ips = blueprint
-            .all_omicron_zones()
-            .filter_map(|(_, z)| match z.zone_type {
-                OmicronZoneType::Nexus { external_ip, .. } => Some(external_ip),
-                _ => None,
-            })
-            .collect();
-
-        Ok((nexus_external_ips, dns_zones))
-    }
 }
 
 #[cfg(test)]
@@ -956,7 +929,7 @@ mod test {
     use omicron_common::api::internal::shared::SourceNatConfig;
     use omicron_test_utils::dev;
     use sled_agent_client::types::OmicronZoneDataset;
-    use std::collections::{BTreeMap, BTreeSet, HashMap};
+    use std::collections::{BTreeMap, HashMap};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -969,8 +942,7 @@ mod test {
                 rack_subnet: nexus_test_utils::RACK_SUBNET.parse().unwrap(),
                 blueprint: Blueprint {
                     id: Uuid::new_v4(),
-                    omicron_zones: BTreeMap::new(),
-                    zones_in_service: BTreeSet::new(),
+                    blueprint_zones: BTreeMap::new(),
                     parent_blueprint_id: None,
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),

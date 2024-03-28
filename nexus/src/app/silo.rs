@@ -16,6 +16,7 @@ use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::{self, lookup};
 use nexus_db_queries::{authn, authz};
+use nexus_reconfigurator_execution::blueprint_nexus_external_ips;
 use nexus_reconfigurator_execution::silo_dns_name;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -96,20 +97,22 @@ impl super::Nexus {
 
         // Set up an external DNS name for this Silo's API and console
         // endpoints (which are the same endpoint).
+        let nexus_external_dns_zones = datastore
+            .dns_zones_list_all(nexus_opctx, DnsGroup::External)
+            .await
+            .internal_context("listing external DNS zones")?;
         let target_blueprint = datastore
             .blueprint_target_get_current_full(opctx)
             .await
             .internal_context("loading target blueprint")?;
-        let target = target_blueprint
-            .as_ref()
-            .map(|(_, blueprint)| blueprint)
-            .ok_or_else(|| {
-                Error::internal_error(
+        let nexus_external_ips = match target_blueprint {
+            Some((_, blueprint)) => blueprint_nexus_external_ips(&blueprint),
+            None => {
+                return Err(Error::internal_error(
                     "cannot create silos with no target blueprint set",
-                )
-            })?;
-        let (nexus_external_ips, nexus_external_dns_zones) =
-            datastore.nexus_external_addresses(nexus_opctx, target).await?;
+                ))
+            }
+        };
         let dns_records: Vec<DnsRecord> = nexus_external_ips
             .into_iter()
             .map(|addr| match addr {

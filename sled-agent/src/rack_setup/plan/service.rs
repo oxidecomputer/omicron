@@ -690,7 +690,7 @@ impl Plan {
             .map(|sled_info| (sled_info.sled_address, sled_info.request))
             .collect();
 
-        let dns_config = dns_builder.build();
+        let dns_config = dns_builder.build_full_config_for_initial_generation();
         Ok(Self { services, dns_config })
     }
 
@@ -1169,6 +1169,7 @@ mod tests {
                 infra_ip_last: Ipv4Addr::LOCALHOST,
                 ports: Vec::new(),
                 bgp: Vec::new(),
+                bfd: Vec::new(),
             },
         };
 

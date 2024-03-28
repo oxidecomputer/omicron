@@ -43,6 +43,8 @@ use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -678,6 +680,42 @@ impl DataStore {
             .select(Sled::as_select());
 
         // Query the current target blueprint to map service NICs to sleds.
+        {
+            // Ideally this would do something like:
+            //
+            // .filter(bp_omicron_zone::disposition.eq_any(
+            //     BlueprintZoneDisposition::all_matching(
+            //         BlueprintZoneFilter::VpcFirewall,
+            //     ),
+            // )
+            //
+            // But that doesn't quite work today because we currently don't
+            // store the disposition enum next to each zone. Instead, this code
+            // makes its decision to select which sleds to return by just
+            // ignoring the zones_in_service table today.
+            //
+            // The purpose of this otherwise pointless block is to ensure that
+            // it is correct to ensure that the expressed logic by
+            // `BlueprintZoneFilter::VpcFirewall` matches the actual
+            // implementation. It will hopefully soon be replaced with storing
+            // the disposition in the bp_omicron_zone table and using the
+            // filter directly.
+
+            let mut matching = BlueprintZoneDisposition::all_matching(
+                BlueprintZoneFilter::VpcFirewall,
+            )
+            .collect::<Vec<_>>();
+            matching.sort();
+            let mut all = BlueprintZoneDisposition::all_matching(
+                BlueprintZoneFilter::All,
+            )
+            .collect::<Vec<_>>();
+            all.sort();
+            debug_assert_eq!(
+                matching, all,
+                "vpc firewall dispositions should match all dispositions"
+            );
+        }
         let service_query = service_network_interface::table
             .inner_join(bp_omicron_zone::table.on(
                 bp_omicron_zone::id.eq(service_network_interface::service_id),
@@ -1232,9 +1270,11 @@ mod tests {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::OmicronZoneConfig;
     use nexus_types::deployment::OmicronZoneType;
-    use nexus_types::deployment::OmicronZonesConfig;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
     use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
@@ -1248,7 +1288,6 @@ mod tests {
     use omicron_test_utils::dev;
     use slog::info;
     use std::collections::BTreeMap;
-    use std::collections::BTreeSet;
     use std::net::IpAddr;
 
     // Test that we detect the right error condition and return None when we
@@ -1545,11 +1584,11 @@ mod tests {
             })
         }
 
-        fn omicron_zone_configs(
+        fn blueprint_zone_configs(
             &self,
-        ) -> impl Iterator<Item = (Uuid, OmicronZoneConfig)> + '_ {
+        ) -> impl Iterator<Item = (Uuid, BlueprintZoneConfig)> + '_ {
             self.nexuses.iter().zip(self.db_nics()).map(|(nexus, nic)| {
-                let zone_config = OmicronZoneConfig {
+                let config = OmicronZoneConfig {
                     id: nexus.id,
                     underlay_address: "::1".parse().unwrap(),
                     zone_type: OmicronZoneType::Nexus {
@@ -1573,6 +1612,10 @@ mod tests {
                         external_tls: false,
                         external_dns_servers: Vec::new(),
                     },
+                };
+                let zone_config = BlueprintZoneConfig {
+                    config,
+                    disposition: BlueprintZoneDisposition::InService,
                 };
                 (nexus.sled_id, zone_config)
             })
@@ -1617,15 +1660,15 @@ mod tests {
         // Create a blueprint that has a Nexus on our third sled. (This
         // blueprint is completely invalid in many ways, but all we care about
         // here is inserting relevant records in `bp_omicron_zone`.)
-        let bp1_omicron_zones = {
+        let bp1_zones = {
             let (sled_id, zone_config) = harness
-                .omicron_zone_configs()
+                .blueprint_zone_configs()
                 .nth(2)
                 .expect("fewer than 3 services in test harness");
             let mut zones = BTreeMap::new();
             zones.insert(
                 sled_id,
-                OmicronZonesConfig {
+                BlueprintZonesConfig {
                     generation: Generation::new(),
                     zones: vec![zone_config],
                 },
@@ -1635,8 +1678,7 @@ mod tests {
         let bp1_id = Uuid::new_v4();
         let bp1 = Blueprint {
             id: bp1_id,
-            omicron_zones: bp1_omicron_zones,
-            zones_in_service: BTreeSet::new(),
+            blueprint_zones: bp1_zones,
             parent_blueprint_id: None,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1687,8 +1729,7 @@ mod tests {
         let bp2_id = Uuid::new_v4();
         let bp2 = Blueprint {
             id: bp2_id,
-            omicron_zones: BTreeMap::new(),
-            zones_in_service: BTreeSet::new(),
+            blueprint_zones: BTreeMap::new(),
             parent_blueprint_id: Some(bp1_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1729,15 +1770,15 @@ mod tests {
 
         // Create a blueprint that has a Nexus on our fourth sled. This
         // shouldn't change our VPC resolution.
-        let bp3_omicron_zones = {
+        let bp3_zones = {
             let (sled_id, zone_config) = harness
-                .omicron_zone_configs()
+                .blueprint_zone_configs()
                 .nth(3)
                 .expect("fewer than 3 services in test harness");
             let mut zones = BTreeMap::new();
             zones.insert(
                 sled_id,
-                OmicronZonesConfig {
+                BlueprintZonesConfig {
                     generation: Generation::new(),
                     zones: vec![zone_config],
                 },
@@ -1747,8 +1788,7 @@ mod tests {
         let bp3_id = Uuid::new_v4();
         let bp3 = Blueprint {
             id: bp3_id,
-            omicron_zones: bp3_omicron_zones,
-            zones_in_service: BTreeSet::new(),
+            blueprint_zones: bp3_zones,
             parent_blueprint_id: Some(bp2_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -1778,14 +1818,15 @@ mod tests {
         assert_service_sled_ids(&datastore, &[harness.sled_ids[3]]).await;
 
         // Finally, create a blueprint that includes our third and fourth sleds,
-        // make it the target, and ensure we resolve to both of them.
-        let bp4_omicron_zones = {
+        // make it the target, and ensure we resolve to all four sleds.
+        let bp4_zones = {
             let mut zones = BTreeMap::new();
-            for (sled_id, zone_config) in harness.omicron_zone_configs().skip(2)
+            for (sled_id, zone_config) in
+                harness.blueprint_zone_configs().skip(2)
             {
                 zones.insert(
                     sled_id,
-                    OmicronZonesConfig {
+                    BlueprintZonesConfig {
                         generation: Generation::new(),
                         zones: vec![zone_config],
                     },
@@ -1796,8 +1837,7 @@ mod tests {
         let bp4_id = Uuid::new_v4();
         let bp4 = Blueprint {
             id: bp4_id,
-            omicron_zones: bp4_omicron_zones,
-            zones_in_service: BTreeSet::new(),
+            blueprint_zones: bp4_zones,
             parent_blueprint_id: Some(bp3_id),
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),

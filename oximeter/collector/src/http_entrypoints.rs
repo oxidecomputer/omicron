@@ -7,6 +7,8 @@
 // Copyright 2023 Oxide Computer Company
 
 use crate::OximeterAgent;
+use chrono::DateTime;
+use chrono::Utc;
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::EmptyScanParams;
@@ -117,6 +119,8 @@ async fn producer_delete(
 pub struct CollectorInfo {
     /// The collector's UUID.
     pub id: Uuid,
+    /// Last time we refreshed our producer list with Nexus.
+    pub last_refresh: Option<DateTime<Utc>>,
 }
 
 // Return identifying information about this collector
@@ -128,6 +132,8 @@ async fn collector_info(
     request_context: RequestContext<Arc<OximeterAgent>>,
 ) -> Result<HttpResponseOk<CollectorInfo>, HttpError> {
     let agent = request_context.context();
-    let info = CollectorInfo { id: agent.id };
+    let id = agent.id;
+    let last_refresh = *agent.last_refresh_time.lock().unwrap();
+    let info = CollectorInfo { id, last_refresh };
     Ok(HttpResponseOk(info))
 }

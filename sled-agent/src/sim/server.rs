@@ -341,7 +341,8 @@ pub async fn run_standalone_server(
         .expect("failed to set up DNS");
 
     // Initialize the internal DNS entries
-    let dns_config = dns_config_builder.build();
+    let dns_config =
+        dns_config_builder.build_full_config_for_initial_generation();
     dns.initialize_with_config(&log, &dns_config).await?;
     let internal_dns_version = Generation::try_from(dns_config.generation)
         .expect("invalid internal dns version");
@@ -513,6 +514,7 @@ pub async fn run_standalone_server(
             infra_ip_last: Ipv4Addr::LOCALHOST,
             ports: Vec::new(),
             bgp: Vec::new(),
+            bfd: Vec::new(),
         },
     };
 

@@ -20,22 +20,33 @@ use std::collections::BTreeMap;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
-pub use dns::silo_dns_name;
-
 mod datasets;
 mod dns;
 mod omicron_zones;
 mod overridables;
 mod resource_allocation;
 
-struct Sled {
+pub use dns::blueprint_external_dns_config;
+pub use dns::blueprint_internal_dns_config;
+pub use dns::blueprint_nexus_external_ips;
+pub use dns::silo_dns_name;
+
+pub struct Sled {
     id: Uuid,
     sled_agent_address: SocketAddrV6,
     is_scrimlet: bool,
 }
 
 impl Sled {
-    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+    pub fn new(
+        id: Uuid,
+        sled_agent_address: SocketAddrV6,
+        is_scrimlet: bool,
+    ) -> Sled {
+        Sled { id, sled_agent_address, is_scrimlet }
+    }
+
+    pub(crate) fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
         Ipv6Subnet::<SLED_PREFIX>::new(*self.sled_agent_address.ip())
     }
 }
@@ -98,7 +109,7 @@ where
     resource_allocation::ensure_zone_resources_allocated(
         &opctx,
         datastore,
-        &blueprint.omicron_zones,
+        blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;
@@ -111,8 +122,12 @@ where
         .into_iter()
         .map(|db_sled| (db_sled.id(), Sled::from(db_sled)))
         .collect();
-    omicron_zones::deploy_zones(&opctx, &sleds_by_id, &blueprint.omicron_zones)
-        .await?;
+    omicron_zones::deploy_zones(
+        &opctx,
+        &sleds_by_id,
+        &blueprint.blueprint_zones,
+    )
+    .await?;
 
     // After deploying omicron zones, we may need to refresh OPTE service
     // firewall rules. This is an idempotent operation, so we don't attempt
