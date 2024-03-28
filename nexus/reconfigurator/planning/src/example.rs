@@ -5,7 +5,6 @@
 //! Example blueprints
 
 use crate::blueprint_builder::BlueprintBuilder;
-use crate::blueprint_builder::UuidRng;
 use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
@@ -14,6 +13,7 @@ use nexus_types::deployment::Policy;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use sled_agent_client::types::OmicronZonesConfig;
+use typed_rng::UuidRng;
 
 pub struct ExampleSystem {
     pub system: SystemDescription,
@@ -38,8 +38,7 @@ impl ExampleSystem {
     ) -> ExampleSystem {
         let mut system = SystemDescription::new();
         let mut sled_rng = UuidRng::from_seed(test_name, "ExampleSystem");
-        let sled_ids: Vec<_> =
-            (0..nsleds).map(|_| sled_rng.next_uuid()).collect();
+        let sled_ids: Vec<_> = (0..nsleds).map(|_| sled_rng.next()).collect();
         for sled_id in &sled_ids {
             let _ = system.sled(SledBuilder::new().id(*sled_id)).unwrap();
         }
@@ -107,6 +106,7 @@ impl ExampleSystem {
         let blueprint = builder.build();
         let mut builder =
             system.to_collection_builder().expect("failed to build collection");
+        builder.set_rng_seed((test_name, "ExampleSystem collection"));
 
         for sled_id in blueprint.sleds() {
             let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
