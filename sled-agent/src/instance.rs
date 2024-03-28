@@ -1685,7 +1685,7 @@ mod tests {
                 nexus_server.local_addr().port(),
             )
             .unwrap();
-        let dns_config = dns_config.build();
+        let dns_config = dns_config.build_full_config_for_initial_generation();
         dns_dropshot_client.dns_config_put(&dns_config).await.unwrap();
 
         let resolver = Arc::new(
