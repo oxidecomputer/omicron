@@ -1,3 +1,1 @@
-SET
-  LOCAL disallow_full_table_scans = OFF;
-UPDATE omicron.public.sled_resource SET kind = 'instance';
+ALTER TABLE omicron.public.sled_resource ALTER COLUMN kind DROP DEFAULT;
