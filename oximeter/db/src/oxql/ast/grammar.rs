@@ -355,11 +355,15 @@ peg::parser! {
         // sequence. Each is defined as parsing either the "thing itself", e.g.,
         // `foo || bar` for the OR rule; or the rule with next-higher
         // precedence.
+        //
+        // IMPORTANT: The #[cache] directives on the rules below are _critical_
+        // to avoiding wildly exponential runtime with nested expressions.
 
         /// Parse a logical negation
         pub rule not() = "!"
 
         /// A factor is a logically negated expression, or a primary expression.
+        #[cache]
         pub rule factor() -> Filter
             = not() _? factor:factor()
         {
@@ -372,6 +376,7 @@ peg::parser! {
 
         /// A primary expression is either a comparison "atom", e.g., `foo ==
         /// "bar"`, or a grouping around a sequence of such things.
+        #[cache]
         pub rule primary() -> Filter
             = atom:comparison_atom()
         {?
@@ -398,6 +403,7 @@ peg::parser! {
         ///
         /// An OR expression is two logical ANDs joined with "||", or just a
         /// bare logical AND expression.
+        #[cache]
         pub rule logical_or_expr() -> Filter
             = left:logical_and_expr() _? "||" _? right:logical_or_expr()
         {
@@ -414,6 +420,7 @@ peg::parser! {
         ///
         /// A logical AND expression is two logical XORs joined with "&&", or
         /// just a bare logical XOR expression.
+        #[cache]
         pub rule logical_and_expr() -> Filter
             = left:logical_xor_expr() _? "&&" _? right:logical_and_expr()
         {
@@ -434,6 +441,7 @@ peg::parser! {
         /// expression.
         ///
         /// Note that this is the highest-precedence logical operator.
+        #[cache]
         pub rule logical_xor_expr() -> Filter
             = left:factor() _? "^" _? right:logical_xor_expr()
         {

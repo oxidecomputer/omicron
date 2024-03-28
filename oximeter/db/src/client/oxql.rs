@@ -695,10 +695,18 @@ impl Client {
             query.push(')');
         }
 
-        // Always impose a strong order on these fields. The most important one
-        // is ordering by timestamp, since many downstream operations assume
-        // that (and assert it!). Also order by the prefix that is the
-        // sort-order of the table to make things the most efficient.
+        // Always impose a strong order on these fields.
+        //
+        // The tables are all sorted by:
+        //
+        // - timeseries_name
+        // - timeseries_key
+        // - start_time, if present
+        // - timestamp
+        //
+        // We care most about the timestamp ordering, since that is assumed (and
+        // asserted) by downstream table operations. We use the full sort order
+        // of the table, however, to make things the most efficient.
         query.push_str(" ORDER BY timeseries_key");
         if schema.datum_type.is_cumulative() {
             query.push_str(", start_time");

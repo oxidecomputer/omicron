@@ -52,6 +52,14 @@ impl core::str::FromStr for Filter {
     }
 }
 
+// A crude limit on expression complexity, governing how many times we
+// iteratively apply a DNF simplification before bailing out.
+const EXPR_COMPLEXITY_ITERATIVE_LIMIT: usize = 32;
+
+// A crude limit on expression complexity, governing how many times we
+// recurisvely apply a DNF simplification before bailing out.
+const EXPR_COMPLEXITY_RECURSIVE_LIMIT: usize = 32;
+
 impl Filter {
     /// Return the negation of this filter.
     pub fn negate(&self) -> Filter {
@@ -71,6 +79,9 @@ impl Filter {
     fn flatten_disjunctions_inner(&self, dis: &mut Vec<Self>) {
         // Recursion is only needed if this is an OR expression. In that case,
         // we split the left and push it, and then recurse on the right.
+        //
+        // Note that we don't need left-recursion because the parser is strictly
+        // non-left-recursive.
         if let FilterExpr::Compound(CompoundFilter {
             left,
             op: LogicalOp::Or,
@@ -108,8 +119,11 @@ impl Filter {
     /// consistent with each term in the disjunction _independently_, so that
     /// one can apply the timestamp filter to only the correct one.
     ///
-    /// We use this method to generate the DNF, a form with only disjunctions.
-    /// Each of those is then a separate query against the fields table, where
+    /// We use this method to generate the DNF, a form with only disjunctions of
+    /// conjunctions. That is, it's not possible to further distribute
+    /// conjunctions over disjunctions.
+    ///
+    /// Each disjunction is then a separate query against the fields table, where
     /// we keep track of the keys in each. Each set of predicates and consistent
     /// keys is then used later to fetch the measurements.
     ///
@@ -132,7 +146,16 @@ impl Filter {
     /// distributivity of [Boolean operators](https://en.wikipedia.org/wiki/Boolean_algebra#Monotone_laws),
     /// etc.
     pub fn simplify_to_dnf(&self) -> Result<Self, Error> {
-        let mut out = self.simplify_to_dnf_inner()?;
+        self.simplify_to_dnf_impl(0)
+    }
+
+    fn simplify_to_dnf_impl(&self, level: usize) -> Result<Self, Error> {
+        anyhow::ensure!(
+            level < EXPR_COMPLEXITY_RECURSIVE_LIMIT,
+            "Maximum recursion level exceeded trying to simplify \
+            logical expression to disjunctive normal form"
+        );
+        let mut out = self.simplify_to_dnf_inner(level)?;
         if &out == self {
             return Ok(out);
         }
@@ -141,9 +164,8 @@ impl Filter {
         // This makes me really nervous, so I'm adding an escape hatch that we
         // only allow a few iterations. If we've not simplified within that,
         // we'll just declare the expression too complicated to handle.
-        const EXPR_COMPLEXITY_LIMIT: usize = 6;
-        for _ in 0..EXPR_COMPLEXITY_LIMIT {
-            let out_ = out.simplify_to_dnf_inner()?;
+        for _ in 0..EXPR_COMPLEXITY_ITERATIVE_LIMIT {
+            let out_ = out.simplify_to_dnf_inner(level)?;
             if out_ == out {
                 return Ok(out_);
             }
@@ -152,8 +174,8 @@ impl Filter {
         anyhow::bail!("Logical expression is too complicated to simplify")
     }
 
-    fn simplify_to_dnf_inner(&self) -> Result<Self, Error> {
-        let new = self.expr.simplify_to_dnf()?;
+    fn simplify_to_dnf_inner(&self, level: usize) -> Result<Self, Error> {
+        let new = self.expr.simplify_to_dnf(level)?;
 
         // This matches the rule:
         //
@@ -420,13 +442,13 @@ impl FilterExpr {
         Filter { negated: false, expr: self.clone() }
     }
 
-    fn simplify_to_dnf(&self) -> Result<Filter, Error> {
+    fn simplify_to_dnf(&self, level: usize) -> Result<Filter, Error> {
         match self {
             FilterExpr::Simple(_) => Ok(self.to_filter()),
             FilterExpr::Compound(CompoundFilter { left, op, right }) => {
                 // Apply recursively first.
-                let left = left.simplify_to_dnf()?;
-                let right = right.simplify_to_dnf()?;
+                let left = left.simplify_to_dnf_impl(level + 1)?;
+                let right = right.simplify_to_dnf_impl(level + 1)?;
 
                 // This matches the rule:
                 //
@@ -1168,5 +1190,34 @@ mod tests {
                 expected,
             );
         }
+    }
+
+    #[test]
+    fn test_dnf_conversion_fails_on_extremely_long_expressions() {
+        let atom = "a == 0";
+        let or_chain = std::iter::repeat(atom)
+            .take(super::EXPR_COMPLEXITY_ITERATIVE_LIMIT + 1)
+            .collect::<Vec<_>>()
+            .join(" || ");
+        let expr = format!("{atom} && ({or_chain})");
+        let parsed = query_parser::filter_expr(&expr).unwrap();
+        assert!(
+            parsed.simplify_to_dnf().is_err(),
+            "Should fail for extremely long logical expressions"
+        );
+    }
+
+    #[test]
+    fn test_dnf_conversion_fails_on_extremely_deep_expressions() {
+        let atom = "a == 0";
+        let mut expr = atom.to_string();
+        for _ in 0..super::EXPR_COMPLEXITY_RECURSIVE_LIMIT + 1 {
+            expr = format!("{atom} && ({expr})");
+        }
+        let parsed = query_parser::filter_expr(&expr).unwrap();
+        assert!(
+            parsed.simplify_to_dnf().is_err(),
+            "Should fail for extremely deep logical expressions"
+        );
     }
 }
