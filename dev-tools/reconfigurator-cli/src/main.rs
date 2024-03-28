@@ -351,7 +351,11 @@ struct BlueprintEditArgs {
     /// id of the blueprint to edit
     blueprint_id: Uuid,
     /// "creator" field for the new blueprint
+    #[arg(long)]
     creator: Option<String>,
+    /// "comment" field for the new blueprint
+    #[arg(long)]
+    comment: Option<String>,
     #[command(subcommand)]
     edit_command: BlueprintEditCommands,
 }
@@ -718,6 +722,10 @@ fn cmd_blueprint_edit(
         creator,
     )
     .context("creating blueprint builder")?;
+
+    if let Some(comment) = args.comment {
+        builder.comment(comment);
+    }
 
     let label = match args.edit_command {
         BlueprintEditCommands::AddNexus { sled_id } => {
@@ -1137,7 +1145,7 @@ fn cmd_load(
         let blueprint_id = blueprint.id;
         match sim.blueprint_insert_loaded(blueprint) {
             Ok(_) => {
-                swriteln!(s, "blueprint {}: loaded", blueprint_id);
+                swriteln!(s, "blueprint {} loaded", blueprint_id);
             }
             Err(error) => {
                 swriteln!(
