@@ -203,9 +203,12 @@ impl Blueprint {
     /// along with the associated sled id.
     pub fn all_omicron_zones(
         &self,
+        filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (Uuid, &OmicronZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(|(sled_id, z)| {
-            z.zones.iter().map(|z| (*sled_id, &z.config))
+        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
+            z.zones.iter().filter_map(move |z| {
+                z.disposition.matches(filter).then_some((*sled_id, &z.config))
+            })
         })
     }
 
@@ -453,12 +456,30 @@ impl BlueprintZoneDisposition {
         match self {
             Self::InService => match filter {
                 BlueprintZoneFilter::All => true,
-                BlueprintZoneFilter::SledAgentPut => true,
+                BlueprintZoneFilter::BlueprintBuilderActive => true,
+                BlueprintZoneFilter::Crucible => true,
+                BlueprintZoneFilter::External => true,
                 BlueprintZoneFilter::InternalDns => true,
+                BlueprintZoneFilter::SledAgentPut => true,
                 BlueprintZoneFilter::VpcFirewall => true,
             },
             Self::Quiesced => match filter {
                 BlueprintZoneFilter::All => true,
+
+                // The blueprint builder currenlty considers quiesced zones to
+                // be active.
+                //
+                // TODO: this may need to be revisited (builder logic gets more
+                // complex) because the builder likely needs to care about
+                // quiesced zones separately.
+                BlueprintZoneFilter::BlueprintBuilderActive => true,
+
+                // Quiesced Crucible zones are still around.
+                BlueprintZoneFilter::Crucible => true,
+
+                // Quiesced zones should not have external resources -- we do
+                // not want traffic to be directed to them.
+                BlueprintZoneFilter::External => false,
 
                 // Quiesced zones should not be exposed in DNS.
                 BlueprintZoneFilter::InternalDns => false,
@@ -506,6 +527,15 @@ pub enum BlueprintZoneFilter {
     // ---
     /// All zones.
     All,
+
+    /// Filter by zones considered to be active by the blueprint builder.
+    BlueprintBuilderActive,
+
+    /// Filter by zones that should have Crucible dataset records.
+    Crucible,
+
+    /// Filter by zones that should have external IP and DNS resources.
+    External,
 
     /// Filter by zones that should be in internal DNS.
     InternalDns,

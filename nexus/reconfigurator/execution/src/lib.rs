@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::identity::Asset;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -109,7 +110,9 @@ where
     resource_allocation::ensure_zone_resources_allocated(
         &opctx,
         datastore,
-        blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
+        blueprint
+            .all_omicron_zones(BlueprintZoneFilter::External)
+            .map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;
@@ -151,7 +154,9 @@ where
     datasets::ensure_crucible_dataset_records_exist(
         &opctx,
         datastore,
-        blueprint.all_omicron_zones().map(|(_sled_id, zone)| zone),
+        blueprint
+            .all_omicron_zones(BlueprintZoneFilter::Crucible)
+            .map(|(_sled_id, zone)| zone),
     )
     .await
     .map_err(|err| vec![err])?;

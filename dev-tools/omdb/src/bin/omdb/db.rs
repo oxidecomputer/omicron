@@ -84,6 +84,8 @@ use nexus_db_queries::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_preparation::policy_from_db;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use nexus_types::identity::Resource;
@@ -696,15 +698,21 @@ async fn lookup_instance(
         .with_context(|| format!("loading instance {instance_id}"))
 }
 
+#[derive(Clone, Debug)]
+struct ServiceInfo {
+    service_kind: ServiceKind,
+    disposition: BlueprintZoneDisposition,
+}
+
 /// Helper function to look up the kind of the service with the given ID.
 ///
 /// Requires the caller to first have fetched the current target blueprint, so
 /// we can find services that have been added by Reconfigurator.
-async fn lookup_service_kind(
+async fn lookup_service_info(
     datastore: &DataStore,
     service_id: Uuid,
     current_target_blueprint: Option<&Blueprint>,
-) -> anyhow::Result<Option<ServiceKind>> {
+) -> anyhow::Result<Option<ServiceInfo>> {
     let conn = datastore.pool_connection_for_tests().await?;
 
     // We need to check the `service` table (populated during rack setup)...
@@ -719,7 +727,11 @@ async fn lookup_service_kind(
             .optional()
             .with_context(|| format!("loading service {service_id}"))?
         {
-            return Ok(Some(kind));
+            // XXX: the services table is going to go away soon!
+            return Ok(Some(ServiceInfo {
+                service_kind: kind,
+                disposition: BlueprintZoneDisposition::InService,
+            }));
         }
     }
 
@@ -729,9 +741,10 @@ async fn lookup_service_kind(
         return Ok(None);
     };
 
-    let Some(zone_config) =
-        blueprint.all_omicron_zones().find_map(|(_sled_id, zone_config)| {
-            if zone_config.id == service_id {
+    let Some(zone_config) = blueprint
+        .all_blueprint_zones(BlueprintZoneFilter::All)
+        .find_map(|(_sled_id, zone_config)| {
+            if zone_config.config.id == service_id {
                 Some(zone_config)
             } else {
                 None
@@ -741,7 +754,7 @@ async fn lookup_service_kind(
         return Ok(None);
     };
 
-    let service_kind = match &zone_config.zone_type {
+    let service_kind = match &zone_config.config.zone_type {
         OmicronZoneType::BoundaryNtp { .. }
         | OmicronZoneType::InternalNtp { .. } => ServiceKind::Ntp,
         OmicronZoneType::Clickhouse { .. } => ServiceKind::Clickhouse,
@@ -757,7 +770,7 @@ async fn lookup_service_kind(
         OmicronZoneType::Oximeter { .. } => ServiceKind::Oximeter,
     };
 
-    Ok(Some(service_kind))
+    Ok(Some(ServiceInfo { service_kind, disposition: zone_config.disposition }))
 }
 
 /// Helper function to looks up a probe with the given ID.
@@ -1963,9 +1976,20 @@ async fn cmd_db_eips(
     }
 
     enum Owner {
-        Instance { id: Uuid, project: String, name: String },
-        Service { id: Uuid, kind: String },
-        Project { id: Uuid, name: String },
+        Instance {
+            id: Uuid,
+            project: String,
+            name: String,
+        },
+        Service {
+            id: Uuid,
+            kind: String,
+            disposition: Option<BlueprintZoneDisposition>,
+        },
+        Project {
+            id: Uuid,
+            name: String,
+        },
         None,
     }
 
@@ -1998,6 +2022,13 @@ async fn cmd_db_eips(
                 Self::None => "none".to_string(),
             }
         }
+
+        fn disposition(&self) -> Option<BlueprintZoneDisposition> {
+            match self {
+                Self::Service { disposition, .. } => *disposition,
+                _ => None,
+            }
+        }
     }
 
     #[derive(Tabled)]
@@ -2010,6 +2041,13 @@ async fn cmd_db_eips(
         owner_kind: &'static str,
         owner_id: String,
         owner_name: String,
+        #[tabled(display_with = "display_option_blank")]
+        owner_disposition: Option<BlueprintZoneDisposition>,
+    }
+
+    // Display an empty cell for an Option<T> if it's None.
+    fn display_option_blank<T: Display>(opt: &Option<T>) -> String {
+        opt.as_ref().map(|x| x.to_string()).unwrap_or_else(|| "".to_string())
     }
 
     if verbose {
@@ -2032,17 +2070,22 @@ async fn cmd_db_eips(
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let kind = match lookup_service_kind(
+                let (kind, disposition) = match lookup_service_info(
                     datastore,
                     owner_id,
                     current_target_blueprint.as_ref(),
                 )
                 .await?
                 {
-                    Some(kind) => format!("{kind:?}"),
-                    None => "UNKNOWN (service ID not found)".to_string(),
+                    Some(info) => (
+                        format!("{:?}", info.service_kind),
+                        Some(info.disposition),
+                    ),
+                    None => {
+                        ("UNKNOWN (service ID not found)".to_string(), None)
+                    }
                 };
-                Owner::Service { id: owner_id, kind }
+                Owner::Service { id: owner_id, kind, disposition }
             } else {
                 let instance =
                     match lookup_instance(datastore, owner_id).await? {
@@ -2106,6 +2149,7 @@ async fn cmd_db_eips(
             owner_kind: owner.kind(),
             owner_id: owner.id(),
             owner_name: owner.name(),
+            owner_disposition: owner.disposition(),
         };
         rows.push(row);
     }

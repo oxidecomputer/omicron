@@ -474,7 +474,7 @@ pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
 /// Return the Nexus external addresses according to the given blueprint
 pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
     blueprint
-        .all_omicron_zones()
+        .all_omicron_zones(BlueprintZoneFilter::External)
         .filter_map(|(_, z)| match z.zone_type {
             OmicronZoneType::Nexus { external_ip, .. } => Some(external_ip),
             _ => None,
@@ -716,7 +716,7 @@ mod test {
         // To start, we need a mapping from underlay IP to the corresponding
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter(|(_, zone)| zone.id != out_of_service_id)
             .map(|(_, zone)| (zone.underlay_address, zone.id))
             .collect();
@@ -1239,11 +1239,11 @@ mod test {
         eprintln!("blueprint2: {:?}", blueprint2);
         // Figure out the id of the new zone.
         let zones_before = blueprint
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let zones_after = blueprint2
-            .all_omicron_zones()
+            .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, z)| z.zone_type.is_nexus().then_some(z.id))
             .collect::<BTreeSet<_>>();
         let new_zones: Vec<_> = zones_after.difference(&zones_before).collect();
