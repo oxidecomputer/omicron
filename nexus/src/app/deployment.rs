@@ -162,7 +162,7 @@ impl super::Nexus {
             .into_iter()
             .filter_map(|external_ip| {
                 if !external_ip.is_service {
-                    warn!(
+                    error!(
                         opctx.log,
                         "non-service external IP returned by service IP query";
                         "external-ip" => ?external_ip,
@@ -170,7 +170,7 @@ impl super::Nexus {
                     return None;
                 }
                 let Some(service_id) = external_ip.parent_id else {
-                    warn!(
+                    error!(
                         opctx.log,
                         "service external IP with no parent ID set";
                         "external-ip" => ?external_ip,
