@@ -131,21 +131,21 @@ pub fn allocation_query(
     };
     let builder = builder.sql("
         old_zpool_usage.pool_id
-    FROM (
+    FROM
         old_zpool_usage
-          INNER JOIN
+        INNER JOIN
         (zpool INNER JOIN sled ON (zpool.sled_id = sled.id)) ON (zpool.id = old_zpool_usage.pool_id)
-    )
+        INNER JOIN
+        physical_disk ON (zpool.physical_disk_id = physical_disk.id)
     WHERE (
-      ((old_zpool_usage.size_used + ").param().sql(" ) <=
+      (old_zpool_usage.size_used + ").param().sql(" ) <=
          (SELECT total_size FROM omicron.public.inv_zpool WHERE
           inv_zpool.id = old_zpool_usage.pool_id
           ORDER BY inv_zpool.time_collected DESC LIMIT 1)
-      )
-      AND
-      (sled.sled_policy = 'in_service')
-      AND
-      (sled.sled_state = 'active')
+      AND sled.sled_policy = 'in_service'
+      AND sled.sled_state = 'active'
+      AND physical_disk.disk_policy = 'in_service'
+      AND physical_disk.disk_state = 'active'
     )"
     ).bind::<sql_types::BigInt, _>(size_delta as i64);
 
