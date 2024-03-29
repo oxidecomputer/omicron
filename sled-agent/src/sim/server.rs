@@ -503,7 +503,7 @@ pub async fn run_standalone_server(
 
     let rack_init_request = NexusTypes::RackInitializationRequest {
         blueprint: build_initial_blueprint_from_sled_configs(
-            sled_configs,
+            &sled_configs,
             internal_dns_version,
         ),
         physical_disks,

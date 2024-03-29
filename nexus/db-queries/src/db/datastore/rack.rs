@@ -471,7 +471,7 @@ impl DataStore {
         let service_ip_nic = match zone_type {
             OmicronZoneType::ExternalDns { nic, .. }
             | OmicronZoneType::Nexus { nic, .. } => {
-                let service_kind = format!("{}", zone_type.label());
+                let service_kind = format!("{}", zone_type.kind());
                 let external_ip = match zone_type.external_ip() {
                     Ok(Some(ip)) => ip,
                     Ok(None) => {
@@ -540,7 +540,7 @@ impl DataStore {
                         name: nic.name.clone(),
                         description: format!(
                             "{} service vNIC",
-                            zone_type.label()
+                            zone_type.kind()
                         ),
                     },
                     nic.ip,
@@ -563,7 +563,7 @@ impl DataStore {
             info!(
                 log,
                 "No networking records needed for {} service",
-                zone_type.label(),
+                zone_type.kind(),
             );
             return Ok(());
         };
@@ -573,7 +573,7 @@ impl DataStore {
                     log,
                     "Initializing Rack: Failed to allocate \
                      IP address for {}",
-                    zone_type.label();
+                    zone_type.kind();
                     "err" => %err,
                 );
                 match err.retryable() {
@@ -602,7 +602,7 @@ impl DataStore {
         info!(
             log,
             "Inserted networking records for {} service",
-            zone_type.label(),
+            zone_type.kind(),
         );
 
         Ok(())
