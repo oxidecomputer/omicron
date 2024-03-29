@@ -79,6 +79,7 @@ pub const SLED_AGENT_UUID: &str = "b6d65341-167c-41df-9b5c-41cded99c229";
 pub const SLED_AGENT2_UUID: &str = "039be560-54cc-49e3-88df-1a29dadbf913";
 pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
 pub const SWITCH_UUID: &str = "dae4e1f1-410e-4314-bff1-fec0504be07e";
+pub const PHYSICAL_DISK_UUID: &str = "fbf4e1f1-410e-4314-bff1-fec0504be07e";
 pub const OXIMETER_UUID: &str = "39e6175b-4df2-4730-b11d-cbc1e60a2e78";
 pub const PRODUCER_UUID: &str = "a6458b7d-87c3-4483-be96-854d814c20de";
 pub const RACK_SUBNET: &str = "fd00:1122:3344:0100::/56";
@@ -788,6 +789,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             //   (b) These sled-agent-created zpools are registered with Nexus
             //   asynchronously, and we're not making any effort (currently) to
             //   wait for them to be known to Nexus.
+            vec![],
+            vec![],
             vec![],
             dns_config,
             &external_dns_zone_name,

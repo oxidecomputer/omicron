@@ -486,6 +486,11 @@ impl DataStore {
             }
         }
 
+        // Sort all zones to match what blueprint builders do.
+        for (_, zones_config) in blueprint_zones.iter_mut() {
+            zones_config.sort();
+        }
+
         bail_unless!(
             omicron_zone_nics.is_empty(),
             "found extra Omicron zone NICs: {:?}",
@@ -1189,6 +1194,7 @@ mod tests {
     use omicron_common::address::Ipv6Subnet;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
+    use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
     use std::mem;
@@ -1521,7 +1527,10 @@ mod tests {
             .blueprint_read(&opctx, &authz_blueprint2)
             .await
             .expect("failed to read collection back");
-        println!("diff: {}", blueprint2.diff_sleds(&blueprint_read).display());
+        let diff = blueprint_read
+            .diff_since_blueprint(&blueprint2)
+            .expect("failed to diff blueprints");
+        println!("diff: {}", diff.display());
         assert_eq!(blueprint2, blueprint_read);
         assert_eq!(blueprint2.internal_dns_version, new_internal_dns_version);
         assert_eq!(blueprint2.external_dns_version, new_external_dns_version);

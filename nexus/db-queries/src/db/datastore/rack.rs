@@ -23,6 +23,7 @@ use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
+use crate::db::model::PhysicalDisk;
 use crate::db::model::Rack;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
@@ -68,6 +69,8 @@ pub struct RackInit {
     pub rack_id: Uuid,
     pub rack_subnet: IpNetwork,
     pub blueprint: Blueprint,
+    pub physical_disks: Vec<PhysicalDisk>,
+    pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
     pub internal_dns: InitialDnsGroup,
@@ -87,6 +90,8 @@ enum RackInitError {
     BlueprintInsert(Error),
     BlueprintTargetSet(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+    PhysicalDiskInsert(Error),
+    ZpoolInsert(Error),
     RackUpdate { err: DieselError, rack_id: Uuid },
     DnsSerialization(Error),
     Silo(Error),
@@ -123,6 +128,8 @@ impl From<RackInitError> for Error {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             },
+            RackInitError::PhysicalDiskInsert(err) => err,
+            RackInitError::ZpoolInsert(err) => err,
             RackInitError::BlueprintInsert(err) => Error::internal_error(
                 &format!("failed to insert Blueprint: {:#}", err),
             ),
@@ -633,6 +640,8 @@ impl DataStore {
                 async move {
                     let rack_id = rack_init.rack_id;
                     let blueprint = rack_init.blueprint;
+                    let physical_disks = rack_init.physical_disks;
+                    let zpools = rack_init.zpools;
                     let datasets = rack_init.datasets;
                     let service_ip_pool_ranges =
                         rack_init.service_ip_pool_ranges;
@@ -663,7 +672,14 @@ impl DataStore {
                         return Ok::<_, DieselError>(rack);
                     }
 
-                    // Otherwise, insert blueprint and datasets.
+                    // Otherwise, insert:
+                    // - Services
+                    // - PhysicalDisks
+                    // - Zpools
+                    // - Datasets
+                    // - A blueprint
+                    //
+                    // Which RSS has already allocated during bootstrapping.
 
                     // Set up the IP pool for internal services.
                     for range in service_ip_pool_ranges {
@@ -736,11 +752,37 @@ impl DataStore {
                         )
                         .await
                         .map_err(|e| {
+                            error!(log, "Failed to upsert physical disk"; "err" => ?e);
                             err.set(e).unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     }
                     info!(log, "Inserted service networking records");
+
+                    for physical_disk in physical_disks {
+                        Self::physical_disk_upsert_on_connection(&conn, &opctx, physical_disk)
+                            .await
+                            .map_err(|e| {
+                                error!(log, "Failed to upsert physical disk"; "err" => #%e);
+                                err.set(RackInitError::PhysicalDiskInsert(e))
+                                    .unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
+                    }
+
+                    info!(log, "Inserted physical disks");
+
+                    for zpool in zpools {
+                        Self::zpool_upsert_on_connection(&conn, &opctx, zpool).await.map_err(
+                            |e| {
+                                error!(log, "Failed to upsert zpool"; "err" => #%e);
+                                err.set(RackInitError::ZpoolInsert(e)).unwrap();
+                                DieselError::RollbackTransaction
+                            },
+                        )?;
+                    }
+
+                    info!(log, "Inserted zpools");
 
                     for dataset in datasets {
                         use db::schema::dataset::dsl;
@@ -950,6 +992,8 @@ mod test {
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
                 },
+                physical_disks: vec![],
+                zpools: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],
                 internal_dns: InitialDnsGroup::new(

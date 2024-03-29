@@ -13,6 +13,8 @@ use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::PhysicalDisk;
+use crate::db::model::PhysicalDiskPolicy;
+use crate::db::model::PhysicalDiskState;
 use crate::db::model::Sled;
 use crate::db::pagination::paginated;
 use async_bb8_diesel::AsyncRunQueryDsl;
@@ -43,6 +45,15 @@ impl DataStore {
         opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> CreateResult<PhysicalDisk> {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::physical_disk_upsert_on_connection(&conn, opctx, disk).await
+    }
+
+    pub async fn physical_disk_upsert_on_connection(
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        opctx: &OpContext,
+        disk: PhysicalDisk,
+    ) -> CreateResult<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
 
@@ -60,9 +71,7 @@ impl DataStore {
                     dsl::time_modified.eq(now),
                 )),
         )
-        .insert_and_get_result_async(
-            &*self.pool_connection_authorized(&opctx).await?,
-        )
+        .insert_and_get_result_async(conn)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
@@ -75,6 +84,46 @@ impl DataStore {
         })?;
 
         Ok(disk_in_db)
+    }
+
+    pub async fn physical_disk_update_policy(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        policy: PhysicalDiskPolicy,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl;
+
+        diesel::update(dsl::physical_disk.filter(dsl::id.eq(id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::disk_policy.eq(policy))
+            .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|err| {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            })?;
+        Ok(())
+    }
+
+    pub async fn physical_disk_update_state(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+        state: PhysicalDiskState,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        use db::schema::physical_disk::dsl;
+
+        diesel::update(dsl::physical_disk.filter(dsl::id.eq(id)))
+            .filter(dsl::time_deleted.is_null())
+            .set(dsl::disk_state.eq(state))
+            .execute_async(&*self.pool_connection_authorized(&opctx).await?)
+            .await
+            .map_err(|err| {
+                public_error_from_diesel(err, ErrorHandler::Server)
+            })?;
+        Ok(())
     }
 
     pub async fn physical_disk_list(
@@ -203,6 +252,7 @@ mod test {
 
         // Insert a disk
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -213,7 +263,7 @@ mod test {
             .physical_disk_upsert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
-        assert_eq!(disk.uuid(), first_observed_disk.uuid());
+        assert_eq!(disk.id(), first_observed_disk.id());
         assert_disks_equal_ignore_uuid(&disk, &first_observed_disk);
 
         // Observe the inserted disk
@@ -223,11 +273,12 @@ mod test {
             .await
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
-        assert_eq!(disk.uuid(), disks[0].uuid());
+        assert_eq!(disk.id(), disks[0].id());
         assert_disks_equal_ignore_uuid(&disk, &disks[0]);
 
         // Insert the same disk, with a different UUID primary key
         let disk_again = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -240,8 +291,8 @@ mod test {
             .expect("Failed second upsert of physical disk");
         // This check is pretty important - note that we return the original
         // UUID, not the new one.
-        assert_ne!(disk_again.uuid(), second_observed_disk.uuid());
-        assert_eq!(disk_again.id(), second_observed_disk.id());
+        assert_eq!(disk.id(), second_observed_disk.id());
+        assert_ne!(disk_again.id(), second_observed_disk.id());
         assert_disks_equal_ignore_uuid(&disk_again, &second_observed_disk);
         assert!(
             first_observed_disk.time_modified()
@@ -255,8 +306,8 @@ mod test {
 
         // We'll use the old primary key
         assert_eq!(disks.len(), 1);
-        assert_eq!(disk.uuid(), disks[0].uuid());
-        assert_ne!(disk_again.uuid(), disks[0].uuid());
+        assert_eq!(disk.id(), disks[0].id());
+        assert_ne!(disk_again.id(), disks[0].id());
         assert_disks_equal_ignore_uuid(&disk, &disks[0]);
         assert_disks_equal_ignore_uuid(&disk_again, &disks[0]);
 
@@ -276,6 +327,7 @@ mod test {
 
         // Insert a disk
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -286,14 +338,14 @@ mod test {
             .physical_disk_upsert(&opctx, disk.clone())
             .await
             .expect("Failed first attempt at upserting disk");
-        assert_eq!(disk.uuid(), first_observed_disk.uuid());
+        assert_eq!(disk.id(), first_observed_disk.id());
 
         // Insert a disk with an identical UUID
         let second_observed_disk = datastore
             .physical_disk_upsert(&opctx, disk.clone())
             .await
             .expect("Should have succeeded upserting disk");
-        assert_eq!(disk.uuid(), second_observed_disk.uuid());
+        assert_eq!(disk.id(), second_observed_disk.id());
         assert!(
             first_observed_disk.time_modified()
                 <= second_observed_disk.time_modified()
@@ -326,6 +378,7 @@ mod test {
 
         // Insert a disk
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -339,6 +392,7 @@ mod test {
 
         // Insert a second disk
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Noxide"),
             String::from("456"),
             String::from("UnrealDisk"),
@@ -371,6 +425,7 @@ mod test {
 
         // Insert a disk
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -439,6 +494,7 @@ mod test {
 
         // Insert a disk
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -485,6 +541,7 @@ mod test {
 
         // "Report the disk" from the second sled
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -530,6 +587,7 @@ mod test {
 
         // Insert a disk
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),
@@ -554,6 +612,7 @@ mod test {
 
         // "Report the disk" from the second sled
         let disk = PhysicalDisk::new(
+            Uuid::new_v4(),
             String::from("Oxide"),
             String::from("123"),
             String::from("FakeDisk"),

@@ -881,6 +881,7 @@ pub enum ResourceType {
     ServiceNetworkInterface,
     Sled,
     SledInstance,
+    SledLedger,
     Switch,
     SagaDbg,
     Snapshot,

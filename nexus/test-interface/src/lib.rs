@@ -34,6 +34,9 @@
 use async_trait::async_trait;
 use nexus_config::NexusConfig;
 use nexus_types::deployment::Blueprint;
+use nexus_types::internal_api::params::{
+    PhysicalDiskPutRequest, ZpoolPutRequest,
+};
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Error;
 use slog::Logger;
@@ -54,6 +57,8 @@ pub trait NexusServer: Send + Sync + 'static {
         internal_server: Self::InternalServer,
         config: &NexusConfig,
         blueprint: Blueprint,
+        physical_disks: Vec<PhysicalDiskPutRequest>,
+        zpools: Vec<nexus_types::internal_api::params::ZpoolPutRequest>,
         datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
         internal_dns_config: nexus_types::internal_api::params::DnsConfigParams,
         external_dns_zone_name: &str,
@@ -74,6 +79,10 @@ pub trait NexusServer: Send + Sync + 'static {
     // control over dataset provisioning is shifting to Nexus. There is
     // a short window where RSS controls dataset provisioning, but afterwards,
     // Nexus should be calling the shots on "when to provision datasets".
+    // Furthermore, with https://github.com/oxidecomputer/omicron/pull/5172,
+    // physical disk and zpool provisioning has already moved into Nexus. This
+    // provides a "back-door" for tests to control the set of control plane
+    // disks that are considered active.
     //
     // For test purposes, we have many situations where we want to carve up
     // zpools and datasets precisely for disk-based tests. As a result, we
@@ -87,8 +96,9 @@ pub trait NexusServer: Send + Sync + 'static {
     // However, doing so would let us remove this test-only API.
     async fn upsert_crucible_dataset(
         &self,
-        id: Uuid,
-        zpool_id: Uuid,
+        physical_disk: PhysicalDiskPutRequest,
+        zpool: ZpoolPutRequest,
+        dataset_id: Uuid,
         address: SocketAddrV6,
     );
 

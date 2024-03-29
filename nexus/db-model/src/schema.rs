@@ -886,6 +886,8 @@ table! {
         model -> Text,
 
         variant -> crate::PhysicalDiskKindEnum,
+        disk_policy -> crate::PhysicalDiskPolicyEnum,
+        disk_state -> crate::PhysicalDiskStateEnum,
         sled_id -> Uuid,
     }
 }

@@ -295,6 +295,40 @@ CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_kind AS ENUM (
   'u2'
 );
 
+-- The disposition for a particular physical disk.
+-- This is updated by the operator, either explicitly through an operator API,
+-- or implicitly when altering sled policy.
+CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_policy AS ENUM (
+    -- The disk is in service, and new resources can be provisioned onto it.
+    'in_service',
+    -- The disk has been, or will be, removed from the rack, and it should be
+    -- assumed that any resources currently on it are now permanently missing.
+    'expunged'
+);
+
+-- The actual state of a physical disk. This is updated exclusively by Nexus.
+--
+-- Nexus's goal is to match the physical disk's state with the
+-- operator-indicated policy. For example, if the policy is "expunged" and the
+-- state is "active", Nexus will assume that the physical disk is gone. Based
+-- on that, Nexus will reallocate resources currently on the expunged disk
+-- elsewhere, etc. Once the expunged disk no longer has any resources attached
+-- to it, Nexus will mark it as decommissioned.
+CREATE TYPE IF NOT EXISTS omicron.public.physical_disk_state AS ENUM (
+    -- The disk has resources of any kind allocated on it, or, is available for
+    -- new resources.
+    --
+    -- The disk can be in this state and have a different policy, e.g.
+    -- "expunged".
+    'active',
+
+    -- The disk no longer has resources allocated on it, now or in the future.
+    --
+    -- This is a terminal state. This state is only valid if the policy is
+    -- 'expunged'.
+    'decommissioned'
+);
+
 -- A physical disk which exists inside the rack.
 CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
     id UUID PRIMARY KEY,
@@ -311,6 +345,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.physical_disk (
 
     -- FK into the Sled table
     sled_id UUID NOT NULL,
+
+    disk_policy omicron.public.physical_disk_policy NOT NULL,
+    disk_state omicron.public.physical_disk_state NOT NULL,
 
     -- This constraint should be upheld, even for deleted disks
     -- in the fleet.
@@ -3699,7 +3736,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    ( TRUE, NOW(), NOW(), '49.0.0', NULL)
+    ( TRUE, NOW(), NOW(), '50.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

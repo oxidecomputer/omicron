@@ -29,8 +29,10 @@ use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::hash::Hash;
 use std::sync::Arc;
 use thiserror::Error;
+use typed_rng::UuidRng;
 use uuid::Uuid;
 
 /// Describes an operational error encountered during the collection process
@@ -86,6 +88,8 @@ pub struct CollectionBuilder {
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
     sleds: BTreeMap<Uuid, SledAgent>,
     omicron_zones: BTreeMap<Uuid, OmicronZonesFound>,
+    // We just generate one UUID for each collection.
+    id_rng: UuidRng,
 }
 
 impl CollectionBuilder {
@@ -111,6 +115,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
+            id_rng: UuidRng::from_entropy(),
         }
     }
 
@@ -123,7 +128,7 @@ impl CollectionBuilder {
         }
 
         Collection {
-            id: Uuid::new_v4(),
+            id: self.id_rng.next(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
             time_started: self.time_started,
             time_done: now_db_precision(),
@@ -138,6 +143,18 @@ impl CollectionBuilder {
             sled_agents: self.sleds,
             omicron_zones: self.omicron_zones,
         }
+    }
+
+    /// Within tests, set a seeded RNG for deterministic results.
+    ///
+    /// This will ensure that tests that use this builder will produce the same
+    /// results each time they are run.
+    pub fn set_rng_seed<H: Hash>(&mut self, seed: H) -> &mut Self {
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "collection-builder";
+        self.id_rng.set_seed(seed, SEED_EXTRA);
+        self
     }
 
     /// Record service processor state `sp_state` reported by MGS
