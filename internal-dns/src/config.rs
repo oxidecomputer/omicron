@@ -161,9 +161,6 @@ pub struct DnsConfigBuilder {
 
     /// similar to service_instances_zones, but for services that run on sleds
     service_instances_sleds: BTreeMap<ServiceName, BTreeMap<Sled, u16>>,
-
-    /// generation number for this config
-    generation: Generation,
 }
 
 /// Describes a host of type "sled" in the control plane DNS zone
@@ -195,7 +192,6 @@ impl DnsConfigBuilder {
             zones: BTreeMap::new(),
             service_instances_zones: BTreeMap::new(),
             service_instances_sleds: BTreeMap::new(),
-            generation: Generation::new(),
         }
     }
 
@@ -400,14 +396,9 @@ impl DnsConfigBuilder {
         self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
     }
 
-    pub fn generation(&mut self, generation: Generation) {
-        self.generation = generation;
-    }
-
-    /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
-    /// our DNS servers) for the control plane DNS zone described up to this
-    /// point
-    pub fn build(self) -> DnsConfigParams {
+    /// Construct a `DnsConfigZone` describing the control plane zone described
+    /// up to this point
+    pub fn build_zone(self) -> DnsConfigZone {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
             let name = Host::Sled(sled.0).dns_name();
@@ -465,13 +456,18 @@ impl DnsConfigBuilder {
             .chain(srv_records_zones)
             .collect();
 
+        DnsConfigZone { zone_name: DNS_ZONE.to_owned(), records: all_records }
+    }
+
+    /// Construct a complete [`DnsConfigParams`] (suitable for propagating to
+    /// our DNS servers) for the control plane DNS zone described up to this
+    /// point
+    pub fn build_full_config_for_initial_generation(self) -> DnsConfigParams {
+        let zone = self.build_zone();
         DnsConfigParams {
-            generation: u64::from(self.generation),
+            generation: u64::from(Generation::new()),
             time_created: chrono::Utc::now(),
-            zones: vec![DnsConfigZone {
-                zone_name: DNS_ZONE.to_owned(),
-                records: all_records,
-            }],
+            zones: vec![zone],
         }
     }
 }
@@ -609,7 +605,7 @@ mod test {
             ("zones_only", builder_zones_only),
             ("non_trivial", builder_non_trivial),
         ] {
-            let config = builder.build();
+            let config = builder.build_full_config_for_initial_generation();
             assert_eq!(config.generation, 1);
             assert_eq!(config.zones.len(), 1);
             assert_eq!(config.zones[0].zone_name, DNS_ZONE);

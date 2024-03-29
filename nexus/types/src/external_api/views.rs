@@ -742,6 +742,11 @@ pub struct PhysicalDisk {
     #[serde(flatten)]
     pub identity: AssetIdentityMetadata,
 
+    /// The operator-defined policy for a physical disk.
+    pub policy: PhysicalDiskPolicy,
+    /// The current state Nexus believes the disk to be in.
+    pub state: PhysicalDiskState,
+
     /// The sled to which this disk is attached, if any.
     pub sled_id: Option<Uuid>,
 
@@ -750,6 +755,97 @@ pub struct PhysicalDisk {
     pub model: String,
 
     pub form_factor: PhysicalDiskKind,
+}
+
+/// The operator-defined policy of a physical disk.
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum PhysicalDiskPolicy {
+    /// The operator has indicated that the disk is in-service.
+    InService,
+
+    /// The operator has indicated that the disk has been permanently removed
+    /// from service.
+    ///
+    /// This is a terminal state: once a particular disk ID is expunged, it
+    /// will never return to service. (The actual hardware may be reused, but
+    /// it will be treated as a brand-new disk.)
+    ///
+    /// An expunged disk is always non-provisionable.
+    Expunged,
+    // NOTE: if you add a new value here, be sure to add it to
+    // the `IntoEnumIterator` impl below!
+}
+
+// Can't automatically derive strum::EnumIter because that doesn't provide a
+// way to iterate over nested enums.
+impl IntoEnumIterator for PhysicalDiskPolicy {
+    type Iterator = std::array::IntoIter<Self, 2>;
+
+    fn iter() -> Self::Iterator {
+        [Self::InService, Self::Expunged].into_iter()
+    }
+}
+
+impl PhysicalDiskPolicy {
+    /// Creates a new `PhysicalDiskPolicy` that is in-service.
+    pub fn in_service() -> Self {
+        Self::InService
+    }
+
+    /// Returns true if the disk can be decommissioned in this state.
+    pub fn is_decommissionable(&self) -> bool {
+        // This should be kept in sync with decommissionable_states below.
+        match self {
+            Self::InService => false,
+            Self::Expunged => true,
+        }
+    }
+}
+
+impl fmt::Display for PhysicalDiskPolicy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PhysicalDiskPolicy::InService => write!(f, "in service"),
+            PhysicalDiskPolicy::Expunged => write!(f, "expunged"),
+        }
+    }
+}
+
+/// The current state of the disk, as determined by Nexus.
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    EnumIter,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PhysicalDiskState {
+    /// The disk is currently active, and has resources allocated on it.
+    Active,
+
+    /// The disk has been permanently removed from service.
+    ///
+    /// This is a terminal state: once a particular disk ID is decommissioned,
+    /// it will never return to service. (The actual hardware may be reused,
+    /// but it will be treated as a brand-new disk.)
+    Decommissioned,
+}
+
+impl fmt::Display for PhysicalDiskState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PhysicalDiskState::Active => write!(f, "active"),
+            PhysicalDiskState::Decommissioned => write!(f, "decommissioned"),
+        }
+    }
 }
 
 // SILO USERS

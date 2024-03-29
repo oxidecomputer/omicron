@@ -1148,6 +1148,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
+name = "const_format"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a214c7af3d04997541b18d432afaff4c455e79e2029079647e72fc2bd27673"
+dependencies = [
+ "const_format_proc_macros",
+]
+
+[[package]]
+name = "const_format_proc_macros"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7f6ff08fd20f4f299298a28e2dfa8a8ba1036e6cd2460ac1de7b425d76f2500"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-xid",
+]
+
+[[package]]
 name = "constant_time_eq"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2011,6 +2031,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "expectorate",
  "http 0.2.12",
  "omicron-workspace-hack",
  "progenitor",
@@ -3544,6 +3565,7 @@ dependencies = [
  "tokio",
  "toml 0.8.10",
  "uuid 1.7.0",
+ "whoami",
  "zone 0.3.0",
 ]
 
@@ -4590,6 +4612,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "const_format",
  "cookie 0.18.0",
  "db-macros",
  "diesel",
@@ -4695,6 +4718,7 @@ dependencies = [
  "strum 0.26.1",
  "thiserror",
  "tokio",
+ "typed-rng",
  "uuid 1.7.0",
 ]
 
@@ -4706,6 +4730,33 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.52",
+]
+
+[[package]]
+name = "nexus-metrics-producer-gc"
+version = "0.1.0"
+dependencies = [
+ "async-bb8-diesel",
+ "chrono",
+ "diesel",
+ "futures",
+ "httptest",
+ "ipnetwork",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-test-utils",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "oximeter-client",
+ "pq-sys",
+ "slog",
+ "slog-error-chain",
+ "thiserror",
+ "tokio",
+ "uuid 1.7.0",
 ]
 
 [[package]]
@@ -4779,10 +4830,10 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "rand_seeder",
  "sled-agent-client",
  "slog",
  "thiserror",
+ "typed-rng",
  "uuid 1.7.0",
 ]
 
@@ -4790,8 +4841,11 @@ dependencies = [
 name = "nexus-reconfigurator-preparation"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "futures",
  "illumos-utils",
  "nexus-db-model",
+ "nexus-db-queries",
  "nexus-types",
  "omicron-common",
  "omicron-workspace-hack",
@@ -4890,6 +4944,7 @@ dependencies = [
  "sled-agent-client",
  "steno",
  "strum 0.26.1",
+ "tabled",
  "thiserror",
  "uuid 1.7.0",
 ]
@@ -5373,6 +5428,7 @@ dependencies = [
  "nexus-db-queries",
  "nexus-defaults",
  "nexus-inventory",
+ "nexus-metrics-producer-gc",
  "nexus-networking",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
@@ -7376,28 +7432,39 @@ name = "reconfigurator-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "camino",
  "camino-tempfile",
  "clap 4.5.1",
+ "dns-service-client",
  "dropshot",
  "expectorate",
  "humantime",
  "indexmap 2.2.5",
+ "nexus-client",
+ "nexus-db-queries",
+ "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
+ "nexus-reconfigurator-preparation",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
+ "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "pq-sys",
  "reedline",
- "regex",
+ "serde",
  "serde_json",
  "slog",
  "slog-error-chain",
  "subprocess",
  "swrite",
  "tabled",
+ "tokio",
  "uuid 1.7.0",
 ]
 
@@ -8687,11 +8754,15 @@ dependencies = [
 name = "sled-storage"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "camino",
  "camino-tempfile",
  "cfg-if",
+ "debug-ignore",
  "derive_more",
+ "expectorate",
+ "futures",
  "glob",
  "illumos-utils",
  "key-manager",
@@ -10247,6 +10318,17 @@ name = "typed-path"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a90726108dab678edab76459751e1cc7c597c3484a6384d6423191255fa641b"
+
+[[package]]
+name = "typed-rng"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rand_seeder",
+ "uuid 1.7.0",
+]
 
 [[package]]
 name = "typenum"

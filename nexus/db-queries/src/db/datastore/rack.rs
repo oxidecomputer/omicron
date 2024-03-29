@@ -23,6 +23,7 @@ use crate::db::fixed_data::vpc_subnet::NTP_VPC_SUBNET;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
 use crate::db::model::IncompleteExternalIp;
+use crate::db::model::PhysicalDisk;
 use crate::db::model::Rack;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
@@ -34,8 +35,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use ipnetwork::IpNetwork;
-use nexus_db_model::DnsGroup;
-use nexus_db_model::DnsZone;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::IncompleteNetworkInterface;
 use nexus_db_model::InitialDnsGroup;
@@ -45,7 +44,6 @@ use nexus_db_model::SiloUserPasswordHash;
 use nexus_db_model::SledUnderlaySubnetAllocation;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintTarget;
-use nexus_types::deployment::OmicronZoneType;
 use nexus_types::external_api::params as external_params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::IdentityType;
@@ -56,7 +54,6 @@ use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
@@ -74,6 +71,8 @@ pub struct RackInit {
     pub rack_subnet: IpNetwork,
     pub blueprint: Blueprint,
     pub services: Vec<internal_params::ServicePutRequest>,
+    pub physical_disks: Vec<PhysicalDisk>,
+    pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
     pub service_ip_pool_ranges: Vec<IpRange>,
     pub internal_dns: InitialDnsGroup,
@@ -94,6 +93,8 @@ enum RackInitError {
     BlueprintTargetSet(Error),
     ServiceInsert(Error),
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
+    PhysicalDiskInsert(Error),
+    ZpoolInsert(Error),
     RackUpdate { err: DieselError, rack_id: Uuid },
     DnsSerialization(Error),
     Silo(Error),
@@ -130,6 +131,8 @@ impl From<RackInitError> for Error {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             },
+            RackInitError::PhysicalDiskInsert(err) => err,
+            RackInitError::ZpoolInsert(err) => err,
             RackInitError::ServiceInsert(err) => Error::internal_error(
                 &format!("failed to insert Service record: {:#}", err),
             ),
@@ -614,6 +617,8 @@ impl DataStore {
                     let rack_id = rack_init.rack_id;
                     let blueprint = rack_init.blueprint;
                     let services = rack_init.services;
+                    let physical_disks = rack_init.physical_disks;
+                    let zpools = rack_init.zpools;
                     let datasets = rack_init.datasets;
                     let service_ip_pool_ranges =
                         rack_init.service_ip_pool_ranges;
@@ -644,7 +649,14 @@ impl DataStore {
                         return Ok::<_, DieselError>(rack);
                     }
 
-                    // Otherwise, insert blueprint and datasets.
+                    // Otherwise, insert:
+                    // - Services
+                    // - PhysicalDisks
+                    // - Zpools
+                    // - Datasets
+                    // - A blueprint
+                    //
+                    // Which RSS has already allocated during bootstrapping.
 
                     // Set up the IP pool for internal services.
                     for range in service_ip_pool_ranges {
@@ -717,11 +729,37 @@ impl DataStore {
                         )
                         .await
                         .map_err(|e| {
+                            error!(log, "Failed to upsert physical disk"; "err" => ?e);
                             err.set(e).unwrap();
                             DieselError::RollbackTransaction
                         })?;
                     }
                     info!(log, "Inserted services");
+
+                    for physical_disk in physical_disks {
+                        Self::physical_disk_upsert_on_connection(&conn, &opctx, physical_disk)
+                            .await
+                            .map_err(|e| {
+                                error!(log, "Failed to upsert physical disk"; "err" => #%e);
+                                err.set(RackInitError::PhysicalDiskInsert(e))
+                                    .unwrap();
+                                DieselError::RollbackTransaction
+                            })?;
+                    }
+
+                    info!(log, "Inserted physical disks");
+
+                    for zpool in zpools {
+                        Self::zpool_upsert_on_connection(&conn, &opctx, zpool).await.map_err(
+                            |e| {
+                                error!(log, "Failed to upsert zpool"; "err" => #%e);
+                                err.set(RackInitError::ZpoolInsert(e)).unwrap();
+                                DieselError::RollbackTransaction
+                            },
+                        )?;
+                    }
+
+                    info!(log, "Inserted zpools");
 
                     for dataset in datasets {
                         use db::schema::dataset::dsl;
@@ -871,52 +909,36 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn nexus_external_addresses(
+    // TODO once we eliminate the service table, we can eliminate this function
+    // and the branch in the sole caller
+    pub async fn nexus_external_addresses_from_service_table(
         &self,
         opctx: &OpContext,
-        blueprint: Option<&Blueprint>,
-    ) -> Result<(Vec<IpAddr>, Vec<DnsZone>), Error> {
+    ) -> Result<Vec<IpAddr>, Error> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
 
-        let dns_zones = self
-            .dns_zones_list_all(opctx, DnsGroup::External)
+        use crate::db::schema::external_ip::dsl as extip_dsl;
+        use crate::db::schema::service::dsl as service_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        Ok(extip_dsl::external_ip
+            .inner_join(
+                service_dsl::service
+                    .on(service_dsl::id
+                        .eq(extip_dsl::parent_id.assume_not_null())),
+            )
+            .filter(extip_dsl::parent_id.is_not_null())
+            .filter(extip_dsl::time_deleted.is_null())
+            .filter(extip_dsl::is_service)
+            .filter(service_dsl::kind.eq(db::model::ServiceKind::Nexus))
+            .select(ExternalIp::as_select())
+            .get_results_async(&*conn)
             .await
-            .internal_context("listing DNS zones to list external addresses")?;
-
-        let nexus_external_ips = if let Some(blueprint) = blueprint {
-            blueprint
-                .all_omicron_zones()
-                .filter_map(|(_, z)| match z.zone_type {
-                    OmicronZoneType::Nexus { external_ip, .. } => {
-                        Some(external_ip)
-                    }
-                    _ => None,
-                })
-                .collect()
-        } else {
-            use crate::db::schema::external_ip::dsl as extip_dsl;
-            use crate::db::schema::service::dsl as service_dsl;
-
-            let conn = self.pool_connection_authorized(opctx).await?;
-
-            extip_dsl::external_ip
-                .inner_join(service_dsl::service.on(
-                    service_dsl::id.eq(extip_dsl::parent_id.assume_not_null()),
-                ))
-                .filter(extip_dsl::parent_id.is_not_null())
-                .filter(extip_dsl::time_deleted.is_null())
-                .filter(extip_dsl::is_service)
-                .filter(service_dsl::kind.eq(db::model::ServiceKind::Nexus))
-                .select(ExternalIp::as_select())
-                .get_results_async(&*conn)
-                .await
-                .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
-                .into_iter()
-                .map(|external_ip| external_ip.ip.ip())
-                .collect()
-        };
-
-        Ok((nexus_external_ips, dns_zones))
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            .into_iter()
+            .map(|external_ip| external_ip.ip.ip())
+            .collect())
     }
 }
 
@@ -974,6 +996,8 @@ mod test {
                     comment: "test suite".to_string(),
                 },
                 services: vec![],
+                physical_disks: vec![],
+                zpools: vec![],
                 datasets: vec![],
                 service_ip_pool_ranges: vec![],
                 internal_dns: InitialDnsGroup::new(

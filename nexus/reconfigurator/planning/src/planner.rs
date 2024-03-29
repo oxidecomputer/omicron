@@ -343,8 +343,12 @@ mod test {
     use crate::example::example;
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
+    use chrono::NaiveDateTime;
+    use chrono::TimeZone;
+    use chrono::Utc;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
+    use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::external_api::views::SledPolicy;
@@ -400,15 +404,15 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint1.diff_sleds(&blueprint2);
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!("1 -> 2 (expected no changes):\n{}", diff.display());
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_changed().count(), 0);
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
         verify_blueprint(&blueprint2);
 
         // Now add a new sled.
-        let new_sled_id = example.sled_rng.next_uuid();
+        let new_sled_id = example.sled_rng.next();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let policy = example.system.to_policy().unwrap();
@@ -433,7 +437,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_sleds(&blueprint3);
+        let diff = blueprint3.diff_since_blueprint(&blueprint2).unwrap();
         println!(
             "2 -> 3 (expect new NTP zone on new sled):\n{}",
             diff.display()
@@ -454,8 +458,8 @@ mod test {
             sled_zones.zones[0].config.zone_type,
             OmicronZoneType::InternalNtp { .. }
         ));
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_changed().count(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
         verify_blueprint(&blueprint3);
 
         // Check that with no change in inventory, the planner makes no changes.
@@ -474,11 +478,11 @@ mod test {
         .with_rng_seed((TEST_NAME, "bp4"))
         .plan()
         .expect("failed to plan");
-        let diff = blueprint3.diff_sleds(&blueprint4);
+        let diff = blueprint4.diff_since_blueprint(&blueprint3).unwrap();
         println!("3 -> 4 (expected no changes):\n{}", diff.display());
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_changed().count(), 0);
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
         verify_blueprint(&blueprint4);
 
         // Now update the inventory to have the requested NTP zone.
@@ -517,15 +521,15 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint3.diff_sleds(&blueprint5);
+        let diff = blueprint5.diff_since_blueprint(&blueprint3).unwrap();
         println!("3 -> 5 (expect Crucible zones):\n{}", diff.display());
         assert_contents(
             "tests/output/planner_basic_add_sled_3_5.txt",
             &diff.display().to_string(),
         );
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        let sleds = diff.sleds_changed().collect::<Vec<_>>();
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        let sleds = diff.sleds_modified().collect::<Vec<_>>();
         assert_eq!(sleds.len(), 1);
         let (sled_id, sled_changes) = &sleds[0];
         assert_eq!(
@@ -533,8 +537,8 @@ mod test {
             sled_changes.generation_before.next()
         );
         assert_eq!(*sled_id, new_sled_id);
-        assert_eq!(sled_changes.zones_removed().count(), 0);
-        assert_eq!(sled_changes.zones_changed().count(), 0);
+        assert_eq!(sled_changes.zones_removed().len(), 0);
+        assert_eq!(sled_changes.zones_modified().count(), 0);
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), 10);
         for zone in &zones {
@@ -559,11 +563,11 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint5.diff_sleds(&blueprint6);
+        let diff = blueprint6.diff_since_blueprint(&blueprint5).unwrap();
         println!("5 -> 6 (expect no changes):\n{}", diff.display());
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        assert_eq!(diff.sleds_changed().count(), 0);
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        assert_eq!(diff.sleds_modified().count(), 0);
         verify_blueprint(&blueprint6);
 
         logctx.cleanup_successful();
@@ -635,7 +639,7 @@ mod test {
             internal_dns_version,
             external_dns_version,
             &input,
-            "add more Nexus",
+            "test_blueprint2",
             &collection,
         )
         .expect("failed to create planner")
@@ -643,16 +647,16 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint1.diff_sleds(&blueprint2);
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        let mut sleds = diff.sleds_changed().collect::<Vec<_>>();
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        let mut sleds = diff.sleds_modified().collect::<Vec<_>>();
         assert_eq!(sleds.len(), 1);
         let (changed_sled_id, sled_changes) = sleds.pop().unwrap();
         assert_eq!(changed_sled_id, sled_id);
-        assert_eq!(sled_changes.zones_removed().count(), 0);
-        assert_eq!(sled_changes.zones_changed().count(), 0);
+        assert_eq!(sled_changes.zones_removed().len(), 0);
+        assert_eq!(sled_changes.zones_modified().count(), 0);
         let zones = sled_changes.zones_added().collect::<Vec<_>>();
         assert_eq!(zones.len(), input.policy.target_nexus_zone_count - 1);
         for zone in &zones {
@@ -709,7 +713,7 @@ mod test {
             Generation::new(),
             Generation::new(),
             &input,
-            "add more Nexus",
+            "test_blueprint2",
             &collection,
         )
         .expect("failed to create planner")
@@ -717,11 +721,11 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint1.diff_sleds(&blueprint2);
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        let sleds = diff.sleds_changed().collect::<Vec<_>>();
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        let sleds = diff.sleds_modified().collect::<Vec<_>>();
 
         // All 3 sleds should get additional Nexus zones. We expect a total of
         // 11 new Nexus zones, which should be spread evenly across the three
@@ -729,8 +733,8 @@ mod test {
         assert_eq!(sleds.len(), 3);
         let mut total_new_nexus_zones = 0;
         for (sled_id, sled_changes) in sleds {
-            assert_eq!(sled_changes.zones_removed().count(), 0);
-            assert_eq!(sled_changes.zones_changed().count(), 0);
+            assert_eq!(sled_changes.zones_removed().len(), 0);
+            assert_eq!(sled_changes.zones_modified().count(), 0);
             let zones = sled_changes.zones_added().collect::<Vec<_>>();
             match zones.len() {
                 n @ (3 | 4) => {
@@ -825,13 +829,13 @@ mod test {
         // When the planner gets smarter about removing zones from expunged
         // and/or removed sleds, we'll have to adjust this number.
         input.policy.target_nexus_zone_count = 16;
-        let blueprint2 = Planner::new_based_on(
+        let mut blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
             Generation::new(),
             Generation::new(),
             &input,
-            "add more Nexus",
+            "test_blueprint2",
             &collection,
         )
         .expect("failed to create planner")
@@ -839,15 +843,24 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint1.diff_sleds(&blueprint2);
+        // Define a time_created for consistent output across runs.
+        blueprint2.time_created =
+            Utc.from_utc_datetime(&NaiveDateTime::UNIX_EPOCH);
+
+        assert_contents(
+            "tests/output/planner_nonprovisionable_bp2.txt",
+            &blueprint2.display().to_string(),
+        );
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1).unwrap();
         println!("1 -> 2 (added additional Nexus zones):\n{}", diff.display());
         assert_contents(
             "tests/output/planner_nonprovisionable_1_2.txt",
             &diff.display().to_string(),
         );
-        assert_eq!(diff.sleds_added().count(), 0);
-        assert_eq!(diff.sleds_removed().count(), 0);
-        let sleds = diff.sleds_changed().collect::<Vec<_>>();
+        assert_eq!(diff.sleds_added().len(), 0);
+        assert_eq!(diff.sleds_removed().len(), 0);
+        let sleds = diff.sleds_modified().collect::<Vec<_>>();
 
         // Only 2 of the 3 sleds should get additional Nexus zones. We expect a
         // total of 12 new Nexus zones, which should be spread evenly across the
@@ -859,8 +872,8 @@ mod test {
             assert!(sled_id != nonprovisionable_sled_id);
             assert!(sled_id != expunged_sled_id);
             assert!(sled_id != decommissioned_sled_id);
-            assert_eq!(sled_changes.zones_removed().count(), 0);
-            assert_eq!(sled_changes.zones_changed().count(), 0);
+            assert_eq!(sled_changes.zones_removed().len(), 0);
+            assert_eq!(sled_changes.zones_modified().count(), 0);
             let zones = sled_changes.zones_added().collect::<Vec<_>>();
             match zones.len() {
                 n @ (5 | 6) => {
@@ -878,6 +891,90 @@ mod test {
             }
         }
         assert_eq!(total_new_nexus_zones, 11);
+
+        // ---
+
+        // Also poke at some of the config by hand; we'll use this to test out
+        // diff output. This isn't a real blueprint, just one that we're
+        // creating to test diff output.
+        //
+        // Some of the things we're testing here:
+        //
+        // * modifying zones
+        // * removing zones
+        // * removing sleds
+        // * for modified sleds' zone config generation, both a bump and the
+        //   generation staying the same (the latter should produce a warning)
+        let mut blueprint2a = blueprint2.clone();
+
+        enum NextCrucibleMutate {
+            Modify,
+            Remove,
+            Done,
+        }
+        let mut next = NextCrucibleMutate::Modify;
+
+        // Leave the non-provisionable sled's generation alone.
+        let zones = &mut blueprint2a
+            .blueprint_zones
+            .get_mut(&nonprovisionable_sled_id)
+            .unwrap()
+            .zones;
+
+        zones.retain_mut(|zone| {
+            if let OmicronZoneType::Nexus { internal_address, .. } =
+                &mut zone.config.zone_type
+            {
+                // Change one of these params to ensure that the diff output
+                // makes sense.
+                *internal_address = format!("{internal_address}foo");
+                true
+            } else if let OmicronZoneType::Crucible { .. } =
+                zone.config.zone_type
+            {
+                match next {
+                    NextCrucibleMutate::Modify => {
+                        zone.disposition = BlueprintZoneDisposition::Quiesced;
+                        next = NextCrucibleMutate::Remove;
+                        true
+                    }
+                    NextCrucibleMutate::Remove => {
+                        next = NextCrucibleMutate::Done;
+                        false
+                    }
+                    NextCrucibleMutate::Done => true,
+                }
+            } else if let OmicronZoneType::InternalNtp { .. } =
+                &mut zone.config.zone_type
+            {
+                // Change the underlay IP.
+                let mut segments = zone.config.underlay_address.segments();
+                segments[0] += 1;
+                zone.config.underlay_address = segments.into();
+                true
+            } else {
+                true
+            }
+        });
+
+        let expunged_zones =
+            blueprint2a.blueprint_zones.get_mut(&expunged_sled_id).unwrap();
+        expunged_zones.zones.clear();
+        expunged_zones.generation = expunged_zones.generation.next();
+
+        blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
+
+        blueprint2a.external_dns_version =
+            blueprint2a.external_dns_version.next();
+
+        let diff = blueprint2a.diff_since_blueprint(&blueprint2).unwrap();
+        println!("2 -> 2a (manually modified zones):\n{}", diff.display());
+        assert_contents(
+            "tests/output/planner_nonprovisionable_2_2a.txt",
+            &diff.display().to_string(),
+        );
+
+        // ---
 
         logctx.cleanup_successful();
     }
