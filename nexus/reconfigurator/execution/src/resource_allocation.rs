@@ -100,7 +100,7 @@ impl<'a> ResourceAllocator<'a> {
 
         let allocated_ips = self
             .datastore
-            .service_lookup_external_ips(self.opctx, zone_id)
+            .external_ip_list_service(self.opctx, zone_id)
             .await
             .with_context(|| {
                 format!(
@@ -258,7 +258,7 @@ impl<'a> ResourceAllocator<'a> {
         let ip_id = Uuid::new_v4();
         let description = zone_type;
         self.datastore
-            .allocate_explicit_service_ip(
+            .external_ip_allocate_service_explicit(
                 self.opctx,
                 ip_id,
                 ip_name,
@@ -313,7 +313,7 @@ impl<'a> ResourceAllocator<'a> {
 
         let ip_id = Uuid::new_v4();
         self.datastore
-            .allocate_explicit_service_snat_ip(
+            .external_ip_allocate_service_explicit_snat(
                 self.opctx,
                 ip_id,
                 service_id,
@@ -669,7 +669,7 @@ mod tests {
 
         // Check that the external IP records were created.
         let db_nexus_ips = datastore
-            .service_lookup_external_ips(&opctx, nexus_id)
+            .external_ip_list_service(&opctx, nexus_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_nexus_ips.len(), 1);
@@ -680,7 +680,7 @@ mod tests {
         assert_eq!(db_nexus_ips[0].last_port, SqlU16(65535));
 
         let db_dns_ips = datastore
-            .service_lookup_external_ips(&opctx, dns_id)
+            .external_ip_list_service(&opctx, dns_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_dns_ips.len(), 1);
@@ -691,7 +691,7 @@ mod tests {
         assert_eq!(db_dns_ips[0].last_port, SqlU16(65535));
 
         let db_ntp_ips = datastore
-            .service_lookup_external_ips(&opctx, ntp_id)
+            .external_ip_list_service(&opctx, ntp_id)
             .await
             .expect("failed to get external IPs");
         assert_eq!(db_ntp_ips.len(), 1);
@@ -753,21 +753,21 @@ mod tests {
         assert_eq!(
             db_nexus_ips,
             datastore
-                .service_lookup_external_ips(&opctx, nexus_id)
+                .external_ip_list_service(&opctx, nexus_id)
                 .await
                 .expect("failed to get external IPs")
         );
         assert_eq!(
             db_dns_ips,
             datastore
-                .service_lookup_external_ips(&opctx, dns_id)
+                .external_ip_list_service(&opctx, dns_id)
                 .await
                 .expect("failed to get external IPs")
         );
         assert_eq!(
             db_ntp_ips,
             datastore
-                .service_lookup_external_ips(&opctx, ntp_id)
+                .external_ip_list_service(&opctx, ntp_id)
                 .await
                 .expect("failed to get external IPs")
         );

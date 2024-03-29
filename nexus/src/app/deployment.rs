@@ -157,7 +157,7 @@ impl super::Nexus {
         )?;
 
         let service_external_ips = datastore
-            .service_ip_all_list_batched(opctx)
+            .external_ip_list_service_all_batched(opctx)
             .await?
             .into_iter()
             .filter_map(|external_ip| {

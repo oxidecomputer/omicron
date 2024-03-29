@@ -209,7 +209,7 @@ impl DataStore {
     }
 
     /// Fetch all external IP addresses of any kind for the provided service.
-    pub async fn service_lookup_external_ips(
+    pub async fn external_ip_list_service(
         &self,
         opctx: &OpContext,
         service_id: Uuid,
@@ -226,7 +226,7 @@ impl DataStore {
     }
 
     /// Allocates an IP address for internal service usage.
-    pub async fn allocate_service_ip(
+    pub async fn external_ip_allocate_service(
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
@@ -247,7 +247,7 @@ impl DataStore {
     }
 
     /// Allocates an SNAT IP address for internal service usage.
-    pub async fn allocate_service_snat_ip(
+    pub async fn external_ip_allocate_service_snat(
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
@@ -387,7 +387,7 @@ impl DataStore {
     ///
     /// Unlike the other IP allocation requests, this does not search for an
     /// available IP address, it asks for one explicitly.
-    pub async fn allocate_explicit_service_ip(
+    pub async fn external_ip_allocate_service_explicit(
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
@@ -413,7 +413,7 @@ impl DataStore {
     ///
     /// Unlike the other IP allocation requests, this does not search for an
     /// available IP address, it asks for one explicitly.
-    pub async fn allocate_explicit_service_snat_ip(
+    pub async fn external_ip_allocate_service_explicit_snat(
         &self,
         opctx: &OpContext,
         ip_id: Uuid,
@@ -434,7 +434,7 @@ impl DataStore {
     }
 
     /// List one page of all external IPs allocated to internal services
-    pub async fn service_ip_all_list(
+    pub async fn external_ip_list_service_all(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -459,7 +459,7 @@ impl DataStore {
     /// This should generally not be used in API handlers or other
     /// latency-sensitive contexts, but it can make sense in saga actions or
     /// background tasks.
-    pub async fn service_ip_all_list_batched(
+    pub async fn external_ip_list_service_all_batched(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<ExternalIp> {
@@ -468,8 +468,9 @@ impl DataStore {
         let mut all_ips = Vec::new();
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
-            let batch =
-                self.service_ip_all_list(opctx, &p.current_pagparams()).await?;
+            let batch = self
+                .external_ip_list_service_all(opctx, &p.current_pagparams())
+                .await?;
             paginator = p.found_batch(&batch, &|ip: &ExternalIp| ip.id);
             all_ips.extend(batch);
         }
@@ -1226,11 +1227,11 @@ mod tests {
         opctx: &OpContext,
     ) -> Vec<ExternalIp> {
         let all_batched = datastore
-            .service_ip_all_list_batched(opctx)
+            .external_ip_list_service_all_batched(opctx)
             .await
             .expect("failed to fetch all service IPs batched");
         let all_paginated = datastore
-            .service_ip_all_list(opctx, &DataPageParams::max_page())
+            .external_ip_list_service_all(opctx, &DataPageParams::max_page())
             .await
             .expect("failed to fetch all service IPs paginated");
         assert_eq!(all_batched, all_paginated);
@@ -1270,7 +1271,7 @@ mod tests {
             let name = format!("service-ip-{i}");
             let external_ip = if allocate_snat {
                 datastore
-                    .allocate_explicit_service_snat_ip(
+                    .external_ip_allocate_service_explicit_snat(
                         &opctx,
                         Uuid::new_v4(),
                         Uuid::new_v4(),
@@ -1281,7 +1282,7 @@ mod tests {
                     .expect("failed to allocate service IP")
             } else {
                 datastore
-                    .allocate_explicit_service_ip(
+                    .external_ip_allocate_service_explicit(
                         &opctx,
                         Uuid::new_v4(),
                         &Name(name.parse().unwrap()),
