@@ -66,9 +66,7 @@ stdout:
 stderr:
 note: using database URL postgresql://root@[::1]:REDACTED_PORT/omicron?sslmode=disable
 note: database schema version matches expected (<redacted database version>)
-assembling policy ... done.
-loading inventory collections ... done.
-loading blueprints ... done.
+assembling reconfigurator state ... done
 wrote <REDACTED>
 =============================================
 EXECUTING COMMAND: omdb ["db", "services", "list-instances"]

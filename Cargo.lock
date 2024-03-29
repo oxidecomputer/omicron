@@ -4840,8 +4840,11 @@ dependencies = [
 name = "nexus-reconfigurator-preparation"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "futures",
  "illumos-utils",
  "nexus-db-model",
+ "nexus-db-queries",
  "nexus-types",
  "omicron-common",
  "omicron-workspace-hack",
@@ -7426,6 +7429,7 @@ name = "reconfigurator-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "camino",
  "camino-tempfile",
  "clap 4.5.1",
@@ -7434,22 +7438,29 @@ dependencies = [
  "expectorate",
  "humantime",
  "indexmap 2.2.5",
+ "nexus-client",
+ "nexus-db-queries",
  "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
+ "nexus-reconfigurator-preparation",
+ "nexus-test-utils",
+ "nexus-test-utils-macros",
  "nexus-types",
  "omicron-common",
+ "omicron-nexus",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "pq-sys",
  "reedline",
- "regex",
+ "serde",
  "serde_json",
  "slog",
  "slog-error-chain",
  "subprocess",
  "swrite",
  "tabled",
+ "tokio",
  "uuid 1.7.0",
 ]
 

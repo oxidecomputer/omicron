@@ -104,6 +104,7 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(blueprint_target_set_enabled)?;
         api.register(blueprint_generate_from_collection)?;
         api.register(blueprint_regenerate)?;
+        api.register(blueprint_import)?;
 
         api.register(sled_list_uninitialized)?;
         api.register(sled_add)?;
@@ -1000,6 +1001,28 @@ async fn blueprint_regenerate(
         let nexus = &apictx.nexus;
         let result = nexus.blueprint_create_regenerate(&opctx).await?;
         Ok(HttpResponseOk(result))
+    };
+    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
+}
+
+/// Imports a client-provided blueprint
+///
+/// This is intended for development and support, not end users or operators.
+#[endpoint {
+    method = POST,
+    path = "/deployment/blueprints/import",
+}]
+async fn blueprint_import(
+    rqctx: RequestContext<Arc<ServerContext>>,
+    blueprint: TypedBody<Blueprint>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
+        let nexus = &apictx.nexus;
+        let blueprint = blueprint.into_inner();
+        nexus.blueprint_import(&opctx, blueprint).await?;
+        Ok(HttpResponseUpdatedNoContent())
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }
