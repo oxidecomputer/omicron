@@ -21,6 +21,8 @@ use omicron_test_utils::dev::test_cmds::redact_variable;
 use omicron_test_utils::dev::test_cmds::run_command;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use slog::debug;
+use std::io::BufReader;
+use std::io::BufWriter;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -222,23 +224,22 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
         new_blueprint_path,
     ] {
         std::fs::remove_file(&path)
-            .with_context(|| format!("remove {}", &path))
+            .with_context(|| format!("remove {}", path))
             .unwrap();
     }
 
     std::fs::remove_dir(&tmpdir_path)
-        .with_context(|| format!("remove {}", &tmpdir_path))
+        .with_context(|| format!("remove {}", tmpdir_path))
         .unwrap();
 }
 
 fn read_json<T: for<'a> serde::Deserialize<'a>>(
     path: &Utf8Path,
 ) -> Result<T, anyhow::Error> {
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .open(path)
+    let file = std::fs::File::open(path)
         .with_context(|| format!("open {:?}", path))?;
-    serde_json::from_reader(file).with_context(|| format!("read {:?}", path))
+    let bufread = BufReader::new(file);
+    serde_json::from_reader(bufread).with_context(|| format!("read {:?}", path))
 }
 
 fn write_json<T: serde::Serialize>(
@@ -250,7 +251,8 @@ fn write_json<T: serde::Serialize>(
         .create(true)
         .open(path)
         .with_context(|| format!("open {:?}", path))?;
-    serde_json::to_writer_pretty(&file, obj)
+    let bufwrite = BufWriter::new(file);
+    serde_json::to_writer_pretty(bufwrite, obj)
         .with_context(|| format!("write {:?}", path))?;
     Ok(())
 }

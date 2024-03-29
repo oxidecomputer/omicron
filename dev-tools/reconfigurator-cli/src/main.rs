@@ -893,14 +893,10 @@ fn cmd_blueprint_save(
     let blueprint = sim.blueprint_lookup(blueprint_id)?;
 
     let output_path = &args.filename;
-    let outfile = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(output_path)
-        .with_context(|| format!("open {:?}", output_path))?;
-    serde_json::to_writer_pretty(&outfile, &blueprint)
-        .with_context(|| format!("writing to {:?}", output_path))
-        .unwrap_or_else(|e| panic!("{:#}", e));
+    let output_str = serde_json::to_string_pretty(&blueprint)
+        .context("serializing blueprint")?;
+    std::fs::write(&output_path, &output_str)
+        .with_context(|| format!("write {:?}", output_path))?;
     Ok(Some(format!("saved blueprint {} to {:?}", blueprint_id, output_path)))
 }
 
@@ -920,14 +916,10 @@ fn cmd_save(
     };
 
     let output_path = &args.filename;
-    let outfile = std::fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(output_path)
-        .with_context(|| format!("open {:?}", output_path))?;
-    serde_json::to_writer_pretty(&outfile, &saved)
-        .with_context(|| format!("writing to {:?}", output_path))
-        .unwrap_or_else(|e| panic!("{:#}", e));
+    let output_str =
+        serde_json::to_string_pretty(&saved).context("serializing state")?;
+    std::fs::write(&output_path, &output_str)
+        .with_context(|| format!("write {:?}", output_path))?;
     Ok(Some(format!(
         "saved policy, collections, and blueprints to {:?}",
         output_path
@@ -1008,7 +1000,8 @@ fn read_file(
 ) -> anyhow::Result<UnstableReconfiguratorState> {
     let file = std::fs::File::open(input_path)
         .with_context(|| format!("open {:?}", input_path))?;
-    serde_json::from_reader(file)
+    let bufread = std::io::BufReader::new(file);
+    serde_json::from_reader(bufread)
         .with_context(|| format!("read {:?}", input_path))
 }
 

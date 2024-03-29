@@ -1112,9 +1112,9 @@ async fn cmd_nexus_blueprints_import(
     args: &BlueprintImportArgs,
 ) -> Result<(), anyhow::Error> {
     let input_path = &args.input;
-    let file = std::fs::File::open(input_path)
+    let contents = std::fs::read_to_string(input_path)
         .with_context(|| format!("open {:?}", input_path))?;
-    let blueprint: Blueprint = serde_json::from_reader(file)
+    let blueprint: Blueprint = serde_json::from_str(&contents)
         .with_context(|| format!("read {:?}", input_path))?;
     client
         .blueprint_import(&blueprint)
