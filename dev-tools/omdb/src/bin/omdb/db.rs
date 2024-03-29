@@ -73,7 +73,9 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
 use nexus_db_queries::db::datastore::CrucibleTargets;
 use nexus_db_queries::db::datastore::DataStoreConnection;
+use nexus_db_queries::db::datastore::DataStoreDnsTest;
 use nexus_db_queries::db::datastore::DataStoreInventoryTest;
+use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -3383,8 +3385,63 @@ async fn cmd_db_reconfigurator_save(
         .await;
     eprintln!("done.");
 
-    let state =
-        UnstableReconfiguratorState { policy: policy, collections, blueprints };
+    // It's also useful to include information about any DNS generations
+    // mentioned in any blueprints.
+    let blueprints_list = &blueprints;
+    let fetch_dns_group = |dns_group: DnsGroup| async move {
+        let latest_version = datastore
+            .dns_group_latest_version(&opctx, dns_group)
+            .await
+            .with_context(|| {
+                format!("reading latest {:?} version", dns_group)
+            })?;
+        let dns_generations_needed: BTreeSet<_> = blueprints_list
+            .iter()
+            .map(|blueprint| match dns_group {
+                DnsGroup::Internal => blueprint.internal_dns_version,
+                DnsGroup::External => blueprint.external_dns_version,
+            })
+            .chain(std::iter::once(*latest_version.version))
+            .collect();
+        let mut rv = BTreeMap::new();
+        for gen in dns_generations_needed {
+            let config = datastore
+                .dns_config_read_version(&opctx, dns_group, gen)
+                .await
+                .with_context(|| {
+                    format!("reading {:?} DNS version {}", dns_group, gen)
+                })?;
+            rv.insert(gen, config);
+        }
+
+        Ok::<BTreeMap<_, _>, anyhow::Error>(rv)
+    };
+
+    let internal_dns = fetch_dns_group(DnsGroup::Internal).await?;
+    let external_dns = fetch_dns_group(DnsGroup::External).await?;
+    let silo_names = datastore
+        .silo_list_all_batched(&opctx, Discoverability::All)
+        .await
+        .context("listing all Silos")?
+        .into_iter()
+        .map(|s| s.name().clone())
+        .collect();
+    let external_dns_zone_names = datastore
+        .dns_zones_list_all(&opctx, DnsGroup::External)
+        .await
+        .context("listing external DNS zone names")?
+        .into_iter()
+        .map(|dns_zone| dns_zone.zone_name)
+        .collect();
+    let state = UnstableReconfiguratorState {
+        policy,
+        collections,
+        blueprints,
+        internal_dns,
+        external_dns,
+        silo_names,
+        external_dns_zone_names,
+    };
 
     let output_path = &reconfig_save_args.output_file;
     let file = std::fs::OpenOptions::new()

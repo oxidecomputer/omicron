@@ -45,6 +45,15 @@ impl DataStore {
         opctx: &OpContext,
         disk: PhysicalDisk,
     ) -> CreateResult<PhysicalDisk> {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::physical_disk_upsert_on_connection(&conn, opctx, disk).await
+    }
+
+    pub async fn physical_disk_upsert_on_connection(
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        opctx: &OpContext,
+        disk: PhysicalDisk,
+    ) -> CreateResult<PhysicalDisk> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         use db::schema::physical_disk::dsl;
 
@@ -62,9 +71,7 @@ impl DataStore {
                     dsl::time_modified.eq(now),
                 )),
         )
-        .insert_and_get_result_async(
-            &*self.pool_connection_authorized(&opctx).await?,
-        )
+        .insert_and_get_result_async(conn)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
