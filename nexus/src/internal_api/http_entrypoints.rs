@@ -43,7 +43,6 @@ use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::PaginatedById;
 use omicron_common::api::external::http_pagination::ScanById;
 use omicron_common::api::external::http_pagination::ScanParams;
-use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
 use omicron_common::api::internal::nexus::DownstairsClientStopRequest;
 use omicron_common::api::internal::nexus::DownstairsClientStopped;
@@ -984,10 +983,7 @@ async fn blueprint_target_view(
     let handler = async {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let nexus = &apictx.nexus;
-        let target =
-            nexus.blueprint_target_view(&opctx).await?.ok_or_else(|| {
-                Error::conflict("no target blueprint has been configured")
-            })?;
+        let target = nexus.blueprint_target_view(&opctx).await?;
         Ok(HttpResponseOk(target))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await

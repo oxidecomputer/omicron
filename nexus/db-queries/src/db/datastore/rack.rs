@@ -1420,8 +1420,7 @@ mod test {
         let (_blueprint_target, observed_blueprint) = datastore
             .blueprint_target_get_current_full(&opctx)
             .await
-            .expect("failed to read blueprint")
-            .expect("no target blueprint set");
+            .expect("failed to read blueprint");
         assert_eq!(observed_blueprint, blueprint);
 
         // We should also see the single external IP allocated for each service
@@ -1666,8 +1665,7 @@ mod test {
         let (_blueprint_target, observed_blueprint) = datastore
             .blueprint_target_get_current_full(&opctx)
             .await
-            .expect("failed to read blueprint")
-            .expect("no target blueprint set");
+            .expect("failed to read blueprint");
         assert_eq!(observed_blueprint, blueprint);
 
         // We should see both of the Nexus services we provisioned.

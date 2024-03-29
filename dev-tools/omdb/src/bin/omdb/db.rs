@@ -1850,21 +1850,17 @@ async fn cmd_db_eips(
 
     let mut rows = Vec::new();
 
-    let current_target_blueprint = datastore
+    let (_, current_target_blueprint) = datastore
         .blueprint_target_get_current_full(opctx)
         .await
-        .context("loading current target blueprint")?
-        .map(|(_, blueprint)| blueprint);
+        .context("loading current target blueprint")?;
 
     for ip in &ips {
         let owner = if let Some(owner_id) = ip.parent_id {
             if ip.is_service {
-                let maybe_kind = match current_target_blueprint.as_ref() {
-                    Some(blueprint) => {
-                        lookup_service_kind(owner_id, blueprint).await?
-                    }
-                    None => None,
-                };
+                let maybe_kind =
+                    lookup_service_kind(owner_id, &current_target_blueprint)
+                        .await?;
                 let kind = match maybe_kind {
                     Some(kind) => format!("{kind:?}"),
                     None => "UNKNOWN (service ID not found)".to_string(),

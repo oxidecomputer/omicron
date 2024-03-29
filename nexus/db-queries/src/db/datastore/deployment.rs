@@ -538,15 +538,13 @@ impl DataStore {
                 // current target.
                 let current_target =
                     self.blueprint_current_target_only(&conn).await?;
-                if let Some(current_target) = current_target {
-                    if current_target.target_id == blueprint_id {
-                        return Err(TransactionError::CustomError(
-                            Error::conflict(format!(
-                                "blueprint {blueprint_id} is the \
-                                 current target and cannot be deleted",
-                            )),
-                        ));
-                    }
+                if current_target.target_id == blueprint_id {
+                    return Err(TransactionError::CustomError(
+                        Error::conflict(format!(
+                            "blueprint {blueprint_id} is the \
+                             current target and cannot be deleted",
+                        )),
+                    ));
                 }
 
                 // Remove the record describing the blueprint itself.
@@ -776,14 +774,11 @@ impl DataStore {
     pub async fn blueprint_target_get_current_full(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<(BlueprintTarget, Blueprint)>, Error> {
+    ) -> Result<(BlueprintTarget, Blueprint), Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let Some(target) = self.blueprint_current_target_only(&conn).await?
-        else {
-            return Ok(None);
-        };
+        let target = self.blueprint_current_target_only(&conn).await?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -794,14 +789,14 @@ impl DataStore {
         let authz_blueprint = authz_blueprint_from_id(target.target_id);
         let blueprint = self.blueprint_read(opctx, &authz_blueprint).await?;
 
-        Ok(Some((target, blueprint)))
+        Ok((target, blueprint))
     }
 
     /// Get the current target blueprint, if one exists
     pub async fn blueprint_target_get_current(
         &self,
         opctx: &OpContext,
-    ) -> Result<Option<BlueprintTarget>, Error> {
+    ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
         self.blueprint_current_target_only(&conn).await
@@ -814,7 +809,7 @@ impl DataStore {
     async fn blueprint_current_target_only(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<Option<BlueprintTarget>, Error> {
+    ) -> Result<BlueprintTarget, Error> {
         use db::schema::bp_target::dsl;
 
         let current_target = dsl::bp_target
@@ -824,7 +819,16 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(current_target.map(BlueprintTarget::from))
+        // We expect a target blueprint to be set on all systems. RSS sets an
+        // initial blueprint, but we shipped systems before it did so. We added
+        // target blueprints to those systems via support operations, but let's
+        // be careful here and return a specific error for this case.
+        let current_target =
+            current_target.ok_or_else(|| Error::InternalError {
+                internal_message: "no target blueprint set".to_string(),
+            })?;
+
+        Ok(current_target.into())
     }
 }
 
@@ -1378,10 +1382,12 @@ mod tests {
             datastore.blueprint_insert(&opctx, &blueprint1).await.unwrap_err();
         assert!(err.to_string().contains("duplicate key"));
 
-        // Delete the blueprint and ensure it's really gone.
-        datastore.blueprint_delete(&opctx, &authz_blueprint).await.unwrap();
-        ensure_blueprint_fully_deleted(&datastore, blueprint1.id).await;
-        assert_eq!(blueprint_list_all_ids(&opctx, &datastore).await, []);
+        // We could try to test deleting this blueprint, but deletion checks
+        // that the blueprint being deleted isn't the current target, and we
+        // haven't set a current target at all as part of this test. Instead of
+        // going through the motions of creating another blueprint and making it
+        // the target just to test deletion, we'll end this test here, and rely
+        // on other tests to check blueprint deletion.
 
         // Clean up.
         db.cleanup().await.unwrap();
@@ -1441,7 +1447,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            Some((bp1_target, blueprint1.clone()))
+            (bp1_target, blueprint1.clone())
         );
         let err = datastore
             .blueprint_delete(&opctx, &authz_blueprint1)
@@ -1541,7 +1547,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            Some((bp2_target, blueprint2.clone()))
+            (bp2_target, blueprint2.clone())
         );
         let err = datastore
             .blueprint_delete(&opctx, &authz_blueprint2)
@@ -1597,11 +1603,14 @@ mod tests {
             ))
         );
 
-        // There should be no current target still.
-        assert_eq!(
-            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            None
-        );
+        // There should be no current target; this is never expected in a real
+        // system, since RSS sets an initial target blueprint, so we should get
+        // an error.
+        let err = datastore
+            .blueprint_target_get_current_full(&opctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no target blueprint set"));
 
         // Create three blueprints:
         // * `blueprint1` has no parent
@@ -1674,11 +1683,14 @@ mod tests {
             Error::from(InsertTargetError::ParentNotTarget(blueprint2.id))
         );
 
-        // There should be no current target still.
-        assert_eq!(
-            datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            None
-        );
+        // There should be no current target; this is never expected in a real
+        // system, since RSS sets an initial target blueprint, so we should get
+        // an error.
+        let err = datastore
+            .blueprint_target_get_current_full(&opctx)
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("no target blueprint set"));
 
         // We should be able to insert blueprint1, which has no parent (matching
         // the currently-empty `bp_target` table's lack of a target).
@@ -1688,7 +1700,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            Some((bp1_target, blueprint1.clone()))
+            (bp1_target, blueprint1.clone())
         );
 
         // Now that blueprint1 is the current target, we should be able to
@@ -1699,7 +1711,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            Some((bp3_target, blueprint3.clone()))
+            (bp3_target, blueprint3.clone())
         );
 
         // Now that blueprint3 is the target, trying to insert blueprint1 or
@@ -1747,7 +1759,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current_full(&opctx).await.unwrap(),
-            Some((bp4_target, blueprint4))
+            (bp4_target, blueprint4)
         );
 
         // Clean up.
@@ -1808,7 +1820,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current(&opctx).await.unwrap(),
-            Some(bp1_target),
+            bp1_target,
         );
 
         // We should be able to toggle its enabled status an arbitrary number of
@@ -1821,7 +1833,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 datastore.blueprint_target_get_current(&opctx).await.unwrap(),
-                Some(bp1_target),
+                bp1_target,
             );
         }
 
@@ -1842,7 +1854,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             datastore.blueprint_target_get_current(&opctx).await.unwrap(),
-            Some(bp2_target),
+            bp2_target,
         );
 
         // We can no longer toggle the enabled bit of bp1_target.
@@ -1863,7 +1875,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 datastore.blueprint_target_get_current(&opctx).await.unwrap(),
-                Some(bp2_target),
+                bp2_target,
             );
         }
 
