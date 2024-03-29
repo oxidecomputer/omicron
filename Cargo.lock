@@ -3565,6 +3565,7 @@ dependencies = [
  "tokio",
  "toml 0.8.10",
  "uuid 1.7.0",
+ "whoami",
  "zone 0.3.0",
 ]
 
@@ -4717,6 +4718,7 @@ dependencies = [
  "strum 0.26.1",
  "thiserror",
  "tokio",
+ "typed-rng",
  "uuid 1.7.0",
 ]
 
@@ -4827,10 +4829,10 @@ dependencies = [
  "omicron-test-utils",
  "omicron-workspace-hack",
  "rand 0.8.5",
- "rand_seeder",
  "sled-agent-client",
  "slog",
  "thiserror",
+ "typed-rng",
  "uuid 1.7.0",
 ]
 
@@ -4939,6 +4941,7 @@ dependencies = [
  "sled-agent-client",
  "steno",
  "strum 0.26.1",
+ "tabled",
  "thiserror",
  "uuid 1.7.0",
 ]
@@ -8747,11 +8750,15 @@ dependencies = [
 name = "sled-storage"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-trait",
  "camino",
  "camino-tempfile",
  "cfg-if",
+ "debug-ignore",
  "derive_more",
+ "expectorate",
+ "futures",
  "glob",
  "illumos-utils",
  "key-manager",
@@ -10307,6 +10314,17 @@ name = "typed-path"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a90726108dab678edab76459751e1cc7c597c3484a6384d6423191255fa641b"
+
+[[package]]
+name = "typed-rng"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "rand_seeder",
+ "uuid 1.7.0",
+]
 
 [[package]]
 name = "typenum"

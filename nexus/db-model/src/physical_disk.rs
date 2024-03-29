@@ -29,6 +29,7 @@ pub struct PhysicalDisk {
 
 impl PhysicalDisk {
     pub fn new(
+        id: Uuid,
         vendor: String,
         serial: String,
         model: String,
@@ -36,7 +37,7 @@ impl PhysicalDisk {
         sled_id: Uuid,
     ) -> Self {
         Self {
-            identity: PhysicalDiskIdentity::new(Uuid::new_v4()),
+            identity: PhysicalDiskIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
             vendor,
@@ -47,18 +48,8 @@ impl PhysicalDisk {
         }
     }
 
-    pub fn uuid(&self) -> Uuid {
+    pub fn id(&self) -> Uuid {
         self.identity.id
-    }
-
-    // This is slightly gross, but:
-    // the `authz_resource` macro really expects that the "primary_key"
-    // for an object can be acquired by "id()".
-    //
-    // The PhysicalDisk object does actually have a separate convenience
-    // UUID, but may be looked by up vendor/serial/model too.
-    pub fn id(&self) -> (String, String, String) {
-        (self.vendor.clone(), self.serial.clone(), self.model.clone())
     }
 
     pub fn time_deleted(&self) -> Option<DateTime<Utc>> {

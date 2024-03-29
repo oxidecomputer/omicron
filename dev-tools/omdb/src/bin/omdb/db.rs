@@ -3234,7 +3234,7 @@ fn inv_collection_print_sleds(collection: &Collection) {
 
             println!("    ZONES FOUND");
             for z in &zones.zones.zones {
-                println!("      zone {} (type {})", z.id, z.zone_type.label());
+                println!("      zone {} (type {})", z.id, z.zone_type.kind());
             }
         } else {
             println!("  warning: no zone information found");
