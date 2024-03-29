@@ -958,7 +958,7 @@ async fn cmd_nexus_blueprints_show(
         .blueprint_view(&args.blueprint_id)
         .await
         .with_context(|| format!("fetching blueprint {}", args.blueprint_id))?;
-    println!("{:?}", blueprint);
+    println!("{}", blueprint.display());
     Ok(())
 }
 

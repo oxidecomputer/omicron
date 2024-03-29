@@ -431,7 +431,31 @@ EXECUTING COMMAND: omdb ["nexus", "blueprints", "show", "REDACTED_UUID_REDACTED_
 termination: Exited(0)
 ---------------------------------------------
 stdout:
-Blueprint { id: REDACTED_UUID_REDACTED_UUID_REDACTED, blueprint_zones: {REDACTED_UUID_REDACTED_UUID_REDACTED: BlueprintZonesConfig { generation: Generation(2), zones: [] }, REDACTED_UUID_REDACTED_UUID_REDACTED: BlueprintZonesConfig { generation: Generation(2), zones: [BlueprintZoneConfig { config: OmicronZoneConfig { id: REDACTED_UUID_REDACTED_UUID_REDACTED, underlay_address: ::1, zone_type: Clickhouse { address: "[::1]:REDACTED_PORT", dataset: OmicronZoneDataset { pool_name: ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED") } } }, disposition: InService }, BlueprintZoneConfig { config: OmicronZoneConfig { id: REDACTED_UUID_REDACTED_UUID_REDACTED, underlay_address: ::1, zone_type: CockroachDb { address: "[::1]:REDACTED_PORT", dataset: OmicronZoneDataset { pool_name: ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED") } } }, disposition: InService }, BlueprintZoneConfig { config: OmicronZoneConfig { id: REDACTED_UUID_REDACTED_UUID_REDACTED, underlay_address: ::1, zone_type: CruciblePantry { address: "[::1]:REDACTED_PORT" } }, disposition: InService }, BlueprintZoneConfig { config: OmicronZoneConfig { id: REDACTED_UUID_REDACTED_UUID_REDACTED, underlay_address: ::1, zone_type: ExternalDns { dataset: OmicronZoneDataset { pool_name: ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED") }, dns_address: "[::1]:REDACTED_PORT", http_address: "[::1]:REDACTED_PORT", nic: NetworkInterface { id: REDACTED_UUID_REDACTED_UUID_REDACTED, kind: Service { id: REDACTED_UUID_REDACTED_UUID_REDACTED }, name: Name("external-dns-REDACTED_UUID_REDACTED_UUID_REDACTED"), ip: 172.30.1.6, mac: MacAddr(MacAddr6([168, 64, 37, 255, 128, 0])), subnet: V4(Ipv4Net(Ipv4Network { addr: 172.30.1.0, prefix: 24 })), vni: Vni(100), primary: true, slot: 0 } } }, disposition: InService }, BlueprintZoneConfig { config: OmicronZoneConfig { id: REDACTED_UUID_REDACTED_UUID_REDACTED, underlay_address: ::1, zone_type: InternalDns { dataset: OmicronZoneDataset { pool_name: ZpoolName("oxp_REDACTED_UUID_REDACTED_UUID_REDACTED") }, dns_address: "[::1]:REDACTED_PORT", gz_address: ::1, gz_address_index: 0, http_address: "[::1]:REDACTED_PORT" } }, disposition: InService }, BlueprintZoneConfig { config: OmicronZoneConfig { id: REDACTED_UUID_REDACTED_UUID_REDACTED, underlay_address: ::ffff:127.0.0.1, zone_type: Nexus { external_dns_servers: [1.1.1.1, 9.9.9.9], external_ip: 127.0.0.1, external_tls: false, internal_address: "[::ffff:127.0.0.1]:REDACTED_PORT", nic: NetworkInterface { id: REDACTED_UUID_REDACTED_UUID_REDACTED, kind: Service { id: REDACTED_UUID_REDACTED_UUID_REDACTED }, name: Name("nexus-REDACTED_UUID_REDACTED_UUID_REDACTED"), ip: 172.30.2.6, mac: MacAddr(MacAddr6([168, 64, 37, 255, 128, 1])), subnet: V4(Ipv4Net(Ipv4Network { addr: 172.30.2.0, prefix: 24 })), vni: Vni(100), primary: true, slot: 0 } } }, disposition: InService }] }}, parent_blueprint_id: None, internal_dns_version: Generation(1), external_dns_version: Generation(2), time_created: 2024-03-29T17:09:00.903086Z, creator: "nexus-test-utils", comment: "initial test blueprint" }
+blueprint  REDACTED_UUID_REDACTED_UUID_REDACTED
+parent:    <none>
+
+  -----------------------------------------------------------------------------------------
+    zone type         zone ID                                disposition  underlay IP      
+  -----------------------------------------------------------------------------------------
+                                                                                           
+  sled REDACTED_UUID_REDACTED_UUID_REDACTED: zones at generation 2                         
+   (no zones)                                                                              
+                                                                                           
+  sled REDACTED_UUID_REDACTED_UUID_REDACTED: zones at generation 2                         
+    clickhouse        REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    cockroach_db      REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    crucible_pantry   REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    external_dns      REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    internal_dns      REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::1              
+    nexus             REDACTED_UUID_REDACTED_UUID_REDACTED   in service   ::ffff:127.0.0.1 
+
+METADATA:
+  created by:            nexus-test-utils        
+  created at:            <REDACTED     TIMESTAMP>
+  comment:               initial test blueprint  
+  internal DNS version:  1                       
+  external DNS version:  2                       
+
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
