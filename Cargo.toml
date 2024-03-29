@@ -444,6 +444,7 @@ update-engine = { path = "update-engine" }
 usdt = "0.5.0"
 uuid = { version = "1.7.0", features = ["serde", "v4"] }
 walkdir = "2.4"
+whoami = "1.5"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "clients/wicketd-client" }

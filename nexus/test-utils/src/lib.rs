@@ -861,6 +861,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             //   asynchronously, and we're not making any effort (currently) to
             //   wait for them to be known to Nexus.
             vec![],
+            vec![],
+            vec![],
             dns_config,
             &external_dns_zone_name,
             recovery_silo,

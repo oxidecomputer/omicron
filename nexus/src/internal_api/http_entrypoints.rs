@@ -6,11 +6,7 @@
 
 use crate::ServerContext;
 
-use super::params::{
-    OximeterInfo, PhysicalDiskDeleteRequest, PhysicalDiskPutRequest,
-    PhysicalDiskPutResponse, RackInitializationRequest, SledAgentInfo,
-    ZpoolPutRequest, ZpoolPutResponse,
-};
+use super::params::{OximeterInfo, RackInitializationRequest};
 use dropshot::endpoint;
 use dropshot::ApiDescription;
 use dropshot::FreeformBody;
@@ -34,6 +30,7 @@ use nexus_types::external_api::params::SledSelector;
 use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::SledPolicy;
+use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SwitchPutRequest;
 use nexus_types::internal_api::params::SwitchPutResponse;
 use nexus_types::internal_api::views::to_list;
@@ -75,9 +72,6 @@ pub(crate) fn internal_api() -> NexusApiDescription {
         api.register(sled_firewall_rules_request)?;
         api.register(switch_put)?;
         api.register(rack_initialization_complete)?;
-        api.register(physical_disk_put)?;
-        api.register(physical_disk_delete)?;
-        api.register(zpool_put)?;
         api.register(cpapi_instances_put)?;
         api.register(cpapi_disks_put)?;
         api.register(cpapi_volume_remove_read_only_parent)?;
@@ -253,77 +247,6 @@ async fn switch_put(
         let switch = body.into_inner();
         nexus.switch_upsert(path.switch_id, switch).await?;
         Ok(HttpResponseOk(SwitchPutResponse {}))
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Report that a physical disk for the specified sled has come online.
-#[endpoint {
-     method = PUT,
-     path = "/physical-disk",
- }]
-async fn physical_disk_put(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    body: TypedBody<PhysicalDiskPutRequest>,
-) -> Result<HttpResponseOk<PhysicalDiskPutResponse>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let disk = body.into_inner();
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        nexus.upsert_physical_disk(&opctx, disk).await?;
-        Ok(HttpResponseOk(PhysicalDiskPutResponse {}))
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Report that a physical disk for the specified sled has gone offline.
-#[endpoint {
-     method = DELETE,
-     path = "/physical-disk",
- }]
-async fn physical_disk_delete(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    body: TypedBody<PhysicalDiskDeleteRequest>,
-) -> Result<HttpResponseDeleted, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let disk = body.into_inner();
-
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        nexus.delete_physical_disk(&opctx, disk).await?;
-        Ok(HttpResponseDeleted())
-    };
-    apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
-}
-
-/// Path parameters for Zpool requests (internal API)
-#[derive(Deserialize, JsonSchema)]
-struct ZpoolPathParam {
-    sled_id: Uuid,
-    zpool_id: Uuid,
-}
-
-/// Report that a pool for a specified sled has come online.
-#[endpoint {
-     method = PUT,
-     path = "/sled-agents/{sled_id}/zpools/{zpool_id}",
- }]
-async fn zpool_put(
-    rqctx: RequestContext<Arc<ServerContext>>,
-    path_params: Path<ZpoolPathParam>,
-    pool_info: TypedBody<ZpoolPutRequest>,
-) -> Result<HttpResponseOk<ZpoolPutResponse>, HttpError> {
-    let apictx = rqctx.context();
-    let nexus = &apictx.nexus;
-    let path = path_params.into_inner();
-    let pi = pool_info.into_inner();
-
-    let handler = async {
-        let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
-        nexus.upsert_zpool(&opctx, path.zpool_id, path.sled_id, pi).await?;
-        Ok(HttpResponseOk(ZpoolPutResponse {}))
     };
     apictx.internal_latencies.instrument_dropshot_handler(&rqctx, handler).await
 }

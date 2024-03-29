@@ -106,7 +106,7 @@ tempfile.workspace = true
 tokio-stream.workspace = true
 tokio-util.workspace = true
 
-illumos-utils = { workspace = true, features = ["testing", "tmp_keypath"] }
+illumos-utils = { workspace = true, features = ["testing"] }
 sled-storage = { workspace = true, features = ["testing"] }
 
 #
