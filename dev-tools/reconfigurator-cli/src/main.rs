@@ -30,7 +30,7 @@ use nexus_types::inventory::OmicronZonesConfig;
 use nexus_types::inventory::SledRole;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
-use omicron_uuid_kinds::{GenericUuid, ServiceKind, TypedUuid};
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneKind, TypedUuid};
 use reedline::{Reedline, Signal};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -119,7 +119,7 @@ impl ReconfiguratorSim {
                     return None;
                 };
                 let service_id =
-                    TypedUuid::<ServiceKind>::from_untyped_uuid(zone.id);
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
                 let external_ip = ExternalIp {
                     id: *self
                         .external_ips
@@ -136,7 +136,7 @@ impl ReconfiguratorSim {
             .filter_map(|(_, zone)| {
                 let nic = zone.zone_type.service_vnic()?;
                 let service_id =
-                    TypedUuid::<ServiceKind>::from_untyped_uuid(zone.id);
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
                 let nic = ServiceNetworkInterface {
                     id: nic.id,
                     mac: nic.mac,

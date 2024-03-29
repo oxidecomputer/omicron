@@ -15,12 +15,12 @@ use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::ServiceKind;
+use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::TypedUuid;
 use sled_agent_client::types::OmicronZonesConfig;
 use std::collections::BTreeMap;
-use uuid::Uuid;
 use typed_rng::UuidRng;
+use uuid::Uuid;
 
 pub struct ExampleSystem {
     pub system: SystemDescription,
@@ -126,7 +126,7 @@ impl ExampleSystem {
             };
             for zone in zones.zones.iter().map(|z| &z.config) {
                 let service_id =
-                    TypedUuid::<ServiceKind>::from_untyped_uuid(zone.id);
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
                 if let Ok(Some(ip)) = zone.zone_type.external_ip() {
                     input.service_external_ips.insert(
                         service_id,

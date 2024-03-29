@@ -29,7 +29,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::ServiceKind;
+use omicron_uuid_kinds::OmicronZoneKind;
 use omicron_uuid_kinds::TypedUuid;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
@@ -178,7 +178,7 @@ impl super::Nexus {
                     return None;
                 };
                 Some((
-                    TypedUuid::<ServiceKind>::from_untyped_uuid(service_id),
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(service_id),
                     ExternalIp::from(external_ip),
                 ))
             })
@@ -189,7 +189,9 @@ impl super::Nexus {
             .into_iter()
             .map(|nic| {
                 (
-                    TypedUuid::<ServiceKind>::from_untyped_uuid(nic.service_id),
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(
+                        nic.service_id,
+                    ),
                     ServiceNetworkInterface::from(nic),
                 )
             })

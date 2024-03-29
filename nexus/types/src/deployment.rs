@@ -29,7 +29,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
-use omicron_uuid_kinds::ServiceKind;
+use omicron_uuid_kinds::OmicronZoneKind;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -117,10 +117,11 @@ pub struct PlanningInput {
     pub policy: Policy,
 
     /// external IPs allocated to services
-    pub service_external_ips: BTreeMap<TypedUuid<ServiceKind>, ExternalIp>,
+    pub service_external_ips: BTreeMap<TypedUuid<OmicronZoneKind>, ExternalIp>,
 
     /// vNICs allocated to services
-    pub service_nics: BTreeMap<TypedUuid<ServiceKind>, ServiceNetworkInterface>,
+    pub service_nics:
+        BTreeMap<TypedUuid<OmicronZoneKind>, ServiceNetworkInterface>,
 }
 
 /// External IP allocated to a service
