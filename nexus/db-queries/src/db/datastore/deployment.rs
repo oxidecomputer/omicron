@@ -1339,17 +1339,9 @@ mod tests {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
-        // Create an empty collection and a blueprint from it
-        let collection =
-            nexus_inventory::CollectionBuilder::new("test").build();
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            &EMPTY_POLICY,
-            "test",
-        )
-        .unwrap();
+        // Create an empty blueprint.
+        let blueprint1 =
+            BlueprintBuilder::build_initial_empty(&EMPTY_POLICY, "test");
         let authz_blueprint = authz_blueprint_from_id(blueprint1.id);
 
         // Trying to read it from the database should fail with the relevant
@@ -1368,7 +1360,7 @@ mod tests {
         let blueprint_read = datastore
             .blueprint_read(&opctx, &authz_blueprint)
             .await
-            .expect("failed to read collection back");
+            .expect("failed to read blueprint back");
         assert_eq!(blueprint1, blueprint_read);
         assert_eq!(
             blueprint_list_all_ids(&opctx, &datastore).await,
@@ -1615,16 +1607,8 @@ mod tests {
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
-        let collection =
-            nexus_inventory::CollectionBuilder::new("test").build();
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            &EMPTY_POLICY,
-            "test1",
-        )
-        .unwrap();
+        let blueprint1 =
+            BlueprintBuilder::build_initial_empty(&EMPTY_POLICY, "test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -1772,16 +1756,8 @@ mod tests {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
         // Create an initial blueprint and a child.
-        let collection =
-            nexus_inventory::CollectionBuilder::new("test").build();
-        let blueprint1 = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            &EMPTY_POLICY,
-            "test1",
-        )
-        .unwrap();
+        let blueprint1 =
+            BlueprintBuilder::build_initial_empty(&EMPTY_POLICY, "test1");
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,

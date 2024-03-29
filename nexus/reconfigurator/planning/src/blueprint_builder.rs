@@ -91,15 +91,20 @@ pub enum EnsureMultiple {
 
 /// Helper for assembling a blueprint
 ///
-/// There are two basic ways to assemble a new blueprint:
+/// There are a few basic ways to assemble a new blueprint:
 ///
-/// 1. Build one directly from a collection.  Such blueprints have no parent
+/// 1. Build an initial empty one.  Such blueprints have no parent blueprint.
+///    They are not customizable.  Use
+///    [`BlueprintBuilder::build_initial_empty`] for this.  This is generally
+///    only used for testing.
+///
+/// 2. Build one directly from a collection.  Such blueprints have no parent
 ///    blueprint.  They are not customizable.  Use
-///    [`BlueprintBuilder::build_initial_from_collection`] for this.  This would
-///    generally only be used once in the lifetime of a rack, to assemble the
-///    first blueprint.
+///    [`BlueprintBuilder::build_initial_from_collection`] for this.  This was
+///    historically used to bootstrap pre-blueprint systems, but will soon only
+///    be used for testing, and then removed altogether.
 ///
-/// 2. Build one _from_ another blueprint, called the "parent", making changes
+/// 3. Build one _from_ another blueprint, called the "parent", making changes
 ///    as desired.  Use [`BlueprintBuilder::new_based_on`] for this.  Once the
 ///    new blueprint is created, there is no dependency on the parent one.
 ///    However, the new blueprint can only be made the system's target if its
@@ -138,6 +143,48 @@ pub struct BlueprintBuilder<'a> {
 }
 
 impl<'a> BlueprintBuilder<'a> {
+    /// Build a Blueprint describing a system with no Omicron zones
+    pub fn build_initial_empty(policy: &Policy, creator: &str) -> Blueprint {
+        Self::build_initial_empty_impl(
+            policy,
+            creator,
+            BlueprintBuilderRng::new(),
+        )
+    }
+
+    pub fn build_initial_empty_seeded<H: Hash>(
+        policy: &Policy,
+        creator: &str,
+        seed: H,
+    ) -> Blueprint {
+        let mut rng = BlueprintBuilderRng::new();
+        rng.set_seed(seed);
+        Self::build_initial_empty_impl(policy, creator, rng)
+    }
+
+    fn build_initial_empty_impl(
+        policy: &Policy,
+        creator: &str,
+        mut rng: BlueprintBuilderRng,
+    ) -> Blueprint {
+        let blueprint_zones = policy
+            .sleds
+            .keys()
+            .map(|sled_id| (*sled_id, BlueprintZonesConfig::empty()))
+            .collect();
+
+        Blueprint {
+            id: rng.blueprint_rng.next(),
+            blueprint_zones,
+            parent_blueprint_id: None,
+            internal_dns_version: Generation::new(),
+            external_dns_version: Generation::new(),
+            time_created: now_db_precision(),
+            creator: creator.to_owned(),
+            comment: String::from("initial (empty)"),
+        }
+    }
+
     /// Directly construct a `Blueprint` from the contents of a particular
     /// collection (representing no changes from the collection state)
     pub fn build_initial_from_collection(

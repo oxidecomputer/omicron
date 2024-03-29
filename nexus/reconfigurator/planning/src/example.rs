@@ -12,7 +12,6 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::Policy;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
-use sled_agent_client::types::OmicronZonesConfig;
 use typed_rng::UuidRng;
 
 pub struct ExampleSystem {
@@ -44,36 +43,11 @@ impl ExampleSystem {
         }
 
         let policy = system.to_policy().expect("failed to make policy");
-        let mut inventory_builder =
-            system.to_collection_builder().expect("failed to build collection");
-
-        // For each sled, have it report 0 zones in the initial inventory.
-        // This will enable us to build a blueprint from the initial
-        // inventory, which we can then use to build new blueprints.
-        for sled_id in &sled_ids {
-            inventory_builder
-                .found_sled_omicron_zones(
-                    "fake sled agent",
-                    *sled_id,
-                    OmicronZonesConfig {
-                        generation: Generation::new(),
-                        zones: vec![],
-                    },
-                )
-                .expect("recording Omicron zones");
-        }
-
-        let empty_zone_inventory = inventory_builder.build();
-        let initial_blueprint =
-            BlueprintBuilder::build_initial_from_collection_seeded(
-                &empty_zone_inventory,
-                Generation::new(),
-                Generation::new(),
-                &policy,
-                "test suite",
-                (test_name, "ExampleSystem initial"),
-            )
-            .unwrap();
+        let initial_blueprint = BlueprintBuilder::build_initial_empty_seeded(
+            &policy,
+            "test suite",
+            (test_name, "ExampleSystem initial"),
+        );
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(

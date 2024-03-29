@@ -496,10 +496,9 @@ mod test {
     use nexus_db_queries::authz;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
-    use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
-    use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::example::ExampleSystem;
     use nexus_reconfigurator_preparation::policy_from_db;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils_macros::nexus_test;
@@ -546,21 +545,12 @@ mod test {
         nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
 
     fn blueprint_empty() -> Blueprint {
-        let builder = CollectionBuilder::new("test-suite");
-        let collection = builder.build();
         let policy = Policy {
             sleds: BTreeMap::new(),
             service_ip_pool_ranges: vec![],
             target_nexus_zone_count: 3,
         };
-        BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            Generation::new(),
-            &policy,
-            "test-suite",
-        )
-        .expect("failed to generate empty blueprint")
+        BlueprintBuilder::build_initial_empty(&policy, "test-suite")
     }
 
     fn dns_config_empty() -> DnsConfigParams {
@@ -864,16 +854,8 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, policy) = example(&logctx.log, TEST_NAME, 5);
-        let initial_external_dns_generation = Generation::new();
-        let blueprint = BlueprintBuilder::build_initial_from_collection(
-            &collection,
-            Generation::new(),
-            initial_external_dns_generation,
-            &policy,
-            "test suite",
-        )
-        .expect("failed to generate initial blueprint");
+        let example = ExampleSystem::new(&logctx.log, TEST_NAME, 5);
+        let blueprint = example.blueprint;
 
         let my_silo = Silo::new(params::SiloCreate {
             identity: IdentityMetadataCreateParams {

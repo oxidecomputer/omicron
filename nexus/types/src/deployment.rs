@@ -335,6 +335,11 @@ pub struct BlueprintZonesConfig {
 }
 
 impl BlueprintZonesConfig {
+    /// Constructs an empty [`BlueprintZonesConfig`]
+    pub fn empty() -> Self {
+        BlueprintZonesConfig { generation: Generation::new(), zones: vec![] }
+    }
+
     /// Constructs a new [`BlueprintZonesConfig`] from a collection's zones.
     ///
     /// For the initial blueprint, all zones within a collection are assumed to
