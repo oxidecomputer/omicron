@@ -8,6 +8,7 @@
 //! sure you're only breaking what you intend.
 
 use expectorate::assert_contents;
+use nexus_db_queries::context::OpContext;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
@@ -63,6 +64,22 @@ async fn test_omdb_usage_errors() {
 
 #[nexus_test]
 async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
+    // We want to test showing a blueprint, but that means we need the ID of the
+    // blueprint set up by the test context.
+    let blueprint_id = {
+        let nexus = &cptestctx.server.apictx().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+        datastore
+            .blueprint_target_get_current(&opctx)
+            .await
+            .expect("no target blueprint")
+            .target_id
+    };
+
     let gwtestctx = gateway_test_utils::setup::test_setup(
         "test_omdb_success_case",
         gateway_messages::SpPort::One,
@@ -76,6 +93,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let tmpdir = camino_tempfile::tempdir()
         .expect("failed to create temporary directory");
     let tmppath = tmpdir.path().join("reconfigurator-save.out");
+    let blueprint_id = blueprint_id.to_string();
     let mut output = String::new();
     let invocations: &[&[&str]] = &[
         &["db", "disks", "list"],
@@ -88,6 +106,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         &["mgs", "inventory"],
         &["nexus", "background-tasks", "doc"],
         &["nexus", "background-tasks", "show"],
+        &["nexus", "blueprints", "show", &blueprint_id],
         // We can't easily test the sled agent output because that's only
         // provided by a real sled agent, which is not available in the
         // ControlPlaneTestContext.
