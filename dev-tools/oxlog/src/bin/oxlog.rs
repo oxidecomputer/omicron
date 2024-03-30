@@ -57,6 +57,8 @@ struct FilterArgs {
 }
 
 fn main() -> Result<(), anyhow::Error> {
+    sigpipe::reset();
+
     let cli = Cli::parse();
 
     match cli.command {
