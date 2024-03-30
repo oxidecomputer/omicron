@@ -88,6 +88,8 @@ regex-automata = { version = "0.4.5", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
+rustls-pki-types = { version = "1.3.0", features = ["std"] }
+rustls-webpki = { version = "0.102.2", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid", "uuid1"] }
 semver = { version = "1.0.22", features = ["serde"] }
 serde = { version = "1.0.197", features = ["alloc", "derive", "rc"] }
@@ -194,6 +196,8 @@ regex-automata = { version = "0.4.5", default-features = false, features = ["dfa
 regex-syntax = { version = "0.8.2" }
 reqwest = { version = "0.11.24", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
+rustls-pki-types = { version = "1.3.0", features = ["std"] }
+rustls-webpki = { version = "0.102.2", default-features = false, features = ["aws_lc_rs", "ring", "std"] }
 schemars = { version = "0.8.16", features = ["bytes", "chrono", "uuid", "uuid1"] }
 semver = { version = "1.0.22", features = ["serde"] }
 serde = { version = "1.0.197", features = ["alloc", "derive", "rc"] }
