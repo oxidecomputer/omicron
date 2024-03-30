@@ -284,6 +284,15 @@ impl Zones {
                 load_extra_logs(dir, svc_name, &mut output, filter.show_empty);
             }
         }
+
+        // readdir traverses over directories in indeterminate order, so sort
+        // by filename (which is enough to sort by service name and timestamp
+        // in most cases).
+        for svc_logs in output.values_mut() {
+            svc_logs.archived.sort_unstable();
+            svc_logs.extra.sort_unstable();
+        }
+
         output
     }
 }
