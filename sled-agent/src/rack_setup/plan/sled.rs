@@ -59,7 +59,7 @@ impl Plan {
         storage: &StorageHandle,
     ) -> Result<Option<Self>, PlanError> {
         let paths: Vec<Utf8PathBuf> = storage
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
@@ -126,7 +126,7 @@ impl Plan {
 
         // Once we've constructed a plan, write it down to durable storage.
         let paths: Vec<Utf8PathBuf> = storage_manager
-            .get_latest_resources()
+            .get_latest_disks()
             .await
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()

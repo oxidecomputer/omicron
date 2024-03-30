@@ -364,18 +364,8 @@ impl<'a> LookupPath<'a> {
     }
 
     /// Select a resource of type PhysicalDisk, identified by its id
-    pub fn physical_disk(
-        self,
-        vendor: &str,
-        serial: &str,
-        model: &str,
-    ) -> PhysicalDisk<'a> {
-        PhysicalDisk::PrimaryKey(
-            Root { lookup_root: self },
-            vendor.to_string(),
-            serial.to_string(),
-            model.to_string(),
-        )
+    pub fn physical_disk(self, id: Uuid) -> PhysicalDisk<'a> {
+        PhysicalDisk::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     pub fn silo_image_id(self, id: Uuid) -> SiloImage<'a> {
@@ -836,11 +826,7 @@ lookup_resource! {
     children = [],
     lookup_by_name = false,
     soft_deletes = true,
-    primary_key_columns = [
-        { column_name = "vendor", rust_type = String },
-        { column_name = "serial", rust_type = String },
-        { column_name = "model", rust_type = String }
-    ]
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
 }
 
 lookup_resource! {

@@ -55,6 +55,8 @@ static CUSTOM_TYPE_KEYS: &'static [&'static str] = &[
     "ip_pool_resource_type",
     "network_interface_kind",
     "physical_disk_kind",
+    "physical_disk_policy",
+    "physical_disk_state",
     "producer_kind",
     "provider_type",
     "root_of_trust_page_which",

@@ -44,6 +44,7 @@ members = [
     "nexus/defaults",
     "nexus/inventory",
     "nexus/macros-common",
+    "nexus/metrics-producer-gc",
     "nexus/networking",
     "nexus/reconfigurator/execution",
     "nexus/reconfigurator/planning",
@@ -69,6 +70,7 @@ members = [
     "test-utils",
     "tufaceous-lib",
     "tufaceous",
+    "typed-rng",
     "update-common",
     "update-engine",
     "uuid-kinds",
@@ -120,6 +122,7 @@ default-members = [
     "nexus-config",
     "nexus/authz-macros",
     "nexus/macros-common",
+    "nexus/metrics-producer-gc",
     "nexus/networking",
     "nexus/db-macros",
     "nexus/db-model",
@@ -147,6 +150,7 @@ default-members = [
     "test-utils",
     "tufaceous-lib",
     "tufaceous",
+    "typed-rng",
     "update-common",
     "update-engine",
     "uuid-kinds",
@@ -193,9 +197,9 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.27.0", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "16f16478f4af1502b25ddcd79d307b3f116f13f6" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "16f16478f4af1502b25ddcd79d307b3f116f13f6" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "16f16478f4af1502b25ddcd79d307b3f116f13f6" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "09bcfa6b9201f75891a5413928bb088cc150d319" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "09bcfa6b9201f75891a5413928bb088cc150d319" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "09bcfa6b9201f75891a5413928bb088cc150d319" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.3"
@@ -253,7 +257,6 @@ ipcc = { path = "ipcc" }
 ipnet = "2.9"
 itertools = "0.12.1"
 internet-checksum = "0.2"
-ipcc-key-value = { path = "ipcc-key-value" }
 ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
@@ -277,6 +280,7 @@ nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-macros-common = { path = "nexus/macros-common" }
+nexus-metrics-producer-gc = { path = "nexus/metrics-producer-gc" }
 nexus-networking = { path = "nexus/networking" }
 nexus-reconfigurator-execution = { path = "nexus/reconfigurator/execution" }
 nexus-reconfigurator-planning = { path = "nexus/reconfigurator/planning" }
@@ -294,6 +298,7 @@ num = { version = "0.4.1", default-features = false, features = [ "libm" ] }
 omicron-common = { path = "common" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
+omicron-omdb = { path = "dev-tools/omdb" }
 omicron-package = { path = "package" }
 omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
@@ -307,7 +312,6 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-openssl-probe = "0.1.5"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "7ee353a470ea59529ee1b34729681da887aa88ce" }
 oso = "0.27"
 owo-colors = "4.0.0"
@@ -324,6 +328,7 @@ partial-io = { version = "0.5.4", features = ["proptest1", "tokio1"] }
 parse-size = "1.0.0"
 paste = "1.0.14"
 percent-encoding = "2.3.1"
+peg = "0.8.2"
 pem = "3.0"
 petgraph = "0.6.4"
 postgres-protocol = "0.6.6"
@@ -334,12 +339,13 @@ prettyplease = { version = "0.2.16", features = ["verbatim"] }
 proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "fdf0585c6a227a7cfbee4a61a36938c3d77e4712" }
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "9b2deee64874b315427962b1c7fccceef99436b2" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "9b2deee64874b315427962b1c7fccceef99436b2" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "9b2deee64874b315427962b1c7fccceef99436b2" }
 proptest = "1.4.0"
 quote = "1.0"
 rand = "0.8.5"
+rand_core = "0.6.4"
 rand_seeder = "0.2.3"
 ratatui = "0.26.1"
 rayon = "1.9"
@@ -361,7 +367,6 @@ schemars = "0.8.16"
 secrecy = "0.8.0"
 semver = { version = "1.0.22", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
-serde_derive = "1.0"
 serde_human_bytes = { git = "http://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
 serde_json = "1.0.114"
 serde_path_to_error = "0.1.16"
@@ -387,12 +392,12 @@ slog-envlogger = "2.2"
 slog-error-chain = { git = "https://github.com/oxidecomputer/slog-error-chain", branch = "main", features = ["derive"] }
 slog-term = "2.9"
 smf = "0.2"
-snafu = "0.7"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
 sprockets-common = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-host = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
 sprockets-rot = { git = "http://github.com/oxidecomputer/sprockets", rev = "77df31efa5619d0767ffc837ef7468101608aee9" }
+sqlformat = "0.2.3"
 sqlparser = { version = "0.43.1", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
@@ -431,12 +436,14 @@ trybuild = "1.0.89"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui-tree-widget = "0.17.0"
+typed-rng = { path = "typed-rng" }
 unicode-width = "0.1.11"
 update-common = { path = "update-common" }
 update-engine = { path = "update-engine" }
 usdt = "0.5.0"
 uuid = { version = "1.7.0", features = ["serde", "v4"] }
 walkdir = "2.4"
+whoami = "1.5"
 wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-client = { path = "clients/wicketd-client" }

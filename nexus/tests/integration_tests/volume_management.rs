@@ -2052,9 +2052,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     // Four zpools, one dataset each
     let mut disk_test = DiskTest::new(&cptestctx).await;
-    disk_test
-        .add_zpool_with_dataset(&cptestctx, DiskTest::DEFAULT_ZPOOL_SIZE_GIB)
-        .await;
+    disk_test.add_zpool_with_dataset(&cptestctx).await;
 
     // This bug occurs when region_snapshot records share a snapshot_addr, so
     // insert those here manually.

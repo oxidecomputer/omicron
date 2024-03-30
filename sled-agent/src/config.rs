@@ -12,7 +12,6 @@ use illumos_utils::dladm::Dladm;
 use illumos_utils::dladm::FindPhysicalLinkError;
 use illumos_utils::dladm::PhysicalLink;
 use illumos_utils::dladm::CHELSIO_LINK_PREFIX;
-use illumos_utils::zpool::ZpoolName;
 use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::is_gimlet;
@@ -65,8 +64,8 @@ pub struct Config {
     pub swap_device_size_gb: Option<u32>,
     /// Optional VLAN ID to be used for tagging guest VNICs.
     pub vlan: Option<VlanID>,
-    /// Optional list of zpools to be used as "discovered disks".
-    pub zpools: Option<Vec<ZpoolName>>,
+    /// Optional list of virtual devices to be used as "discovered disks".
+    pub vdevs: Option<Vec<Utf8PathBuf>>,
     /// Optionally skip waiting for time synchronization
     pub skip_timesync: Option<bool>,
 
