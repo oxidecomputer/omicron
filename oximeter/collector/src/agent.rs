@@ -1144,5 +1144,6 @@ mod tests {
             collector.delete_producer(Uuid::new_v4()).await.is_ok(),
             "Deleting a non-existent producer should be OK"
         );
+        logctx.cleanup_successful();
     }
 }
