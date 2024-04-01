@@ -748,7 +748,6 @@ impl OximeterAgent {
 // A task which periodically updates our list of producers from Nexus.
 async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
     let mut interval = tokio::time::interval(agent.refresh_interval);
-    let page_size = Some(NonZeroU32::new(100).unwrap());
     loop {
         interval.tick().await;
         info!(agent.log, "refreshing list of producers from Nexus");
@@ -758,7 +757,9 @@ async fn refresh_producer_list(agent: OximeterAgent, resolver: Resolver) {
         let client = nexus_client::Client::new(&url, agent.log.clone());
         let mut stream = client.cpapi_assigned_producers_list_stream(
             &agent.id,
-            page_size,
+            // This is a _total_ limit, not a page size, so `None` means "get
+            // all entries".
+            None,
             Some(IdSortMode::IdAscending),
         );
         let mut expected_producers = BTreeMap::new();
