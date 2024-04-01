@@ -10,6 +10,7 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
+use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
 use nexus_types::deployment::SledResources;
 use nexus_types::external_api::views::SledPolicy;
@@ -28,6 +29,8 @@ use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::TypedUuid;
 use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
@@ -42,8 +45,8 @@ impl<T> SubnetIterator for T where
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
-/// From this description, you can extract a `Policy` or inventory `Collection`.
-/// There are a few intended purposes here:
+/// From this description, you can extract a `PlanningInput` or inventory
+/// `Collection`. There are a few intended purposes here:
 ///
 /// 1. to easily construct fake racks in automated tests for the Planner and
 ///    other parts of Reconfigurator
@@ -223,6 +226,7 @@ impl SystemDescription {
     pub fn sled_full(
         &mut self,
         sled_id: Uuid,
+        sled_policy: SledPolicy,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
         inventory_sled_agent: &nexus_types::inventory::SledAgent,
@@ -236,6 +240,7 @@ impl SystemDescription {
             sled_id,
             Sled::new_full(
                 sled_id,
+                sled_policy,
                 sled_resources,
                 inventory_sp,
                 inventory_sled_agent,
@@ -275,26 +280,31 @@ impl SystemDescription {
         Ok(builder)
     }
 
-    pub fn to_policy(&self) -> anyhow::Result<Policy> {
-        let sleds = self
-            .sleds
-            .values()
-            .map(|sled| {
-                let sled_resources = SledResources {
-                    policy: sled.policy,
-                    state: SledState::Active,
-                    zpools: sled.zpools.iter().cloned().collect(),
-                    subnet: sled.sled_subnet,
-                };
-                (sled.sled_id, sled_resources)
-            })
-            .collect();
-
-        Ok(Policy {
-            sleds,
+    /// Construct a [`PlanningInputBuilder`] primed with all this system's sleds
+    ///
+    /// Does not populate extra information like Omicron zone external IPs or
+    /// NICs.
+    pub fn to_planning_input_builder(
+        &self,
+    ) -> anyhow::Result<PlanningInputBuilder> {
+        let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_nexus_zone_count: self.target_nexus_zone_count,
-        })
+        };
+        let mut builder = PlanningInputBuilder::new(policy);
+
+        for sled in self.sleds.values() {
+            let sled_resources = SledResources {
+                state: SledState::Active,
+                zpools: sled.zpools.iter().cloned().collect(),
+                subnet: sled.sled_subnet,
+            };
+            // TODO-cleanup use `TypedUuid` everywhere
+            let sled_id = TypedUuid::from_untyped_uuid(sled.sled_id);
+            builder.add_sled(sled_id, sled.policy, sled_resources)?;
+        }
+
+        Ok(builder)
     }
 }
 
@@ -391,7 +401,8 @@ pub struct SledHwInventory<'a> {
 
 /// Our abstract description of a `Sled`
 ///
-/// This needs to be rich enough to generate a Policy and inventory Collection.
+/// This needs to be rich enough to generate a PlanningInput and inventory
+/// Collection.
 #[derive(Clone, Debug)]
 struct Sled {
     sled_id: Uuid,
@@ -496,6 +507,7 @@ impl Sled {
     /// inventory `Collection`
     fn new_full(
         sled_id: Uuid,
+        sled_policy: SledPolicy,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
         inv_sled_agent: &nexus_types::inventory::SledAgent,
@@ -568,7 +580,7 @@ impl Sled {
             zpools: sled_resources.zpools.into_iter().collect(),
             inventory_sp,
             inventory_sled_agent,
-            policy: sled_resources.policy,
+            policy: sled_policy,
         }
     }
 

@@ -4843,7 +4843,9 @@ dependencies = [
  "nexus-db-queries",
  "nexus-types",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "slog",
 ]
 
 [[package]]

@@ -20,7 +20,7 @@ use nexus_types::deployment::OmicronZoneConfig;
 use nexus_types::deployment::OmicronZoneDataset;
 use nexus_types::deployment::OmicronZoneType;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::Policy;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::inventory::Collection;
@@ -38,6 +38,9 @@ use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledKind;
+use omicron_uuid_kinds::TypedUuid;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use slog::o;
@@ -145,14 +148,14 @@ impl<'a> BlueprintBuilder<'a> {
         collection: &Collection,
         internal_dns_version: Generation,
         external_dns_version: Generation,
-        policy: &Policy,
+        all_sleds: impl Iterator<Item = TypedUuid<SledKind>>,
         creator: &str,
     ) -> Result<Blueprint, Error> {
         Self::build_initial_impl(
             collection,
             internal_dns_version,
             external_dns_version,
-            policy,
+            all_sleds,
             creator,
             BlueprintBuilderRng::new(),
         )
@@ -164,7 +167,7 @@ impl<'a> BlueprintBuilder<'a> {
         collection: &Collection,
         internal_dns_version: Generation,
         external_dns_version: Generation,
-        policy: &Policy,
+        all_sleds: impl Iterator<Item = TypedUuid<SledKind>>,
         creator: &str,
         seed: H,
     ) -> Result<Blueprint, Error> {
@@ -174,7 +177,7 @@ impl<'a> BlueprintBuilder<'a> {
             collection,
             internal_dns_version,
             external_dns_version,
-            policy,
+            all_sleds,
             creator,
             rng,
         )
@@ -184,17 +187,15 @@ impl<'a> BlueprintBuilder<'a> {
         collection: &Collection,
         internal_dns_version: Generation,
         external_dns_version: Generation,
-        policy: &Policy,
+        all_sleds: impl Iterator<Item = TypedUuid<SledKind>>,
         creator: &str,
         mut rng: BlueprintBuilderRng,
     ) -> Result<Blueprint, Error> {
-        let blueprint_zones = policy
-            .sleds
-            .keys()
+        let blueprint_zones = all_sleds
             .map(|sled_id| {
                 let zones = collection
                     .omicron_zones
-                    .get(sled_id)
+                    .get(sled_id.as_untyped_uuid())
                     .map(|z| &z.zones)
                     .ok_or_else(|| {
                         // We should not find a sled that's supposed to be
@@ -218,7 +219,7 @@ impl<'a> BlueprintBuilder<'a> {
                     })?;
 
                 Ok((
-                    *sled_id,
+                    *sled_id.as_untyped_uuid(),
                     BlueprintZonesConfig::initial_from_collection(&zones),
                 ))
             })
@@ -343,8 +344,7 @@ impl<'a> BlueprintBuilder<'a> {
         );
         let available_external_ips = Box::new(
             input
-                .policy
-                .service_ip_pool_ranges
+                .service_ip_pool_ranges()
                 .iter()
                 .flat_map(|r| r.iter())
                 .filter(move |ip| !used_external_ips.contains(ip)),
@@ -374,8 +374,9 @@ impl<'a> BlueprintBuilder<'a> {
     /// Assemble a final [`Blueprint`] based on the contents of the builder
     pub fn build(mut self) -> Blueprint {
         // Collect the Omicron zones config for each in-service sled.
-        let blueprint_zones =
-            self.zones.into_zones_map(self.input.policy.sleds.keys().copied());
+        let blueprint_zones = self
+            .zones
+            .into_zones_map(self.input.all_sled_ids(SledFilter::InService));
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -717,7 +718,9 @@ impl<'a> BlueprintBuilder<'a> {
     }
 
     fn sled_resources(&self, sled_id: Uuid) -> Result<&SledResources, Error> {
-        self.input.policy.sleds.get(&sled_id).ok_or_else(|| {
+        // TODO-cleanup use `TypedUuid` everywhere
+        let sled_id = TypedUuid::from_untyped_uuid(sled_id);
+        self.input.sled_resources(&sled_id).ok_or_else(|| {
             Error::Planner(anyhow!(
                 "attempted to use sled that is not in service: {}",
                 sled_id
@@ -828,10 +831,12 @@ impl<'a> BlueprintZonesBuilder<'a> {
     /// Produces an owned map of zones for the requested sleds
     pub fn into_zones_map(
         mut self,
-        sled_ids: impl Iterator<Item = Uuid>,
+        sled_ids: impl Iterator<Item = TypedUuid<SledKind>>,
     ) -> BTreeMap<Uuid, BlueprintZonesConfig> {
         sled_ids
             .map(|sled_id| {
+                // TODO-cleanup use `TypedUuid` everywhere
+                let sled_id = *sled_id.as_untyped_uuid();
                 // Start with self.changed_zones, which contains entries for any
                 // sled whose zones config is changing in this blueprint.
                 let mut zones = self

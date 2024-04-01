@@ -12,9 +12,10 @@ use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::external_api::views::SledState;
+use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::GenericUuid;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -96,19 +97,13 @@ impl<'a> Planner<'a> {
         // We will not mark sleds getting Crucible zones as ineligible; other
         // control plane service zones starting concurrently with Crucible zones
         // is fine.
-        let mut sleds_ineligible_for_services = BTreeSet::new();
+        let mut sleds_waiting_for_ntp_zones = BTreeSet::new();
 
-        for (sled_id, sled_info) in &self.input.policy.sleds {
-            // Decommissioned sleds don't get any services. (This is an
-            // explicit match so that when more states are added, this fails to
-            // compile.)
-            match sled_info.state {
-                SledState::Decommissioned => {
-                    sleds_ineligible_for_services.insert(*sled_id);
-                    continue;
-                }
-                SledState::Active => {}
-            }
+        for (sled_id, sled_info) in
+            self.input.all_sled_resources(SledFilter::InService)
+        {
+            // TODO-cleanup use `TypedUuid` everywhere
+            let sled_id = sled_id.as_untyped_uuid();
 
             // Check for an NTP zone.  Every sled should have one.  If it's not
             // there, all we can do is provision that one zone.  We have to wait
@@ -125,7 +120,7 @@ impl<'a> Planner<'a> {
                 // Don't make any other changes to this sled.  However, this
                 // change is compatible with any other changes to other sleds,
                 // so we can "continue" here rather than "break".
-                sleds_ineligible_for_services.insert(*sled_id);
+                sleds_waiting_for_ntp_zones.insert(*sled_id);
                 continue;
             }
 
@@ -194,22 +189,8 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // We've now placed all the services that should always exist on all
-        // sleds. Before moving on to make decisions about placing services that
-        // are _not_ present on all sleds, check the provision state of all our
-        // sleds so we can avoid any non-provisionable sleds under the
-        // assumption that there is something amiss with them.
-        sleds_ineligible_for_services.extend(
-            self.input.policy.sleds.iter().filter_map(
-                |(sled_id, sled_info)| {
-                    (!sled_info.is_eligible_for_discretionary_services())
-                        .then_some(*sled_id)
-                },
-            ),
-        );
-
         self.ensure_correct_number_of_nexus_zones(
-            &sleds_ineligible_for_services,
+            &sleds_waiting_for_ntp_zones,
         )?;
 
         Ok(())
@@ -217,21 +198,32 @@ impl<'a> Planner<'a> {
 
     fn ensure_correct_number_of_nexus_zones(
         &mut self,
-        sleds_ineligible_for_services: &BTreeSet<Uuid>,
+        sleds_waiting_for_ntp_zone: &BTreeSet<Uuid>,
     ) -> Result<(), Error> {
         // Bin every sled by the number of Nexus zones it currently has while
         // counting the total number of Nexus zones.
         let mut num_total_nexus = 0;
         let mut sleds_by_num_nexus: BTreeMap<usize, Vec<Uuid>> =
             BTreeMap::new();
-        for &sled_id in self.input.policy.sleds.keys() {
+
+        // This loop fails to count Nexus zones that are present on sleds that
+        // are not eligible for discretionary services. We should remove those
+        // Nexus zones, so this should be correct? (Confirm once we actually
+        // remove zones!)
+        for sled_id in self
+            .input
+            .all_sled_ids(SledFilter::EligibleForDiscretionaryServices)
+        {
+            // TODO-cleanup use `TypedUuid` everywhere
+            let sled_id = *sled_id.as_untyped_uuid();
             let num_nexus = self.blueprint.sled_num_nexus_zones(sled_id);
             num_total_nexus += num_nexus;
 
-            // Only bin this sled if we're allowed to use it. If we have a sled
-            // we're not allowed to use that's already running a Nexus (seems
-            // fishy!), we counted its Nexus above but will ignore it here.
-            if !sleds_ineligible_for_services.contains(&sled_id) {
+            // Only add this sled to our bins of eligible sleds if it's not
+            // waiting for an NTP zone. Such a sled should not have any Nexus
+            // zones, although if for some reason it did we would count it in
+            // `num_total_nexus`.
+            if !sleds_waiting_for_ntp_zone.contains(&sled_id) {
                 sleds_by_num_nexus.entry(num_nexus).or_default().push(sled_id);
             }
         }
@@ -241,13 +233,12 @@ impl<'a> Planner<'a> {
         // at least the minimum number.
         let nexus_to_add = self
             .input
-            .policy
-            .target_nexus_zone_count
+            .target_nexus_zone_count()
             .saturating_sub(num_total_nexus);
         if nexus_to_add == 0 {
             info!(
                 self.log, "sufficient Nexus zones exist in plan";
-                "desired_count" => self.input.policy.target_nexus_zone_count,
+                "desired_count" => self.input.target_nexus_zone_count(),
                 "current_count" => num_total_nexus,
             );
             return Ok(());
@@ -415,7 +406,7 @@ mod test {
         let new_sled_id = example.sled_rng.next();
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
-        let policy = example.system.to_policy().unwrap();
+        let policy = example.system.to_planning_input_builder().unwrap();
         let input = PlanningInput {
             policy,
             service_external_ips: example.input.service_external_ips,

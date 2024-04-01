@@ -9,14 +9,13 @@ use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
-use nexus_reconfigurator_preparation::policy_from_db;
+use nexus_reconfigurator_preparation::PlanningInputFromDb;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::ExternalIp;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::ServiceNetworkInterface;
+use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::api::external::CreateResult;
@@ -28,9 +27,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::OmicronZoneKind;
-use omicron_uuid_kinds::TypedUuid;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
@@ -148,56 +144,22 @@ impl super::Nexus {
                 .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
                 .await?
         };
-
-        let policy = policy_from_db(
-            &sled_rows,
-            &zpool_rows,
-            &ip_pool_range_rows,
-            NEXUS_REDUNDANCY,
-        )?;
-
-        let service_external_ips = datastore
+        let external_ip_rows = datastore
             .external_ip_list_service_all_batched(opctx)
-            .await?
-            .into_iter()
-            .filter_map(|external_ip| {
-                if !external_ip.is_service {
-                    error!(
-                        opctx.log,
-                        "non-service external IP returned by service IP query";
-                        "external-ip" => ?external_ip,
-                    );
-                    return None;
-                }
-                let Some(service_id) = external_ip.parent_id else {
-                    error!(
-                        opctx.log,
-                        "service external IP with no parent ID set";
-                        "external-ip" => ?external_ip,
-                    );
-                    return None;
-                };
-                Some((
-                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(service_id),
-                    ExternalIp::from(external_ip),
-                ))
-            })
-            .collect();
-        let service_nics = datastore
+            .await?;
+        let service_nic_rows = datastore
             .service_network_interfaces_all_list_batched(opctx)
-            .await?
-            .into_iter()
-            .map(|nic| {
-                (
-                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(
-                        nic.service_id,
-                    ),
-                    ServiceNetworkInterface::from(nic),
-                )
-            })
-            .collect();
-        let planning_input =
-            PlanningInput { policy, service_external_ips, service_nics };
+            .await?;
+
+        let planning_input = PlanningInputFromDb {
+            sled_rows: &sled_rows,
+            zpool_rows: &zpool_rows,
+            ip_pool_range_rows: &ip_pool_range_rows,
+            external_ip_rows: &external_ip_rows,
+            service_nic_rows: &service_nic_rows,
+            target_nexus_zone_count: NEXUS_REDUNDANCY,
+            log: &opctx.log,
+        }.build()?;
 
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to
@@ -264,7 +226,7 @@ impl super::Nexus {
             &collection,
             planning_context.internal_dns_version,
             planning_context.external_dns_version,
-            &planning_context.planning_input.policy,
+            planning_context.planning_input.all_sled_ids(SledFilter::All),
             &planning_context.creator,
         )
         .map_err(|error| {
