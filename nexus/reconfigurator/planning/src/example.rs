@@ -9,15 +9,22 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::Policy;
+use nexus_types::deployment::ExternalIp;
+use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::ServiceNetworkInterface;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneKind;
+use omicron_uuid_kinds::TypedUuid;
 use sled_agent_client::types::OmicronZonesConfig;
+use std::collections::BTreeMap;
 use typed_rng::UuidRng;
+use uuid::Uuid;
 
 pub struct ExampleSystem {
     pub system: SystemDescription,
-    pub policy: Policy,
+    pub input: PlanningInput,
     pub collection: Collection,
     pub blueprint: Blueprint,
     // If we add more types of RNGs than just sleds here, we'll need to
@@ -46,6 +53,11 @@ impl ExampleSystem {
         let policy = system.to_policy().expect("failed to make policy");
         let mut inventory_builder =
             system.to_collection_builder().expect("failed to build collection");
+        let mut input = PlanningInput {
+            policy,
+            service_external_ips: BTreeMap::new(),
+            service_nics: BTreeMap::new(),
+        };
 
         // For each sled, have it report 0 zones in the initial inventory.
         // This will enable us to build a blueprint from the initial
@@ -69,7 +81,7 @@ impl ExampleSystem {
                 &empty_zone_inventory,
                 Generation::new(),
                 Generation::new(),
-                &policy,
+                &input.policy,
                 "test suite",
                 (test_name, "ExampleSystem initial"),
             )
@@ -77,16 +89,16 @@ impl ExampleSystem {
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
-            &log,
+            log,
             &initial_blueprint,
             Generation::new(),
             Generation::new(),
-            &policy,
+            &input,
             "test suite",
         )
         .unwrap();
         builder.set_rng_seed((test_name, "ExampleSystem make_zones"));
-        for (sled_id, sled_resources) in &policy.sleds {
+        for (sled_id, sled_resources) in &input.policy.sleds {
             let _ = builder.sled_ensure_zone_ntp(*sled_id).unwrap();
             let _ = builder
                 .sled_ensure_zone_multiple_nexus_with_config(
@@ -112,6 +124,28 @@ impl ExampleSystem {
             let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
             };
+            for zone in zones.zones.iter().map(|z| &z.config) {
+                let service_id =
+                    TypedUuid::<OmicronZoneKind>::from_untyped_uuid(zone.id);
+                if let Ok(Some(ip)) = zone.zone_type.external_ip() {
+                    input.service_external_ips.insert(
+                        service_id,
+                        ExternalIp { id: Uuid::new_v4(), ip: ip.into() },
+                    );
+                }
+                if let Some(nic) = zone.zone_type.service_vnic() {
+                    input.service_nics.insert(
+                        service_id,
+                        ServiceNetworkInterface {
+                            id: nic.id,
+                            mac: nic.mac,
+                            ip: nic.ip.into(),
+                            slot: nic.slot,
+                            primary: nic.primary,
+                        },
+                    );
+                }
+            }
             builder
                 .found_sled_omicron_zones(
                     "fake sled agent",
@@ -125,7 +159,7 @@ impl ExampleSystem {
 
         ExampleSystem {
             system,
-            policy,
+            input,
             collection: builder.build(),
             blueprint,
             sled_rng,
@@ -133,7 +167,7 @@ impl ExampleSystem {
     }
 }
 
-/// Returns a collection and policy describing a pretty simple system.
+/// Returns a collection and planning input describing a pretty simple system.
 ///
 /// The test name is used as the RNG seed.
 ///
@@ -144,7 +178,7 @@ pub fn example(
     log: &slog::Logger,
     test_name: &str,
     nsleds: usize,
-) -> (Collection, Policy) {
+) -> (Collection, PlanningInput) {
     let example = ExampleSystem::new(log, test_name, nsleds);
-    (example.collection, example.policy)
+    (example.collection, example.input)
 }

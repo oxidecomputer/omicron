@@ -2120,7 +2120,7 @@ async fn cmd_db_network_list_vnics(
     struct NicRow {
         ip: IpNetwork,
         mac: MacAddr,
-        slot: i16,
+        slot: u8,
         primary: bool,
         kind: &'static str,
         subnet: String,
@@ -2241,7 +2241,7 @@ async fn cmd_db_network_list_vnics(
         let row = NicRow {
             ip: nic.ip,
             mac: *nic.mac,
-            slot: nic.slot,
+            slot: *nic.slot,
             primary: nic.primary,
             kind,
             subnet,
