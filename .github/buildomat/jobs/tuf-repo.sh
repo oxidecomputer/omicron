@@ -8,9 +8,6 @@
 #:	"=/work/repo-*.zip",
 #:	"=/work/repo-*.zip.sha256.txt",
 #: ]
-#: access_repos = [
-#:	"oxidecomputer/dvt-dock",
-#: ]
 #:
 #: [dependencies.ci-tools]
 #: job = "helios / CI tools"
@@ -41,12 +38,10 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
-ALL_BOARDS=(gimlet-{c..f} psc-{b..c} sidecar-{b..c})
-
 TOP=$PWD
 VERSION=$(< /input/package/work/version.txt)
 
-for bin in caboose-util tufaceous; do
+for bin in caboose-util tufaceous permslip; do
     ptime -m gunzip < /input/ci-tools/work/$bin.gz > /work/$bin
     chmod a+x /work/$bin
 done
@@ -110,94 +105,26 @@ path = "/input/host/work/helios/upload/os-$kind.tar.gz"
 EOF
 done
 
-# Fetch SP images from a Hubris release.
+download_region_manifests() {
+	url=$1
+	name=$2
+	mkdir $2
+	pushd $2
+	while read -r manifest_hash manifest_name; do
+		/work/permslip --url=$url --anonymous get-artifact $manifest_hash --out $manifest_name
+		# hash refers to the hash in permission slip
+		grep -F "hash =" $manifest_name | cut -d "=" -f 2 | tr -d "\" " | xargs -L 1 -I {} /work/permslip --url=$1 --anonymous get-artifact {} --out {}.zip
+		# turn the hash entry into the path we just downloaded in the manifest
+		sed "s|hash = \"\(.*\)\"|path = \"$PWD\/\1.zip\"|" $manifest_name >> /work/manifest.toml
+	done < $TOP/tools/permslip_$name
+	popd
+}
+
 mkdir /work/hubris
 pushd /work/hubris
-source "$TOP/tools/hubris_version"
-for tag in "${TAGS[@]}"; do
-    for board in "${ALL_BOARDS[@]}"; do
-        if [[ "${tag%-*}" = "${board%-*}" ]]; then
-            file=build-${board}-image-default-${tag#*-}.zip
-            curl -fLOsS "https://github.com/oxidecomputer/hubris/releases/download/$tag/$file"
-            grep -F "$file" "$TOP/tools/hubris_checksums" | shasum -a 256 -c -
-            mv "$file" "$board.zip"
-        fi
-    done
-done
+download_region_manifests https://permslip-staging.corp.oxide.computer staging
+download_region_manifests https://signer-us-west.corp.oxide.computer production
 popd
 
-# Fetch signed ROT images from dvt-dock.
-source "$TOP/tools/dvt_dock_version"
-git init /work/dvt-dock
-(
-    cd /work/dvt-dock
-    git remote add origin https://github.com/oxidecomputer/dvt-dock.git
-    git fetch --depth 1 origin "$COMMIT"
-    git checkout FETCH_HEAD
-)
-
-caboose_util_rot() {
-    # usage: caboose_util_rot ACTION IMAGE_A IMAGE_B
-    output_a=$(/work/caboose-util "$1" "$2")
-    output_b=$(/work/caboose-util "$1" "$3")
-    if [[ "$output_a" != "$output_b" ]]; then
-        >&2 echo "\`caboose-util $1\` mismatch:"
-        >&2 echo "  $2: $output_a"
-        >&2 echo "  $3: $output_b"
-        exit 1
-    fi
-    echo "$output_a"
-}
-
-# Add the SP images.
-for board_rev in "${ALL_BOARDS[@]}"; do
-    board=${board_rev%-?}
-    tufaceous_board=${board//sidecar/switch}
-    sp_image="/work/hubris/${board_rev}.zip"
-    sp_caboose_version=$(/work/caboose-util read-version "$sp_image")
-    sp_caboose_board=$(/work/caboose-util read-board "$sp_image")
-
-    cat >>/work/manifest.toml <<EOF
-[[artifact.${tufaceous_board}_sp]]
-name = "$sp_caboose_board"
-version = "$sp_caboose_version"
-[artifact.${tufaceous_board}_sp.source]
-kind = "file"
-path = "$sp_image"
-EOF
-done
-
-# Add the ROT images.
-add_hubris_artifacts() {
-    rot_dir="$1"
-    rot_version="$2"
-
-    for board in gimlet psc sidecar; do
-        tufaceous_board=${board//sidecar/switch}
-        rot_image_a="/work/dvt-dock/${rot_dir}/${board}/build-${board}-rot-image-a-${rot_version}.zip"
-        rot_image_b="/work/dvt-dock/${rot_dir}/${board}/build-${board}-rot-image-b-${rot_version}.zip"
-        rot_caboose_version=$(caboose_util_rot read-version "$rot_image_a" "$rot_image_b")
-        rot_caboose_board=$(caboose_util_rot read-board "$rot_image_a" "$rot_image_b")
-
-        cat >>/work/manifest.toml <<EOF
-[[artifact.${tufaceous_board}_rot]]
-name = "$rot_caboose_board-${rot_dir//\//-}"
-version = "$rot_caboose_version"
-[artifact.${tufaceous_board}_rot.source]
-kind = "composite-rot"
-[artifact.${tufaceous_board}_rot.source.archive_a]
-kind = "file"
-path = "$rot_image_a"
-[artifact.${tufaceous_board}_rot.source.archive_b]
-kind = "file"
-path = "$rot_image_b"
-EOF
-    done
-}
-# usage:              ROT_DIR      ROT_VERSION
-add_hubris_artifacts  staging/dev  cert-staging-dev-v1.0.7
-add_hubris_artifacts  prod/rel     cert-prod-rel-v1.0.7
-
-# Build the TUF ZIP.
 /work/tufaceous assemble --no-generate-key /work/manifest.toml /work/repo-rot-all.zip
 digest -a sha256 /work/repo-rot-all.zip > /work/repo-rot-all.zip.sha256.txt
