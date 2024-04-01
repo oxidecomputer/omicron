@@ -363,7 +363,6 @@ impl DataStore {
             .transaction_retry_wrapper("sled_set_policy")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                let new_sled_policy = new_sled_policy.clone();
 
                 async move {
                     let t = SledTransition::Policy(new_sled_policy);
