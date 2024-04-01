@@ -36,7 +36,6 @@ use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use std::num::NonZeroU32;
 use std::ops::Bound;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
