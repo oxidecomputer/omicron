@@ -103,7 +103,7 @@ pub async fn reconfigurator_state_load(
         .await
         .context("listing sleds")?;
     let zpool_rows = datastore
-        .zpool_list_all_external_batched(opctx)
+        .zpool_list_all_external_batched_in_service(opctx)
         .await
         .context("listing zpools")?;
     let ip_pool_range_rows = {

@@ -1193,8 +1193,10 @@ mod test {
         // We do this directly with BlueprintBuilder to avoid the planner
         // deciding to make other unrelated changes.
         let sled_rows = datastore.sled_list_all_batched(&opctx).await.unwrap();
-        let zpool_rows =
-            datastore.zpool_list_all_external_batched(&opctx).await.unwrap();
+        let zpool_rows = datastore
+            .zpool_list_all_external_batched_in_service(&opctx)
+            .await
+            .unwrap();
         let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) =
                 datastore.ip_pools_service_lookup(&opctx).await.unwrap();

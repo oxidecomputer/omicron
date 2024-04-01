@@ -140,7 +140,7 @@ impl super::Nexus {
 
         let sled_rows = datastore.sled_list_all_batched(opctx).await?;
         let zpool_rows =
-            datastore.zpool_list_all_external_batched(opctx).await?;
+            datastore.zpool_list_all_external_batched_in_service(opctx).await?;
         let ip_pool_range_rows = {
             let (authz_service_ip_pool, _) =
                 datastore.ip_pools_service_lookup(opctx).await?;

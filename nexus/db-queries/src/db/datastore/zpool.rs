@@ -23,6 +23,8 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
 use nexus_db_model::PhysicalDiskKind;
+use nexus_db_model::PhysicalDiskPolicy;
+use nexus_db_model::PhysicalDiskState;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -81,7 +83,7 @@ impl DataStore {
     }
 
     /// Fetches a page of the list of all zpools on U.2 disks in all sleds
-    async fn zpool_list_all_external(
+    async fn zpool_list_all_external_in_service(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
@@ -99,6 +101,11 @@ impl DataStore {
                     ),
                 ),
             )
+            .filter(
+                dsl_physical_disk::disk_policy
+                    .eq(PhysicalDiskPolicy::InService),
+            )
+            .filter(dsl_physical_disk::disk_state.eq(PhysicalDiskState::Active))
             .select(Zpool::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -111,7 +118,7 @@ impl DataStore {
     /// This should generally not be used in API handlers or other
     /// latency-sensitive contexts, but it can make sense in saga actions or
     /// background tasks.
-    pub async fn zpool_list_all_external_batched(
+    pub async fn zpool_list_all_external_batched_in_service(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<Zpool> {
@@ -121,7 +128,10 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let batch = self
-                .zpool_list_all_external(opctx, &p.current_pagparams())
+                .zpool_list_all_external_in_service(
+                    opctx,
+                    &p.current_pagparams(),
+                )
                 .await?;
             paginator =
                 p.found_batch(&batch, &|z: &nexus_db_model::Zpool| z.id());
