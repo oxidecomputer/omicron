@@ -679,8 +679,10 @@ impl OximeterAgent {
         >,
         id: Uuid,
     ) -> Result<(), Error> {
-        let (_info, task) =
-            tasks.remove(&id).ok_or_else(|| Error::NoSuchProducer(id))?;
+        let Some((_info, task)) = tasks.remove(&id) else {
+            // We have no such producer, so good news, we've removed it!
+            return Ok(());
+        };
         debug!(
             self.log,
             "removed collection task from set";
@@ -1120,5 +1122,27 @@ mod tests {
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_delete_nonexistent_producer_succeeds() {
+        let logctx =
+            test_setup_log("test_delete_nonexistent_producer_succeeds");
+        let log = &logctx.log;
+
+        // Spawn an oximeter collector ...
+        let collector = OximeterAgent::new_standalone(
+            Uuid::new_v4(),
+            SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0),
+            crate::default_refresh_interval(),
+            None,
+            log,
+        )
+        .await
+        .unwrap();
+        assert!(
+            collector.delete_producer(Uuid::new_v4()).await.is_ok(),
+            "Deleting a non-existent producer should be OK"
+        );
     }
 }
